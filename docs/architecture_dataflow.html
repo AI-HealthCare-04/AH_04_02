@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>데이터 흐름 — 진료기록 기반 복약 안내 시스템</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1a1a2e; font-family: 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; padding: 40px 20px; }
+  .page { max-width: 900px; margin: 0 auto; }
+  h1 { color: #ffffff; font-size: 22px; font-weight: 600; margin-bottom: 8px; }
+  .subtitle { color: #aaaaaa; font-size: 13px; margin-bottom: 28px; }
+  .step { border-radius: 10px; padding: 18px 20px; margin-bottom: 8px; border-width: 2px; border-style: solid; }
+  .step-title { font-size: 14px; font-weight: 600; color: #ffffff; margin-bottom: 8px; }
+  .step-desc { font-size: 12px; color: #000000; line-height: 1.8; }
+  .step-coral  { background: #F4825A; border-color: #D85A30; }
+  .step-purple { background: #9F99E8; border-color: #7F77DD; }
+  .step-blue   { background: #6BB8F0; border-color: #378ADD; }
+  .step-pink   { background: #ED93B1; border-color: #D4537E; }
+  .arrow { text-align: center; color: #888888; font-size: 20px; margin: 4px 0; }
+  .row { display: flex; gap: 10px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>② 데이터 흐름 단계별 상세</h1>
+  <p class="subtitle">처방전 업로드 → OCR → RAG → 결과 전송 → 챗봇 순서로 흐릅니다</p>
+
+  <div class="step step-pink">
+    <div class="step-title">STEP 1 — 업로드 (④ 박소정 · ③ 조성아)</div>
+    <div class="step-desc">
+      보호자가 처방전 이미지 업로드 → React에서 multipart/form-data 전송<br>
+      FastAPI: POST /api/v1/medical-records → S3 저장 → Redis XADD → "접수 완료" 즉시 응답<br>
+      화면: "분석을 시작할게요" 처리중 애니메이션 표시 (어르신 큰 글씨)
+    </div>
+  </div>
+  <div class="arrow">↓</div>
+
+  <div class="step step-coral">
+    <div class="step-title">STEP 2 — OCR · 정보추출 (① 권순현)</div>
+    <div class="step-desc">
+      OCR Worker: Redis XREAD → S3에서 이미지 로드 → CLOVA OCR API 호출<br>
+      텍스트 파싱: 약품명 / 용량 / 복용법 / 복용횟수 / 진단명 추출<br>
+      출력: REQ-002 JSON 스키마 변환 → DB(ExtractedMedication) 저장 → RAG XADD<br>
+      실패 시: REQ-008 에러메시지 반환 → 재업로드 안내
+    </div>
+  </div>
+  <div class="arrow">↓</div>
+
+  <div class="step step-purple">
+    <div class="step-title">STEP 3 — RAG · 가이드생성 (② 김영혜)</div>
+    <div class="step-desc">
+      RAG Worker: Redis XREAD → OCR 결과(JSON) 수신<br>
+      ① 벡터 검색: 약품명으로 FAISS 조회 → 식약처 데이터 top-3 추출<br>
+      ② 복약 가이드: 복용법·주의사항·병용금기 → gpt-4o-mini 프롬프트 생성<br>
+      ③ 생활습관 가이드: 진단명 기반 식이·운동 → gpt-4o-mini 생성<br>
+      결과: DB(GuideResult) 저장 · source_refs(출처) 명시
+    </div>
+  </div>
+  <div class="arrow">↓</div>
+
+  <div class="step step-blue">
+    <div class="step-title">STEP 4 — 결과 전송 (③ 조성아)</div>
+    <div class="step-desc">
+      RAG Worker: XACK 완료 → Redis Pub/Sub publish<br>
+      FastAPI: Pub/Sub 구독 → 완료 수신 → SSE로 클라이언트에 결과 스트리밍<br>
+      화면: 복약 가이드 + 생활습관 가이드 + 출처(식약처) 동시 표시<br>
+      어르신용 큰 글씨 · "○○님이 대신 올려드렸어요" 투명 표시
+    </div>
+  </div>
+  <div class="arrow">↓</div>
+
+  <div class="step step-blue">
+    <div class="step-title">STEP 5 — 챗봇 질의응답 (③ 조성아)</div>
+    <div class="step-desc">
+      어르신/보호자: "이 약 밥 먹고 먹어도 되나요?" 추가 질문<br>
+      Chat Worker: POST /api/v1/chat → 대화이력(ChatHistory) 포함 → gpt-4o-mini 응답<br>
+      SSE 스트리밍 응답 · 히스토리 저장(REQ-007)<br>
+      하단 면책 고지 자동 표시 (REQ-011)
+    </div>
+  </div>
+  <div class="arrow"> </div>
+
+  <div class="row">
+    <div class="step step-pink" style="flex:1">
+      <div class="step-title">신뢰 설계</div>
+      <div class="step-desc">"의료진 대체 불가" 고지 항상 표시<br>출처(식약처) 명시 · 대리입력 투명 표시</div>
+    </div>
+    <div class="step step-coral" style="flex:1">
+      <div class="step-title">예외 처리 (REQ-008)</div>
+      <div class="step-desc">OCR 실패 → 재업로드 안내<br>XCLAIM으로 장애 Worker 작업 재할당</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
