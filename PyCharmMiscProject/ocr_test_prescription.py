@@ -228,13 +228,17 @@ def run_ocr(image_path: str):
 
 
 def fix_char_level(text: str) -> str:
-    """문자 수준 교정: 캡슐 혼동, 숫자/알파벳 O 혼동."""
-    # 캡슐 관련 혼동 패턴 직접 치환
+    """문자 수준 교정: 캡슐 혼동, 숫자/알파벳 O 혼동, mg 오인식."""
     for wrong, right in CHAR_CORRECTIONS.items():
         text = text.replace(wrong, right)
-    # 숫자 맥락의 알파벳 O → 숫자 0  (예: 50Omg → 500mg, 2Omg → 20mg)
+    # 숫자 맥락의 알파벳 O → 숫자 0  (50Omg → 500mg)
     text = re.sub(r'(\d)O', r'\g<1>0', text)
     text = re.sub(r'O(\d)', r'0\1', text)
+    # mg 오인식: m이 rn/rN/rT/r7으로 분리되는 패턴 → mg
+    text = re.sub(r'(\d[\.\d]*\s*)r[nNtT7]g\b', r'\g<1>mg', text)
+    text = re.sub(r'(\d[\.\d]*\s*)rng\b',        r'\g<1>mg', text)
+    # mcg 오인식: rc/rC로 분리되는 패턴 → mcg
+    text = re.sub(r'(\d[\.\d]*\s*)r[cC]g\b', r'\g<1>mcg', text)
     return text
 
 

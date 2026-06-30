@@ -289,8 +289,14 @@ def preprocess(path: str) -> None:
 def fix_char_level(text: str) -> str:
     for wrong, right in CHAR_CORRECTIONS.items():
         text = text.replace(wrong, right)
+    # 숫자 뒤 O → 0  (50Omg → 500mg)
     text = re.sub(r'(\d)O', r'\g<1>0', text)
     text = re.sub(r'O(\d)', r'0\1', text)
+    # mg 오인식: m이 rn/rN/rT/r7으로 분리되는 패턴 → mg
+    text = re.sub(r'(\d[\.\d]*\s*)r[nNtT7]g\b', r'\g<1>mg', text)
+    text = re.sub(r'(\d[\.\d]*\s*)rng\b',        r'\g<1>mg', text)
+    # mcg 오인식: rc/rC로 분리되는 패턴 → mcg
+    text = re.sub(r'(\d[\.\d]*\s*)r[cC]g\b', r'\g<1>mcg', text)
     return text
 
 
