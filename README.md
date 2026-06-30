@@ -34,6 +34,18 @@
 
 의료 기록은 개인 맞춤형 의료 서비스 구현의 핵심 데이터입니다. 이 프로젝트는 LLM 기술을 활용해 복약 안내 및 건강 가이드를 자동화하고, AI 모델 서빙과 헬스케어 서비스 연계 역량을 강화하는 실무형 프로젝트로 기획되었습니다. 질병 예측, 환자 건강 모니터링, 의료 상담 챗봇 등 실질적인 문제 해결을 목표로 합니다.
 
+### 주요 타겟층
+
+- 만성질환을 앓고 있어 정기적으로 약을 복용해야 하는 사용자
+- 처방전 내용을 직접 해석하기 어려운 **독거노인 및 거동 불편자**
+- 본인을 대신해 처방전을 등록해주는 **보호자 / 요양보호사** — 대리 입력 시 누가 등록했는지 사용자에게 투명하게 표시됩니다
+
+### 신뢰 설계 원칙
+
+- 모든 가이드 하단에 "본 정보는 의료진의 진단·처방을 대체하지 않습니다" 고지 표시
+- 복약 가이드의 출처(식약처 데이터 등) 항상 명시
+- 보호자가 대리로 등록한 경우 사용자에게 투명하게 안내
+
 ### 주요 기능
 
 | 구분 | 기능 | 설명 |
@@ -72,7 +84,7 @@
 `LangChain` `OpenAI API` `CLOVA OCR` `sentence-transformers`
 
 ### Database & Cache
-`MySQL` `Redis (Stream / Pub-Sub)`
+`PostgreSQL` `Redis (Stream / Pub-Sub)`
 
 ### Infra & Deploy
 `Docker` `Docker Compose` `Nginx` `AWS EC2` `AWS S3`
@@ -89,30 +101,52 @@
 AI 추론처럼 응답 시간이 긴 작업을 FastAPI가 직접 처리하면 서버가 다른 요청을 받지 못하게 되는 문제를 막기 위해, **Producer–Consumer 패턴**을 적용합니다.
 
 ```
-Client → Nginx (Reverse Proxy)
-            │
-            ▼
-        FastAPI (Producer)
-            │  XADD (작업 등록)
-            ▼
-        Redis Stream (Message Broker)
-            │  작업 소비
-            ▼
-        AI Worker (Consumer)
-            │  모델 로드(S3) → 추론/학습
-            ▼
-        Redis Pub/Sub (결과 발행)
-            │
-            ▼
-        FastAPI → SSE → Client (실시간 결과 전달)
+Client (사용자 / 보호자)
+       │
+       ▼
+Nginx (리버스 프록시, SSL 종단, SSE 연결 유지)
+       │
+       ▼
+FastAPI (Producer) ──→ PostgreSQL
+       │  XADD (작업 등록)
+       ▼
+Redis Stream (메시지 브로커)
+       │  XREAD (Consumer Group)
+       ▼
+┌─────────────┬─────────────┬─────────────┐
+│ OCR Worker  │ RAG Worker  │ Chat Worker │
+│ (CLOVA OCR) │ (LangChain  │ (asyncio,   │
+│   ①권순현   │  + FAISS)   │   SSE)      │
+│             │   ②김영혜   │   ③조성아   │
+└─────────────┴─────────────┴─────────────┘
+       │             │             │
+       ▼             ▼             ▼
+    AWS S3      Vector DB      PostgreSQL
+   (이미지)       (FAISS)      (가이드/이력)
+       │             │             │
+       └─────────────┴─────────────┘
+                    │
+            Redis Pub/Sub (결과 발행)
+                    │
+                    ▼
+            FastAPI → SSE → Client
 ```
 
 - **Nginx**: 리버스 프록시, SSL 종단, 정적 파일 처리
 - **FastAPI**: 요청 접수 및 비즈니스 로직 처리, Redis Stream에 작업 등록 후 SSE로 결과 전달
-- **Redis**: 메시지 브로커 및 작업 큐 (Stream), FastAPI-Worker 간 디커플링
-- **AI Worker**: 실제 모델 추론/학습 수행, Consumer Group으로 수평 확장 가능
-- **MySQL**: 사용자/서비스 데이터 저장
-- **AWS S3**: 모델 파일 및 미디어 저장소
+- **Redis**: 메시지 브로커 및 작업 큐 (Stream), FastAPI-Worker 간 디커플링, Consumer Group으로 수평 확장
+- **OCR / RAG / Chat Worker**: 역할별로 분리된 Consumer. 장애 시 Redis XCLAIM으로 작업 재할당
+- **PostgreSQL**: 사용자, 의료기록, 가이드 결과, 대화 이력 저장 *(MySQL→PostgreSQL 변경 검토 중, 추후 확정 시 업데이트)*
+- **AWS S3**: 처방전 원본 이미지, 모델 파일 저장
+- **FAISS**: 식약처 의약품 데이터 임베딩 기반 벡터 검색
+
+### 데이터 흐름
+
+1. **업로드** — 사용자/보호자가 처방전 이미지 업로드 → FastAPI가 S3 저장 후 Redis에 작업 등록, 즉시 "접수 완료" 응답
+2. **OCR·정보추출** (①) — OCR Worker가 CLOVA OCR로 약품명/용량/복용법/진단명 추출 → REQ-002 JSON 스키마로 변환, 실패 시 REQ-008 기준 에러 응답
+3. **RAG·가이드생성** (②) — RAG Worker가 FAISS로 식약처 데이터 검색(top-3) → 복약 가이드 및 생활습관 가이드 생성, 출처(source_refs) 명시
+4. **결과 전송** (③) — 완료 시 Redis Pub/Sub으로 신호 → FastAPI가 SSE로 클라이언트에 결과 스트리밍
+5. **챗봇 질의응답** (③) — 추가 질문 시 Chat Worker가 대화 이력(ChatHistory) 기반으로 SSE 스트리밍 응답, 하단 면책 고지 자동 표시
 
 ---
 
@@ -354,7 +388,7 @@ main
 ## ☁️ 배포
 
 - **배포 환경**: AWS EC2 (Ubuntu) + Docker Compose
-- **구성**: Nginx → FastAPI → Redis Stream → AI Worker, MySQL, S3
+- **구성**: Nginx → FastAPI → Redis Stream → AI Worker, PostgreSQL, S3
 - **배포 링크**: _추후 업데이트_
 - **API 문서**: _추후 업데이트_
 
