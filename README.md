@@ -65,7 +65,7 @@
 
 | 이름 | 역할 |
 |---|---|
-| 권순현 | OCR·정보추출 (CLOVA OCR 연동, 의료정보 추출 파이프라인) |
+| 권순현 | OCR·정보추출 (EasyOCR 연동, 의료정보 추출 파이프라인) |
 | 김영혜 | RAG·가이드생성 (LangChain, 벡터DB, 복약 가이드 생성) |
 | 조성아 | 챗봇·백엔드 (FastAPI, DB 모델링, 챗봇 API) |
 | 박소정 | 프론트·배포·통합 (화면 구현, Docker Compose, 통합 테스트) |
@@ -81,7 +81,7 @@
 `FastAPI` `Uvicorn` `Python 3.13` `uv`
 
 ### AI / LLM
-`LangChain` `OpenAI API` `CLOVA OCR` `sentence-transformers`
+`LangChain` `OpenAI API` `EasyOCR` `sentence-transformers`
 
 ### Database & Cache
 `PostgreSQL` `Redis (Stream / Pub-Sub)`
@@ -115,7 +115,7 @@ Redis Stream (메시지 브로커)
        ▼
 ┌─────────────┬─────────────┬─────────────┐
 │ OCR Worker  │ RAG Worker  │ Chat Worker │
-│ (CLOVA OCR) │ (LangChain  │ (asyncio,   │
+│  (EasyOCR)  │ (LangChain  │ (asyncio,   │
 │   ①권순현   │  + FAISS)   │   SSE)      │
 │             │   ②김영혜   │   ③조성아   │
 └─────────────┴─────────────┴─────────────┘
@@ -143,7 +143,7 @@ Redis Stream (메시지 브로커)
 ### 데이터 흐름
 
 1. **업로드** — 사용자/보호자가 처방전 이미지 업로드 → FastAPI가 S3 저장 후 Redis에 작업 등록, 즉시 "접수 완료" 응답
-2. **OCR·정보추출** (①) — OCR Worker가 CLOVA OCR로 약품명/용량/복용법/진단명 추출 → REQ-002 JSON 스키마로 변환, 실패 시 REQ-008 기준 에러 응답
+2. **OCR·정보추출** (①) — OCR Worker가 EasyOCR로 약품명/용량/복용법/진단명 추출 → REQ-002 JSON 스키마로 변환, 실패 시 REQ-008 기준 에러 응답
 3. **RAG·가이드생성** (②) — RAG Worker가 FAISS로 식약처 데이터 검색(top-3) → 복약 가이드 및 생활습관 가이드 생성, 출처(source_refs) 명시
 4. **결과 전송** (③) — 완료 시 Redis Pub/Sub으로 신호 → FastAPI가 SSE로 클라이언트에 결과 스트리밍
 5. **챗봇 질의응답** (③) — 추가 질문 시 Chat Worker가 대화 이력(ChatHistory) 기반으로 SSE 스트리밍 응답, 하단 면책 고지 자동 표시
@@ -318,7 +318,7 @@ main
 
 | Day | 작업 | 완료 기준 |
 |---|---|---|
-| 월 | CLOVA OCR 키 발급, 테스트 호출 | 샘플 이미지 1장에서 raw text 출력 성공 |
+| 월 | EasyOCR 실행 환경 구성 및 모델 설치, 단일 이미지 추론 테스트 | 샘플 이미지 1장에서 raw text 출력 성공 |
 | 화 | 처방전/약봉투 샘플 5~10장 수집 후 인식 테스트 | 샘플별 인식 성공/실패 표 작성 |
 | 수 | 추출 텍스트 → 약품명/용량/복용법 패턴 정리 | REQ-002 JSON 스키마로 1건 변환 성공 |
 | 목 | OCR 실패 케이스 처리 (REQ-008) | 흐릿한 이미지 입력 시 에러메시지 반환 확인 |

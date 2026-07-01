@@ -6,7 +6,7 @@
 
 | 시간 | ① OCR·정보추출 | ② RAG·가이드생성 | ③ 챗봇·백엔드 | ④ 프론트·배포 |
 |---|---|---|---|---|
-| 오전 | CLOVA OCR 콘솔 가입·키 발급, 단일 이미지 호출 테스트 | OpenAI API 키 확인, langchain/openai 패키지 설치, 공식 quickstart 1개 실행 | FastAPI 프로젝트 구조 잡기(`app/main.py`, `models/`, `routers/`), 서버 기동 확인 | Figma 새 파일 생성, 화면 5개(로그인/업로드/처리중/결과/챗봇) 박스 배치 |
+| 오전 | EasyOCR 실행 환경 구성·모델 설치, 단일 이미지 추론 테스트 | OpenAI API 키 확인, langchain/openai 패키지 설치, 공식 quickstart 1개 실행 | FastAPI 프로젝트 구조 잡기(`app/main.py`, `models/`, `routers/`), 서버 기동 확인 | Figma 새 파일 생성, 화면 5개(로그인/업로드/처리중/결과/챗봇) 박스 배치 |
 | 오후 | 처방전·약봉투 샘플 5~10장 확보 후 각각 OCR 호출, 결과를 표로 기록 | 식약처 e약은요 공공데이터 API 신청 또는 약품 10건 데이터 수동 정리 | User·MedicalRecord 테이블 SQLAlchemy 모델 작성, 로컬 DB 테이블 생성 | 화면 간 이동 흐름 화살표 표시, 업로드/결과화면 레이아웃 구체화 |
 | **완료기준** | 샘플별 인식 성공/실패표 완성 | API키 발급 또는 데이터 10건 확보 | 로컬 DB에 테이블 2개 생성 확인 | 화면 5개 + 흐름 1차 완성 |
 
