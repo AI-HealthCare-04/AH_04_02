@@ -19,6 +19,7 @@ import json
 import os
 
 from parsing_rules import parse_prescription
+from drug_reference import get_drug_class
 
 
 # ------------------------------------------------------------------
@@ -68,7 +69,7 @@ def _build_medications(raw_text: str, confidence: float) -> list:
             dosage=m["dosage"],
             frequency=m["frequency"],
             diagnosis=diagnosis,
-            drug_class=m.get("drug_class", ""),
+            drug_class=m.get("drug_class") or get_drug_class(m["drug_name"]),
             confidence=confidence,
         )
         for m in meds
