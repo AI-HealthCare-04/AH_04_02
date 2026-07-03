@@ -2,10 +2,11 @@
 """
 처방전 raw_text 파싱 규칙
 
-세 가지 처방전 포맷을 커버한다:
-  1. 테이블 포맷  : OCR이 약품명·용량·횟수·일수를 컬럼 그룹으로 출력
-  2. 리스트 포맷  : 번호. 약품명 1회 N정, 1일 N회, N일분
-  3. 약식(약어) 포맷: Dx: / Rx) / bid / qd / #N
+네 가지 처방전 포맷을 커버한다:
+  1. 공식 포맷    : [급여/비급여][코드] 약품명 1회량 1일횟수 일수
+  2. 테이블 포맷  : OCR이 약품명·용량·횟수·일수를 컬럼 그룹으로 출력
+  3. 리스트 포맷  : 번호. 약품명 1회 N정, 1일 N회, N일분
+  4. 약식(약어) 포맷: Dx: / Rx) / bid / qd / #N
 """
 
 import re
@@ -62,8 +63,10 @@ KOR_FREQ_RE     = re.compile(r"(?:1일|하루)\s*(\d+)\s*(?:회|번)")
 ABBREV_FREQ_RE  = re.compile(r"\b(qd|od|bid|tid|qid|prn|hs|ac|pc)\b", re.IGNORECASE)
 DAYS_KOR_RE     = re.compile(r"(\d+)\s*일\s*분")
 DAYS_ABBREV_RE  = re.compile(r"#\s*(\d+)")
-DIAGNOSIS_KOR_RE = re.compile(r"진단명\s*[:：]\s*(.+)")
-DIAGNOSIS_EN_RE  = re.compile(r"Dx\s*[:：]\s*(.+?)(?=\s+Rx\b|\Z)", re.IGNORECASE)
+DIAGNOSIS_KOR_RE  = re.compile(r"진단명\s*[:：]\s*(.+)")
+DIAGNOSIS_EN_RE   = re.compile(r"Dx\s*[:：]\s*(.+?)(?=\s+Rx\b|\Z)", re.IGNORECASE)
+# 공식 처방전: "질병분류기호:M17 (무릎관절증)" → "무릎관절증"
+DIAGNOSIS_CODE_RE = re.compile(r"질병분류기호\s*[:：]\s*\S+\s*[（(]([^)）]+)[)）]")
 
 # ─────────────────────────────────────────────────────────────
 # 4. 유틸리티 함수 (공개 API)
@@ -102,6 +105,10 @@ def extract_diagnosis(text: str) -> str:
     m = DIAGNOSIS_EN_RE.search(text)
     if m:
         return m.group(1).strip()
+    # 공식 처방전: 질병분류기호:M17 (무릎관절증)
+    m = DIAGNOSIS_CODE_RE.search(text)
+    if m:
+        return m.group(1).strip()
     return ""
 
 
@@ -117,7 +124,9 @@ def lookup_drug_class(drug_name: str) -> str:
 # ─────────────────────────────────────────────────────────────
 
 def _detect_format(text: str) -> str:
-    """'abbrev' | 'list' | 'table' 반환."""
+    """'official' | 'abbrev' | 'list' | 'table' 반환."""
+    if re.search(r"\[(?:급여|비급여)\]\[\d+\]", text):
+        return "official"
     if re.search(r"\b(?:bid|qd|tid|qid)\b", text, re.IGNORECASE):
         return "abbrev"
     if re.search(r"\d+[.)]\s+[가-힣A-Za-z]+(?:정|캡슐)", text):
@@ -137,6 +146,47 @@ def _drug_name_only(form_str: str) -> str:
 def _split_by_number(text: str) -> list:
     """'1) ...\n2) ...' 또는 '1. ... 2. ...' 형식을 번호 기준으로 분리."""
     return [s.strip() for s in re.split(r"\d+\s*[).]", text) if s.strip()]
+
+
+def _parse_official_format(text: str) -> list:
+    """
+    공식 처방전 포맷: [급여/비급여][코드] 약품명 1회량 1일횟수 일수
+    - 용법 자유서술형("1일 1회 취침전 복용하세요")은 KOR_FREQ_RE로 흡수
+    - "110/500" 같은 복합 용량은 col_nums에서 자동 제외(/ 앞뒤 숫자 필터)
+    """
+    # [급여/비급여][코드] 경계로 분리 → 각 항목이 약품 1줄
+    segments = re.split(r"\[(?:급여|비급여)\]\[\d+\]", text)
+    results = []
+    for seg in segments:
+        seg = seg.strip()
+        dm = DRUG_NAME_RE.search(seg)
+        if not dm:
+            continue
+        drug_name = _drug_name_only(dm.group(1))
+        dosage = dm.group(2) or extract_dosage(seg)
+
+        # DRUG_NAME_RE 매치 이후 텍스트에서 숫자 컬럼 추출
+        # .(소수점) / (분수) 앞뒤 숫자, 단위 붙은 숫자, 일/분/회/번 붙은 숫자는 모두 제외
+        post = seg[dm.end():]
+        col_nums = re.findall(
+            r"(?<![./\d])(\d+)(?![./\d]|mg|g|ml|일|분|회|번)", post
+        )
+
+        # 용법 자유서술형 우선("1일 N회 ..."), 없으면 col_nums[1](1일 투여횟수) 사용
+        freq = extract_frequency(seg)
+        if not freq and len(col_nums) >= 2:
+            freq = f"1일 {col_nums[1]}회"
+
+        days = f"{col_nums[2]}일" if len(col_nums) >= 3 else ""
+
+        results.append({
+            "drug_name":  drug_name,
+            "dosage":     dosage,
+            "frequency":  freq,
+            "days":       days,
+            "drug_class": lookup_drug_class(drug_name),
+        })
+    return results
 
 
 def _parse_abbrev_format(text: str) -> list:
@@ -225,7 +275,9 @@ def parse_prescription(raw_text: str) -> tuple:
     각 약품 dict: drug_name / dosage / frequency / days / drug_class
     """
     fmt = _detect_format(raw_text)
-    if fmt == "abbrev":
+    if fmt == "official":
+        meds = _parse_official_format(raw_text)
+    elif fmt == "abbrev":
         meds = _parse_abbrev_format(raw_text)
     elif fmt == "list":
         meds = _parse_list_format(raw_text)
@@ -270,6 +322,16 @@ if __name__ == "__main__":
             "3) 파모티딘정20mg 1T bid #14",
         ),
     ]
+
+    samples.append((
+        "공식",
+        "[조제기관] 00약국 [처방기관] 00의원 질병분류기호:M17 (무릎관절증) "
+        "[급여][649500560] 세레콕시브캡슐200mg 1 2 7 "
+        "[급여][642201540] 에페리손염산염정50mg 1 3 7 "
+        "[급여][644308830] 라베프라졸나트륨장용정 1 1 7 1일 1회 취침전 복용하세요 "
+        "[급여][658101480] 조인트콘드로이친캡슐 110/500 1 1 1 "
+        "[비급여][643501070] 파스(온습포) 1 2 7",
+    ))
 
     for label, text in samples:
         meds, diag = parse_prescription(text)
