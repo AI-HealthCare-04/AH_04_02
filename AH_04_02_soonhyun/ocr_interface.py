@@ -1,0 +1,242 @@
+# -*- coding: utf-8 -*-
+from __future__ import annotations
+
+"""
+OCR Provider 추상화 레이어
+- CLOVA OCR 승인이 늦어져도 Mock으로 ②(RAG) ③(백엔드)이 바로 개발 시작 가능하게 함
+- CLOVA 장애/지연 시 Tesseract 등으로 무중단 전환 가능하게 인터페이스 고정
+
+사용 예:
+    provider = get_ocr_provider("mock")   # 오늘은 이걸로 시작
+    # provider = get_ocr_provider("clova")  # CLOVA 키 발급되면 여기로 전환
+    result = provider.extract("samples/prescription_01.jpg")
+"""
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import Literal
+import json
+import os
+
+from parsing_rules import parse_prescription
+
+
+# ------------------------------------------------------------------
+# 1. 출력 스키마 (Day2에 ①②③이 이걸 기준으로 합의·고정 예정)
+# ------------------------------------------------------------------
+
+@dataclass
+class MedicationItem:
+    drug_name: str
+    dosage: str            # 예: "500mg"
+    frequency: str         # 예: "1일 3회"
+    diagnosis: str          # 예: "고혈압"
+    drug_class: str = ""    # 약효분류, 예: "이뇨제"
+    confidence: float = 0.0  # 0.0 ~ 1.0
+
+
+@dataclass
+class OCRResult:
+    raw_text: str
+    medications: list[MedicationItem] = field(default_factory=list)
+    overall_confidence: float = 0.0
+    review_required: bool = False  # confidence < 0.80 이면 True (REQ-011)
+    source: Literal["clova", "mock", "tesseract"] = "mock"
+
+    def to_dict(self) -> dict:
+        return {
+            "raw_text": self.raw_text,
+            "medications": [m.__dict__ for m in self.medications],
+            "overall_confidence": self.overall_confidence,
+            "review_required": self.review_required,
+            "source": self.source,
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+
+
+# ------------------------------------------------------------------
+# 1-b. 파싱 헬퍼 — raw_text → MedicationItem 리스트
+# ------------------------------------------------------------------
+
+def _build_medications(raw_text: str, confidence: float) -> list:
+    meds, diagnosis = parse_prescription(raw_text)
+    return [
+        MedicationItem(
+            drug_name=m["drug_name"],
+            dosage=m["dosage"],
+            frequency=m["frequency"],
+            diagnosis=diagnosis,
+            drug_class=m.get("drug_class", ""),
+            confidence=confidence,
+        )
+        for m in meds
+    ]
+
+
+# ------------------------------------------------------------------
+# 2. 추상 인터페이스 — 모든 OCR 구현체는 이 계약을 따름
+# ------------------------------------------------------------------
+
+class OCRProvider(ABC):
+    @abstractmethod
+    def extract(self, image_path: str) -> OCRResult:
+        """이미지 경로를 받아 OCRResult를 반환한다."""
+        raise NotImplementedError
+
+    @staticmethod
+    def _apply_review_flag(result: OCRResult, threshold: float = 0.80) -> OCRResult:
+        result.review_required = result.overall_confidence < threshold
+        return result
+
+
+# ------------------------------------------------------------------
+# 3. Mock 구현체 — 오늘(Day1)부터 바로 쓸 수 있음
+# ------------------------------------------------------------------
+
+class MockOCRProvider(OCRProvider):
+    """실제 OCR 없이 고정된 샘플 결과를 반환. ②③이 이걸로 선행 개발."""
+
+    def extract(self, image_path: str) -> OCRResult:
+        result = OCRResult(
+            raw_text="아스피린 100mg 1일 1회 / 고혈압 / 로자탄 50mg 1일 1회",
+            medications=[
+                MedicationItem(
+                    drug_name="아스피린",
+                    dosage="100mg",
+                    frequency="1일 1회",
+                    diagnosis="고혈압",
+                    drug_class="항혈소판제",
+                    confidence=0.92,
+                ),
+                MedicationItem(
+                    drug_name="로자탄",
+                    dosage="50mg",
+                    frequency="1일 1회",
+                    diagnosis="고혈압",
+                    drug_class="ARB(안지오텐신수용체차단제)",
+                    confidence=0.78,
+                ),
+            ],
+            overall_confidence=0.85,
+            source="mock",
+        )
+        return self._apply_review_flag(result)
+
+
+# ------------------------------------------------------------------
+# 4. CLOVA 구현체 — 키 발급되면 TODO만 채우면 됨
+# ------------------------------------------------------------------
+
+class ClovaOCRProvider(OCRProvider):
+    """네이버클라우드 CLOVA General OCR 연동.
+
+    키는 코드에 하드코딩하지 말고 .env / 환경변수로만 주입한다.
+    .env.example을 복사해서 .env로 만들고 값 채운 뒤 python-dotenv로 로드해서 쓰면 된다.
+    """
+
+    def __init__(self, api_url: str | None = None, secret_key: str | None = None):
+        self.api_url = api_url or os.environ.get("CLOVA_OCR_API_URL", "")
+        self.secret_key = secret_key or os.environ.get("CLOVA_OCR_SECRET_KEY", "")
+
+    def extract(self, image_path: str) -> OCRResult:
+        if not self.api_url or not self.secret_key:
+            raise RuntimeError(
+                "CLOVA_OCR_API_URL / CLOVA_OCR_SECRET_KEY 환경변수가 없습니다. "
+                ".env 파일을 만들고 load_dotenv()로 로드했는지 확인하세요. "
+                "키가 없으면 get_ocr_provider('mock')을 대신 쓰세요."
+            )
+
+        import base64
+        import time
+        import uuid
+        import requests
+
+        ext = os.path.splitext(image_path)[1].lstrip(".").lower() or "jpg"
+        with open(image_path, "rb") as f:
+            image_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+        payload = {
+            "version": "V2",
+            "requestId": str(uuid.uuid4()),
+            "timestamp": int(time.time() * 1000),
+            "images": [
+                {"format": ext, "name": "prescription", "data": image_b64}
+            ],
+        }
+        headers = {
+            "X-OCR-SECRET": self.secret_key,
+            "Content-Type": "application/json",
+        }
+
+        response = requests.post(self.api_url, headers=headers, json=payload, timeout=15)
+        response.raise_for_status()
+        body = response.json()
+
+        fields = body.get("images", [{}])[0].get("fields", [])
+        raw_text = " ".join(f.get("inferText", "") for f in fields)
+        confidences = [f.get("inferConfidence", 0.0) for f in fields if "inferConfidence" in f]
+        overall_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+
+        result = OCRResult(
+            raw_text=raw_text,
+            medications=_build_medications(raw_text, round(overall_confidence, 4)),
+            overall_confidence=round(overall_confidence, 4),
+            source="clova",
+        )
+        return self._apply_review_flag(result)
+
+
+# ------------------------------------------------------------------
+# 5. 폴백 구현체 — CLOVA +2일 이상 지연 시 무중단 전환용 뼈대
+# ------------------------------------------------------------------
+
+class TesseractOCRProvider(OCRProvider):
+    """CLOVA 장애/지연 시 폴백. 로컬 tesseract 설치 필요."""
+
+    def extract(self, image_path: str) -> OCRResult:
+        try:
+            import pytesseract
+            from PIL import Image
+        except ImportError as e:
+            raise RuntimeError(
+                "pytesseract/Pillow 미설치. `pip install pytesseract pillow` 후 "
+                "`brew install tesseract`(mac) 필요"
+            ) from e
+
+        text = pytesseract.image_to_string(Image.open(image_path), lang="kor+eng")
+        result = OCRResult(
+            raw_text=text,
+            medications=_build_medications(text, 0.0),
+            overall_confidence=0.0,
+            source="tesseract",
+        )
+        return self._apply_review_flag(result)
+
+
+# ------------------------------------------------------------------
+# 6. 팩토리 함수
+# ------------------------------------------------------------------
+
+def get_ocr_provider(kind: Literal["mock", "clova", "tesseract"] = "mock") -> OCRProvider:
+    if kind == "mock":
+        return MockOCRProvider()
+    if kind == "clova":
+        return ClovaOCRProvider()
+    if kind == "tesseract":
+        return TesseractOCRProvider()
+    raise ValueError(f"알 수 없는 provider: {kind}")
+
+
+if __name__ == "__main__":
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    import sys
+    kind = sys.argv[1] if len(sys.argv) > 1 else "mock"
+    image = sys.argv[2] if len(sys.argv) > 2 else "samples/prescription_01.jpg"
+
+    provider = get_ocr_provider(kind)
+    result = provider.extract(image)
+    print(result.to_json())

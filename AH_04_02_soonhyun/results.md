@@ -1,0 +1,178 @@
+# OCR 실측 결과 보고서
+
+> 측정일: 2026-07-03  
+> 엔진: CLOVA OCR (primary) / Tesseract 5.5.2 (fallback)  
+> `review_required` 기준: `overall_confidence < 0.80`
+
+---
+
+## 1. 실행 결과 요약
+
+| # | 샘플 | 엔진 | 감지 포맷 | medications | confidence | review_required |
+|---|------|------|-----------|:-----------:|:----------:|:---------------:|
+| 1 | prescription_01.jpg | CLOVA | table | 7개 | 0.9147 | false |
+| 2 | mock_prescription_table.png | CLOVA | table | 3개 | 0.9350 | false |
+| 3 | mock_prescription_bag.png | CLOVA | list | 3개 | 0.8497 | false |
+| 4 | mock_prescription_abbrev.png | CLOVA | abbrev | 3개 | 0.7811 | **true** |
+| 5 | mock_prescription_official.png | CLOVA | official | 4개 | 0.9564 | false |
+| 6 | mock_pharmacy_bag_format.png | CLOVA | table | 5개¹ | 0.9651 | false |
+| 7 | mock_prescription_table.png | Tesseract | table | 3개² | 0.0³ | true |
+
+> ¹ 5개 중 2개(메트포르민염산, 암로디핀베실)는 성분명 오인식 — 실제 브랜드 3개  
+> ² 약품명만 추출, dosage·frequency 빈값  
+> ³ pytesseract는 신뢰도를 제공하지 않아 0.0 고정
+
+---
+
+## 2. 샘플별 상세 결과
+
+### 2-1. prescription_01.jpg (실제 처방전)
+- **confidence**: 0.9147 / **포맷**: table
+- **medications** (7개):
+
+| 약품명 | dosage | frequency | days |
+|--------|--------|-----------|------|
+| 케이캡 | 50mg | _(빈값)_ | _(빈값)_ |
+| 엑세그란 | _(빈값)_ | _(빈값)_ | _(빈값)_ |
+| 가스모틴 | 5mg | _(빈값)_ | _(빈값)_ |
+| 마도파 | _(빈값)_ | _(빈값)_ | _(빈값)_ |
+| 뉴로메드 | 800mg | _(빈값)_ | _(빈값)_ |
+| 프라닥사 | 110mg | _(빈값)_ | _(빈값)_ |
+| 메바로친 | 20mg | _(빈값)_ | _(빈값)_ |
+
+- **미해결**: `"7 회"` 처럼 숫자와 '회' 사이 공백이 있는 비표준 표기로 `KOR_FREQ_RE` 미검출, frequency 전량 빈값. Day2 이후 실샘플 기반 보강 필요 (TODO 주석 기록됨).
+
+---
+
+### 2-2. mock_prescription_table.png (테이블형 목업)
+- **confidence**: 0.9350 / **포맷**: table / **diagnosis**: 고혈압, 제2형 당뇨병
+- **medications** (3개):
+
+| 약품명 | dosage | frequency | days | drug_class |
+|--------|--------|-----------|------|------------|
+| 암로디핀 | 5mg | 1일 1회 | 30일 | 칼슘채널차단제 |
+| 로자탄칼륨 | 50mg | 1일 2회 | 30일 | ARB(안지오텐신수용체차단제) |
+| 메트포르민 | 500mg | 1일 1회 | 30일 | 당뇨병용제(비구아니드) |
+
+---
+
+### 2-3. mock_prescription_bag.png (약봉투 리스트형 목업)
+- **confidence**: 0.8497 / **포맷**: list / **diagnosis**: 관상동맥질환, 위염
+- **medications** (3개):
+
+| 약품명 | dosage | frequency | days | drug_class |
+|--------|--------|-----------|------|------------|
+| 아스피린프로텍트 | 100mg | 1일 1회 | 30일 | 항혈소판제 |
+| 심바스타틴 | 20mg | 1일 1회 | 30일 | HMG-CoA환원효소억제제(스타틴) |
+| 오메프라졸 | 20mg | 1일 1회 | 30일 | 양성자펌프억제제(PPI) |
+
+---
+
+### 2-4. mock_prescription_abbrev.png (약어 처방전 목업)
+- **confidence**: 0.7811 → **review_required: true** / **포맷**: abbrev / **diagnosis**: 골관절염, 불면증
+- **medications** (3개):
+
+| 약품명 | dosage | frequency | days | drug_class |
+|--------|--------|-----------|------|------------|
+| 세레브렉스 | 200mg | 1일 2회 | 14일 | COX-2선택적억제제(NSAIDs) |
+| 졸피뎀 | 10mg | 1일 1회 | 7일 | 수면유도제(비벤조디아제핀계) |
+| 파모티딘 | 20mg | 1일 2회 | 14일 | H2수용체차단제 |
+
+- **확인**: `bid` → "1일 2회", `qd` → "1일 1회" 변환 정상 동작
+
+---
+
+### 2-5. mock_prescription_official.png (공식 처방전 포맷 목업)
+- **confidence**: 0.9564 / **포맷**: official / **diagnosis**: 무릎관절증
+- **medications** (4개):
+
+| 약품명 | dosage | frequency | days |
+|--------|--------|-----------|------|
+| 세레콕시브 | 200mg | 1일 2회 | 7일 |
+| 에페리손염산염 | 50mg | 1일 3회 | 7일 |
+| 라베프라졸나트륨장용 | _(빈값)_ | 1일 1회 | 7일 |
+| 조인트콘드로이친 | _(빈값)_ | 1일 1회 | 1일 |
+
+- **확인**: `[급여][코드]` 접두어 건너뜀, `질병분류기호:M17 (무릎관절증)` → diagnosis 정상 추출
+- **확인**: 자유서술형 용법("1일 1회 취침전 복용하세요") → frequency 정상 파싱
+- **확인**: 복합 용량 `110/500` → col_nums 룩어헤드로 자동 제외
+
+---
+
+### 2-6. mock_pharmacy_bag_format.png (약봉투 테이블형 목업)
+- **confidence**: 0.9651 / **포맷**: table (오감지¹)
+- **medications** (파서 출력 5개, 실제 브랜드 3개):
+
+| 약품명 | 실제 여부 | dosage | frequency | 비고 |
+|--------|-----------|--------|-----------|------|
+| 글루코파지 | ✅ 정상 | 500mg | 1일 2회 | 복약안내 문장에 "1일 2회" 포함 |
+| 메트포르민염 | ❌ 오인식 | _(빈값)_ | _(빈값)_ | 성분명(-산) 제형 패턴 오매칭 |
+| 노바스크 | ✅ 정상 | 5mg | _(빈값)_ | 복약안내 "아침 식후" → KOR_FREQ_RE 미검출 |
+| 암로디핀베실 | ❌ 오인식 | _(빈값)_ | _(빈값)_ | 성분명(-산) 제형 패턴 오매칭 |
+| 리피토 | ✅ 정상 | 10mg | _(빈값)_ | 복약안내 "저녁 식후" → KOR_FREQ_RE 미검출 |
+
+> ¹ `[급여][코드]` 없고 `bid/qd` 없어 table로 감지되나, 순수 숫자 컬럼 포맷
+
+- **진단 (정규식 한계)**: 순수 숫자 컬럼(1 2 30 / 1 1 30 / 1 1 30) 포맷은 CLOVA flat string에서 행 소속 정보가 소실되어 **정규식으로 해결 불가**. `fields[].boundingPoly.vertices` y좌표 기반 행 그룹핑 필요.
+
+---
+
+### 2-7. mock_prescription_table.png — Tesseract fallback
+- **confidence**: 0.0 (pytesseract 신뢰도 미제공 → 고정값) / **review_required**: true
+- **medications** (3개, 약품명만):
+
+| 약품명 | dosage | frequency | 비고 |
+|--------|--------|-----------|------|
+| 암로디핀 | _(빈값)_ | _(빈값)_ | "5mg" → "5078" 오인식 |
+| 로자탄칼륨 | _(빈값)_ | _(빈값)_ | "50mg" → "50078" 오인식 |
+| 메트포르민 | _(빈값)_ | _(빈값)_ | "500mg" → "500008" 오인식 |
+
+- **diagnosis**: 고혈압, 제2형 당뇨병 (정상 추출)
+- **결론**: 약품명·진단명 추출까지만 기대 가능. CLOVA 장애 시 폴백 용도.
+
+---
+
+## 3. 파싱 정확도 요약
+
+| 항목 | 결과 |
+|------|------|
+| 지원 포맷 | 4종 (official / abbrev / list / table) |
+| 약품명 추출 성공률 | 목업 5종 기준 100% (오인식 제외 시) |
+| frequency 정상 파싱 | table·list·official·abbrev 목업 전체 ✅ |
+| bid/qd 약어 변환 | ✅ 확인 |
+| diagnosis 추출 | 진단명: / Dx: / 질병분류기호: 3종 모두 ✅ |
+| 약봉투 테이블형 frequency | ❌ bounding box 필요 (미구현) |
+| Tesseract dosage 추출 | ❌ mg 오인식 |
+
+---
+
+## 4. 현재 파이프라인
+
+```
+이미지 파일
+   ↓
+CLOVA OCR API (base64 전송, fields[].inferText 병합)
+   ↓
+parsing_rules.parse_prescription()
+  ├─ 포맷 감지: [급여/비급여] → official
+  │              bid/qd      → abbrev
+  │              번호+약품명  → list
+  │              기본         → table
+  ├─ 약품명·용량·횟수·일수·진단명 정규식 추출
+  └─ DRUG_CLASS_DICTIONARY 약효 분류 매핑
+   ↓
+OCRResult { raw_text, medications[], overall_confidence,
+            review_required, source }
+```
+
+**Tesseract fallback**: CLOVA 키 미설정 또는 장애 시 사용. 약품명·진단명만 신뢰.
+
+---
+
+## 5. 미해결 이슈 (Day2 이후)
+
+| 우선순위 | 이슈 | 근거 샘플 |
+|----------|------|-----------|
+| 높음 | 약봉투 테이블형 — bounding box 기반 행 그룹핑 구현 | mock_pharmacy_bag_format.png |
+| 중간 | 비표준 frequency 표기("7 회") KOR_FREQ_RE 보강 | prescription_01.jpg |
+| 낮음 | DRUG_CLASS_DICTIONARY 확장 (현재 9종) | 전 샘플 |
