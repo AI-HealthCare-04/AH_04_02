@@ -198,10 +198,84 @@ OCRResult { raw_text, medications[], overall_confidence,
 
 ---
 
+---
+
+## 2-8. mock_dental_bag.png (치과 약봉투)
+- **confidence**: 0.9119 / **포맷**: list / **review_required**: false
+- **medications** (2개):
+
+| 약품명 | dosage | frequency | diagnosis | drug_class | 비고 |
+|--------|--------|-----------|-----------|------------|------|
+| 아모클란 | 375mg | 1일 3회 | _(빈값)_ | _(빈값)_ | 정상 추출 |
+| 프로 | _(빈값)_ | 1일 3회 | _(빈값)_ | **항혈소판제** | ❌ OCR이 "이지엔6프로연질캡슐"을 분리 인식, ATC 패턴 오매칭 |
+
+- **잔존 이슈**: "프로" 2자 이하 단편명 — `_lookup_emedinfo` 2자 미만 가드로 e약은요 오매칭은 방지됐으나, ATC 패턴의 부분 일치(`프로스타글란딘|프로부코` 등)로 항혈소판제 오분류 지속. Day2 대응: ATC 패턴에 단어 경계(`\b`) 추가.
+
+---
+
+## 2-9. mock_oriental_medicine.png (한방 첩약)
+- **confidence**: 0.9238 / **포맷**: _(감지 불가)_ / **review_required**: false
+- **medications**: **0개** (예상 동작)
+- 십전대보탕 등 한방 첩약은 형태소(정/캡슐/주/산/시럽/액) 없음 → 기존 4-포맷 파서 전부 미매칭. **별도 한방처방전 파서 필요** (미구현, Day3 이후).
+
+---
+
+## 2-10. mock_pediatric.png (소아청소년과)
+- **confidence**: 0.9342 / **포맷**: list / **review_required**: false
+- **medications** (2개):
+
+| 약품명 | dosage | frequency | diagnosis | drug_class | 비고 |
+|--------|--------|-----------|-----------|------------|------|
+| 오구멘틴 | 5mL | 1일 2회 | 급성 중이염 | _(빈값)_ | ✅ 시럽 포맷 정상 |
+| 지르텍 | 2.5mL | 1일 1회 | 급성 중이염 | 항히스타민제 | ✅ drug_class 정상 |
+
+- **수정 내역**: list 감지 정규식에 `시럽|액|주|산` 추가 → table 오감지 수정 후 5mL/2.5mL 정상 추출
+- **잔존 이슈**: `오구멘틴` 브랜드명 미등록 → drug_class 빈값 (ATC J01 항생제 패턴 미포함)
+
+---
+
+## 2-11. mock_psychiatry.png (정신건강의학과)
+- **confidence**: 0.9505 / **포맷**: list / **review_required**: false
+- **medications** (3개):
+
+| 약품명 | dosage | frequency | diagnosis | drug_class | 비고 |
+|--------|--------|-----------|-----------|------------|------|
+| 자낙스 | 0.25mg | 1일 2회 | F41.1 범불안장애 | _(빈값)_ | ✅ ICD 코드 오분할 수정 |
+| 렉사프로 | 10mg | 1일 1회 | F41.1 범불안장애 | _(빈값)_ | 브랜드명 미등록 |
+| 스틸녹스 | 10mg | 1일 1회 | F41.1 범불안장애 | _(빈값)_ | 브랜드명 미등록 |
+
+- **수정 내역**: `_split_by_number` — `(?<![A-Za-z가-힣])\d+\s*[).](?!\d)` 로 F41.1 오분할 방지 → 자낙스 dosage·frequency 정상 복원
+- **잔존 이슈**: 정신건강의학과 브랜드명(자낙스/알프라졸람, 렉사프로/에스시탈로프람, 스틸녹스/졸피뎀)이 ATC 패턴 미등록 → drug_class 전량 빈값. Day2 대응: N05-N06 계열 ATC 패턴 추가 필요.
+
+---
+
+## 2-12. mock_university_hospital.png (대학병원 다과 협진)
+- **confidence**: 0.9194 / **포맷**: official / **review_required**: false
+- **medications** (4개):
+
+| 약품명 | dosage | frequency | diagnosis | drug_class | 비고 |
+|--------|--------|-----------|-----------|------------|------|
+| 자누메트 | 1000mg | 1일 2회 | 제2형 당뇨병, 이상지질혈증, 본태성 고혈압, 심방세동 | _(빈값)_ | 복합제 브랜드명 미등록 |
+| 아토젯 | 40mg | 1일 1회 | 〃 | HMG-CoA환원효소억제제(스타틴) | ✅ ATC C10 패턴 매칭 |
+| 엘리퀴스 | 5mg | 1일 2회 | 〃 | 항응고제 | ✅ |
+| 오메가3 | _(빈값)_ | 1일 1회 | 〃 | _(빈값)_ | dosage 없음 (성분명 패턴) |
+
+- **수정 내역 3가지**:
+  1. `DRUG_NAME_RE`에 `(?:\d+)?(?:연질)?` 추가 → 오메가3연질캡슐 인식
+  2. col_nums 룩어헤드에서 `|회|번` 제거 → "1정 2회 30일" frequency 정상 추출
+  3. `DIAGNOSIS_KOR_RE` `진단(?:명)?` → 2개 과 복수 진단명 모두 수집
+- **잔존 이슈**: 자누메트(메트포르민+자누비아 복합제) 브랜드명 미등록, 오메가3 dosage 빈값(복용량 미기재)
+
+---
+
 ## 5. 미해결 이슈 (Day2 이후)
 
 | 우선순위 | 이슈 | 근거 샘플 |
 |----------|------|-----------|
 | 높음 | 약봉투 테이블형 — bounding box 기반 행 그룹핑 구현 | mock_pharmacy_bag_format.png |
+| 높음 | 한방 첩약 파서 구현 (형태소 없는 자연어 처방) | mock_oriental_medicine.png |
+| 중간 | ATC 패턴 단어 경계(`\b`) 추가 — 2자 단편명 오분류 방지 | mock_dental_bag.png |
+| 중간 | 정신건강의학과 브랜드명 → ATC N05-N06 패턴 등록 | mock_psychiatry.png |
+| 중간 | 복합제 브랜드명 등록 (자누메트, 아토젯 등) | mock_university_hospital.png |
 | 중간 | 비표준 frequency 표기("7 회") KOR_FREQ_RE 보강 | prescription_01.jpg |
 | 낮음 | ~~DRUG_CLASS_DICTIONARY 확장~~ → drug_reference.py로 대체 완료 | — |
