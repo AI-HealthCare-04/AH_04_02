@@ -146,6 +146,32 @@
 
 ---
 
+## 3-1. drug_class 정확도 — 구 사전 vs drug_reference.py
+
+> 측정: 기존 9개 샘플 + 신규 14개 약품(하드코딩 사전 미수록) = 총 23개  
+> `drug_reference.py` 구현: ATC 코드 기반 약명 패턴(1순위) → e약은요 DB 매칭(2순위) → 하드코딩 폴백(3순위)
+
+| 구분 | 구 사전 (`parsing_rules.py`) | `drug_reference.py` | 비고 |
+|------|:---:|:---:|------|
+| 기존 9개 샘플 | 9/9 (100%) | 9/9 (100%) | 두 방식 모두 커버 |
+| **신규 14개 약품** | **0/14 (0%)** | **14/14 (100%)** | 구 사전 전량 빈값 |
+| **통합 23개** | **9/23 (39%)** | **23/23 (100%)** | **+61%p** |
+
+**신규 인식된 약품 (14개, 모두 ❌→✅):**
+
+| 질환군 | 신규 인식 약품 | 분류 결과 |
+|--------|--------------|-----------|
+| 고혈압 (ATC C07-C09) | 노바스크, 발사르탄, 에날라프릴, 메토프롤롤 | 칼슘채널차단제 / ARB / ACE억제제 / 베타차단제 |
+| 당뇨병 (ATC A10) | 글루코파지, 아마릴, 자누비아 | 비구아니드 / 설포닐우레아 / DPP-4억제제 |
+| 고지혈증 (ATC C10) | 리피토, 아토르바스타틴, 크레스토 | HMG-CoA환원효소억제제(스타틴) |
+| 기타 | 프라닥사, 라베프라졸, 넥시움, 가스모틴 | 항응고제 / PPI×2 / 위장운동촉진제 |
+
+> **Note**: e약은요 DB(4,809건)는 OTC 중심이라 고혈압·당뇨·고지혈증 전문의약품이 미수록.  
+> 위 신규 인식은 모두 ATC 코드 기반 약명 패턴 정규식(소스: `atc`)이 담당.  
+> e약은요 DB는 OTC 약품(파모티딘 등) 매칭 및 efcyQesitm 제공에 활용.
+
+---
+
 ## 4. 현재 파이프라인
 
 ```
@@ -159,7 +185,10 @@ parsing_rules.parse_prescription()
   │              번호+약품명  → list
   │              기본         → table
   ├─ 약품명·용량·횟수·일수·진단명 정규식 추출
-  └─ DRUG_CLASS_DICTIONARY 약효 분류 매핑
+  └─ drug_reference.get_drug_class() 약효 분류
+       ├─ 1. ATC 코드 기반 패턴 (고혈압 C02-C09, 당뇨 A10, 고지혈 C10)
+       ├─ 2. e약은요 DB 부분/유사도 매칭 + efcyQesitm 키워드 분류
+       └─ 3. 하드코딩 폴백 (9종)
    ↓
 OCRResult { raw_text, medications[], overall_confidence,
             review_required, source }
@@ -175,4 +204,4 @@ OCRResult { raw_text, medications[], overall_confidence,
 |----------|------|-----------|
 | 높음 | 약봉투 테이블형 — bounding box 기반 행 그룹핑 구현 | mock_pharmacy_bag_format.png |
 | 중간 | 비표준 frequency 표기("7 회") KOR_FREQ_RE 보강 | prescription_01.jpg |
-| 낮음 | DRUG_CLASS_DICTIONARY 확장 (현재 9종) | 전 샘플 |
+| 낮음 | ~~DRUG_CLASS_DICTIONARY 확장~~ → drug_reference.py로 대체 완료 | — |
