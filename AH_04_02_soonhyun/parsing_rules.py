@@ -1,50 +1,278 @@
 # -*- coding: utf-8 -*-
 """
-파싱 규칙 초안 (Day1)
-CLOVA/Tesseract가 뽑아낸 raw_text에서 약품명/용량/복용법/진단명을 구조화한다.
-정확도는 나중에(Day6 OCR 정확도 측정 단계) 다듬고, 오늘은 최소 동작 버전만 만든다.
+처방전 raw_text 파싱 규칙
+
+세 가지 처방전 포맷을 커버한다:
+  1. 테이블 포맷  : OCR이 약품명·용량·횟수·일수를 컬럼 그룹으로 출력
+  2. 리스트 포맷  : 번호. 약품명 1회 N정, 1일 N회, N일분
+  3. 약식(약어) 포맷: Dx: / Rx) / bid / qd / #N
 """
 
 import re
 
-# 용량 패턴: 숫자 + mg/g/ml/정/캡슐
-DOSAGE_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*(mg|g|ml|정|캡슐)")
+# ─────────────────────────────────────────────────────────────
+# 1. 약어 → 한국어 매핑
+# ─────────────────────────────────────────────────────────────
 
-# 복용법 패턴: "1일 N회", "하루 N번" 등
-FREQUENCY_PATTERN = re.compile(r"(1일|하루)\s*(\d+)\s*(회|번)")
-
-# TODO: Day2 이후 실제 샘플 10장으로 검증하며 아래 사전을 계속 보강
-DRUG_CLASS_DICTIONARY = {
-    "아스피린": "항혈소판제",
-    "로자탄": "ARB(안지오텐신수용체차단제)",
-    "메트포르민": "당뇨병용제(비구아니드)",
-    "암로디핀": "칼슘채널차단제",
+FREQ_ABBREV_MAP: dict = {
+    "qd":  "1일 1회",
+    "od":  "1일 1회",
+    "bid": "1일 2회",
+    "tid": "1일 3회",
+    "qid": "1일 4회",
+    "prn": "필요시",
+    "hs":  "취침 전",
+    "ac":  "식전",
+    "pc":  "식후",
 }
 
+# ─────────────────────────────────────────────────────────────
+# 2. 약효 분류 사전 (TODO: Day2 이후 실샘플 기반으로 계속 보강)
+# ─────────────────────────────────────────────────────────────
+
+DRUG_CLASS_DICTIONARY: dict = {
+    "아스피린":   "항혈소판제",
+    "로자탄":     "ARB(안지오텐신수용체차단제)",
+    "메트포르민": "당뇨병용제(비구아니드)",
+    "암로디핀":   "칼슘채널차단제",
+    "심바스타틴": "HMG-CoA환원효소억제제(스타틴)",
+    "오메프라졸": "양성자펌프억제제(PPI)",
+    "세레브렉스": "COX-2선택적억제제(NSAIDs)",
+    "졸피뎀":     "수면유도제(비벤조디아제핀계)",
+    "파모티딘":   "H2수용체차단제",
+}
+
+# ─────────────────────────────────────────────────────────────
+# 3. 정규식 상수
+# ─────────────────────────────────────────────────────────────
+
+# 약품명: 한글·영문 3자 이상 + 제형(정|캡슐|…) + 선택적 용량 + 선택적 제조사
+# 3자 이상 조건으로 '개인정보' 같은 일반 단어의 오인식 방지
+DRUG_NAME_RE = re.compile(
+    r"([가-힣A-Za-z]{3,}(?:정|캡슐|주|산|시럽|액))"
+    r"(\d+(?:\.\d+)?(?:mg|g|ml))?"
+    r"(?:\([^)]+\))?",
+    re.IGNORECASE,
+)
+
+DOSAGE_RE       = re.compile(r"(\d+(?:\.\d+)?)\s*(mg|g|ml)", re.IGNORECASE)
+# TODO: 실제 처방전(prescription_01.jpg)에서 "7 회", "1 회" 처럼 숫자와 '회' 사이에
+#       공백이 들어간 비표준 표기가 확인됨. Day2 이후 실샘플 10장 기반으로 패턴 보강 필요.
+KOR_FREQ_RE     = re.compile(r"(?:1일|하루)\s*(\d+)\s*(?:회|번)")
+ABBREV_FREQ_RE  = re.compile(r"\b(qd|od|bid|tid|qid|prn|hs|ac|pc)\b", re.IGNORECASE)
+DAYS_KOR_RE     = re.compile(r"(\d+)\s*일\s*분")
+DAYS_ABBREV_RE  = re.compile(r"#\s*(\d+)")
+DIAGNOSIS_KOR_RE = re.compile(r"진단명\s*[:：]\s*(.+)")
+DIAGNOSIS_EN_RE  = re.compile(r"Dx\s*[:：]\s*(.+?)(?=\s+Rx\b|\Z)", re.IGNORECASE)
+
+# ─────────────────────────────────────────────────────────────
+# 4. 유틸리티 함수 (공개 API)
+# ─────────────────────────────────────────────────────────────
 
 def extract_dosage(text: str) -> str:
-    m = DOSAGE_PATTERN.search(text)
+    m = DOSAGE_RE.search(text)
     return f"{m.group(1)}{m.group(2)}" if m else ""
 
 
 def extract_frequency(text: str) -> str:
-    m = FREQUENCY_PATTERN.search(text)
-    return f"{m.group(1)} {m.group(2)}{m.group(3)}" if m else ""
+    """한국어 횟수 우선, 없으면 약어 변환."""
+    m = KOR_FREQ_RE.search(text)
+    if m:
+        return f"1일 {m.group(1)}회"
+    m = ABBREV_FREQ_RE.search(text)
+    if m:
+        return FREQ_ABBREV_MAP.get(m.group(1).lower(), m.group(1))
+    return ""
+
+
+def extract_days(text: str) -> str:
+    m = DAYS_KOR_RE.search(text)
+    if m:
+        return f"{m.group(1)}일"
+    m = DAYS_ABBREV_RE.search(text)
+    if m:
+        return f"{m.group(1)}일"
+    return ""
+
+
+def extract_diagnosis(text: str) -> str:
+    m = DIAGNOSIS_KOR_RE.search(text)
+    if m:
+        return m.group(1).strip()
+    m = DIAGNOSIS_EN_RE.search(text)
+    if m:
+        return m.group(1).strip()
+    return ""
 
 
 def lookup_drug_class(drug_name: str) -> str:
-    return DRUG_CLASS_DICTIONARY.get(drug_name, "")
+    for key, cls in DRUG_CLASS_DICTIONARY.items():
+        if key in drug_name:
+            return cls
+    return ""
 
 
+# ─────────────────────────────────────────────────────────────
+# 5. 포맷 감지
+# ─────────────────────────────────────────────────────────────
+
+def _detect_format(text: str) -> str:
+    """'abbrev' | 'list' | 'table' 반환."""
+    if re.search(r"\b(?:bid|qd|tid|qid)\b", text, re.IGNORECASE):
+        return "abbrev"
+    if re.search(r"\d+[.)]\s+[가-힣A-Za-z]+(?:정|캡슐)", text):
+        return "list"
+    return "table"
+
+# ─────────────────────────────────────────────────────────────
+# 6. 포맷별 파서
+# ─────────────────────────────────────────────────────────────
+
+def _drug_name_only(form_str: str) -> str:
+    """'암로디핀정' → '암로디핀'."""
+    m = re.match(r"([가-힣A-Za-z]+)(?:정|캡슐|주|산|시럽|액)$", form_str)
+    return m.group(1) if m else form_str
+
+
+def _split_by_number(text: str) -> list:
+    """'1) ...\n2) ...' 또는 '1. ... 2. ...' 형식을 번호 기준으로 분리."""
+    return [s.strip() for s in re.split(r"\d+\s*[).]", text) if s.strip()]
+
+
+def _parse_abbrev_format(text: str) -> list:
+    """약식(약어) 포맷: Rx) 1) 약품명 1T bid #14"""
+    rx_m = re.search(r"Rx\s*[)]", text, re.IGNORECASE)
+    body = text[rx_m.end():] if rx_m else text
+
+    results = []
+    for item in _split_by_number(body):
+        dm = DRUG_NAME_RE.search(item)
+        if not dm:
+            continue
+        drug_name = _drug_name_only(dm.group(1))
+        results.append({
+            "drug_name":  drug_name,
+            "dosage":     dm.group(2) or extract_dosage(item),
+            "frequency":  extract_frequency(item),
+            "days":       extract_days(item),
+            "drug_class": lookup_drug_class(drug_name),
+        })
+    return results
+
+
+def _parse_list_format(text: str) -> list:
+    """리스트 포맷: 1. 약품명 1회 1정, 1일 1회, 30일분"""
+    results = []
+    for item in _split_by_number(text):
+        dm = DRUG_NAME_RE.search(item)
+        if not dm:
+            continue
+        drug_name = _drug_name_only(dm.group(1))
+        results.append({
+            "drug_name":  drug_name,
+            "dosage":     dm.group(2) or extract_dosage(item),
+            "frequency":  extract_frequency(item),
+            "days":       extract_days(item),
+            "drug_class": lookup_drug_class(drug_name),
+        })
+    return results
+
+
+def _parse_table_format(text: str) -> list:
+    """
+    테이블 포맷: OCR이 컬럼을 그룹으로 출력.
+    약품명 그룹 → 1회량 그룹 → 횟수 그룹 → 일수 그룹 순서를 가정.
+    """
+    drug_matches = list(DRUG_NAME_RE.finditer(text))
+    if not drug_matches:
+        return []
+
+    # 모든 한국어 횟수 순서대로 추출
+    freq_nums = KOR_FREQ_RE.findall(text)
+    frequencies = [f"1일 {n}회" for n in freq_nums]
+
+    # 마지막 횟수 패턴 이후 영역에서 단독 정수를 일수로 추출
+    last_freq_end = 0
+    for m in re.finditer(r"(?:1일|하루)\s*\d+\s*(?:회|번)", text):
+        last_freq_end = m.end()
+    tail = text[last_freq_end:]
+    diag_m = re.search(r"진단명", tail)
+    if diag_m:
+        tail = tail[:diag_m.start()]
+    # 소수점·단위에 붙지 않은 단독 정수만 추출
+    day_nums = re.findall(r"(?<![.\d])(\d+)(?![.\d]|mg|g|ml|일|분)", tail)
+
+    results = []
+    for i, dm in enumerate(drug_matches):
+        drug_name = _drug_name_only(dm.group(1))
+        results.append({
+            "drug_name":  drug_name,
+            "dosage":     dm.group(2) or "",
+            "frequency":  frequencies[i] if i < len(frequencies) else "",
+            "days":       f"{day_nums[i]}일" if i < len(day_nums) else "",
+            "drug_class": lookup_drug_class(drug_name),
+        })
+    return results
+
+
+# ─────────────────────────────────────────────────────────────
+# 7. 공개 메인 API
+# ─────────────────────────────────────────────────────────────
+
+def parse_prescription(raw_text: str) -> tuple:
+    """
+    raw_text → (약품 목록, 진단명)
+    각 약품 dict: drug_name / dosage / frequency / days / drug_class
+    """
+    fmt = _detect_format(raw_text)
+    if fmt == "abbrev":
+        meds = _parse_abbrev_format(raw_text)
+    elif fmt == "list":
+        meds = _parse_list_format(raw_text)
+    else:
+        meds = _parse_table_format(raw_text)
+    return meds, extract_diagnosis(raw_text)
+
+
+# 하위 호환: 단일 라인 파싱
 def parse_line(line: str) -> dict:
-    """처방전 한 줄(약품명 + 용량 + 복용법)을 파싱. 진단명은 별도 라인에서 처리."""
     return {
-        "dosage": extract_dosage(line),
+        "dosage":    extract_dosage(line),
         "frequency": extract_frequency(line),
     }
 
 
 if __name__ == "__main__":
-    sample = "아스피린 100mg 1일 1회"
-    print(parse_line(sample))
-    print(lookup_drug_class("아스피린"))
+    import json
+
+    samples = [
+        (
+            "테이블",
+            "처방전 환자 성명: 홍길동 (개인정보 목업) 질병분류기호: 110 (본태성 고혈압) "
+            "의약품명 1회 투약량 1일 투여횟수 총 투약일수 "
+            "암로디핀정5mg(한미) 로자탄칼륨정50mg(종근당) 메트포르민정500mg(대웅) "
+            "1.00 1.00 2.00 1일 1회 1일 2회 1일 1회 30 30 30 "
+            "진단명: 고혈압, 제2형 당뇨병",
+        ),
+        (
+            "리스트",
+            "00약국 환자: 김철수 (개인정보 목업) 조제일자: 2026-07-01 "
+            "1. 아스피린프로텍트정100mg 1회 1정, 1일 1회, 30일분 복용 "
+            "2. 심바스타틴정20mg(유한양행) 1회 1정, 1일 1회 (취침전), 30일분 "
+            "3. 오메프라졸캡슐20mg 1회 1캡슐, 1일 1회 (식전), 30일분 "
+            "진단명: 관상동맥질환, 위염",
+        ),
+        (
+            "약어",
+            "처방전 (약식) Pt: 이영희(모) Dx: 골관절염, 불면증 "
+            "Rx) 1) 세레브렉스캡슐200mg 1C bid #14 "
+            "2) 졸피뎀정10mg 1T qd(취침전) #7 "
+            "3) 파모티딘정20mg 1T bid #14",
+        ),
+    ]
+
+    for label, text in samples:
+        meds, diag = parse_prescription(text)
+        print(f"\n{'=' * 40}")
+        print(f"[{label}] 진단명: {diag}")
+        print(json.dumps(meds, ensure_ascii=False, indent=2))

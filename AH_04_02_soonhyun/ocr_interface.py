@@ -18,6 +18,8 @@ from typing import Literal
 import json
 import os
 
+from parsing_rules import parse_prescription
+
 
 # ------------------------------------------------------------------
 # 1. 출력 스키마 (Day2에 ①②③이 이걸 기준으로 합의·고정 예정)
@@ -52,6 +54,25 @@ class OCRResult:
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+
+
+# ------------------------------------------------------------------
+# 1-b. 파싱 헬퍼 — raw_text → MedicationItem 리스트
+# ------------------------------------------------------------------
+
+def _build_medications(raw_text: str, confidence: float) -> list:
+    meds, diagnosis = parse_prescription(raw_text)
+    return [
+        MedicationItem(
+            drug_name=m["drug_name"],
+            dosage=m["dosage"],
+            frequency=m["frequency"],
+            diagnosis=diagnosis,
+            drug_class=m.get("drug_class", ""),
+            confidence=confidence,
+        )
+        for m in meds
+    ]
 
 
 # ------------------------------------------------------------------
@@ -158,10 +179,9 @@ class ClovaOCRProvider(OCRProvider):
         confidences = [f.get("inferConfidence", 0.0) for f in fields if "inferConfidence" in f]
         overall_confidence = sum(confidences) / len(confidences) if confidences else 0.0
 
-        # TODO: parsing_rules.py의 규칙으로 raw_text -> MedicationItem 리스트 구조화
         result = OCRResult(
             raw_text=raw_text,
-            medications=[],
+            medications=_build_medications(raw_text, round(overall_confidence, 4)),
             overall_confidence=round(overall_confidence, 4),
             source="clova",
         )
@@ -186,8 +206,12 @@ class TesseractOCRProvider(OCRProvider):
             ) from e
 
         text = pytesseract.image_to_string(Image.open(image_path), lang="kor+eng")
-        # TODO: parsing_rules.py로 raw_text -> MedicationItem 리스트 구조화
-        result = OCRResult(raw_text=text, medications=[], overall_confidence=0.0, source="tesseract")
+        result = OCRResult(
+            raw_text=text,
+            medications=_build_medications(text, 0.0),
+            overall_confidence=0.0,
+            source="tesseract",
+        )
         return self._apply_review_flag(result)
 
 
