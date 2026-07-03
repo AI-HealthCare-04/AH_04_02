@@ -1,30 +1,82 @@
-import { useNavigate } from "react-router-dom";
-
-// TODO: 실제 API 응답 데이터로 대체
-const MOCK = {
-  uploadedBy: "보호자 김영희님",
-  record: { hospital: "서울내과의원", date: "2026.06.30", days: 7 },
-  medications: [
-    { name: "아목시실린 500mg", dosage: "1일 3회 · 식후 30분", drugClass: "항생제" },
-    { name: "타이레놀 650mg", dosage: "1일 3회 · 필요시", drugClass: "해열진통" },
-    { name: "판토프라졸 40mg", dosage: "1일 1회 · 식전", drugClass: "위장약" },
-  ],
-  patientStatus: "당뇨 관리 단계 · 혈당 변동 주의군",
-  medicationGuide: [
-    { label: "복용 시간", icon: "⏰", text: "아목시실린과 판토프라졸은 식사와 함께, 타이레놀은 통증이 있을 때만 복용하세요." },
-    { label: "주의사항", icon: "⚠️", text: "항생제는 증상이 나아도 처방 기간 동안 꾸준히 복용해야 합니다. 임의로 중단하지 마세요." },
-    { label: "약물 상호작용", icon: "💊", text: "타이레놀과 아목시실린은 함께 복용해도 안전합니다." },
-  ],
-  lifestyleGuide: [
-    { label: "식이", icon: "🥗", text: "짠 음식과 단 음식을 줄이고, 채소와 통곡물 위주로 드세요. 칼륨 보충을 위해 바나나, 시금치를 권장합니다." },
-    { label: "운동", icon: "🚶", text: "하루 30분 가벼운 걷기를 권장합니다. 격렬한 운동은 혈당 변동을 유발할 수 있으니 주의하세요." },
-    { label: "수면", icon: "😴", text: "규칙적인 수면 시간을 유지하세요. 수면 부족은 혈당 조절을 어렵게 합니다." },
-  ],
-  sources: ["식약처 e약은요", "HIRA 질환별 통계"],
-};
+import { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import {
+  getMedicalRecord,
+  getGuide,
+  type MedicalRecordDetail,
+  type GuideResult,
+} from "../api/medicalRecords";
 
 export default function Result() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const recordId = (location.state as { recordId?: number } | null)?.recordId;
+
+  const [record, setRecord] = useState<MedicalRecordDetail | null>(null);
+  const [guide, setGuide] = useState<GuideResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!recordId) {
+      navigate("/upload");
+      return;
+    }
+
+    const load = async () => {
+      try {
+        const [recordData, guideData] = await Promise.all([
+          getMedicalRecord(recordId),
+          getGuide(recordId),
+        ]);
+        setRecord(recordData);
+        setGuide(guideData);
+      } catch (err: unknown) {
+        const message =
+          (err as { response?: { data?: { message?: string } } })?.response
+            ?.data?.message ??
+          "결과를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.";
+        setError(message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    load();
+  }, [recordId, navigate]);
+
+  if (loading) {
+    return (
+      <div style={styles.page}>
+        <nav style={styles.nav}>
+          <span style={styles.logo}>💊 건강동행</span>
+        </nav>
+        <main style={{ ...styles.main, textAlign: "center" as const, padding: "120px 24px" }}>
+          <p style={{ fontSize: 15, color: "#888888" }}>결과를 불러오는 중이에요...</p>
+        </main>
+      </div>
+    );
+  }
+
+  if (error || !record || !guide) {
+    return (
+      <div style={styles.page}>
+        <nav style={styles.nav}>
+          <span style={styles.logo}>💊 건강동행</span>
+        </nav>
+        <main style={{ ...styles.main, textAlign: "center" as const, padding: "120px 24px" }}>
+          <p style={{ fontSize: 15, color: "#D94F4F", marginBottom: 20 }}>
+            {error || "결과를 찾을 수 없어요."}
+          </p>
+          <button style={styles.chatBtn} onClick={() => navigate("/upload")}>
+            다시 업로드하기
+          </button>
+        </main>
+      </div>
+    );
+  }
+
+  const generatedDate = new Date(guide.generated_at).toLocaleDateString("ko-KR");
 
   return (
     <div style={styles.page}>
@@ -39,17 +91,22 @@ export default function Result() {
             <h1 style={styles.title}>복약 안내 결과</h1>
             <span style={styles.badge}>✓ 분석 완료</span>
           </div>
-          <p style={styles.subtitle}>
-            2026.06.30 · {MOCK.uploadedBy}이 등록하였습니다
-          </p>
+          <p style={styles.subtitle}>{generatedDate} 생성됨</p>
         </div>
 
         {/* 면책 고지 */}
         <div style={styles.disclaimer}>
-          <p style={styles.disclaimerText}>
-            ⚠️ 이 정보는 AI가 생성한 참고용 안내입니다. 정확한 복약 지도는 담당 의사 또는 약사에게 확인하세요.
-          </p>
+          <p style={styles.disclaimerText}>⚠️ {guide.disclaimer}</p>
         </div>
+
+        {/* 저신뢰 OCR 확인 필요 안내 */}
+        {record.status === "review_required" && (
+          <div style={{ ...styles.disclaimer, background: "#FFF3E0", border: "1px solid #FFD8A8" }}>
+            <p style={{ ...styles.disclaimerText, color: "#B8621B" }}>
+              ⚠️ 일부 약품 정보의 인식 정확도가 낮아요. 아래 내용을 확인해 주세요.
+            </p>
+          </div>
+        )}
 
         {/* 2단 레이아웃 */}
         <div style={styles.grid}>
@@ -57,18 +114,18 @@ export default function Result() {
           <div style={styles.colLeft}>
             <div style={styles.card}>
               <h2 style={styles.cardTitle}>📄 OCR 인식 결과</h2>
-              <div style={styles.infoBox}>
-                <div style={styles.infoRow}><span style={styles.infoKey}>병원</span><span style={styles.infoVal}>{MOCK.record.hospital}</span></div>
-                <div style={styles.infoRow}><span style={styles.infoKey}>처방일</span><span style={styles.infoVal}>{MOCK.record.date}</span></div>
-                <div style={styles.infoRow}><span style={styles.infoKey}>조제일수</span><span style={styles.infoVal}>{MOCK.record.days}일</span></div>
-              </div>
-              {MOCK.medications.map((med, i) => (
-                <div key={i} style={styles.medItem}>
+              {record.extracted_medications.map((med) => (
+                <div key={med.medication_id} style={styles.medItem}>
                   <div style={styles.medInfo}>
-                    <p style={styles.medName}>{med.name}</p>
-                    <p style={styles.medDosage}>{med.dosage}</p>
+                    <p style={styles.medName}>{med.drug_name}</p>
+                    <p style={styles.medDosage}>{med.dosage} · {med.frequency}</p>
+                    {med.confidence < 0.8 && (
+                      <p style={{ fontSize: 11, color: "#D98A2B", marginTop: 2 }}>
+                        확인 필요 (인식 정확도 {Math.round(med.confidence * 100)}%)
+                      </p>
+                    )}
                   </div>
-                  <span style={styles.medBadge}>{med.drugClass}</span>
+                  <span style={styles.medBadge}>{med.drug_class}</span>
                 </div>
               ))}
             </div>
@@ -76,20 +133,30 @@ export default function Result() {
 
           {/* 우측: 예측된 환자상태 + 가이드 */}
           <div style={styles.colRight}>
-            {/* 예측된 환자 상태 */}
+            {/* 예측된 환자 상태 (진단명 기반) */}
             <div style={{ ...styles.card, ...styles.statusCard }}>
-              <h2 style={styles.cardTitle}>🔍 예측된 환자 상태</h2>
-              <p style={styles.statusText}>{MOCK.patientStatus}</p>
+              <h2 style={styles.cardTitle}>🔍 진단 기반 안내</h2>
+              <p style={styles.statusText}>{guide.lifestyle_guide.diagnosis}</p>
               <p style={styles.statusNote}>진단명 + 처방 약물 기반 분석 결과입니다.</p>
             </div>
 
             {/* 맞춤 복약 지도 */}
             <div style={styles.card}>
               <h2 style={styles.cardTitle}>💊 맞춤 복약 지도</h2>
-              {MOCK.medicationGuide.map((g, i) => (
+              {guide.medication_guide.drugs.map((drug, i) => (
                 <div key={i} style={styles.guideItem}>
-                  <p style={styles.guideLabel}>{g.icon} {g.label}</p>
-                  <p style={styles.guideText}>{g.text}</p>
+                  <p style={styles.guideLabel}>💊 {drug.drug_name}</p>
+                  <p style={styles.guideText}>{drug.dosage_text}</p>
+                  {drug.caution && (
+                    <p style={{ ...styles.guideText, color: "#C16A45", marginTop: 4 }}>
+                      ⚠️ {drug.caution}
+                    </p>
+                  )}
+                  {drug.guardian_check_required && (
+                    <p style={{ fontSize: 12, color: "#8A7A6A", marginTop: 4 }}>
+                      🧑‍🤝‍🧑 보호자 확인이 권장되는 약물이에요.
+                    </p>
+                  )}
                 </div>
               ))}
             </div>
@@ -97,21 +164,53 @@ export default function Result() {
             {/* 생활습관 개선 가이드 */}
             <div style={styles.card}>
               <h2 style={styles.cardTitle}>🌿 생활습관 개선 가이드</h2>
-              {MOCK.lifestyleGuide.map((g, i) => (
+              {guide.lifestyle_guide.situational_guidance.map((g, i) => (
                 <div key={i} style={styles.guideItem}>
-                  <p style={styles.guideLabel}>{g.icon} {g.label}</p>
-                  <p style={styles.guideText}>{g.text}</p>
+                  <p style={styles.guideLabel}>🚶 {g.situation}</p>
+                  <p style={styles.guideText}>{g.action}</p>
                 </div>
               ))}
-              <div style={styles.sources}>
-                <p style={styles.sourcesText}>출처: {MOCK.sources.join(", ")}</p>
+              <div style={styles.guideItem}>
+                <p style={styles.guideLabel}>🥗 식이</p>
+                <p style={styles.guideText}>
+                  피해야 할 음식: {guide.lifestyle_guide.diet.avoid.join(", ") || "없음"}
+                </p>
+                {guide.lifestyle_guide.diet.drug_specific.length > 0 && (
+                  <p style={styles.guideText}>
+                    {guide.lifestyle_guide.diet.drug_specific.join(" ")}
+                  </p>
+                )}
               </div>
+              <div style={styles.guideItem}>
+                <p style={styles.guideLabel}>🏃 운동</p>
+                <p style={styles.guideText}>
+                  {guide.lifestyle_guide.exercise.type} · {guide.lifestyle_guide.exercise.duration} · {guide.lifestyle_guide.exercise.intensity}
+                </p>
+              </div>
+              {guide.lifestyle_guide.caution.length > 0 && (
+                <div style={styles.guideItem}>
+                  <p style={styles.guideLabel}>⚠️ 주의사항</p>
+                  {guide.lifestyle_guide.caution.map((c, i) => (
+                    <p key={i} style={styles.guideText}>{c}</p>
+                  ))}
+                </div>
+              )}
+              {guide.source_refs.length > 0 && (
+                <div style={styles.sources}>
+                  <p style={styles.sourcesText}>
+                    출처: {guide.source_refs.map((s) => s.title).join(", ")}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>
 
         {/* 챗봇 이동 버튼 */}
-        <button style={styles.chatBtn} onClick={() => navigate("/chat")}>
+        <button
+          style={styles.chatBtn}
+          onClick={() => navigate("/chat", { state: { guideResultId: guide.guide_result_id } })}
+        >
           💬 더 궁금한 점이 있으신가요? 챗봇에게 물어보기
         </button>
       </main>

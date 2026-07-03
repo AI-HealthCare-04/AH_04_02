@@ -1,25 +1,56 @@
 import { useState, type DragEvent, type ChangeEvent } from "react";
+import { useNavigate } from "react-router-dom";
+import { uploadMedicalRecord } from "../api/medicalRecords";
 
 export default function Upload() {
+  const navigate = useNavigate();
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
 
   const handleDrop = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragging(false);
     const dropped = e.dataTransfer.files?.[0];
-    if (dropped) setFile(dropped);
+    if (dropped) {
+      setFile(dropped);
+      setError("");
+    }
   };
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0];
-    if (selected) setFile(selected);
+    if (selected) {
+      setFile(selected);
+      setError("");
+    }
   };
 
-  const handleUpload = () => {
-    if (!file) return;
-    // TODO: ③ 백엔드 연동 - POST /api/v1/medical-records
-    console.log("업로드할 파일:", file.name);
+  const handleUpload = async () => {
+    if (!file || uploading) return;
+
+    // 413 방지용 클라이언트 사전 체크 (API명세서: 10MB 초과 거부)
+    if (file.size > 10 * 1024 * 1024) {
+      setError("파일 용량이 너무 커요. 10MB 이하 이미지로 올려주세요.");
+      return;
+    }
+
+    setUploading(true);
+    setError("");
+
+    try {
+      // TODO: 로그인 연동 완료 전까지는 localStorage user_id 임시 사용 (기본값 1)
+      const uploadedFor = Number(localStorage.getItem("user_id") ?? 1);
+      const { record_id } = await uploadMedicalRecord(file, uploadedFor);
+      navigate("/processing", { state: { recordId: record_id } });
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { message?: string } } })?.response?.data
+          ?.message ?? "업로드 중 문제가 발생했어요. 잠시 후 다시 시도해 주세요.";
+      setError(message);
+      setUploading(false);
+    }
   };
 
   return (
@@ -66,15 +97,17 @@ export default function Upload() {
           )}
         </div>
 
+        {error && <p style={styles.errorText}>{error}</p>}
+
         <button
           style={{
             ...styles.uploadButton,
-            ...(file ? {} : styles.uploadButtonDisabled),
+            ...(file && !uploading ? {} : styles.uploadButtonDisabled),
           }}
-          disabled={!file}
+          disabled={!file || uploading}
           onClick={handleUpload}
         >
-          업로드
+          {uploading ? "업로드 중..." : "업로드"}
         </button>
       </main>
     </div>
@@ -144,6 +177,12 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 15,
     color: "#2A2A2A",
     fontWeight: 500,
+  },
+  errorText: {
+    fontSize: 13,
+    color: "#D94F4F",
+    marginBottom: 16,
+    marginTop: -12,
   },
   uploadButton: {
     width: "100%",

@@ -32,15 +32,33 @@ img, video {
 
 button {
   font-family: inherit;
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus,
+button:focus-visible,
+button:active,
+button:focus-within {
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 input, textarea {
   font-family: inherit;
 }
 
-/* 반응형 기준점 */
 @media (max-width: 768px) {
   :root {
     font-size: 15px;
   }
+}
+
+/* Grammarly 및 브라우저 기본 포커스링 완전 제거 */
+*:focus,
+*:focus-visible,
+*:focus-within {
+  outline: 0 !important;
+  outline-width: 0 !important;
+  box-shadow: none !important;
 }

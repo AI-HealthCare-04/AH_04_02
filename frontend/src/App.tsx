@@ -8,6 +8,8 @@ import Upload from "./pages/Upload";
 import Processing from "./pages/Processing";
 import Result from "./pages/Result";
 import Chat from "./pages/Chat";
+import Dashboard from "./pages/Dashboard";
+import InviteAccept from "./pages/InviteAccept";
 
 function App() {
   return (
@@ -22,6 +24,8 @@ function App() {
         <Route path="/processing" element={<Processing />} />
         <Route path="/result" element={<Result />} />
         <Route path="/chat" element={<Chat />} />
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/invite/:token" element={<InviteAccept />} />
       </Routes>
     </BrowserRouter>
   );
