@@ -222,6 +222,9 @@ def _class_from_efcy(efcy: str) -> str:
 
 
 def _lookup_emedinfo(drug_name: str) -> Optional[dict]:
+    # 2자 이하 단편 이름은 오매칭 가능성 높음 → e약은요 DB 조회 생략
+    if len(drug_name) < 3:
+        return None
     table = _load_drug_table()
     if not table:
         return None

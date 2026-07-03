@@ -67,10 +67,12 @@ DRUG_CLASS_DICTIONARY: dict = {
 # 3. 정규식 상수
 # ─────────────────────────────────────────────────────────────
 
-# 약품명: 한글·영문 3자 이상 + 제형(정|캡슐|…) + 선택적 용량 + 선택적 제조사
-# 3자 이상 조건으로 '개인정보' 같은 일반 단어의 오인식 방지
+# 약품명: 한글·영문 3자 이상 + 선택적 숫자(오메가3 등) + 선택적 연질 수식어 + 제형
+# {3,} 조건으로 '개인정보'→'개인정' 오인식 방지 (2자 이하 불가)
+# (?:\d+)? : 브랜드에 숫자 포함된 경우 허용 (오메가3연질캡슐)
+# (?:연질)?: '연질캡슐' 복합 제형 허용
 DRUG_NAME_RE = re.compile(
-    r"([가-힣A-Za-z]{3,}(?:정|캡슐|주|산|시럽|액))"
+    r"([가-힣A-Za-z]{3,}(?:\d+)?(?:연질)?(?:정|캡슐|주|산|시럽|액))"
     r"(\d+(?:\.\d+)?(?:mg|g|ml))?"
     r"(?:\([^)]+\))?",
     re.IGNORECASE,
@@ -83,7 +85,9 @@ KOR_FREQ_RE     = re.compile(r"(?:1일|하루)\s*(\d+)\s*(?:회|번)")
 ABBREV_FREQ_RE  = re.compile(r"\b(qd|od|bid|tid|qid|prn|hs|ac|pc)\b", re.IGNORECASE)
 DAYS_KOR_RE     = re.compile(r"(\d+)\s*일\s*분")
 DAYS_ABBREV_RE  = re.compile(r"#\s*(\d+)")
-DIAGNOSIS_KOR_RE  = re.compile(r"진단명\s*[:：]\s*(.+)")
+# '진단명:' 과 '진단:' 모두 허용 (대학병원 다과 협진 포맷 지원)
+# non-greedy: 다음 목록 번호("1. "/"2) "), '[', 줄바꿈, 또는 문자열 끝에서 중단
+DIAGNOSIS_KOR_RE  = re.compile(r"진단(?:명)?\s*[:：]\s*([^\[\n]+?)(?=\s+\d+[.)]\s+|[\[\n]|\Z)")
 DIAGNOSIS_EN_RE   = re.compile(r"Dx\s*[:：]\s*(.+?)(?=\s+Rx\b|\Z)", re.IGNORECASE)
 # 공식 처방전: "질병분류기호:M17 (무릎관절증)" → "무릎관절증"
 DIAGNOSIS_CODE_RE = re.compile(r"질병분류기호\s*[:：]\s*\S+\s*[（(]([^)）]+)[)）]")
@@ -119,9 +123,14 @@ def extract_days(text: str) -> str:
 
 
 def extract_diagnosis(text: str) -> str:
-    m = DIAGNOSIS_KOR_RE.search(text)
-    if m:
-        return m.group(1).strip()
+    # 다과 협진 처방전(대학병원)은 '진단:' 이 여러 번 등장할 수 있음 → findall
+    matches = DIAGNOSIS_KOR_RE.findall(text)
+    if matches:
+        parts = [m.strip().rstrip(",/ ") for m in matches if m.strip()]
+        # 중복 제거(순서 유지)
+        seen: set = set()
+        deduped = [p for p in parts if not (p in seen or seen.add(p))]  # type: ignore[func-returns-value]
+        return ", ".join(deduped)
     m = DIAGNOSIS_EN_RE.search(text)
     if m:
         return m.group(1).strip()
@@ -149,7 +158,7 @@ def _detect_format(text: str) -> str:
         return "official"
     if re.search(r"\b(?:bid|qd|tid|qid)\b", text, re.IGNORECASE):
         return "abbrev"
-    if re.search(r"\d+[.)]\s+[가-힣A-Za-z]+(?:정|캡슐)", text):
+    if re.search(r"\d+[.)]\s+[가-힣A-Za-z]+(?:\d+)?(?:연질)?(?:정|캡슐|시럽|액|주|산)", text):
         return "list"
     return "table"
 
@@ -158,14 +167,18 @@ def _detect_format(text: str) -> str:
 # ─────────────────────────────────────────────────────────────
 
 def _drug_name_only(form_str: str) -> str:
-    """'암로디핀정' → '암로디핀'."""
-    m = re.match(r"([가-힣A-Za-z]+)(?:정|캡슐|주|산|시럽|액)$", form_str)
-    return m.group(1) if m else form_str
+    """'암로디핀정' → '암로디핀', '오메가3연질캡슐' → '오메가3'."""
+    result = re.sub(r"(?:연질)?(?:정|캡슐|주|산|시럽|액)$", "", form_str)
+    return result if result else form_str
 
 
 def _split_by_number(text: str) -> list:
-    """'1) ...\n2) ...' 또는 '1. ... 2. ...' 형식을 번호 기준으로 분리."""
-    return [s.strip() for s in re.split(r"\d+\s*[).]", text) if s.strip()]
+    """'1) ...\n2) ...' 또는 '1. ... 2. ...' 형식을 번호 기준으로 분리.
+    ICD 코드(F41.1, E11.9)나 소수점(5.2)은 분리하지 않음.
+    - (?<![A-Za-z가-힣]) : 알파벳·한글 직후 숫자는 ICD 코드 → 제외
+    - (?!\\d)           : 숫자 직후 또 숫자면 소수점 → 제외
+    """
+    return [s.strip() for s in re.split(r"(?<![A-Za-z가-힣])\d+\s*[).](?!\d)", text) if s.strip()]
 
 
 def _parse_official_format(text: str) -> list:
@@ -186,10 +199,11 @@ def _parse_official_format(text: str) -> list:
         dosage = dm.group(2) or extract_dosage(seg)
 
         # DRUG_NAME_RE 매치 이후 텍스트에서 숫자 컬럼 추출
-        # .(소수점) / (분수) 앞뒤 숫자, 단위 붙은 숫자, 일/분/회/번 붙은 숫자는 모두 제외
+        # .(소수점) / (분수) 앞뒤 숫자, mg/g/ml 단위 붙은 숫자는 제외
+        # 회·일 접미사 붙은 숫자는 포함 — "1정 2회 30일" 형태 대응
         post = seg[dm.end():]
         col_nums = re.findall(
-            r"(?<![./\d])(\d+)(?![./\d]|mg|g|ml|일|분|회|번)", post
+            r"(?<![./\d])(\d+)(?![./\d]|mg|g|ml)", post
         )
 
         # 용법 자유서술형 우선("1일 N회 ..."), 없으면 col_nums[1](1일 투여횟수) 사용
