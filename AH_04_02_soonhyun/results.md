@@ -146,33 +146,42 @@
 
 ---
 
-## 3-1. drug_class 정확도 — 구 사전 vs drug_reference.py
+## 3-1. drug_class 정확도 — 단계별 개선 이력
 
-> 측정: 기존 9개 샘플 + 신규 14개 약품(하드코딩 사전 미수록) = 총 23개  
-> `drug_reference.py` 구현: ATC 코드 기반 약명 패턴(1순위) → e약은요 DB 매칭(2순위) → 하드코딩 폴백(3순위)
+> 테스트셋: 기존 9개 + 신규 14개 = 23개 약품 (2026-07-04 기준)
 
-| 구분 | 구 사전 (`parsing_rules.py`) | `drug_reference.py` | 비고 |
-|------|:---:|:---:|------|
-| 기존 9개 샘플 | 9/9 (100%) | 9/9 (100%) | 두 방식 모두 커버 |
-| **신규 14개 약품** | **0/14 (0%)** | **14/14 (100%)** | 구 사전 전량 빈값 |
-| **통합 23개** | **9/23 (39%)** | **23/23 (100%)** | **+61%p** |
+| 단계 | 구현 | 정확도 | 비고 |
+|------|------|:------:|------|
+| 초기 | `parsing_rules.py` 하드코딩 사전 | 9/23 (39%) | 브랜드명·전문의약품 전량 빈값 |
+| Day1-v1 | ATC 패턴 정규식(1) + e약은요 DB(2) + 폴백(3) | 23/23 (100%) | 성분명 패턴 기반, 브랜드명 한계 |
+| **Day1-v2** | **HIRA 약가마스터(1) + e약은요(2) + ATC 패턴(3) + 폴백(4)** | **23/23 (100%)** | **브랜드명 직접 매칭, ATC 코드 실거래 데이터** |
 
-**신규 인식된 약품 (14개, 모두 ❌→✅):**
+### Day1-v2 HIRA 연동 결과 (2026-07-04)
 
-| 질환군 | 신규 인식 약품 | 분류 결과 |
-|--------|--------------|-----------|
-| 고혈압 (ATC C07-C09) | 노바스크, 발사르탄, 에날라프릴, 메토프롤롤 | 칼슘채널차단제 / ARB / ACE억제제 / 베타차단제 |
-| 당뇨병 (ATC A10) | 글루코파지, 아마릴, 자누비아 | 비구아니드 / 설포닐우레아 / DPP-4억제제 |
-| 고지혈증 (ATC C10) | 리피토, 아토르바스타틴, 크레스토 | HMG-CoA환원효소억제제(스타틴) |
-| 기타 | 프라닥사, 라베프라졸, 넥시움, 가스모틴 | 항응고제 / PPI×2 / 위장운동촉진제 |
+> 데이터: 건강보험심사평가원 약가마스터 20251031 (30.5만 건, ATC 코드 23.4만 건)  
+> 매칭 방식: 한글상품명 startswith + 제형접두(정/캡/주/산) 단일제 우선 → ATC 코드 → drug_class
 
-> **Note**: e약은요 DB(4,809건)는 OTC 중심이라 고혈압·당뇨·고지혈증 전문의약품이 미수록.  
-> 위 신규 인식은 모두 ATC 코드 기반 약명 패턴 정규식(소스: `atc`)이 담당.  
-> e약은요 DB는 OTC 약품(파모티딘 등) 매칭 및 efcyQesitm 제공에 활용.
+| 약품명 | 소스 | ATC 코드 | drug_class | 이전 상태 |
+|--------|------|----------|------------|-----------|
+| 케이캡 | hira_name | A02BC09 | 양성자펌프억제제(PPI) | ❌ 빈값 |
+| 엑세그란 | hira_name | N03AX15 | 항경련제 | ❌ 빈값 |
+| 가스모틴 | hira_name | A03FA09 | 위장운동촉진제 | ✅ (ATC 패턴) |
+| 마도파 | hira_name | N04BA02 | 파킨슨치료제(레보도파계) | ❌ 빈값 |
+| 뉴로메드 | hira_name | N06BX07 | 인지기능개선제 | ❌ 빈값 |
+| 프라닥사 | hira_name | B01AE07 | 항응고제(직접트롬빈억제제) | ✅ (ATC 패턴) |
+| 메바로친 | hira_name | C10AA03 | HMG-CoA환원효소억제제(스타틴) | ❌ 빈값 |
+| 자낙스 | hira_name | N05BA12 | 항불안제(벤조디아제핀계) | ❌ 빈값 |
+| 렉사프로 | hira_name | N06AB10 | SSRI(항우울제) | ❌ 빈값 |
+| 스틸녹스 | hira_name | N05CF02 | 수면유도제(비벤조디아제핀계) | ❌ 빈값 |
+| 리피토 | hira_name | C10AA05 | HMG-CoA환원효소억제제(스타틴) | ✅ (ATC 패턴) |
+| 엘리퀴스 | hira_name | B01AF02 | 항응고제(직접Xa인자억제제) | ✅ (ATC 패턴) |
+
+> **수정 이슈 2건**: 케이캡→엘도스케이캡슐 오매칭(startswith 우선순위 도입으로 해결),  
+> 리피토→리피토플러스 오매칭(제형접두 단일제 필터로 해결)
 
 ---
 
-## 4. 현재 파이프라인
+## 4. 현재 파이프라인 (Day1-v2)
 
 ```
 이미지 파일
@@ -185,10 +194,12 @@ parsing_rules.parse_prescription()
   │              번호+약품명  → list
   │              기본         → table
   ├─ 약품명·용량·횟수·일수·진단명 정규식 추출
-  └─ drug_reference.get_drug_class() 약효 분류
-       ├─ 1. ATC 코드 기반 패턴 (고혈압 C02-C09, 당뇨 A10, 고지혈 C10)
-       ├─ 2. e약은요 DB 부분/유사도 매칭 + efcyQesitm 키워드 분류
-       └─ 3. 하드코딩 폴백 (9종)
+  └─ drug_reference.get_drug_class(drug_name, drug_code) 약효 분류
+       ├─ 1. HIRA 약가마스터 — 품목기준코드 exact 매칭 → ATC코드 (30.5만 건)
+       ├─ 2. HIRA 약가마스터 — 한글상품명 startswith + 제형접두 단일제 매칭 → ATC코드
+       ├─ 3. e약은요 DB — 일반의약품(OTC) 부분/유사도 매칭 + efcyQesitm 분류 (4,809건)
+       ├─ 4. ATC 패턴 정규식 (성분명 기반 하드코딩, 30종)
+       └─ 5. 하드코딩 폴백 사전 (17종)
    ↓
 OCRResult { raw_text, medications[], overall_confidence,
             review_required, source }
@@ -238,14 +249,14 @@ OCRResult { raw_text, medications[], overall_confidence,
 - **confidence**: 0.9505 / **포맷**: list / **review_required**: false
 - **medications** (3개):
 
-| 약품명 | dosage | frequency | diagnosis | drug_class | 비고 |
+| 약품명 | dosage | frequency | diagnosis | drug_class | 소스 |
 |--------|--------|-----------|-----------|------------|------|
-| 자낙스 | 0.25mg | 1일 2회 | F41.1 범불안장애 | _(빈값)_ | ✅ ICD 코드 오분할 수정 |
-| 렉사프로 | 10mg | 1일 1회 | F41.1 범불안장애 | _(빈값)_ | 브랜드명 미등록 |
-| 스틸녹스 | 10mg | 1일 1회 | F41.1 범불안장애 | _(빈값)_ | 브랜드명 미등록 |
+| 자낙스 | 0.25mg | 1일 2회 | F41.1 범불안장애 | 항불안제(벤조디아제핀계) | hira_name (N05BA12) |
+| 렉사프로 | 10mg | 1일 1회 | F41.1 범불안장애 | SSRI(항우울제) | hira_name (N06AB10) |
+| 스틸녹스 | 10mg | 1일 1회 | F41.1 범불안장애 | 수면유도제(비벤조디아제핀계) | hira_name (N05CF02) |
 
 - **수정 내역**: `_split_by_number` — `(?<![A-Za-z가-힣])\d+\s*[).](?!\d)` 로 F41.1 오분할 방지 → 자낙스 dosage·frequency 정상 복원
-- **잔존 이슈**: 정신건강의학과 브랜드명(자낙스/알프라졸람, 렉사프로/에스시탈로프람, 스틸녹스/졸피뎀)이 ATC 패턴 미등록 → drug_class 전량 빈값. Day2 대응: N05-N06 계열 ATC 패턴 추가 필요.
+- **HIRA 연동 후**: 브랜드명 3종 모두 HIRA 한글상품명 매칭으로 drug_class 자동 분류 ✅ (이전 전량 빈값)
 
 ---
 
@@ -286,8 +297,10 @@ OCRResult { raw_text, medications[], overall_confidence,
 |----------|------|-----------|
 | 높음 | 약봉투 테이블형 — bounding box 기반 행 그룹핑 구현 | mock_pharmacy_bag_format.png |
 | 높음 | 한방 첩약 파서 구현 (형태소 없는 자연어 처방) | mock_oriental_medicine.png |
-| 중간 | ATC 패턴 단어 경계(`\b`) 추가 — 2자 단편명 오분류 방지 | mock_dental_bag.png |
-| 중간 | 정신건강의학과 브랜드명 → ATC N05-N06 패턴 등록 | mock_psychiatry.png |
-| 중간 | 복합제 브랜드명 등록 (자누메트, 아토젯 등) | mock_university_hospital.png |
+| 중간 | 영문 약품명 지원 — `DRUG_NAME_RE`에 `[A-Za-z]{3,}` 추가 | mock_english_mixed.png |
+| 중간 | 피부과 제형 추가 — `크림\|로션\|연고\|겔\|패취` | mock_dermatology.png |
+| 중간 | 점안액 용량 패턴 — `\d+(?:\.\d+)?%` 추가 | mock_ophthalmology.png |
+| 중간 | ATC 패턴 단어 경계(`\b`) — 2자 단편명 오분류 방지 | mock_dental_bag.png |
 | 중간 | 비표준 frequency 표기("7 회") KOR_FREQ_RE 보강 | prescription_01.jpg |
+| 낮음 | ~~정신건강의학과 브랜드명 미등록~~ → HIRA 연동으로 해결 | — |
 | 낮음 | ~~DRUG_CLASS_DICTIONARY 확장~~ → drug_reference.py로 대체 완료 | — |
