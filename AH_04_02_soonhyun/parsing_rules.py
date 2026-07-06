@@ -82,12 +82,18 @@ DOSAGE_RE       = re.compile(r"(\d+(?:\.\d+)?)\s*(mg|g|ml)", re.IGNORECASE)
 # TODO: 실제 처방전(prescription_01.jpg)에서 "7 회", "1 회" 처럼 숫자와 '회' 사이에
 #       공백이 들어간 비표준 표기가 확인됨. Day2 이후 실샘플 10장 기반으로 패턴 보강 필요.
 KOR_FREQ_RE     = re.compile(r"(?:1일|하루)\s*(\d+)\s*(?:회|번)")
+# "3회", "2회" 처럼 '1일' 접두사 없이 단독으로 오는 패턴.
+# 뒤에 한글(투약량·복용 등) 또는 ')' 가 바로 오면 제외 → "1회 투약량", "용량(1회)" 오탐 방지
+BARE_FREQ_RE    = re.compile(r"(?<!\d)(\d+)\s*회(?!\s*[가-힣\)])")
 ABBREV_FREQ_RE  = re.compile(r"\b(qd|od|bid|tid|qid|prn|hs|ac|pc)\b", re.IGNORECASE)
 DAYS_KOR_RE     = re.compile(r"(\d+)\s*일\s*분")
 DAYS_ABBREV_RE  = re.compile(r"#\s*(\d+)")
 # '진단명:' 과 '진단:' 모두 허용 (대학병원 다과 협진 포맷 지원)
-# non-greedy: 다음 목록 번호("1. "/"2) "), '[', 줄바꿈, 또는 문자열 끝에서 중단
-DIAGNOSIS_KOR_RE  = re.compile(r"진단(?:명)?\s*[:：]\s*([^\[\n]+?)(?=\s+\d+[.)]\s+|[\[\n]|\Z)")
+# non-greedy: 다음 목록 번호("1. "/"2) "), '[', 줄바꿈, '■', 또는 문자열 끝에서 중단
+# ■ 추가: "진단명: ... ■ 처방 의약품" 형태에서 테이블 헤더가 진단명으로 흡수되는 버그 수정
+DIAGNOSIS_KOR_RE  = re.compile(r"진단(?:명)?\s*[:：]\s*([^\[\n■]+?)(?=\s+\d+[.)]\s+|[\[\n■]|\Z)")
+# 공식 처방전 [급여/비급여][코드] 패턴에서 코드 추출
+DRUG_CODE_RE      = re.compile(r"\[(?:급여|비급여)\]\[(\w+)\]")
 DIAGNOSIS_EN_RE   = re.compile(r"Dx\s*[:：]\s*(.+?)(?=\s+Rx\b|\Z)", re.IGNORECASE)
 # 공식 처방전: "질병분류기호:M17 (무릎관절증)" → "무릎관절증"
 DIAGNOSIS_CODE_RE = re.compile(r"질병분류기호\s*[:：]\s*\S+\s*[（(]([^)）]+)[)）]")
@@ -102,14 +108,22 @@ def extract_dosage(text: str) -> str:
 
 
 def extract_frequency(text: str) -> str:
-    """한국어 횟수 우선, 없으면 약어 변환."""
+    """한국어 횟수 우선, 없으면 약어, 없으면 단독 N회 패턴."""
     m = KOR_FREQ_RE.search(text)
     if m:
         return f"1일 {m.group(1)}회"
     m = ABBREV_FREQ_RE.search(text)
     if m:
         return FREQ_ABBREV_MAP.get(m.group(1).lower(), m.group(1))
+    m = BARE_FREQ_RE.search(text)
+    if m:
+        return f"1일 {m.group(1)}회"
     return ""
+
+
+def extract_drug_code_list(text: str) -> list:
+    """공식 처방전의 [급여/비급여][코드] 패턴을 순서대로 추출해 리스트로 반환."""
+    return DRUG_CODE_RE.findall(text)
 
 
 def extract_days(text: str) -> str:
@@ -154,7 +168,7 @@ def lookup_drug_class(drug_name: str) -> str:
 
 def _detect_format(text: str) -> str:
     """'official' | 'abbrev' | 'list' | 'table' 반환."""
-    if re.search(r"\[(?:급여|비급여)\]\[\d+\]", text):
+    if re.search(r"\[(?:급여|비급여)\]\[\w+\]", text):
         return "official"
     if re.search(r"\b(?:bid|qd|tid|qid)\b", text, re.IGNORECASE):
         return "abbrev"
@@ -194,10 +208,11 @@ def _parse_official_format(text: str) -> list:
     세그먼트 내에서 찾지 못하면 약품 순서(0-based index)로 배정한다.
     """
     # [급여/비급여][코드] 경계로 분리 → 각 항목이 약품 1줄
-    segments = re.split(r"\[(?:급여|비급여)\]\[\d+\]", text)
+    segments = re.split(r"\[(?:급여|비급여)\]\[\w+\]", text)
 
-    # 전체 텍스트에서 "1일 N회" 목록을 순서대로 추출 (컬럼 그룹 출력 대응)
+    # 전체 텍스트에서 횟수·코드 목록을 순서대로 추출 (컬럼 그룹 출력 대응)
     all_freqs = [f"1일 {n}회" for n in KOR_FREQ_RE.findall(text)]
+    all_codes = extract_drug_code_list(text)
 
     results = []
     drug_idx = 0
@@ -210,15 +225,18 @@ def _parse_official_format(text: str) -> list:
         dosage = dm.group(2) or extract_dosage(seg)
 
         # DRUG_NAME_RE 매치 이후 텍스트에서 숫자 컬럼 추출
-        # .(소수점) / (분수) 앞뒤 숫자, mg/g/ml 단위 붙은 숫자는 제외
-        post = seg[dm.end():]
+        # ■ 이후(복약 안내 등)는 다른 약품 정보가 섞이므로 제거
+        post_raw = seg[dm.end():]
+        post = post_raw.split("■")[0]
+        # .(소수점) / (분수) 앞뒤 숫자, mg/g/ml/분/시/초 단위 붙은 숫자 제외
         col_nums = re.findall(
-            r"(?<![./\d])(\d+)(?![./\d]|mg|g|ml)", post
+            r"(?<![./\d])(\d+)(?![./\d]|mg|g|ml|분|시|초)", post
         )
 
-        # 우선순위: ① 세그먼트 내 "1일 N회" → ② 전체 목록 약품 순서 배정
-        #           → ③ col_nums[1] 폴백
-        freq = extract_frequency(seg)
+        # 우선순위: ① 세그먼트 전체(■ 이전)에서 횟수 검색 (약품명 앞에 오는 "1회 3일"도 포함)
+        #           → ② 전체 목록 약품 순서 배정 → ③ col_nums[1] 폴백
+        seg_clean = seg.split("■")[0]
+        freq = extract_frequency(seg_clean)
         if not freq:
             if drug_idx < len(all_freqs):
                 freq = all_freqs[drug_idx]
@@ -226,9 +244,11 @@ def _parse_official_format(text: str) -> list:
                 freq = f"1일 {col_nums[1]}회"
 
         days = f"{col_nums[2]}일" if len(col_nums) >= 3 else ""
+        drug_code = all_codes[drug_idx] if drug_idx < len(all_codes) else ""
 
         results.append({
             "drug_name":  drug_name,
+            "drug_code":  drug_code,
             "dosage":     dosage,
             "frequency":  freq,
             "days":       days,
@@ -251,6 +271,7 @@ def _parse_abbrev_format(text: str) -> list:
         drug_name = _drug_name_only(dm.group(1))
         results.append({
             "drug_name":  drug_name,
+            "drug_code":  "",
             "dosage":     dm.group(2) or extract_dosage(item),
             "frequency":  extract_frequency(item),
             "days":       extract_days(item),
@@ -269,6 +290,7 @@ def _parse_list_format(text: str) -> list:
         drug_name = _drug_name_only(dm.group(1))
         results.append({
             "drug_name":  drug_name,
+            "drug_code":  "",
             "dosage":     dm.group(2) or extract_dosage(item),
             "frequency":  extract_frequency(item),
             "days":       extract_days(item),
@@ -306,6 +328,7 @@ def _parse_table_format(text: str) -> list:
         drug_name = _drug_name_only(dm.group(1))
         results.append({
             "drug_name":  drug_name,
+            "drug_code":  "",
             "dosage":     dm.group(2) or "",
             "frequency":  frequencies[i] if i < len(frequencies) else "",
             "days":       f"{day_nums[i]}일" if i < len(day_nums) else "",
