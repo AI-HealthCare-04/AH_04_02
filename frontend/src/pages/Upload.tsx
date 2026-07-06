@@ -1,12 +1,10 @@
 import { useState, type DragEvent, type ChangeEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { uploadMedicalRecord } from "../api/medicalRecords";
 
 export default function Upload() {
   const navigate = useNavigate();
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
 
   const handleDrop = (e: DragEvent<HTMLDivElement>) => {
@@ -27,30 +25,18 @@ export default function Upload() {
     }
   };
 
-  const handleUpload = async () => {
-    if (!file || uploading) return;
+  const handleUpload = () => {
+    if (!file) return;
 
-    // 413 방지용 클라이언트 사전 체크 (API명세서: 10MB 초과 거부)
     if (file.size > 10 * 1024 * 1024) {
       setError("파일 용량이 너무 커요. 10MB 이하 이미지로 올려주세요.");
       return;
     }
 
-    setUploading(true);
-    setError("");
-
-    try {
-      // TODO: 로그인 연동 완료 전까지는 localStorage user_id 임시 사용 (기본값 1)
-      const uploadedFor = Number(localStorage.getItem("user_id") ?? 1);
-      const { record_id } = await uploadMedicalRecord(file, uploadedFor);
-      navigate("/processing", { state: { recordId: record_id } });
-    } catch (err: unknown) {
-      const message =
-        (err as { response?: { data?: { message?: string } } })?.response?.data
-          ?.message ?? "업로드 중 문제가 발생했어요. 잠시 후 다시 시도해 주세요.";
-      setError(message);
-      setUploading(false);
-    }
+    // 실제 업로드 요청은 Processing.tsx에서 보냄 (동기 방식이라 몇 초 걸릴 수 있어서
+    // 애니메이션이 있는 화면으로 넘어간 다음 거기서 기다리는 구조)
+    const patientId = Number(localStorage.getItem("patient_id") ?? 1);
+    navigate("/processing", { state: { file, patientId } });
   };
 
   return (
@@ -102,12 +88,12 @@ export default function Upload() {
         <button
           style={{
             ...styles.uploadButton,
-            ...(file && !uploading ? {} : styles.uploadButtonDisabled),
+            ...(file ? {} : styles.uploadButtonDisabled),
           }}
-          disabled={!file || uploading}
+          disabled={!file}
           onClick={handleUpload}
         >
-          {uploading ? "업로드 중..." : "업로드"}
+          업로드
         </button>
       </main>
     </div>

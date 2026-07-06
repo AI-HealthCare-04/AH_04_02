@@ -1,30 +1,49 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import NavBar from "../components/NavBar";
+import {
+  getTodayMedications,
+  checkIntake,
+  clearIntake,
+  type Medication,
+  type IntakeStatus,
+} from "../api/monitoring";
 
-type IntakeStatus = "taken" | "pending" | "skipped";
-
-interface Medication {
-  id: string;
-  name: string;
-  time: string;
-  note: string;
-  status: IntakeStatus;
+// 로그인이 아직 없어서 patient_id를 localStorage에서 관리
+// (환자가 여러 명이 되면 "환자 선택" 화면에서 이 값을 설정하도록 확장)
+function getCurrentPatientId(): number {
+  return Number(localStorage.getItem("patient_id") ?? 1);
 }
-
-const initialMeds: Medication[] = [
-  { id: "1", name: "암로디핀 5mg", time: "오전 8:00", note: "혈압약", status: "pending" },
-  { id: "2", name: "메트포르민 500mg", time: "오전 8:00", note: "당뇨약 (식후)", status: "pending" },
-  { id: "3", name: "아스피린 100mg", time: "오후 12:00", note: "혈액순환 (식후)", status: "pending" },
-];
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [meds, setMeds] = useState(initialMeds);
+  const [meds, setMeds] = useState<Medication[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [showBanner, setShowBanner] = useState(true);
 
-  const updateStatus = (id: string, status: IntakeStatus) => {
-    setMeds((prev) => prev.map((m) => (m.id === id ? { ...m, status } : m)));
+  useEffect(() => {
+    const patientId = getCurrentPatientId();
+    getTodayMedications(patientId)
+      .then(setMeds)
+      .catch(() => setError("복약 목록을 불러오지 못했어요."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const updateStatus = async (id: string, status: IntakeStatus) => {
+    // 먼저 화면부터 낙관적으로 바꾸고, 실패하면 되돌림 (버튼 반응성 위해)
+    const prev = meds;
+    setMeds((cur) => cur.map((m) => (m.id === id ? { ...m, status } : m)));
+
+    try {
+      if (status === "pending") {
+        await clearIntake(id);
+      } else {
+        await checkIntake(id, status);
+      }
+    } catch {
+      setMeds(prev); // 실패 시 원래 상태로 롤백
+    }
   };
 
   const today = new Date();
@@ -56,13 +75,20 @@ export default function Dashboard() {
         )}
 
         <h2 style={styles.sectionTitle}>오늘의 복약</h2>
+
+        {loading && <p style={styles.stateText}>불러오는 중이에요...</p>}
+        {!loading && error && <p style={{ ...styles.stateText, color: "#D94F4F" }}>{error}</p>}
+        {!loading && !error && meds.length === 0 && (
+          <p style={styles.stateText}>등록된 복약 일정이 없어요.</p>
+        )}
+
         <div style={styles.medList}>
           {meds.map((med) => (
             <div key={med.id} style={styles.medCard}>
               <div style={styles.medHeader}>
                 <div>
                   <p style={styles.medName}>{med.name}</p>
-                  <p style={styles.medMeta}>{med.time} · {med.note}</p>
+                  <p style={styles.medMeta}>{med.time}{med.note ? ` · ${med.note}` : ""}</p>
                 </div>
                 <span style={{
                   ...styles.statusBadge,
@@ -153,6 +179,7 @@ const styles: Record<string, React.CSSProperties> = {
   bannerBtn: { padding: "10px 20px", background: "#C16A45", color: "#FFFFFF", border: "none", borderRadius: 24, fontWeight: 700, cursor: "pointer", fontSize: 13, outline: "none" },
   closeBtn: { width: 32, height: 32, borderRadius: "50%", border: "none", background: "#E5D5C4", cursor: "pointer", fontSize: 16, color: "#8A7A6A", outline: "none" },
   sectionTitle: { fontSize: 18, fontWeight: 800, color: "#2A2A2A", marginBottom: 16 },
+  stateText: { fontSize: 14, color: "#888888", marginBottom: 16 },
   medList: { display: "flex", flexDirection: "column" as const, gap: 16, marginBottom: 32 },
   medCard: { background: "#FFFFFF", borderRadius: 16, padding: "20px 24px", border: "1px solid #EEE6DC" },
   medHeader: { display: "flex", justifyContent: "space-between", marginBottom: 16 },

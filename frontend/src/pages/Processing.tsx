@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { getMedicalRecordStatus, retryMedicalRecord } from "../api/medicalRecords";
+import { createRecord } from "../api/records";
 
 const steps = [
   { id: 1, label: "OCR 인식 중", desc: "처방전에서 약품 정보를 읽고 있어요" },
@@ -8,75 +8,57 @@ const steps = [
   { id: 3, label: "맞춤 가이드 생성 중", desc: "복약 안내와 생활습관 가이드를 만들고 있어요" },
 ];
 
-const POLL_INTERVAL_MS = 2000;
-
 export default function Processing() {
   const navigate = useNavigate();
   const location = useLocation();
-  const recordId = (location.state as { recordId?: number } | null)?.recordId;
+  const { file, patientId } =
+    (location.state as { file?: File; patientId?: number }) ?? {};
 
   const [current, setCurrent] = useState(0);
   const [failed, setFailed] = useState(false);
   const [failureReason, setFailureReason] = useState("");
   const [retrying, setRetrying] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const visualRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    // recordId 없이 직접 이 화면으로 들어온 경우 업로드부터 다시
-    if (!recordId) {
+  const runUpload = async () => {
+    if (!file || !patientId) {
       navigate("/upload");
       return;
     }
 
-    // 시각적 진행 애니메이션 (실제 단계와 무관하게 기대감을 주는 용도)
+    setFailed(false);
+    setCurrent(0);
+
+    // 실제 단계와 무관한 시각 효과 — 응답 올 때까지 기대감만 주는 용도
     visualRef.current = setInterval(() => {
       setCurrent((prev) => (prev < steps.length - 1 ? prev + 1 : prev));
-    }, 1800);
+    }, 1200);
 
-    // 실제 상태 polling — 완료/실패 여부는 이 결과로만 판단
-    const poll = async () => {
-      try {
-        const data = await getMedicalRecordStatus(recordId);
+    try {
+      const result = await createRecord(patientId, file);
+      if (visualRef.current) clearInterval(visualRef.current);
+      setCurrent(steps.length - 1);
+      setTimeout(() => navigate("/result", { state: { result } }), 400);
+    } catch (err: unknown) {
+      if (visualRef.current) clearInterval(visualRef.current);
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data
+        ?.detail;
+      setFailed(true);
+      setFailureReason(detail ?? "처리 중 문제가 발생했어요. 잠시 후 다시 시도해 주세요.");
+    }
+  };
 
-        if (data.status === "completed" || data.status === "review_required") {
-          if (pollRef.current) clearInterval(pollRef.current);
-          if (visualRef.current) clearInterval(visualRef.current);
-          setCurrent(steps.length - 1);
-          setTimeout(() => navigate("/result", { state: { recordId } }), 600);
-        } else if (data.status === "failed") {
-          if (pollRef.current) clearInterval(pollRef.current);
-          if (visualRef.current) clearInterval(visualRef.current);
-          setFailed(true);
-          setFailureReason(data.failure_reason ?? "처리 중 문제가 발생했어요.");
-        }
-        // "processing"이면 계속 polling
-      } catch {
-        // 네트워크 일시 오류는 다음 polling에서 재시도 (여기서 바로 실패 처리하지 않음)
-      }
-    };
-
-    poll();
-    pollRef.current = setInterval(poll, POLL_INTERVAL_MS);
-
+  useEffect(() => {
+    runUpload();
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
       if (visualRef.current) clearInterval(visualRef.current);
     };
-  }, [recordId, navigate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const handleRetry = async () => {
-    if (!recordId || retrying) return;
+  const handleRetry = () => {
     setRetrying(true);
-    try {
-      await retryMedicalRecord(recordId);
-      setFailed(false);
-      setCurrent(0);
-      // useEffect가 다시 polling을 태우도록 페이지 자체를 재진입시킴
-      navigate("/processing", { state: { recordId }, replace: true });
-    } catch {
-      setRetrying(false);
-    }
+    runUpload().finally(() => setRetrying(false));
   };
 
   return (
@@ -91,11 +73,7 @@ export default function Processing() {
               <div style={styles.spinner}>⚠️</div>
               <h1 style={styles.title}>처리 중 문제가 발생했어요</h1>
               <p style={styles.subtitle}>{failureReason}</p>
-              <button
-                style={styles.retryBtn}
-                onClick={handleRetry}
-                disabled={retrying}
-              >
+              <button style={styles.retryBtn} onClick={handleRetry} disabled={retrying}>
                 {retrying ? "다시 시도 중..." : "다시 시도하기"}
               </button>
             </>

@@ -1,99 +1,125 @@
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  getCaregivers,
+  getCaregiverPatients,
+  type Caregiver,
+  type Patient,
+} from "../api/monitoring";
+
+/**
+ * [7/6] 원래 이메일/비밀번호 로그인이었는데, 실제 JWT 로그인(auth_router.py)은
+ * schedule_v6에서 스코프 밖으로 보류돼서 main.py에 아직 안 붙어있음.
+ *
+ * 대신 이미 동작하는 보호자/환자 조회 API로 "본인 선택" 방식으로 대체함.
+ * 나중에 실제 로그인이 켜지면 이 화면을 이메일/비밀번호 폼으로 다시 바꾸고,
+ * 로그인 성공 후 caregiver.id로 아래와 동일하게 환자 목록을 불러오면 됨.
+ */
+const relationLabel: Record<string, string> = {
+  guardian: "보호자",
+  caregiver: "요양보호사",
+  life_support_worker: "생활지원사",
+  social_worker: "사회복지사",
+};
 
 export default function Login() {
   const navigate = useNavigate();
-  const [form, setForm] = useState({ email: "", password: "" });
+  const [caregivers, setCaregivers] = useState<Caregiver[]>([]);
+  const [selectedCaregiver, setSelectedCaregiver] = useState<Caregiver | null>(null);
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
-    setError("");
+  useEffect(() => {
+    getCaregivers()
+      .then(setCaregivers)
+      .catch(() => setError("목록을 불러오지 못했어요. 백엔드 서버가 켜져 있는지 확인해 주세요."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const proceedWithPatient = (caregiver: Caregiver, patient: Patient) => {
+    localStorage.setItem("caregiver_id", String(caregiver.id));
+    localStorage.setItem("patient_id", String(patient.id));
+    navigate("/dashboard");
   };
 
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    if (!form.email || !form.password) {
-      setError("이메일과 비밀번호를 모두 입력해 주세요.");
-      return;
+  const handleSelectCaregiver = async (caregiver: Caregiver) => {
+    setError("");
+    setLoading(true);
+    setSelectedCaregiver(caregiver);
+    try {
+      const list = await getCaregiverPatients(caregiver.id);
+      if (list.length === 0) {
+        setError("이 보호자가 케어하는 환자가 아직 없어요.");
+      } else if (list.length === 1) {
+        proceedWithPatient(caregiver, list[0]);
+        return;
+      } else {
+        setPatients(list);
+      }
+    } catch {
+      setError("환자 목록을 불러오지 못했어요.");
+    } finally {
+      setLoading(false);
     }
-    // TODO: POST /api/v1/auth/login 연동
-    navigate("/check");
+  };
+
+  const handleBack = () => {
+    setSelectedCaregiver(null);
+    setPatients([]);
+    setError("");
   };
 
   return (
     <div style={styles.page}>
-      {/* 네비게이션 */}
       <nav style={styles.nav}>
         <span style={styles.logo}>💊 건강동행</span>
       </nav>
 
       <main style={styles.main}>
-        {/* 헤더 */}
         <div style={styles.header}>
           <h1 style={styles.title}>안녕하세요</h1>
-          <p style={styles.subtitle}>건강동행에 로그인해 주세요</p>
+          <p style={styles.subtitle}>
+            {patients.length > 0 ? "케어하실 환자를 선택해 주세요" : "본인을 선택해 주세요"}
+          </p>
         </div>
 
-        {/* 로그인 카드 */}
         <div style={styles.card}>
-          <form onSubmit={handleSubmit}>
-            <div style={styles.field}>
-              <label style={styles.label} htmlFor="email">
-                이메일 또는 전화번호
-              </label>
-              <input
-                id="email"
-                name="email"
-                type="text"
-                placeholder="예: hong@email.com"
-                value={form.email}
-                onChange={handleChange}
-                style={styles.input}
-                autoComplete="username"
-              />
+          {loading && <p style={styles.stateText}>불러오는 중이에요...</p>}
+          {!loading && error && <p style={{ ...styles.stateText, color: "#D94F4F" }}>{error}</p>}
+
+          {!loading && patients.length === 0 && !error && (
+            <div style={styles.optionList}>
+              {caregivers.map((c) => (
+                <button key={c.id} style={styles.optionBtn} onClick={() => handleSelectCaregiver(c)}>
+                  <span style={styles.optionName}>{c.name}</span>
+                  <span style={styles.optionTag}>{relationLabel[c.relation_type] ?? c.relation_type}</span>
+                </button>
+              ))}
             </div>
+          )}
 
-            <div style={styles.field}>
-              <label style={styles.label} htmlFor="password">
-                비밀번호
-              </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                placeholder="비밀번호를 입력해 주세요"
-                value={form.password}
-                onChange={handleChange}
-                style={styles.input}
-                autoComplete="current-password"
-              />
+          {!loading && patients.length > 0 && selectedCaregiver && (
+            <div style={styles.optionList}>
+              {patients.map((p) => (
+                <button
+                  key={p.id}
+                  style={styles.optionBtn}
+                  onClick={() => proceedWithPatient(selectedCaregiver, p)}
+                >
+                  <span style={styles.optionName}>{p.name}</span>
+                  {p.note && <span style={styles.optionTag}>{p.note}</span>}
+                </button>
+              ))}
+              <button style={styles.backBtn} onClick={handleBack}>
+                ← 다른 보호자로
+              </button>
             </div>
-
-            {error && <p style={styles.error}>{error}</p>}
-
-            <button type="submit" style={styles.loginBtn}>
-              로그인
-            </button>
-          </form>
-
-          <div style={styles.divider}>
-            <span style={styles.dividerText}>또는</span>
-          </div>
-
-          <button
-            style={styles.registerBtn}
-            onClick={() => navigate("/check")}
-          >
-            처음 오셨나요? 회원가입
-          </button>
-
-          <button style={styles.resetBtn}>비밀번호를 잊으셨나요?</button>
+          )}
         </div>
 
-        {/* 신뢰 고지 */}
         <p style={styles.trust}>
-          🔒 회원님의 진료 정보는 안전하게 보호됩니다
+          🔒 비밀번호 로그인은 아직 준비 중이에요 — 임시로 이름을 선택하는 방식이에요
         </p>
       </main>
     </div>
@@ -113,12 +139,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
   },
-  logo: {
-    fontSize: 20,
-    fontWeight: 700,
-    color: "#C16A45",
-    letterSpacing: "-0.3px",
-  },
+  logo: { fontSize: 20, fontWeight: 700, color: "#C16A45", letterSpacing: "-0.3px" },
   main: {
     maxWidth: 480,
     margin: "0 auto",
@@ -127,111 +148,45 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     alignItems: "center",
   },
-  header: {
-    textAlign: "center",
-    marginBottom: 36,
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: 700,
-    color: "#2A2A2A",
-    marginBottom: 8,
-    letterSpacing: "-0.5px",
-  },
-  subtitle: {
-    fontSize: 16,
-    color: "#888888",
-  },
+  header: { textAlign: "center", marginBottom: 36 },
+  title: { fontSize: 32, fontWeight: 700, color: "#2A2A2A", marginBottom: 8, letterSpacing: "-0.5px" },
+  subtitle: { fontSize: 16, color: "#888888" },
   card: {
     width: "100%",
     background: "#FFFFFF",
     borderRadius: 16,
-    padding: "36px 32px",
+    padding: "28px 24px",
     boxShadow: "0 2px 16px rgba(0,0,0,0.06)",
     border: "1px solid #EEE6DC",
   },
-  field: {
-    marginBottom: 20,
-  },
-  label: {
-    display: "block",
-    fontSize: 14,
-    fontWeight: 600,
-    color: "#4A4A4A",
-    marginBottom: 8,
-  },
-  input: {
-    width: "100%",
-    padding: "14px 16px",
-    fontSize: 15,
-    border: "1.5px solid #D9C8B8",
-    borderRadius: 10,
-    background: "#FAFAFA",
-    color: "#2A2A2A",
-    outline: "none",
-    boxSizing: "border-box",
-    transition: "border-color 0.15s",
-  },
-  error: {
-    fontSize: 13,
-    color: "#D94F4F",
-    marginBottom: 12,
-    marginTop: -8,
-  },
-  loginBtn: {
-    width: "100%",
-    padding: "15px",
-    fontSize: 16,
-    fontWeight: 700,
-    color: "#FFFFFF",
-    background: "#C16A45",
-    border: "none",
-    borderRadius: 10,
-    cursor: "pointer",
-    marginTop: 4,
-    letterSpacing: "0.2px",
-  },
-  divider: {
+  stateText: { fontSize: 14, color: "#888888", textAlign: "center" as const, padding: "12px 0" },
+  optionList: { display: "flex", flexDirection: "column" as const, gap: 10 },
+  optionBtn: {
     display: "flex",
+    justifyContent: "space-between",
     alignItems: "center",
-    margin: "20px 0",
-    gap: 12,
-  },
-  dividerText: {
-    fontSize: 13,
-    color: "#BBBBBB",
-    background: "#FFFFFF",
-    padding: "0 8px",
-    flexShrink: 0,
     width: "100%",
-    textAlign: "center",
-  },
-  registerBtn: {
-    width: "100%",
-    padding: "14px",
+    padding: "16px 18px",
     fontSize: 15,
     fontWeight: 600,
-    color: "#C16A45",
-    background: "#FFF3EE",
-    border: "1.5px solid #C16A45",
+    color: "#2A2A2A",
+    background: "#FAFAFA",
+    border: "1.5px solid #EEE6DC",
     borderRadius: 10,
     cursor: "pointer",
-    marginBottom: 12,
+    textAlign: "left" as const,
   },
-  resetBtn: {
-    width: "100%",
+  optionName: { fontSize: 15, fontWeight: 700, color: "#2A2A2A" },
+  optionTag: { fontSize: 12, fontWeight: 600, color: "#C16A45", background: "#F5EDE4", borderRadius: 12, padding: "4px 10px" },
+  backBtn: {
+    marginTop: 4,
     padding: "10px",
-    fontSize: 14,
+    fontSize: 13,
     color: "#AAAAAA",
     background: "transparent",
     border: "none",
     cursor: "pointer",
-    textDecoration: "underline",
+    textAlign: "left" as const,
   },
-  trust: {
-    marginTop: 28,
-    fontSize: 13,
-    color: "#AAAAAA",
-    textAlign: "center",
-  },
+  trust: { marginTop: 28, fontSize: 13, color: "#AAAAAA", textAlign: "center" },
 };
