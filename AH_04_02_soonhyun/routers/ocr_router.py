@@ -1,62 +1,61 @@
-import os
-import sys
-import tempfile
-from pathlib import Path
+"""
+ocr_router.py — 담당: 권순현
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+지금은 "흐름 확인용 가짜 데이터"만 들어있습니다.
+Day3에 할 일: stub_ocr_upload() 안의 가짜 OcrResult 생성 부분을
+실제 CLOVA OCR 호출(ocr_interface.py) 결과로 바꿔 끼우면 됩니다.
+나머지(파일 받기, DB 저장하는 틀)는 이미 만들어져 있어서 그대로 쓰면 됩니다.
+"""
+from fastapi import APIRouter, Depends, UploadFile, File
+from sqlmodel import Session
 
-# routers/가 프로젝트 루트 하위에 있으므로, 직접 실행 시에도 루트 모듈을 찾을 수 있도록 보장
-_ROOT = Path(__file__).parent.parent
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
-
-from dotenv import load_dotenv
-
-load_dotenv(_ROOT / ".env")
-
-from ocr_interface import get_ocr_provider  # noqa: E402
+from database import get_session
+from models import MedicalRecord, OcrResult
 
 router = APIRouter(prefix="/ocr", tags=["OCR"])
 
-_ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
-_MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+@router.get("/ping")
+def ping():
+    """서버에 이 라우터가 잘 붙었는지 확인용. /docs에서 눌러보면 됨"""
+    return {"status": "ok", "owner": "권순현"}
 
 
-@router.post(
-    "",
-    summary="처방전 이미지 OCR",
-    description="이미지를 업로드하면 CLOVA OCR로 텍스트를 추출하고 복약 정보를 구조화해 반환합니다.",
-)
-async def run_ocr(file: UploadFile = File(..., description="처방전 이미지 (jpg/png/bmp/tiff)")):
-    # 1. 확장자 검증
-    _, ext = os.path.splitext(file.filename or "")
-    if ext.lower() not in _ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"지원하지 않는 파일 형식: '{ext}'. 허용: {sorted(_ALLOWED_EXTENSIONS)}",
-        )
+@router.post("/test")
+def stub_ocr_upload(
+    patient_id: int, file: UploadFile = File(...), session: Session = Depends(get_session)
+):
+    """
+    임시 stub 엔드포인트.
+    지금 하는 일: 파일을 받아서 → MedicalRecord 1행 생성 → 가짜 OcrResult 1행 생성
+    TODO(권순현): 아래 "가짜 데이터" 부분을 실제 CLOVA 호출 결과로 교체
 
-    # 2. 파일 크기 검증
-    content = await file.read()
-    if len(content) > _MAX_FILE_BYTES:
-        raise HTTPException(status_code=413, detail="파일 크기가 10 MB를 초과합니다.")
+    ⚠️ [7/6 변경] patient_id가 필수 파라미터로 추가됨 (환자 구분 도입).
+    테스트할 땐 데모 시드 환자 id=1을 쓰면 됩니다.
+    """
+    record = MedicalRecord(patient_id=patient_id, image_path=file.filename, status="completed")
+    session.add(record)
+    session.commit()
+    session.refresh(record)
 
-    # 3. 임시 파일로 저장 (ClovaOCRProvider.extract()는 파일 경로를 받음)
-    tmp_path: str | None = None
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=ext.lower()) as tmp:
-            tmp.write(content)
-            tmp_path = tmp.name
+    # ↓↓↓ 여기부터 가짜 데이터 — CLOVA 연동 완료되면 이 블록을 실제 결과로 교체 ↓↓↓
+    fake_result = OcrResult(
+        record_id=record.id,
+        drug_name="테스트약품 500mg",
+        drug_code="000000000",
+        dosage="1일 3회",
+        frequency="식후 30분",
+        diagnosis="테스트 진단명",
+        drug_class="테스트 분류",
+        confidence=0.99,
+        review_required=False,
+    )
+    session.add(fake_result)
+    session.commit()
+    # ↑↑↑ 여기까지 ↑↑↑
 
-        provider = get_ocr_provider("clova")
-        result = provider.extract(tmp_path)
-    except RuntimeError as exc:
-        # CLOVA 키 미설정 등 설정 오류
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"OCR 처리 중 오류 발생: {exc}") from exc
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-
-    return result.to_dict()
+    return {
+        "record_id": record.id,
+        "status": "completed",
+        "note": "⚠️ 가짜 데이터입니다 — 실제 CLOVA 연동 전까지만 사용",
+    }
