@@ -291,6 +291,21 @@ OCRResult { raw_text, medications[], overall_confidence,
 
 ---
 
+## 7. Day3-4 완료 (2026-07-06)
+
+- `ocr_router.py`에 실제 CLOVA OCR 연동 완료 (가짜 데이터 제거)
+- `monitoring_router.py` prefix 버그 수정 (`/monitoring` 누락 발견 및 수정)
+- `review_required` 로직 실제 검증 완료: confidence 0.80 미만 시 `review_required=true`, `status="review_required"`로 정상 전환 확인 (`mock_prescription_table_tilt_blur.jpg`로 테스트, confidence 0.6388)
+- PR #8 생성 및 dev 머지 완료
+- **알려진 한계**: CLOVA가 다중 행 표에서 텍스트 순서를 가끔 뒤섞어 줘서 frequency가 잘못 매칭될 수 있음 (bounding box 재구성 필요, Day2+ 이슈)
+
+## 8. 진행중 / 대기
+
+- **Day5 BackgroundTask**: 김영혜님 `rag_router.py` 실제 연동 대기 중
+- 박소정님이 `records_router.py`로 통합 라우터 작업 중 — 기존 `ocr_router` / `rag_router` / `monitoring_router`와의 관계 확인 필요
+
+---
+
 ## 6. 미해결 이슈 (Day2 이후)
 
 | 우선순위 | 이슈 | 근거 샘플 |
