@@ -13,6 +13,7 @@ class TestLoginAPI(TestCase):
             "password": "Password123!",
             "name": "로그인테스터",
             "gender": "FEMALE",
+            "role": "MEDICATION_SUBJECT",
             "birth_date": "1995-05-05",
             "phone_number": "01011112222",
         }

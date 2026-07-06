@@ -35,6 +35,7 @@ class AuthService:
                 name=data.name,
                 phone_number=normalized_phone_number,
                 gender=data.gender,
+                role=data.role,
                 birthday=data.birth_date,
             )
 

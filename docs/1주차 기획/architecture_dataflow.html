@@ -39,7 +39,7 @@
   <div class="step step-coral">
     <div class="step-title">STEP 2 — OCR · 정보추출 (① 권순현)</div>
     <div class="step-desc">
-      OCR Worker: Redis XREAD → S3에서 이미지 로드 → EasyOCR 로컬 추론<br>
+      OCR Worker: Redis XREAD → S3에서 이미지 로드 → CLOVA OCR API 호출<br>
       텍스트 파싱: 약품명 / 용량 / 복용법 / 복용횟수 / 진단명 추출<br>
       출력: REQ-002 JSON 스키마 변환 → DB(ExtractedMedication) 저장 → RAG XADD<br>
       실패 시: REQ-008 에러메시지 반환 → 재업로드 안내
