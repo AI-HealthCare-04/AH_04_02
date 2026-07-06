@@ -4,7 +4,7 @@ from typing import Annotated
 from pydantic import BaseModel, EmailStr, Field
 
 from app.dtos.base import BaseSerializerModel
-from app.models.users import Gender
+from app.models.users import Gender, UserRole
 from app.core.validators import optional_after_validator
 from app.core.validators import validate_birthday, validate_phone_number
 
@@ -38,4 +38,5 @@ class UserInfoResponse(BaseSerializerModel):
     phone_number: str
     birthday: date
     gender: Gender
+    role: UserRole
     created_at: datetime
