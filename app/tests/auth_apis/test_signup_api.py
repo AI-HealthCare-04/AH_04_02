@@ -12,6 +12,7 @@ class TestSignupAPI(TestCase):
             "password": "Password123!",
             "name": "테스터",
             "gender": "MALE",
+            "role": "MEDICATION_SUBJECT",
             "birth_date": "1990-01-01",
             "phone_number": "01012345678",
         }
@@ -27,6 +28,7 @@ class TestSignupAPI(TestCase):
             "password": "password123!",
             "name": "테스터",
             "gender": "MALE",
+            "role": "MEDICATION_SUBJECT",
             "birth_date": "1990-01-01",
             "phone_number": "01012345678",
         }

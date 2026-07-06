@@ -14,6 +14,7 @@ class TestUserMeApis(TestCase):
             "password": "Password123!",
             "name": "내정보테스터",
             "gender": "FEMALE",
+            "role": "MEDICATION_SUBJECT",
             "birth_date": "1992-02-02",
             "phone_number": "01055556666",
         }
@@ -38,6 +39,7 @@ class TestUserMeApis(TestCase):
             "password": "Password123!",
             "name": "수정전",
             "gender": "MALE",
+            "role": "MEDICATION_SUBJECT",
             "birth_date": "1990-10-10",
             "phone_number": "01077778888",
         }

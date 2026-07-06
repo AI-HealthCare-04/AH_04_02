@@ -4,7 +4,7 @@ from typing import Any
 from pydantic import EmailStr
 
 from app.core import config
-from app.models.users import Gender, User
+from app.models.users import Gender, User, UserRole
 
 ALLOWED_UPDATE_FIELDS = ["name", "phone_number", "gender", "birthday"]
 UPDATED_AT_FIELD = "updated_at"
@@ -27,6 +27,7 @@ class UserRepository:
         name: str,
         phone_number: str,
         gender: Gender,
+        role: UserRole,
         birthday: date,
         *,
         is_active: bool = True,
@@ -38,6 +39,7 @@ class UserRepository:
             name=name,
             phone_number=phone_number,
             gender=gender,
+            role=role,
             birthday=birthday,
             is_active=is_active,
             is_admin=is_admin,
