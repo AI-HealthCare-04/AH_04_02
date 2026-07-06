@@ -26,7 +26,7 @@ from sqlmodel import Session, func, select
 from database import get_session
 from models import Caregiver, CaregiverPatient, MedicationLog, MedicationSchedule, Patient
 
-router = APIRouter(tags=["Monitoring"])
+router = APIRouter(prefix="/monitoring", tags=["Monitoring"])
 
 
 # ══════════════════════════════════════════
