@@ -186,10 +186,21 @@ def _parse_official_format(text: str) -> list:
     공식 처방전 포맷: [급여/비급여][코드] 약품명 1회량 1일횟수 일수
     - 용법 자유서술형("1일 1회 취침전 복용하세요")은 KOR_FREQ_RE로 흡수
     - "110/500" 같은 복합 용량은 col_nums에서 자동 제외(/ 앞뒤 숫자 필터)
+
+    CLOVA 컬럼 그룹 출력 대응:
+    CLOVA가 테이블을 컬럼 단위로 플래튼할 때 약품명 컬럼 전체 → 횟수 컬럼 전체 순으로
+    출력하면, 첫 번째·두 번째 약품 세그먼트에는 횟수 텍스트가 없고 마지막 세그먼트에만
+    전체 횟수가 몰린다. 이를 대비해 전체 텍스트에서 횟수 목록을 미리 추출해두고
+    세그먼트 내에서 찾지 못하면 약품 순서(0-based index)로 배정한다.
     """
     # [급여/비급여][코드] 경계로 분리 → 각 항목이 약품 1줄
     segments = re.split(r"\[(?:급여|비급여)\]\[\d+\]", text)
+
+    # 전체 텍스트에서 "1일 N회" 목록을 순서대로 추출 (컬럼 그룹 출력 대응)
+    all_freqs = [f"1일 {n}회" for n in KOR_FREQ_RE.findall(text)]
+
     results = []
+    drug_idx = 0
     for seg in segments:
         seg = seg.strip()
         dm = DRUG_NAME_RE.search(seg)
@@ -200,16 +211,19 @@ def _parse_official_format(text: str) -> list:
 
         # DRUG_NAME_RE 매치 이후 텍스트에서 숫자 컬럼 추출
         # .(소수점) / (분수) 앞뒤 숫자, mg/g/ml 단위 붙은 숫자는 제외
-        # 회·일 접미사 붙은 숫자는 포함 — "1정 2회 30일" 형태 대응
         post = seg[dm.end():]
         col_nums = re.findall(
             r"(?<![./\d])(\d+)(?![./\d]|mg|g|ml)", post
         )
 
-        # 용법 자유서술형 우선("1일 N회 ..."), 없으면 col_nums[1](1일 투여횟수) 사용
+        # 우선순위: ① 세그먼트 내 "1일 N회" → ② 전체 목록 약품 순서 배정
+        #           → ③ col_nums[1] 폴백
         freq = extract_frequency(seg)
-        if not freq and len(col_nums) >= 2:
-            freq = f"1일 {col_nums[1]}회"
+        if not freq:
+            if drug_idx < len(all_freqs):
+                freq = all_freqs[drug_idx]
+            elif len(col_nums) >= 2:
+                freq = f"1일 {col_nums[1]}회"
 
         days = f"{col_nums[2]}일" if len(col_nums) >= 3 else ""
 
@@ -220,6 +234,7 @@ def _parse_official_format(text: str) -> list:
             "days":       days,
             "drug_class": lookup_drug_class(drug_name),
         })
+        drug_idx += 1
     return results
 
 
