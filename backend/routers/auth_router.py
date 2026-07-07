@@ -4,6 +4,7 @@ auth_router.py — 보호자·요양보호사 회원가입/로그인 (담당: �
 [7/6 추가] app/ 예시 프로젝트의 JWT 로그인 방식을 이 SQLite 백엔드로 옮겨왔습니다.
 환자(Patient)는 로그인하지 않고, Caregiver만 계정을 가집니다.
 """
+from __future__ import annotations
 import jwt
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from pydantic import BaseModel, EmailStr

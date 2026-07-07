@@ -19,6 +19,7 @@ schedule_v6에서 이미 제외하기로 한 항목이라 — 나중에 여유 �
     uvicorn main:app --reload
 → http://localhost:8000/docs 열리면 성공
 """
+from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 

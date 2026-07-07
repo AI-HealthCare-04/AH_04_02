@@ -10,6 +10,7 @@ schedule_v6의 "동기 방식" 원칙 그대로: 폴링도 스트리밍도 없�
    기다리는 동안 기존 3단계 애니메이션을 그냥 시각 효과로 보여줌
 3) 응답이 오면 그 데이터를 그대로 들고 /result로 이동 (재조회 없음)
 """
+from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile

@@ -8,6 +8,7 @@ Day4에 할 일: run_rag_stub() 안의 가짜 GuideResult 생성 부분을
 [7/6 추가] 로직을 run_rag_stub() 함수로 분리했습니다 — /rag/test/{record_id}(개별 테스트용)와
 records_router.py(업로드→OCR→가이드 한번에 처리)가 이 함수를 같이 씁니다.
 """
+from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends, HTTPException

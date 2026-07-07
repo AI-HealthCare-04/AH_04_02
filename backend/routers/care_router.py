@@ -9,8 +9,10 @@ Figma에만 있고 백엔드가 없던 3개 기능을 여기 모았습니다:
 로그인이 없어서 "누가 초대를 보냈는지"는 optional로만 기록하고,
 수락 시점에 caregiver_id를 body로 받아 연결합니다 (기존 보호자 선택 방식과 동일 패턴).
 """
+from __future__ import annotations
 import secrets
 from datetime import datetime
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -76,7 +78,7 @@ def create_assessment(payload: AssessmentCreate, session: Session = Depends(get_
     return assessment
 
 
-@router.get("/assessments/latest", response_model=CareLevelAssessment | None)
+@router.get("/assessments/latest", response_model=Optional[CareLevelAssessment])
 def get_latest_assessment(patient_id: int, session: Session = Depends(get_session)):
     return session.exec(
         select(CareLevelAssessment)

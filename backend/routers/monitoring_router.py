@@ -16,6 +16,7 @@ patients / caregivers / caregiver_patients(다대다)를 도입함.
 2) GET /caregivers/{id}/patients  → 그 보호자가 케어하는 환자 목록
 3) 환자 하나를 고르면 그 patient_id로 /monitoring/today?patient_id=... 호출
 """
+from __future__ import annotations
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException

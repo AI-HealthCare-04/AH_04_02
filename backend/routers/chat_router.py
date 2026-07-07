@@ -5,6 +5,7 @@ schedule_v6 확정 방식: 자유 대화 아님. 고정 질문 3개를 누르면
 지금은 "고정 답변"이지만, 나중에 실제 LLM(gpt-4o-mini) 연동 시
 ask() 안의 PRESET_QUESTIONS 매칭 부분만 실제 호출로 바꿔 끼우면 됩니다.
 """
+from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
