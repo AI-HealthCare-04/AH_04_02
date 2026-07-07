@@ -306,6 +306,36 @@ OCRResult { raw_text, medications[], overall_confidence,
 
 ---
 
+## 9. Day5 완료 (2026-07-07)
+
+### 수정 내역
+
+1. **`BARE_FREQ_RE` 추가** (`parsing_rules.py`)
+   - `1일` 접두사 없이 단독으로 오는 `N회` 패턴 파싱 지원
+   - `extract_frequency` KOR_FREQ_RE → ABBREV_FREQ_RE → BARE_FREQ_RE 순 폴백
+   - 오탐 방지: 뒤에 한글(`투약량`·`복용` 등) 또는 `)` 오면 매칭 제외 → `용량(1회)`, `1회 투약량` 헤더 안전
+
+2. **`_parse_official_format` 횟수 검색 범위 확장** (`parsing_rules.py`)
+   - 기존: `post` (약품명 이후 텍스트만 검색)
+   - 변경: `seg_clean` (세그먼트 전체, ■ 이전)
+   - 효과: CLOVA가 `[코드] 0.5mg 1회 3일 ... 덱사메타손정` 처럼 횟수를 약품명 앞에 출력하는 경우도 포착
+
+3. **OcrResult `drug_code` 하드코딩 제거** (`ocr_interface.py`, `routers/ocr_router.py`)
+   - `drug_code=""` 고정값 → `med.drug_code` (파싱된 실제 코드)로 변경
+
+### mock_seoul_clinic_prescription.png 재테스트 결과
+
+- confidence: 0.9684 / status: completed / review_required: false
+
+| 약품명 | dosage | frequency | 이전 결과 | 비고 |
+|--------|--------|-----------|-----------|------|
+| 아목시실린 | 500mg | **1일 3회** ✅ | 1일 3회 | 유지 |
+| 이부프로펜 | 400mg | **""** | "" | CLOVA가 해당 행 횟수 미출력 — 파싱 차원 해결 불가 |
+| 오메프라졸 | 20mg | **1일 2회** ✅ | "" (버그) | BARE_FREQ_RE로 수정 |
+| 덱사메타손 | 0.5mg | **1일 1회** ✅ | "" (버그) | seg_clean 확장으로 수정 |
+
+---
+
 ## 6. 미해결 이슈 (Day2 이후)
 
 | 우선순위 | 이슈 | 근거 샘플 |
