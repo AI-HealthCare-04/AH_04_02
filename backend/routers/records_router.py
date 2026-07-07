@@ -59,12 +59,22 @@ def create_record(
 ):
     """
     처방전 이미지를 받아서 OCR → RAG 가이드 생성까지 끝내고 결과를 반환합니다.
+
+    [7/8 추가] 권순현님 PR #9 합의 반영: OCR 결과가 review_required(저신뢰,
+    보호자 확인 필요)면 RAG는 호출하지 않고 그 상태로 바로 반환합니다.
+    프론트(Result.tsx)는 review_required를 받으면 "확인 필요" 배지를 보여주고,
+    보호자가 확인/수정한 뒤 재요청하는 흐름으로 이어집니다(재요청 엔드포인트는 별도 TODO).
+
     권순현/김영혜의 실제 로직이 붙기 전까지는 run_ocr_stub/run_rag_stub의 가짜 데이터가 나갑니다.
     """
     if not session.get(Patient, patient_id):
         raise HTTPException(404, "해당 환자를 찾을 수 없어요")
 
     record = run_ocr_stub(patient_id, file.filename, session)
+
+    if record.status == "review_required":
+        # RAG 호출 자체를 안 함 — OCR 결과만 담아서 바로 반환
+        return _build_record_response(record, session, None)
 
     try:
         guide = run_rag_stub(record.id, session)

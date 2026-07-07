@@ -76,6 +76,55 @@ export async function getCaregivers() {
 }
 
 /**
+ * [7/8 추가] 반대 방향 — 이 환자를 케어하는 보호자 전체 목록 (Connect.tsx '연결된 사람' 표)
+ */
+export async function getPatientCaregivers(patientId: number) {
+  const { data } = await monitoringClient.get<Caregiver[]>(
+    `/monitoring/patients/${patientId}/caregivers`
+  );
+  return data;
+}
+
+/**
+ * [7/8 추가] 보호자-환자 연결 해제 ("연결 해제" 버튼)
+ */
+export async function unlinkCaregiverPatient(caregiverId: number, patientId: number) {
+  const { data } = await monitoringClient.delete(
+    `/monitoring/caregivers/${caregiverId}/patients/${patientId}`
+  );
+  return data;
+}
+
+/**
+ * [7/8 추가] 환자 목록 (환자관리 화면)
+ */
+export async function getPatients() {
+  const { data } = await monitoringClient.get<Patient[]>("/monitoring/patients");
+  return data;
+}
+
+export async function createPatient(payload: { name: string; note?: string }) {
+  const { data } = await monitoringClient.post<Patient>("/monitoring/patients", payload);
+  return data;
+}
+
+export async function updatePatient(
+  patientId: number,
+  payload: { name?: string; note?: string }
+) {
+  const { data } = await monitoringClient.patch<Patient>(
+    `/monitoring/patients/${patientId}`,
+    payload
+  );
+  return data;
+}
+
+export async function deletePatient(patientId: number) {
+  const { data } = await monitoringClient.delete(`/monitoring/patients/${patientId}`);
+  return data;
+}
+
+/**
  * 복약 일정 생성
  */
 export async function createSchedule(payload: {
@@ -85,5 +134,41 @@ export async function createSchedule(payload: {
   memo?: string;
 }) {
   const { data } = await monitoringClient.post("/monitoring/schedules", payload);
+  return data;
+}
+
+/**
+ * [7/8 추가] 복약 일정 목록 (복약일정 관리 화면)
+ */
+export interface Schedule {
+  id: number;
+  patient_id: number;
+  drug_name: string;
+  time_slot: string;
+  memo: string | null;
+  active: boolean;
+  created_at: string;
+}
+
+export async function getSchedules(patientId: number, activeOnly = false) {
+  const { data } = await monitoringClient.get<Schedule[]>("/monitoring/schedules", {
+    params: { patient_id: patientId, active_only: activeOnly },
+  });
+  return data;
+}
+
+export async function updateSchedule(
+  scheduleId: number,
+  payload: { drug_name?: string; time_slot?: string; memo?: string; active?: boolean }
+) {
+  const { data } = await monitoringClient.patch<Schedule>(
+    `/monitoring/schedules/${scheduleId}`,
+    payload
+  );
+  return data;
+}
+
+export async function deleteSchedule(scheduleId: number) {
+  const { data } = await monitoringClient.delete(`/monitoring/schedules/${scheduleId}`);
   return data;
 }

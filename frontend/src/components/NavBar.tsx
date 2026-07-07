@@ -1,4 +1,5 @@
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { ChevronRight } from "lucide-react";
 
 interface NavBarProps {
   isLoggedIn?: boolean;
@@ -6,68 +7,80 @@ interface NavBarProps {
   variant?: "light" | "dark";
 }
 
-export default function NavBar({ isLoggedIn = false, userName, variant = "light" }: NavBarProps) {
+const NAV_ITEMS = [
+  { label: "복약 일정", to: "/schedule" },
+  { label: "알림 설정", to: "/notification" },
+  { label: "대시보드", to: "/dashboard" },
+];
+
+/**
+ * [7/8 업그레이드] 기존엔 로고만 있고 메뉴 링크는 실제로 동작하지 않았음.
+ * Figma 원본 Navbar 디자인 + react-router 실제 이동으로 교체.
+ */
+export default function NavBar({ isLoggedIn = false, userName = "", variant = "light" }: NavBarProps) {
   const navigate = useNavigate();
-  const isDark = variant === "dark";
+  const dark = variant === "dark";
 
   return (
-    <nav style={{
-      padding: "16px 40px",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-between",
-      position: "relative" as const,
-      zIndex: 10,
-      background: isDark ? "transparent" : "#FFFFFF",
-      borderBottom: isDark ? "none" : "1px solid #EEE6DC",
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={() => navigate("/")}>
-        <span style={{
-          width: 32, height: 32, borderRadius: "50%",
-          background: "#C16A45", color: "#FFFFFF",
-          display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16,
-        }}>♥</span>
-        <span style={{ fontSize: 20, fontWeight: 700, color: isDark ? "#FFFFFF" : "#2A2A2A" }}>건강동행</span>
-      </div>
-
-      <div style={{ display: "flex", gap: 32 }}>
-        {["복약 안내", "생활 습관", "알림 설정", "대시보드"].map((item) => (
-          <span key={item} style={{ fontSize: 15, fontWeight: 500, cursor: "pointer", color: isDark ? "#EDE6DE" : "#2A2A2A" }}>
-            {item}
-          </span>
-        ))}
-      </div>
-
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        {isLoggedIn ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{
-              width: 32, height: 32, borderRadius: "50%",
-              background: "#C16A45", color: "#FFFFFF",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 14, fontWeight: 700,
-            }}>
-              {userName?.[0] ?? "?"}
-            </span>
-            <span style={{ color: isDark ? "#FFFFFF" : "#2A2A2A", fontWeight: 600 }}>{userName} 님</span>
+    <header
+      className={
+        dark
+          ? "sticky top-0 z-40 bg-transparent"
+          : "sticky top-0 z-40 bg-white/95 backdrop-blur-sm border-b border-black/10"
+      }
+    >
+      <div className="max-w-7xl mx-auto px-6 sm:px-10 h-16 flex items-center justify-between">
+        <Link to="/" className="flex items-center gap-2 shrink-0">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-[#C1653D]">
+            <span className="text-white text-sm">💊</span>
           </div>
-        ) : (
-          <>
-            <button onClick={() => navigate("/login")} style={{
-              padding: "10px 20px", fontSize: 14, fontWeight: 600,
-              background: "transparent",
-              border: `1.5px solid ${isDark ? "#FFFFFF" : "#C16A45"}`,
-              borderRadius: 24, cursor: "pointer",
-              color: isDark ? "#FFFFFF" : "#C16A45",
-            }}>로그인</button>
-            <button onClick={() => navigate("/login")} style={{
-              padding: "10px 20px", fontSize: 14, fontWeight: 600,
-              background: "#C16A45", border: "none",
-              borderRadius: 24, color: "#FFFFFF", cursor: "pointer",
-            }}>회원가입</button>
-          </>
+          <span className={`text-xl font-black ${dark ? "text-white" : "text-[#1E1A17]"}`}>
+            건강동행
+          </span>
+        </Link>
+
+        {isLoggedIn && (
+          <nav className="hidden sm:flex items-center gap-8">
+            {NAV_ITEMS.map((item) => (
+              <Link
+                key={item.to}
+                to={item.to}
+                className={`text-[15px] font-medium transition-opacity hover:opacity-60 ${
+                  dark ? "text-white" : "text-[#1E1A17]"
+                }`}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </nav>
         )}
+
+        <div className="flex items-center gap-3">
+          {isLoggedIn ? (
+            <button
+              onClick={() => navigate("/mypage")}
+              className="flex items-center gap-2.5 transition-opacity hover:opacity-75"
+            >
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold bg-[#C1653D]">
+                {userName ? userName[0] : "?"}
+              </div>
+              <span className={`text-[15px] font-semibold ${dark ? "text-white" : "text-[#1E1A17]"}`}>
+                {userName} 님
+              </span>
+              <ChevronRight className="w-3.5 h-3.5 text-[#8A7E75]" />
+            </button>
+          ) : (
+            !dark && (
+              <button
+                onClick={() => navigate("/login")}
+                className="px-5 py-2 rounded-full border-2 text-[14px] font-bold border-[#C1653D] text-[#C1653D] transition-colors hover:bg-[#C1653D]/5"
+              >
+                로그인
+              </button>
+            )
+          )}
+        </div>
       </div>
-    </nav>
+    </header>
   );
 }

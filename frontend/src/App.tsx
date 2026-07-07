@@ -10,6 +10,8 @@ import Result from "./pages/Result";
 import Chat from "./pages/Chat";
 import Dashboard from "./pages/Dashboard";
 import InviteAccept from "./pages/InviteAccept";
+import Schedule from "./pages/Schedule";
+import Notification from "./pages/Notification";
 
 function App() {
   return (
@@ -26,6 +28,8 @@ function App() {
         <Route path="/chat" element={<Chat />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/invite/:token" element={<InviteAccept />} />
+        <Route path="/schedule" element={<Schedule />} />
+        <Route path="/notification" element={<Notification />} />
       </Routes>
     </BrowserRouter>
   );

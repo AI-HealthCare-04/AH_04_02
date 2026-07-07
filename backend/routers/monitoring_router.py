@@ -129,6 +129,21 @@ def list_patients_of_caregiver(caregiver_id: int, session: Session = Depends(get
     return session.exec(select(Patient).where(Patient.id.in_(patient_ids))).all()
 
 
+@router.get("/patients/{patient_id}/caregivers", response_model=list[CaregiverPublic])
+def list_caregivers_of_patient(patient_id: int, session: Session = Depends(get_session)):
+    """[7/8 추가] 반대 방향 조회 — 이 환자를 케어하는 보호자 전체 목록 (Connect.tsx '연결된 사람' 표에 사용)"""
+    if not session.get(Patient, patient_id):
+        raise HTTPException(404, "해당 환자를 찾을 수 없어요")
+
+    links = session.exec(
+        select(CaregiverPatient).where(CaregiverPatient.patient_id == patient_id)
+    ).all()
+    caregiver_ids = [link.caregiver_id for link in links]
+    if not caregiver_ids:
+        return []
+    return session.exec(select(Caregiver).where(Caregiver.id.in_(caregiver_ids))).all()
+
+
 @router.post("/caregivers/{caregiver_id}/patients/{patient_id}")
 def link_caregiver_to_patient(
     caregiver_id: int, patient_id: int, session: Session = Depends(get_session)

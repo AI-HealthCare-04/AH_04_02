@@ -1,137 +1,289 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Phone, User, AlertCircle } from "lucide-react";
 import NavBar from "../components/NavBar";
+import {
+  createInvitation,
+  listInvitations,
+  type InvitationSummary,
+} from "../api/care";
+import { getPatientCaregivers, unlinkCaregiverPatient, type Caregiver } from "../api/monitoring";
+import { getCurrentPatientId } from "../lib/session";
 
 type RelationType = "guardian" | "caregiver" | "life_support_worker" | "social_worker";
 
-interface Connection {
-  id: string;
-  name: string;
-  relation: string;
-  status: "approved" | "pending";
-}
-
-const relationLabels: Record<RelationType, string> = {
+const RELATION_LABEL: Record<RelationType, string> = {
   guardian: "보호자",
   caregiver: "요양보호사",
   life_support_worker: "생활지원사",
   social_worker: "사회복지사",
 };
 
-const initialConnections: Connection[] = [
-  { id: "1", name: "김철수", relation: "보호자", status: "approved" },
-  { id: "2", name: "이영희", relation: "요양보호사", status: "pending" },
-];
+// 장식용 가짜 QR — 실제 QR 생성 라이브러리 없이 시각 효과만 (기존 Figma 디자인 그대로)
+function FakeQR() {
+  const cells = Array.from({ length: 441 }, (_, i) => (i * 7 + Math.floor(i / 21)) % 3 === 0);
+  return (
+    <div
+      className="grid gap-[1.5px] p-2.5 bg-white rounded-xl"
+      style={{ gridTemplateColumns: "repeat(21, 1fr)", width: 160, height: 160 }}
+    >
+      {cells.map((on, i) => (
+        <div key={i} className={on ? "bg-[#1E1A17] rounded-[1px]" : ""} />
+      ))}
+    </div>
+  );
+}
 
 export default function Connect() {
+  const patientId = getCurrentPatientId();
+
   const [phone, setPhone] = useState("");
   const [relationType, setRelationType] = useState<RelationType>("guardian");
-  const [connections, setConnections] = useState(initialConnections);
+  const [inviteMethod, setInviteMethod] = useState<"sms" | "url" | "qr">("sms");
+  const [inviteUrl, setInviteUrl] = useState("");
+  const [urlCopied, setUrlCopied] = useState(false);
+  const [sending, setSending] = useState(false);
 
-  const handleInvite = () => {
-    if (!phone) return;
-    alert(`${phone}로 ${relationLabels[relationType]} 초대를 전송합니다.`);
-    setPhone("");
+  const [caregivers, setCaregivers] = useState<Caregiver[]>([]);
+  const [invitations, setInvitations] = useState<InvitationSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const loadConnections = async () => {
+    try {
+      const [caregiverList, invitationList] = await Promise.all([
+        getPatientCaregivers(patientId),
+        listInvitations(patientId),
+      ]);
+      setCaregivers(caregiverList);
+      setInvitations(invitationList.filter((inv) => inv.status === "pending"));
+    } catch {
+      setError("연결 정보를 불러오지 못했어요.");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleRevoke = (id: string) => {
-    setConnections((prev) => prev.filter((c) => c.id !== id));
+  useEffect(() => {
+    loadConnections();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleInvite = async () => {
+    setSending(true);
+    setError("");
+    try {
+      const created = await createInvitation({
+        patient_id: patientId,
+        relation_type: relationType,
+        invited_phone: phone || undefined,
+      });
+      setInviteUrl(window.location.origin + created.invite_url);
+      setPhone("");
+      await loadConnections();
+    } catch {
+      setError("초대를 보내지 못했어요.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleUnlink = async (caregiverId: number) => {
+    try {
+      await unlinkCaregiverPatient(caregiverId, patientId);
+      await loadConnections();
+    } catch {
+      setError("연결 해제에 실패했어요.");
+    }
+  };
+
+  const copyUrl = () => {
+    navigator.clipboard?.writeText(inviteUrl);
+    setUrlCopied(true);
+    setTimeout(() => setUrlCopied(false), 2000);
   };
 
   return (
-    <div style={styles.page}>
+    <div className="min-h-screen bg-[#FAF6F1]">
       <NavBar isLoggedIn userName="김건강" />
-      <main style={styles.main}>
-        <h1 style={styles.title}>보호자·요양보호사 연결 관리</h1>
-        <p style={styles.subtitle}>복약 관리를 함께할 사람을 초대하고 관리하세요.</p>
+      <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
+        <h1 className="text-[26px] font-black text-[#2A2A2A] mb-1">보호자·요양보호사 연결 관리</h1>
+        <p className="text-[14px] text-[#888888] mb-7">복약 관리를 함께할 사람을 초대하고 관리하세요.</p>
 
-        <div style={styles.card}>
-          <h2 style={styles.cardTitle}>초대하기</h2>
-          <input
-            style={styles.input}
-            placeholder="전화번호 (010-0000-0000)"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-          />
-          <div style={styles.roleRow}>
-            {(Object.keys(relationLabels) as RelationType[]).map((key) => {
-              const isActive = relationType === key;
-              return (
-                <button
-                  key={key}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => setRelationType(key)}
-                  style={{
-                    flex: 1,
-                    minWidth: 100,
-                    padding: "10px 0",
-                    borderRadius: 10,
-                    borderWidth: 1,
-                    borderStyle: "solid",
-                    borderColor: isActive ? "#C16A45" : "#E0D3C4",
-                    background: isActive ? "#C16A45" : "#F5F0EA",
-                    color: isActive ? "#FFFFFF" : "#888888",
-                    fontWeight: 600,
-                    fontSize: 13,
-                    cursor: "pointer",
-                    outline: "none",
-                    boxShadow: "none",
-                    fontFamily: "inherit",
-                  }}
-                >
-                  {relationLabels[key]}
-                </button>
-              );
-            })}
+        {error && (
+          <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-[#D94F4F]/8 border border-[#D94F4F]/20 mb-5">
+            <AlertCircle className="w-4 h-4 text-[#D94F4F] shrink-0" />
+            <p className="text-[13px] text-[#D94F4F]">{error}</p>
           </div>
-          <button style={styles.submitBtn} onMouseDown={(e) => e.preventDefault()} onClick={handleInvite}>
-            초대 전송하기
-          </button>
-        </div>
+        )}
 
-        <div style={styles.card}>
-          <h2 style={styles.cardTitle}>연결된 사람 ({connections.length}명)</h2>
-          <div style={styles.tableHeader}>
-            <span style={styles.colName}>이름</span>
-            <span style={styles.colRelation}>관계</span>
-            <span style={styles.colStatus}>상태</span>
+        {/* 초대하기 */}
+        <div className="bg-white border border-[#EEE6DC] rounded-2xl p-6 mb-6">
+          <h2 className="text-[16px] font-black text-[#2A2A2A] mb-4">초대하기</h2>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+            {(Object.keys(RELATION_LABEL) as RelationType[]).map((key) => (
+              <button
+                key={key}
+                onClick={() => setRelationType(key)}
+                className={`py-2.5 rounded-xl text-[13px] font-bold transition-all ${
+                  relationType === key ? "bg-[#C1653D] text-white" : "bg-[#F0EDE8] text-[#888888]"
+                }`}
+              >
+                {RELATION_LABEL[key]}
+              </button>
+            ))}
           </div>
-          {connections.map((c) => (
-            <div key={c.id} style={styles.tableRow}>
-              <span style={styles.colName}>{c.name}</span>
-              <span style={styles.colRelation}>{c.relation}</span>
-              <span style={styles.colStatus}>
-                <span style={{ ...styles.statusPill, ...(c.status === "approved" ? styles.statusApproved : styles.statusPending) }}>
-                  {c.status === "approved" ? "승인됨" : "대기중"}
-                </span>
-              </span>
-              <button style={styles.revokeBtn} onMouseDown={(e) => e.preventDefault()} onClick={() => handleRevoke(c.id)}>
-                연결 해제
+
+          <div className="flex gap-2 mb-4 p-1 rounded-xl bg-[#F0EDE8]">
+            {[
+              { key: "sms" as const, label: "💬 문자" },
+              { key: "url" as const, label: "🔗 URL" },
+              { key: "qr" as const, label: "📷 QR" },
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => setInviteMethod(key)}
+                className={`flex-1 py-2.5 rounded-lg text-[13px] font-bold transition-all ${
+                  inviteMethod === key ? "bg-white text-[#2A2A2A] shadow-sm" : "text-[#888888]"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {inviteMethod === "sms" && (
+            <div className="space-y-3">
+              <div className="relative">
+                <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[#888888]" />
+                <input
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="전화번호 (010-0000-0000)"
+                  className="w-full pl-11 pr-4 py-3.5 rounded-xl border border-[#E0D3C4] bg-[#FAFAF7] text-[15px] outline-none"
+                />
+              </div>
+              {inviteUrl && (
+                <div className="rounded-xl px-4 py-3 bg-[#F7F4EF] border border-black/8">
+                  <p className="text-[12px] font-bold text-[#888888] mb-1">생성된 초대 링크</p>
+                  <p className="text-[13px] break-all text-[#2A2A2A]">{inviteUrl}</p>
+                  <p className="text-[11px] text-[#AAAAAA] mt-1">
+                    실제 문자 발송 기능은 아직 없어요 — 이 링크를 직접 전달해 주세요.
+                  </p>
+                </div>
+              )}
+              <button
+                onClick={handleInvite}
+                disabled={sending}
+                className="w-full py-3.5 rounded-full text-white font-bold text-[16px] bg-[#C1653D] disabled:opacity-60"
+              >
+                {sending ? "전송 중..." : "초대 만들기"}
               </button>
             </div>
-          ))}
+          )}
+
+          {inviteMethod === "url" && (
+            <div className="space-y-3">
+              <p className="text-[13px] text-[#888888]">초대 링크를 만들고 복사해서 전달하세요.</p>
+              {!inviteUrl ? (
+                <button
+                  onClick={handleInvite}
+                  disabled={sending}
+                  className="w-full py-3.5 rounded-full text-white font-bold text-[16px] bg-[#C1653D] disabled:opacity-60"
+                >
+                  {sending ? "생성 중..." : "초대 링크 만들기"}
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 px-4 py-3.5 rounded-xl bg-[#F7F4EF] border border-black/10">
+                  <span className="flex-1 text-[13px] font-mono truncate text-[#2A2A2A]">{inviteUrl}</span>
+                  <button
+                    onClick={copyUrl}
+                    className={`shrink-0 px-4 py-2 rounded-full text-[13px] font-bold ${
+                      urlCopied ? "bg-[#8FAE8B]/20 text-[#4A7A47]" : "bg-[#C1653D]/15 text-[#C1653D]"
+                    }`}
+                  >
+                    {urlCopied ? "복사됨 ✓" : "복사"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {inviteMethod === "qr" && (
+            <div className="flex flex-col items-center py-4 gap-4">
+              {!inviteUrl ? (
+                <button
+                  onClick={handleInvite}
+                  disabled={sending}
+                  className="w-full py-3.5 rounded-full text-white font-bold text-[16px] bg-[#C1653D] disabled:opacity-60"
+                >
+                  {sending ? "생성 중..." : "QR용 초대 만들기"}
+                </button>
+              ) : (
+                <>
+                  <p className="text-[13px] text-center text-[#888888]">
+                    QR은 지금 시각효과용 이미지예요 — 아래 링크를 스캐너에 직접 입력해 확인하세요.
+                  </p>
+                  <div className="p-4 rounded-2xl bg-[#FAF6F1] border-2 border-black/8">
+                    <FakeQR />
+                  </div>
+                  <p className="text-[12px] font-mono break-all text-center text-[#2A2A2A]">{inviteUrl}</p>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 대기중인 초대 */}
+        {invitations.length > 0 && (
+          <div className="bg-white border border-[#EEE6DC] rounded-2xl overflow-hidden mb-6">
+            <div className="px-6 py-4 border-b border-black/6">
+              <h2 className="text-[15px] font-black text-[#2A2A2A]">대기중인 초대 ({invitations.length}건)</h2>
+            </div>
+            {invitations.map((inv) => (
+              <div key={inv.id} className="flex items-center justify-between px-6 py-3.5 border-b border-[#F5F0EA] last:border-0">
+                <span className="text-[14px] text-[#2A2A2A]">
+                  {RELATION_LABEL[inv.relation_type as RelationType] ?? inv.relation_type}
+                  {inv.invited_phone ? ` · ${inv.invited_phone}` : ""}
+                </span>
+                <span className="px-3 py-1 rounded-full text-[12px] font-bold bg-[#F0EBE3] text-[#8A7A6A]">대기중</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* 연결된 사람 */}
+        <div className="bg-white border border-[#EEE6DC] rounded-2xl overflow-hidden">
+          <div className="px-6 py-4 border-b border-black/6">
+            <h2 className="text-[15px] font-black text-[#2A2A2A]">연결된 사람 ({caregivers.length}명)</h2>
+          </div>
+          {loading ? (
+            <p className="px-6 py-8 text-center text-[14px] text-[#888888]">불러오는 중이에요...</p>
+          ) : caregivers.length === 0 ? (
+            <div className="py-14 text-center">
+              <User className="w-9 h-9 mx-auto mb-3 text-[#888888] opacity-30" />
+              <p className="text-[14px] text-[#888888]">아직 연결된 사람이 없어요</p>
+            </div>
+          ) : (
+            caregivers.map((c) => (
+              <div key={c.id} className="flex items-center justify-between px-6 py-4 border-b border-[#F5F0EA] last:border-0">
+                <div>
+                  <p className="text-[14px] font-bold text-[#2A2A2A]">{c.name}</p>
+                  <p className="text-[13px] text-[#888888]">
+                    {RELATION_LABEL[c.relation_type as RelationType] ?? c.relation_type}
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleUnlink(c.id)}
+                  className="px-4 py-2 rounded-full text-[12px] font-bold border border-[#C1653D]/35 text-[#C1653D]"
+                >
+                  연결 해제
+                </button>
+              </div>
+            ))
+          )}
         </div>
       </main>
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  page: { minHeight: "100vh", background: "#FAF6F1", fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" },
-  main: { maxWidth: 700, margin: "0 auto", padding: "32px 20px 60px" },
-  title: { fontSize: 26, fontWeight: 800, color: "#2A2A2A", marginBottom: 8 },
-  subtitle: { fontSize: 14, color: "#888888", marginBottom: 28 },
-  card: { background: "#FFFFFF", border: "1px solid #EEE6DC", borderRadius: 16, padding: 24, marginBottom: 24 },
-  cardTitle: { fontSize: 16, fontWeight: 700, color: "#2A2A2A", marginBottom: 16 },
-  input: { width: "100%", padding: "14px 16px", borderRadius: 10, border: "1px solid #E0D3C4", fontSize: 14, marginBottom: 14, outline: "none", boxSizing: "border-box" as const },
-  roleRow: { display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" as const },
-  submitBtn: { width: "100%", padding: "14px 0", borderRadius: 10, background: "#C16A45", color: "#FFFFFF", border: "none", fontWeight: 700, fontSize: 15, cursor: "pointer", outline: "none" },
-  tableHeader: { display: "flex", padding: "8px 4px", borderBottom: "1px solid #EEE6DC", fontSize: 13, color: "#888888", fontWeight: 600 },
-  tableRow: { display: "flex", alignItems: "center", padding: "16px 4px", borderBottom: "1px solid #F5F0EA" },
-  colName: { flex: 1, fontSize: 14, fontWeight: 600, color: "#2A2A2A" },
-  colRelation: { flex: 1, fontSize: 14, color: "#666666" },
-  colStatus: { flex: 1 },
-  statusPill: { fontSize: 12, fontWeight: 700, borderRadius: 12, padding: "4px 10px" },
-  statusApproved: { background: "#E8EFE2", color: "#5C7A4A" },
-  statusPending: { background: "#F0EBE3", color: "#8A7A6A" },
-  revokeBtn: { padding: "8px 14px", borderRadius: 8, border: "1.5px solid #C16A45", background: "#FFFFFF", color: "#C16A45", fontWeight: 600, fontSize: 12, cursor: "pointer", outline: "none" },
-};
