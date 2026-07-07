@@ -126,3 +126,61 @@ class MedicationLog(SQLModel, table=True):
     status: str = "taken"  # taken(복용) / skipped(건너뜀)
     checked_at: datetime = Field(default_factory=datetime.now)
     note: Optional[str] = None
+
+
+# ══════════════════════════════════════════════════════════
+# [7/7 추가] Figma 화면 전체 연결을 위한 신규 테이블
+# ══════════════════════════════════════════════════════════
+
+# ── 자가진단 결과 (담당: 박소정) — Check.tsx/AssessmentPage 저장용 ──
+class CareLevelAssessment(SQLModel, table=True):
+    __tablename__ = "care_level_assessments"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    patient_id: int = Field(foreign_key="patients.id")
+    cognitive_level: str = "normal"  # normal / mild / severe
+    mobility_level: str = "normal"
+    vision_level: str = "normal"
+    medication_awareness: bool = True
+    medication_willingness: bool = True
+    care_level: str = "independent"  # independent / guardian_check / third_party_needed
+    reason: str = ""
+    evaluated_at: datetime = Field(default_factory=datetime.now)
+
+
+# ── 보호자 초대 (담당: 박소정) — CaregiverPage/InvitePage 실제 연동용 ──
+class Invitation(SQLModel, table=True):
+    __tablename__ = "invitations"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    patient_id: int = Field(foreign_key="patients.id")
+    inviter_caregiver_id: Optional[int] = Field(default=None, foreign_key="caregivers.id")
+    relation_type: str = "guardian"
+    invited_phone: Optional[str] = None
+    token: str = Field(unique=True, index=True)
+    status: str = "pending"  # pending / accepted / rejected / expired
+    created_at: datetime = Field(default_factory=datetime.now)
+    accepted_at: Optional[datetime] = None
+
+
+# ── 알림 설정 (담당: 박소정) — NotificationPage 저장용 ──
+class NotificationSetting(SQLModel, table=True):
+    __tablename__ = "notification_settings"
+
+    patient_id: int = Field(primary_key=True, foreign_key="patients.id")
+    medication_reminder_enabled: bool = True
+    care_alert_enabled: bool = True
+    all_push_enabled: bool = True
+    updated_at: datetime = Field(default_factory=datetime.now)
+
+
+# ── 챗봇 대화 로그 (담당: 김영혜) — 고정 Q&A 방식, schedule_v6 Day6 계획 ──
+class ChatMessage(SQLModel, table=True):
+    __tablename__ = "chat_messages"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    patient_id: int = Field(foreign_key="patients.id")
+    question_id: str  # 고정 질문 식별자 (q1, q2, q3...)
+    question_text: str
+    answer_text: str
+    created_at: datetime = Field(default_factory=datetime.now)

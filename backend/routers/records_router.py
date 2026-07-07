@@ -80,6 +80,33 @@ def create_record(
     return _build_record_response(record, session, guide)
 
 
+@router.get("")
+def list_records(patient_id: int, session: Session = Depends(get_session)):
+    """
+    환자별 처방전 이력 목록 (RecordsPage '이용 기록' 화면용).
+    각 항목은 상세 조회 없이 목록에 필요한 요약 정보만 담습니다.
+    """
+    records = session.exec(
+        select(MedicalRecord)
+        .where(MedicalRecord.patient_id == patient_id)
+        .order_by(MedicalRecord.created_at.desc())
+    ).all()
+
+    summaries = []
+    for r in records:
+        ocr_items = session.exec(select(OcrResult).where(OcrResult.record_id == r.id)).all()
+        summaries.append(
+            {
+                "record_id": r.id,
+                "status": r.status,
+                "created_at": r.created_at.isoformat(),
+                "diagnosis": ocr_items[0].diagnosis if ocr_items else "",
+                "drug_names": [item.drug_name for item in ocr_items],
+            }
+        )
+    return summaries
+
+
 @router.get("/{record_id}")
 def get_record(record_id: int, session: Session = Depends(get_session)):
     """새로고침 등으로 결과 화면을 다시 열었을 때 재조회용 (Processing에서 받은 데이터가 없을 때 대비)"""

@@ -23,7 +23,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_db
-from routers import ocr_router, rag_router, monitoring_router, records_router
+from routers import ocr_router, rag_router, monitoring_router, records_router, care_router, chat_router
 # from routers import auth_router  # [7/6 보류] 로그인 붙일 때 이 줄과 아래 include_router 주석 해제
 
 app = FastAPI(
@@ -60,3 +60,5 @@ app.include_router(records_router.router)
 app.include_router(ocr_router.router)
 app.include_router(rag_router.router)
 app.include_router(monitoring_router.router)
+app.include_router(care_router.router)
+app.include_router(chat_router.router)
