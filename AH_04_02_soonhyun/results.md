@@ -301,38 +301,65 @@ OCRResult { raw_text, medications[], overall_confidence,
 
 ## 8. 진행중 / 대기
 
-- **Day5 BackgroundTask**: 김영혜님 `rag_router.py` 실제 연동 대기 중
+- 김영혜님 `rag_router.py` 실제 RAG 파이프라인 연동 대기 중 (현재 stub 상태)
 - 박소정님 `records_router.py` 아직 미공유 상태, `main.py` 미등록 확인됨 (2026-07-07 기준)
+- PR #9 리뷰 대기 중 — 박소정님(pecs0310) 리뷰어 지정, 김영혜님은 복귀 후 별도 추가 예정
 
 ---
 
-## 9. Day5 완료 (2026-07-07)
+## 9. Day5-6 완료 (2026-07-07)
 
 ### 수정 내역
 
 1. **`BARE_FREQ_RE` 추가** (`parsing_rules.py`)
    - `1일` 접두사 없이 단독으로 오는 `N회` 패턴 파싱 지원
    - `extract_frequency` KOR_FREQ_RE → ABBREV_FREQ_RE → BARE_FREQ_RE 순 폴백
-   - 오탐 방지: 뒤에 한글(`투약량`·`복용` 등) 또는 `)` 오면 매칭 제외 → `용량(1회)`, `1회 투약량` 헤더 안전
+   - 오탐 방지: 뒤에 한글(`투약량`·`복용` 등) 또는 `)` 오면 매칭 제외
 
 2. **`_parse_official_format` 횟수 검색 범위 확장** (`parsing_rules.py`)
-   - 기존: `post` (약품명 이후 텍스트만 검색)
-   - 변경: `seg_clean` (세그먼트 전체, ■ 이전)
-   - 효과: CLOVA가 `[코드] 0.5mg 1회 3일 ... 덱사메타손정` 처럼 횟수를 약품명 앞에 출력하는 경우도 포착
+   - 기존: `post` (약품명 이후 텍스트만) → 변경: `seg_clean` (세그먼트 전체, ■ 이전)
+   - 효과: CLOVA가 횟수를 약품명 앞에 출력하는 경우(덱사메타손 "1회 3일 … 덱사메타손정")도 포착
 
 3. **OcrResult `drug_code` 하드코딩 제거** (`ocr_interface.py`, `routers/ocr_router.py`)
    - `drug_code=""` 고정값 → `med.drug_code` (파싱된 실제 코드)로 변경
 
-### mock_seoul_clinic_prescription.png 재테스트 결과
+4. **BackgroundTask 연결** (`routers/ocr_router.py`, `routers/rag_router.py`)
+   - OCR 완료(`status=completed`) 시 자동으로 `_bg_rag_task` → `generate_guide_for_record()` 호출
+   - `review_required=true` 시 RAG 호출 보류 — 보호자 확인 후 수동 `/rag/test/{record_id}` 호출
+   - `generate_guide_for_record(record_id, session)` 함수 분리: 엔드포인트·BackgroundTask 공용
+   - ⚠️ 주의: RAG 로직이 `async def`로 바뀌면 `_bg_rag_task`도 함께 수정 필요
 
-- confidence: 0.9684 / status: completed / review_required: false
+5. **예외처리 보강** (`routers/ocr_router.py`)
 
-| 약품명 | dosage | frequency | 이전 결과 | 비고 |
-|--------|--------|-----------|-----------|------|
-| 아목시실린 | 500mg | **1일 3회** ✅ | 1일 3회 | 유지 |
-| 이부프로펜 | 400mg | **""** | "" | CLOVA가 해당 행 횟수 미출력 — 파싱 차원 해결 불가 |
-| 오메프라졸 | 20mg | **1일 2회** ✅ | "" (버그) | BARE_FREQ_RE로 수정 |
-| 덱사메타손 | 0.5mg | **1일 1회** ✅ | "" (버그) | seg_clean 확장으로 수정 |
+   | 상황 | HTTP | 비고 |
+   |------|------|------|
+   | 파일명 없음 | 400 | MedicalRecord 생성 전 차단 |
+   | 지원하지 않는 확장자 | 400 | 허용 형식 목록 응답에 포함 |
+   | 빈 파일 (0 bytes) | 400 | MedicalRecord 생성 전 차단 |
+   | CLOVA 타임아웃 | 504 | `requests.exceptions.Timeout` |
+   | CLOVA 연결 실패 | 503 | `requests.exceptions.ConnectionError` |
+   | CLOVA HTTP 오류 (잘못된 키 등) | 502 | 실제 HTTP 상태코드 포함 |
+   | 환경변수 미설정 | 503 | 기존 `RuntimeError` 처리 유지 |
+
+6. **라우터 통합 점검** (`main.py`)
+   - 등록 확인: `ocr_router`(/ocr) / `rag_router`(/rag) / `monitoring_router`(/monitoring)
+   - `auth_router` 주석 처리 상태 유지 (로그인 보류)
+   - `records_router.py` 미공유 / 미등록 확인
+
+7. **PR #9 생성**
+   - `feature/day4-5-summary-soonhyun` → `dev`
+   - 리뷰어: 박소정(pecs0310) / 김영혜는 복귀 후 추가 예정
+
+### mock_seoul_clinic_prescription.png 최종 테스트 결과
+
+- confidence: 0.9684 / status: completed / review_required: false / rag_scheduled: true
+
+| 약품명 | dosage | frequency | 비고 |
+|--------|--------|-----------|------|
+| 아목시실린 | 500mg | **1일 3회** ✅ | 정상 |
+| 이부프로펜 | 400mg | **""** | CLOVA 원본 미출력 — 파싱 차원 해결 불가 |
+| 오메프라졸 | 20mg | **1일 2회** ✅ | BARE_FREQ_RE로 수정 |
+| 덱사메타손 | 0.5mg | **1일 1회** ✅ | seg_clean 확장으로 수정 |
 
 ---
 
