@@ -1,0 +1,176 @@
+"""
+ocr_router.py — 담당: 권순현
+
+[7/8 통합] 권순현님 PR #9의 실제 CLOVA 연동 로직을 backend/ 구조에 맞춰 통합.
+핵심 로직을 run_ocr() 함수로 분리해서 이 파일의 /ocr/test(개별 테스트용)와
+records_router.py(실제 업로드→OCR→가이드 한 번에 처리) 양쪽에서 재사용합니다.
+
+[7/8 추가] OCR_PROVIDER 환경변수로 clova/mock 전환 가능하게 함
+— CLOVA 키 발급 전까지 팀 전체가 파이프라인을 mock으로 테스트할 수 있게 하기 위함
+  (.env에 OCR_PROVIDER=mock 추가하면 됨, 없으면 기본값 clova)
+"""
+from __future__ import annotations
+
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+import requests.exceptions
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from sqlmodel import Session, select
+
+# ocr_interface.py 등은 backend/ 루트(main.py와 같은 위치)에 있어서 별도 sys.path 조작 불필요
+# (uvicorn을 backend/ 폴더에서 실행하면 그 폴더 자체가 이미 import 루트가 됨)
+_ROOT = Path(__file__).parent.parent
+from dotenv import load_dotenv
+load_dotenv(_ROOT / ".env")
+
+from ocr_interface import get_ocr_provider  # noqa: E402
+from database import get_session
+from models import MedicalRecord, OcrResult
+
+router = APIRouter(prefix="/ocr", tags=["OCR"])
+
+_ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
+
+
+@router.get("/ping")
+def ping():
+    """서버에 이 라우터가 잘 붙었는지 확인용. /docs에서 눌러보면 됨"""
+    return {"status": "ok", "owner": "권순현"}
+
+
+async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> MedicalRecord:
+    """
+    처방전 이미지를 CLOVA OCR로 인식하고 DB에 저장하는 실제 로직.
+    records_router.py(POST /records)와 아래 /ocr/test 양쪽에서 호출됩니다.
+
+    - patient_id: 이 처방전의 환자 id
+    - 인식된 약품마다 ocr_results 행이 1개씩 생성됩니다.
+    - review_required는 처방전 전체 단위 판정(overall_confidence < 0.80)이며,
+      그 값이 모든 OcrResult 행에 동일하게 기록됩니다.
+
+    검증 실패(400)나 CLOVA 통신 오류(502/503/504)는 HTTPException으로 던져지고,
+    호출부(records_router.py)에서 그대로 전파되어 프론트가 실패로 인식합니다.
+    """
+    filename = file.filename or ""
+    if not filename:
+        raise HTTPException(status_code=400, detail="파일명이 없습니다. 파일을 다시 선택해주세요.")
+    _, ext = os.path.splitext(filename)
+    if ext.lower() not in _ALLOWED_EXT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"지원하지 않는 파일 형식입니다: '{ext or '확장자 없음'}'. "
+                   f"지원 형식: {', '.join(sorted(_ALLOWED_EXT))}",
+        )
+
+    content = await file.read()
+
+    if not content:
+        raise HTTPException(status_code=400, detail="빈 파일은 업로드할 수 없습니다.")
+
+    record = MedicalRecord(patient_id=patient_id, image_path=filename, status="processing")
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+
+    tmp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext.lower()) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        provider_kind = os.environ.get("OCR_PROVIDER", "clova")
+        provider = get_ocr_provider(provider_kind)
+        ocr_result = provider.extract(tmp_path)
+
+    except requests.exceptions.Timeout as exc:
+        record.status = "failed"
+        record.failure_reason = "CLOVA API 타임아웃"
+        session.add(record); session.commit()
+        raise HTTPException(
+            status_code=504,
+            detail="CLOVA OCR API 응답 시간이 초과됐습니다. 잠시 후 다시 시도해주세요.",
+        ) from exc
+    except requests.exceptions.ConnectionError as exc:
+        record.status = "failed"
+        record.failure_reason = "CLOVA API 연결 실패"
+        session.add(record); session.commit()
+        raise HTTPException(
+            status_code=503,
+            detail="CLOVA OCR API에 연결할 수 없습니다. 네트워크 상태를 확인해주세요.",
+        ) from exc
+    except requests.exceptions.HTTPError as exc:
+        status_code = exc.response.status_code if exc.response is not None else "?"
+        record.status = "failed"
+        record.failure_reason = f"CLOVA API HTTP {status_code} 오류"
+        session.add(record); session.commit()
+        raise HTTPException(
+            status_code=502,
+            detail=f"CLOVA OCR API가 오류를 반환했습니다 (HTTP {status_code}). API 키·할당량을 확인해주세요.",
+        ) from exc
+    except RuntimeError as exc:
+        record.status = "failed"
+        record.failure_reason = str(exc)
+        session.add(record); session.commit()
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        record.status = "failed"
+        record.failure_reason = str(exc)
+        session.add(record); session.commit()
+        raise HTTPException(status_code=500, detail=f"OCR 처리 중 예기치 못한 오류가 발생했습니다: {exc}") from exc
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+    record.raw_text = ocr_result.raw_text
+    record.status = "review_required" if ocr_result.review_required else "completed"
+    session.add(record)
+
+    for med in ocr_result.medications:
+        row = OcrResult(
+            record_id=record.id,
+            drug_name=med.drug_name,
+            drug_code=med.drug_code,
+            dosage=med.dosage,
+            frequency=med.frequency,
+            diagnosis=med.diagnosis,
+            drug_class=med.drug_class,
+            confidence=med.confidence,
+            review_required=ocr_result.review_required,
+        )
+        session.add(row)
+
+    session.commit()
+    session.refresh(record)
+    return record
+
+
+@router.post("/test")
+async def test_ocr_upload(
+    patient_id: int,
+    file: UploadFile = File(...),
+    session: Session = Depends(get_session),
+):
+    """OCR만 따로 테스트하고 싶을 때 쓰는 엔드포인트 (실제 흐름은 POST /records 사용)"""
+    record = await run_ocr(patient_id, file, session)
+    medications = [
+        {
+            "drug_name": m.drug_name,
+            "dosage": m.dosage,
+            "frequency": m.frequency,
+            "diagnosis": m.diagnosis,
+            "drug_class": m.drug_class,
+            "confidence": m.confidence,
+            "review_required": m.review_required,
+        }
+        for m in session.exec(
+            select(OcrResult).where(OcrResult.record_id == record.id)
+        ).all()
+    ]
+    return {
+        "record_id": record.id,
+        "status": record.status,
+        "medications": medications,
+    }

@@ -1,0 +1,25 @@
+import { monitoringClient } from "./monitoringClient";
+
+export interface ChatQuestion {
+  id: string;
+  text: string;
+}
+
+export interface ChatAnswer {
+  question: string;
+  answer: string;
+  created_at: string;
+}
+
+export async function getChatQuestions() {
+  const { data } = await monitoringClient.get<ChatQuestion[]>("/chat/questions");
+  return data;
+}
+
+export async function askChat(patientId: number, questionId: string) {
+  const { data } = await monitoringClient.post<ChatAnswer>("/chat/ask", {
+    patient_id: patientId,
+    question_id: questionId,
+  });
+  return data;
+}

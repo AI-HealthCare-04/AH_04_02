@@ -33,6 +33,9 @@ _*
 !.github/
 !.github/**
 
+# _* 패턴이 __init__.py까지 가리는 것 방지
+!**/__init__.py
+
 # ===== 민감 데이터 / 의료정보 (절대 커밋 금지) =====
 data/private/
 uploads/
@@ -57,6 +60,9 @@ htmlcov/
 # ===== 로그 =====
 *.log
 logs/
+
+# ===== SQLite (backend/ 로컬 개발 DB) =====
+*.db
 
 # ===== Docker / 빌드 산출물 =====
 *.pid
