@@ -302,7 +302,7 @@ OCRResult { raw_text, medications[], overall_confidence,
 ## 8. 진행중 / 대기
 
 - **Day5 BackgroundTask**: 김영혜님 `rag_router.py` 실제 연동 대기 중
-- 박소정님이 `records_router.py`로 통합 라우터 작업 중 — 기존 `ocr_router` / `rag_router` / `monitoring_router`와의 관계 확인 필요
+- 박소정님 `records_router.py` 아직 미공유 상태, `main.py` 미등록 확인됨 (2026-07-07 기준)
 
 ---
 
