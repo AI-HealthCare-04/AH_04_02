@@ -33,6 +33,7 @@ class MedicationItem:
     frequency: str         # 예: "1일 3회"
     diagnosis: str          # 예: "고혈압"
     drug_class: str = ""    # 약효분류, 예: "이뇨제"
+    drug_code: str = ""     # [급여/비급여][코드] 패턴에서 추출한 코드
     confidence: float = 0.0  # 0.0 ~ 1.0
 
 
@@ -70,6 +71,7 @@ def _build_medications(raw_text: str, confidence: float) -> list:
             frequency=m["frequency"],
             diagnosis=diagnosis,
             drug_class=m.get("drug_class") or get_drug_class(m["drug_name"]),
+            drug_code=m.get("drug_code", ""),
             confidence=confidence,
         )
         for m in meds
