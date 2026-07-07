@@ -8,6 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+import requests.exceptions
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from sqlmodel import Session
 
@@ -62,12 +63,23 @@ async def stub_ocr_upload(
     - patient_id: 이 처방전의 환자 id (데모용 id=1 사용)
     - 인식된 약품마다 ocr_results 행이 1개씩 생성됩니다.
     """
-    # 확장자 검증
-    _, ext = os.path.splitext(file.filename or "")
+    # 파일명·확장자 검증
+    filename = file.filename or ""
+    if not filename:
+        raise HTTPException(status_code=400, detail="파일명이 없습니다. 파일을 다시 선택해주세요.")
+    _, ext = os.path.splitext(filename)
     if ext.lower() not in _ALLOWED_EXT:
-        raise HTTPException(status_code=400, detail=f"지원하지 않는 파일 형식: {ext}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"지원하지 않는 파일 형식입니다: '{ext or '확장자 없음'}'. "
+                   f"지원 형식: {', '.join(sorted(_ALLOWED_EXT))}",
+        )
 
     content = await file.read()
+
+    # 빈 파일 검증 (MedicalRecord 생성 전에 차단 — DB에 불필요한 행 남기지 않음)
+    if not content:
+        raise HTTPException(status_code=400, detail="빈 파일은 업로드할 수 없습니다.")
 
     # MedicalRecord 먼저 생성 (OCR 실패 시에도 업로드 기록은 남김)
     record = MedicalRecord(patient_id=patient_id, image_path=file.filename, status="processing")
@@ -85,18 +97,45 @@ async def stub_ocr_upload(
         provider = get_ocr_provider("clova")
         ocr_result = provider.extract(tmp_path)
 
+    except requests.exceptions.Timeout as exc:
+        # CLOVA API가 15초 내 응답 없음 (ocr_interface.py timeout=15)
+        record.status = "failed"
+        record.failure_reason = "CLOVA API 타임아웃"
+        session.add(record); session.commit()
+        raise HTTPException(
+            status_code=504,
+            detail="CLOVA OCR API 응답 시간이 초과됐습니다. 잠시 후 다시 시도해주세요.",
+        ) from exc
+    except requests.exceptions.ConnectionError as exc:
+        # 네트워크 단절, DNS 실패 등
+        record.status = "failed"
+        record.failure_reason = "CLOVA API 연결 실패"
+        session.add(record); session.commit()
+        raise HTTPException(
+            status_code=503,
+            detail="CLOVA OCR API에 연결할 수 없습니다. 네트워크 상태를 확인해주세요.",
+        ) from exc
+    except requests.exceptions.HTTPError as exc:
+        # CLOVA 서버가 4xx/5xx 반환 (잘못된 키, 할당량 초과 등)
+        status_code = exc.response.status_code if exc.response is not None else "?"
+        record.status = "failed"
+        record.failure_reason = f"CLOVA API HTTP {status_code} 오류"
+        session.add(record); session.commit()
+        raise HTTPException(
+            status_code=502,
+            detail=f"CLOVA OCR API가 오류를 반환했습니다 (HTTP {status_code}). API 키·할당량을 확인해주세요.",
+        ) from exc
     except RuntimeError as exc:
+        # CLOVA_OCR_API_URL / SECRET_KEY 미설정 등 설정 오류
         record.status = "failed"
         record.failure_reason = str(exc)
-        session.add(record)
-        session.commit()
+        session.add(record); session.commit()
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         record.status = "failed"
         record.failure_reason = str(exc)
-        session.add(record)
-        session.commit()
-        raise HTTPException(status_code=500, detail=f"OCR 처리 중 오류: {exc}") from exc
+        session.add(record); session.commit()
+        raise HTTPException(status_code=500, detail=f"OCR 처리 중 예기치 못한 오류가 발생했습니다: {exc}") from exc
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
