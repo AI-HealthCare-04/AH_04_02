@@ -94,7 +94,7 @@ async def stub_ocr_upload(
         row = OcrResult(
             record_id=record.id,
             drug_name=med.drug_name,
-            drug_code="",           # CLOVA 응답에 약품 코드 없음 — HIRA 매칭은 drug_reference.py에서 처리
+            drug_code=med.drug_code,
             dosage=med.dosage,
             frequency=med.frequency,
             diagnosis=med.diagnosis,
