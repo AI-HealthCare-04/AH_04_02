@@ -8,7 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from sqlmodel import Session
 
 # 프로젝트 루트(ocr_interface.py 위치)를 sys.path에 보장
@@ -20,12 +20,27 @@ from dotenv import load_dotenv
 load_dotenv(_ROOT / ".env")
 
 from ocr_interface import get_ocr_provider  # noqa: E402
-from database import get_session
+from database import engine, get_session
 from models import MedicalRecord, OcrResult
 
 router = APIRouter(prefix="/ocr", tags=["OCR"])
 
 _ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
+
+
+def _bg_rag_task(record_id: int) -> None:
+    """OCR 완료 직후 자동으로 RAG 가이드를 생성하는 백그라운드 태스크.
+
+    lazy import 로 rag_router 를 불러와 순환 임포트를 방지한다.
+    실패해도 이미 응답이 나간 뒤이므로 예외를 삼키고 로그만 남긴다.
+    """
+    try:
+        from routers.rag_router import generate_guide_for_record  # lazy import
+        with Session(engine) as session:
+            generate_guide_for_record(record_id, session)
+    except Exception as exc:
+        # BackgroundTask 실패는 OCR 응답에 영향 없음. GuideResult 미생성으로 남음.
+        print(f"[BackgroundTask] RAG 가이드 생성 실패 (record_id={record_id}): {exc}")
 
 
 @router.get("/ping")
@@ -36,7 +51,10 @@ def ping():
 
 @router.post("/test")
 async def stub_ocr_upload(
-    patient_id: int, file: UploadFile = File(...), session: Session = Depends(get_session)
+    patient_id: int,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    session: Session = Depends(get_session),
 ):
     """
     처방전 이미지를 업로드하면 CLOVA OCR로 인식하고 DB에 저장합니다.
@@ -115,10 +133,16 @@ async def stub_ocr_upload(
 
     session.commit()
 
+    # review_required 이면 사람이 확인 후 /rag/test/{record_id} 수동 호출
+    # completed 이면 응답 직후 자동으로 RAG 가이드 생성
+    if record.status == "completed":
+        background_tasks.add_task(_bg_rag_task, record.id)
+
     return {
         "record_id": record.id,
         "status": record.status,
         "overall_confidence": ocr_result.overall_confidence,
         "review_required": ocr_result.review_required,
+        "rag_scheduled": record.status == "completed",
         "medications": saved_results,
     }
