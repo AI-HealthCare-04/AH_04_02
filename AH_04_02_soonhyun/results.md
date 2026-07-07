@@ -363,6 +363,16 @@ OCRResult { raw_text, medications[], overall_confidence,
 
 ---
 
+## 아키텍처 통합 결정 (2026-07-07 저녁, 박소정 제안)
+
+- **권순현의 BackgroundTask(비동기) 방식 폐기**, 박소정의 `records_router` 동기 방식(`POST /records` 한 번에 OCR+RAG 완료 후 반환)으로 통일
+- **사유**: schedule_v6 '동기 방식' 원칙에 부합, 프론트(Upload→Processing→Result)가 이미 이 방식 기준으로 완성 및 테스트됨
+- **유지되는 것**: BARE_FREQ_RE 파싱 수정, drug_code 실제값 저장, CLOVA 예외처리, review_required 시 RAG 스킵 로직(방식만 변경 — 박소정 확인 요청함)
+- **폐기되는 것**: `ocr_router.py`의 `_bg_rag_task`, BackgroundTask 연결부
+- **후속 조치**: `ocr_router.py`를 `records_router.py`로 흡수 예정, 박소정이 진행
+
+---
+
 ## 6. 미해결 이슈 (Day2 이후)
 
 | 우선순위 | 이슈 | 근거 샘플 |
