@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import NavBar from "../components/NavBar";
-import { getRecord, type RecordResult } from "../api/records";
+import { formatSourceRef, getRecord, type RecordResult } from "../api/records";
 import { C } from "../theme";
 
 const STATIC_DISCLAIMER =
@@ -119,40 +119,64 @@ export default function PrescriptionDetail() {
 
                 <section className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
                   <h2 className="text-[15px] font-bold mb-3" style={{ color: C.dark }}>💊 맞춤 복약 지도</h2>
-                  {result.guide.medication_guide.drugs.map((drug, i) => (
-                    <div key={i} className="py-2.5" style={{ borderTop: i > 0 ? "1px solid #F5F0EB" : undefined }}>
-                      <p className="text-[13px] font-bold" style={{ color: "#4A4A4A" }}>💊 {drug.drug_name}</p>
-                      <p className="text-[13px]" style={{ color: "#555555" }}>{drug.dosage_text}</p>
-                      {drug.caution && (
-                        <p className="text-[13px] mt-1" style={{ color: C.terracotta }}>⚠️ {drug.caution}</p>
-                      )}
-                    </div>
-                  ))}
+                  {result.guide.medication_guide.drugs.map((drug, i) => {
+                    // [7/8] dosage_text(stub) / medication_guide(실제) 중 있는 걸 씀
+                    const guideText = drug.medication_guide ?? drug.dosage_text ?? "";
+                    // caution(stub, 단일 문자열) / precautions(실제, 배열) 중 있는 걸 씀
+                    const cautionText = drug.precautions?.length ? drug.precautions.join(" ") : drug.caution;
+                    return (
+                      <div key={i} className="py-2.5" style={{ borderTop: i > 0 ? "1px solid #F5F0EB" : undefined }}>
+                        <p className="text-[13px] font-bold" style={{ color: "#4A4A4A" }}>💊 {drug.drug_name}</p>
+                        <p className="text-[13px]" style={{ color: "#555555" }}>{guideText}</p>
+                        {cautionText && (
+                          <p className="text-[13px] mt-1" style={{ color: C.terracotta }}>⚠️ {cautionText}</p>
+                        )}
+                        {drug.review_required && (
+                          <p className="text-[11px] mt-1" style={{ color: "#D98A2B" }}>
+                            AI 검토 필요 — 참고자료 인용이 부족하거나 OCR 인식 신뢰도가 낮아요.
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
                 </section>
 
                 <section className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
                   <h2 className="text-[15px] font-bold mb-3" style={{ color: C.dark }}>🌿 생활습관 개선 가이드</h2>
-                  <div className="py-2.5">
-                    <p className="text-[13px] font-bold" style={{ color: "#4A4A4A" }}>🥗 식이</p>
-                    <p className="text-[13px]" style={{ color: "#555555" }}>
-                      피해야 할 음식: {result.guide.lifestyle_guide.diet.avoid.join(", ") || "없음"}
-                    </p>
-                    {result.guide.lifestyle_guide.diet.drug_specific.length > 0 && (
-                      <p className="text-[13px]" style={{ color: "#555555" }}>
-                        {result.guide.lifestyle_guide.diet.drug_specific.join(" ")}
-                      </p>
-                    )}
-                  </div>
-                  <div className="py-2.5" style={{ borderTop: "1px solid #F5F0EB" }}>
-                    <p className="text-[13px] font-bold" style={{ color: "#4A4A4A" }}>🏃 운동</p>
-                    <p className="text-[13px]" style={{ color: "#555555" }}>
-                      {result.guide.lifestyle_guide.exercise.type} · {result.guide.lifestyle_guide.exercise.duration} ·{" "}
-                      {result.guide.lifestyle_guide.exercise.intensity}
-                    </p>
-                  </div>
+                  {result.guide.lifestyle_guide.guides?.length ? (
+                    // [7/8] 실제 파이프라인 모양 — 약별 생활습관 안내 전문
+                    result.guide.lifestyle_guide.guides.map((text, i) => (
+                      <div key={i} className="py-2.5" style={{ borderTop: i > 0 ? "1px solid #F5F0EB" : undefined }}>
+                        <p className="text-[13px] font-bold" style={{ color: "#4A4A4A" }}>🌿 안내 {i + 1}</p>
+                        <p className="text-[13px]" style={{ color: "#555555" }}>{text}</p>
+                      </div>
+                    ))
+                  ) : (
+                    // stub 모양 — 구조화된 diet/exercise
+                    <>
+                      <div className="py-2.5">
+                        <p className="text-[13px] font-bold" style={{ color: "#4A4A4A" }}>🥗 식이</p>
+                        <p className="text-[13px]" style={{ color: "#555555" }}>
+                          피해야 할 음식: {result.guide.lifestyle_guide.diet?.avoid.join(", ") || "없음"}
+                        </p>
+                        {!!result.guide.lifestyle_guide.diet?.drug_specific.length && (
+                          <p className="text-[13px]" style={{ color: "#555555" }}>
+                            {result.guide.lifestyle_guide.diet.drug_specific.join(" ")}
+                          </p>
+                        )}
+                      </div>
+                      <div className="py-2.5" style={{ borderTop: "1px solid #F5F0EB" }}>
+                        <p className="text-[13px] font-bold" style={{ color: "#4A4A4A" }}>🏃 운동</p>
+                        <p className="text-[13px]" style={{ color: "#555555" }}>
+                          {result.guide.lifestyle_guide.exercise?.type} · {result.guide.lifestyle_guide.exercise?.duration} ·{" "}
+                          {result.guide.lifestyle_guide.exercise?.intensity}
+                        </p>
+                      </div>
+                    </>
+                  )}
                   {result.guide.source_refs.length > 0 && (
                     <p className="text-[12px] mt-3 pt-3" style={{ color: "#AAAAAA", borderTop: "1px solid #F5F0EB" }}>
-                      출처: {result.guide.source_refs.map((s) => s.title).join(", ")}
+                      출처: {result.guide.source_refs.map(formatSourceRef).join(", ")}
                     </p>
                   )}
                 </section>
