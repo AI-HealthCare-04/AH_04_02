@@ -68,14 +68,15 @@ DRUG_CLASS_DICTIONARY: dict = {
 # ─────────────────────────────────────────────────────────────
 
 DRUG_NAME_RE = re.compile(
-    r"([가-힣A-Za-z]{3,}(?:\d+)?(?:연질)?(?:정|캡슐|주|산|시럽|액))"
+    r"([가-힣A-Za-z]{3,}(?:\d+)?(?:연질)?(?:정|캡슐|주|산|시럽|액)"
+    r"|(?-i:[A-Z][a-zA-Z]{4,})(?=\s+\d))"  # 영문 PascalCase 5자+, 바로 뒤에 숫자(용량/횟수) 필수
     r"(\d+(?:\.\d+)?(?:mg|g|ml))?"
     r"(?:\([^)]+\))?",
     re.IGNORECASE,
 )
 
 DOSAGE_RE       = re.compile(r"(\d+(?:\.\d+)?)\s*(mg|g|ml)", re.IGNORECASE)
-KOR_FREQ_RE     = re.compile(r"(?:1일|하루)\s*(\d+)\s*(?:회|번)")
+KOR_FREQ_RE     = re.compile(r"(?:1\s*일|하루)\s*(\d+)\s*(?:회|번)")  # 1 일 3 회 같은 비표준 공백 허용
 BARE_FREQ_RE    = re.compile(r"(?<!\d)(\d+)\s*회(?!\s*[가-힣\)])")
 ABBREV_FREQ_RE  = re.compile(r"\b(qd|od|bid|tid|qid|prn|hs|ac|pc)\b", re.IGNORECASE)
 DAYS_KOR_RE     = re.compile(r"(\d+)\s*일\s*분")
@@ -285,7 +286,7 @@ def _parse_table_format(text: str) -> list:
     frequencies = [f"1일 {n}회" for n in freq_nums]
 
     last_freq_end = 0
-    for m in re.finditer(r"(?:1일|하루)\s*\d+\s*(?:회|번)", text):
+    for m in re.finditer(r"(?:1\s*일|하루)\s*\d+\s*(?:회|번)", text):
         last_freq_end = m.end()
     tail = text[last_freq_end:]
     diag_m = re.search(r"진단명", tail)
