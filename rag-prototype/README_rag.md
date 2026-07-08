@@ -7,7 +7,7 @@ AH04_2조 파이널 프로젝트의 "② RAG·가이드생성" 파트 프로토�
 
 ## 구성 (요약)
 
-- 검색: 식약처 `DrbEasyDrugInfoService/getDrbEasyDrugList`(e약은요, 품목명 부분검색/전체 목록 페이징) + `data/hira_drug_master_20251031.csv`(HIRA 약가마스터, 표준코드·ATC코드·허가/취소 상태 로컬 조회)
+- 검색: 식약처 `DrbEasyDrugInfoService/getDrbEasyDrugList`(e약은요, 품목명 부분검색/전체 목록 페이징) + `backend/data/hira_drug_master_20251031.csv`(HIRA 약가마스터, 표준코드·ATC코드·허가/취소 상태 로컬 조회 — OCR 파트 `drug_reference.py`와 파일 공유, 아래 참고)
 - 만성질환 생활지침: `data/lifestyle_guidelines.json` (고혈압·당뇨병·이상지질혈증·만성콩팥병, 학회/질병관리청 출처)
 - 임베딩: `sentence-transformers` 로컬 모델 (`jhgan/ko-sroberta-multitask`) — **OpenAI 키 없이 동작**
 - 벡터DB: ChromaDB (로컬 영속 저장, `./chroma_db`), 의약품·생활지침이 같은 컬렉션에 공존
@@ -48,7 +48,7 @@ e약은요와 원천이 다른 **로컬 정적 데이터**. 효능효과 같은 
 
 | 단계 | 코드 | 설명 |
 |---|---|---|
-| 원본 데이터 | `data/hira_drug_master_20251031.csv` (약 30.5만 행, CP949 인코딩) | 건강보험심사평가원 약가마스터. 한글상품명·업체명·제형·품목기준코드·품목허가일자·표준코드·ATC코드·취소일자 등 |
+| 원본 데이터 | `backend/data/hira_drug_master_20251031.csv` (약 30.5만 행, CP949 인코딩) | 건강보험심사평가원 약가마스터. 한글상품명·업체명·제형·품목기준코드·품목허가일자·표준코드·ATC코드·취소일자 등 |
 | 데이터 모양 | `rag_prototype/schemas.py`의 `HiraDrugMasterEntry` | `is_active` 프로퍼티로 취소일자 없이 정상 등재 상태인지 바로 판단 가능 |
 | 조회 | `rag_prototype/hira_master.py`의 `search_by_product_name()` / `is_registered_and_active()` | 최초 호출 시 CSV 전체를 한글상품명 기준 raw dict 인덱스로 1회 파싱해 프로세스 캐시(약 1.5초), 이후 조회는 즉시 반환. 정확히 일치하는 상품명 우선, 없으면 부분일치로 폴백 |
 | 벡터DB 적재 | 안 함 | 설명문이 없어 임베딩 대상이 아님, 조회 전용 |
@@ -129,14 +129,14 @@ e약은요와 원천이 다른 **로컬 정적 데이터**. 효능효과 같은 
 |---|---|
 | `rag_prototype/schemas.py` | 데이터 모델 전체: `DrugInfo`, `HiraDrugMasterEntry`, `LifestyleGuideline`, `SourceRef`, `LifestyleSourceRef`, `GuideResponse`, OCR 입력 `MedicationInput` (`DrugPermitInfo`는 `[보류]` 주석 처리됨) |
 | `rag_prototype/mfds_client.py` | 식약처 e약은요 API 호출 (검색 / 전체목록 페이지 조회, 재시도). 허가정보 관련 함수는 `[보류]` 주석 처리됨 |
-| `rag_prototype/hira_master.py` | `data/hira_drug_master_20251031.csv`(HIRA 약가마스터) 로컬 조회 — 표준코드/ATC코드/허가·취소 상태 |
+| `rag_prototype/hira_master.py` | `backend/data/hira_drug_master_20251031.csv`(HIRA 약가마스터) 로컬 조회 — 표준코드/ATC코드/허가·취소 상태 |
 | `rag_prototype/lifestyle_data.py` | `data/lifestyle_guidelines.json` 로더 |
 | `rag_prototype/chunking.py` | 의약품/생활지침 데이터 → `Document` 청크 변환 |
 | `rag_prototype/vectorstore.py` | ChromaDB 연결, 적재(`add_documents` / `add_lifestyle_documents`), 조회(`search_by_item_name` / `search_by_disease` / `similarity_search`) |
 | `rag_prototype/rag_chain.py` | 참고자료 컨텍스트 구성, 질환 별칭 매칭, LLM 호출, self-consistency, 최종 `GuideResponse` 조립 |
 | `rag_prototype/cli.py` | `ingest` / `ingest-lifestyle` / `query` 커맨드라인 진입점 |
 | `data/lifestyle_guidelines.json` | 만성질환 생활지침 원본 데이터 (텍스트 에디터로 직접 수정 가능) |
-| `data/hira_drug_master_20251031.csv` | HIRA 약가마스터 원본 (약 30.5만 행, CP949, 54MB — 권순현님 `drug_reference.py`와 동일 파일 공유) |
+| `backend/data/hira_drug_master_20251031.csv` | HIRA 약가마스터 원본 (약 30.5만 행, CP949, 54MB). `backend/`에만 실물 1개 두고 여기서 상위 디렉터리 경로로 참조 — 권순현님 `drug_reference.py`와 완전히 동일한 파일(중복 보관 안 함) |
 | `scripts/demo_e2e.py` | 배치 수집 → 검색 → 가이드 생성 데모 |
 | `CONTRACT.md` | OCR ↔ RAG 필드 매핑, confidence 임계값, `review_required` 명명 규칙, 생활지침 커버리지 문서 |
 | `tests/contracts/` | OCR 실제 산출물 픽스처 기반 계약 테스트 (필드 누락/rename 감지) |

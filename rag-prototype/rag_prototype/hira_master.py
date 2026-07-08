@@ -2,7 +2,10 @@
 
 e약은요(mfds_client.py)와 원천이 다른 로컬 데이터 — 효능효과 같은 설명문은 없지만,
 표준코드·ATC코드·허가일자·취소일자 등 e약은요에 없는 코드성 정보를 담고 있다.
-data/hira_drug_master_20251031.csv (약 30.5만 행, CP949 인코딩) 기준.
+backend/data/hira_drug_master_20251031.csv (약 30.5만 행, CP949 인코딩) 기준.
+
+이 CSV는 backend/drug_matcher.py(OCR 약품 매칭)도 함께 참조하는 파일이라, 54MB 파일을
+두 곳에 중복 보관하지 않도록 backend/data/ 한 곳만 두고 여기서는 그 경로를 가리킨다.
 """
 
 import csv
@@ -11,7 +14,9 @@ from pathlib import Path
 
 from rag_prototype.schemas import HiraDrugMasterEntry
 
-DEFAULT_HIRA_CSV_PATH = Path(__file__).resolve().parent.parent / "data" / "hira_drug_master_20251031.csv"
+DEFAULT_HIRA_CSV_PATH = (
+    Path(__file__).resolve().parent.parent.parent / "backend" / "data" / "hira_drug_master_20251031.csv"
+)
 
 
 @lru_cache(maxsize=4)
