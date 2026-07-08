@@ -19,7 +19,7 @@ from sqlmodel import Session, select
 from database import get_session
 from models import GuideResult, MedicalRecord, OcrResult, Patient
 from routers.ocr_router import run_ocr
-from routers.rag_router import run_rag_stub
+from routers.rag_router import run_rag
 
 router = APIRouter(prefix="/records", tags=["Records"])
 
@@ -70,7 +70,10 @@ async def create_record(
     ⚠️ CLOVA_OCR_API_URL/SECRET_KEY가 .env에 없으면 503으로 실패합니다(의도된 동작).
        키 없이 파이프라인만 테스트하려면 .env에 OCR_PROVIDER=mock 추가하세요.
 
-    김영혜의 실제 RAG 로직이 붙기 전까지는 run_rag_stub의 가짜 데이터가 나갑니다.
+    [7/8] run_rag_stub -> run_rag로 이름이 바뀌고 async def가 됐습니다 (김영혜).
+    RAG_PROVIDER=real로 켜지 않는 한 지금까지와 동일한 가짜 데이터가 나갑니다 — 자세한
+    내용은 rag_router.py 상단 설명 참고. 반드시 await로 호출해야 합니다(안 붙이면
+    coroutine 객체만 만들고 실제로 실행되지 않는데 예외도 안 떠서 발견하기 어렵습니다).
     """
     if not session.get(Patient, patient_id):
         raise HTTPException(404, "해당 환자를 찾을 수 없어요")
@@ -82,7 +85,7 @@ async def create_record(
         return _build_record_response(record, session, None)
 
     try:
-        guide = run_rag_stub(record.id, session)
+        guide = await run_rag(record.id, session)
     except ValueError as e:
         # OCR은 됐는데 RAG가 실패한 경우 — records/OCR결과는 남기고 실패로 표시
         record.status = "failed"

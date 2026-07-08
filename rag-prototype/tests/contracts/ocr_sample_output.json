@@ -1,0 +1,25 @@
+{
+  "_comment": "OCR팀(origin/feature/ocr-day1-setup_soonhyun, AH_04_02_soonhyun/ocr_interface.py MockOCRProvider) 산출물을 그대로 복사한 계약 픽스처. 두 브랜치가 dev로 머지되면 이 파일 대신 producer 정본(AH_04_02_soonhyun/samples/medication_item.json 등)을 직접 읽도록 전환할 것 (CONTRACT.md 참고).",
+  "raw_text": "아스피린 100mg 1일 1회 / 고혈압 / 로자탄 50mg 1일 1회",
+  "overall_confidence": 0.85,
+  "review_required": false,
+  "source": "mock",
+  "medications": [
+    {
+      "drug_name": "아스피린",
+      "dosage": "100mg",
+      "frequency": "1일 1회",
+      "diagnosis": "고혈압",
+      "drug_class": "항혈소판제",
+      "confidence": 0.92
+    },
+    {
+      "drug_name": "로자탄",
+      "dosage": "50mg",
+      "frequency": "1일 1회",
+      "diagnosis": "고혈압",
+      "drug_class": "ARB(안지오텐신수용체차단제)",
+      "confidence": 0.78
+    }
+  ]
+}
