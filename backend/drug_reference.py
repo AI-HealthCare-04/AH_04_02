@@ -395,6 +395,29 @@ def get_drug_class(drug_name: str, drug_code: str = "") -> str:
     return _class_from_fallback(drug_name)
 
 
+def get_drug_name_list() -> list[str]:
+    """drug_matcher.py에서 재사용할 기준 약품명 목록 반환.
+
+    HIRA 약가마스터 한글상품명 + e약은요 정규화 이름 + 하드코딩 폴백 키
+    를 합쳐서 중복 제거한 리스트를 돌려준다. 데이터 파일이 없으면 하드코딩만 반환.
+    """
+    names: list[str] = []
+    _load_hira()
+    if _hira_name_df is not None and not _hira_name_df.empty:
+        names.extend(_hira_name_df["한글상품명"].tolist())
+    for entry in _load_drug_table():
+        if entry["norm"]:
+            names.append(entry["norm"])
+    names.extend(_HARDCODED_FALLBACK.keys())
+    seen: set[str] = set()
+    result: list[str] = []
+    for name in names:
+        if name and name not in seen:
+            seen.add(name)
+            result.append(name)
+    return result
+
+
 def get_drug_info(drug_name: str, drug_code: str = "") -> dict:
     """상세 정보 반환 (match_source 포함)."""
     if drug_code:

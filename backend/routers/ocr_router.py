@@ -28,6 +28,7 @@ load_dotenv(_ROOT / ".env")
 
 from ocr_interface import get_ocr_provider  # noqa: E402
 from database import get_session
+from drug_matcher import MATCH_THRESHOLD, match_drug
 from models import MedicalRecord, OcrResult
 
 router = APIRouter(prefix="/ocr", tags=["OCR"])
@@ -129,6 +130,7 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
     session.add(record)
 
     for med in ocr_result.medications:
+        matched_name, score = match_drug(med.drug_name)
         row = OcrResult(
             record_id=record.id,
             drug_name=med.drug_name,
@@ -139,6 +141,9 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
             drug_class=med.drug_class,
             confidence=med.confidence,
             review_required=ocr_result.review_required,
+            matched_drug_name=matched_name,
+            match_score=score,
+            needs_review=score < MATCH_THRESHOLD,
         )
         session.add(row)
 
