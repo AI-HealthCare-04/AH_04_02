@@ -297,7 +297,7 @@ OCRResult { raw_text, medications[], overall_confidence,
 - `monitoring_router.py` prefix 버그 수정 (`/monitoring` 누락 발견 및 수정)
 - `review_required` 로직 실제 검증 완료: confidence 0.80 미만 시 `review_required=true`, `status="review_required"`로 정상 전환 확인 (`mock_prescription_table_tilt_blur.jpg`로 테스트, confidence 0.6388)
 - PR #8 생성 및 dev 머지 완료
-- **알려진 한계**: CLOVA가 다중 행 표에서 텍스트 순서를 가끔 뒤섞어 줘서 frequency가 잘못 매칭될 수 있음 (bounding box 재구성 필요, Day2+ 이슈)
+- ~~**알려진 한계**: CLOVA가 다중 행 표에서 텍스트 순서를 가끔 뒤섞어 줘서 frequency가 잘못 매칭될 수 있음~~ → **해결** (`7816a42`): `ocr_interface.py`에 `_sort_fields_by_bbox()` 추가, bounding box 중심 좌표 기반 행 재구성으로 열 우선 출력 문제 수정
 
 ## 8. 진행중 / 대기
 
@@ -354,7 +354,7 @@ OCRResult { raw_text, medications[], overall_confidence,
 
 | 우선순위 | 이슈 | 근거 샘플 |
 |----------|------|-----------|
-| 높음 | 약봉투 테이블형 — bounding box 기반 행 그룹핑 구현 | mock_pharmacy_bag_format.png |
+| ~~높음~~ | ~~약봉투 테이블형 — bounding box 기반 행 그룹핑 구현~~ → **해결** `7816a42` (`ocr_interface._sort_fields_by_bbox`) | mock_pharmacy_bag_format.png |
 | 높음 | 한방 첩약 파서 구현 (형태소 없는 자연어 처방) | mock_oriental_medicine.png |
 | 중간 | 영문 약품명 지원 — `DRUG_NAME_RE`에 `[A-Za-z]{3,}` 추가 | mock_english_mixed.png |
 | 중간 | 피부과 제형 추가 — `크림\|로션\|연고\|겔\|패취` | mock_dermatology.png |
