@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from database import get_session
@@ -32,6 +33,7 @@ def _build_record_response(record: MedicalRecord, session: Session, guide: Guide
         "failure_reason": record.failure_reason,
         "medications": [
             {
+                "id": item.id,  # [7/8 추가] 처방전확인 화면에서 항목별 수정 시 식별용
                 "drug_name": item.drug_name,
                 "dosage": item.dosage,
                 "frequency": item.frequency,
@@ -119,6 +121,66 @@ def list_records(patient_id: int, session: Session = Depends(get_session)):
             }
         )
     return summaries
+
+
+class MedicationCorrection(BaseModel):
+    id: int  # OcrResult.id
+    drug_name: str
+    dosage: str
+    frequency: str
+    diagnosis: str
+    drug_class: str
+
+
+class ConfirmMedicationsPayload(BaseModel):
+    medications: list[MedicationCorrection]
+
+
+@router.post("/{record_id}/confirm")
+def confirm_medications(
+    record_id: int, payload: ConfirmMedicationsPayload, session: Session = Depends(get_session)
+):
+    """
+    [7/8 추가] 처방전확인 화면 — review_required(저신뢰) 처방전의 항목을 보호자가 직접
+    수정·확정하면 그 값으로 OCR 결과를 갈아끼우고 바로 RAG 가이드 생성까지 이어서 처리합니다.
+    (POST /records 상단 docstring에 있던 "재요청 엔드포인트는 별도 TODO"를 해소)
+    """
+    record = session.get(MedicalRecord, record_id)
+    if not record:
+        raise HTTPException(404, "해당 기록을 찾을 수 없어요")
+    if record.status != "review_required":
+        raise HTTPException(409, "확인이 필요한 상태의 처방전이 아니에요")
+
+    for correction in payload.medications:
+        item = session.get(OcrResult, correction.id)
+        if not item or item.record_id != record_id:
+            continue
+        item.drug_name = correction.drug_name
+        item.dosage = correction.dosage
+        item.frequency = correction.frequency
+        item.diagnosis = correction.diagnosis
+        item.drug_class = correction.drug_class
+        item.review_required = False
+        item.user_confirmed = True
+        session.add(item)
+    session.commit()
+
+    try:
+        guide = run_rag_stub(record.id, session)
+    except ValueError as e:
+        record.status = "failed"
+        record.failure_reason = str(e)
+        session.add(record)
+        session.commit()
+        session.refresh(record)
+        return _build_record_response(record, session, None)
+
+    record.status = "completed"
+    record.failure_reason = None
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return _build_record_response(record, session, guide)
 
 
 @router.get("/{record_id}")

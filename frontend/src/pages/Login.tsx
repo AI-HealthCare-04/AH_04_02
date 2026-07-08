@@ -121,6 +121,15 @@ export default function Login() {
         <p style={styles.trust}>
           🔒 비밀번호 로그인은 아직 준비 중이에요 — 임시로 이름을 선택하는 방식이에요
         </p>
+        <p style={{ ...styles.trust, marginTop: 12 }}>
+          처음이신가요?{" "}
+          <button
+            onClick={() => navigate("/register")}
+            style={{ color: "#C16A45", fontWeight: 700, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+          >
+            회원가입
+          </button>
+        </p>
       </main>
     </div>
   );

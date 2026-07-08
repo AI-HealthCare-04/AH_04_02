@@ -1,5 +1,6 @@
 import { Link, useNavigate } from "react-router-dom";
 import { ChevronRight } from "lucide-react";
+import { C } from "../theme";
 
 interface NavBarProps {
   isLoggedIn?: boolean;
@@ -11,32 +12,30 @@ const NAV_ITEMS = [
   { label: "복약 일정", to: "/schedule" },
   { label: "알림 설정", to: "/notification" },
   { label: "대시보드", to: "/dashboard" },
+  { label: "이용 기록", to: "/records" },
 ];
 
 /**
  * [7/8 업그레이드] 기존엔 로고만 있고 메뉴 링크는 실제로 동작하지 않았음.
  * Figma 원본 Navbar 디자인 + react-router 실제 이동으로 교체.
+ * [이후] 색상을 theme.ts(C)로 통일 — 인라인 hex 제거.
  */
 export default function NavBar({ isLoggedIn = false, userName = "", variant = "light" }: NavBarProps) {
   const navigate = useNavigate();
   const dark = variant === "dark";
+  const textColor = dark ? C.white : C.dark;
 
   return (
     <header
-      className={
-        dark
-          ? "sticky top-0 z-40 bg-transparent"
-          : "sticky top-0 z-40 bg-white/95 backdrop-blur-sm border-b border-black/10"
-      }
+      className={dark ? "sticky top-0 z-40 bg-transparent" : "sticky top-0 z-40 backdrop-blur-sm border-b"}
+      style={dark ? undefined : { background: "rgba(255,255,255,0.95)", borderColor: "rgba(30,26,23,0.10)" }}
     >
       <div className="max-w-7xl mx-auto px-6 sm:px-10 h-16 flex items-center justify-between">
         <Link to="/" className="flex items-center gap-2 shrink-0">
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-[#C1653D]">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: C.terracotta }}>
             <span className="text-white text-sm">💊</span>
           </div>
-          <span className={`text-xl font-black ${dark ? "text-white" : "text-[#1E1A17]"}`}>
-            건강동행
-          </span>
+          <span className="text-xl font-black" style={{ color: textColor }}>건강동행</span>
         </Link>
 
         {isLoggedIn && (
@@ -45,9 +44,8 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
               <Link
                 key={item.to}
                 to={item.to}
-                className={`text-[15px] font-medium transition-opacity hover:opacity-60 ${
-                  dark ? "text-white" : "text-[#1E1A17]"
-                }`}
+                className="text-[15px] font-medium transition-opacity hover:opacity-60"
+                style={{ color: textColor }}
               >
                 {item.label}
               </Link>
@@ -57,23 +55,19 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
 
         <div className="flex items-center gap-3">
           {isLoggedIn ? (
-            <button
-              onClick={() => navigate("/mypage")}
-              className="flex items-center gap-2.5 transition-opacity hover:opacity-75"
-            >
-              <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold bg-[#C1653D]">
+            <button onClick={() => navigate("/mypage")} className="flex items-center gap-2.5 transition-opacity hover:opacity-75">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold" style={{ background: C.terracotta }}>
                 {userName ? userName[0] : "?"}
               </div>
-              <span className={`text-[15px] font-semibold ${dark ? "text-white" : "text-[#1E1A17]"}`}>
-                {userName} 님
-              </span>
-              <ChevronRight className="w-3.5 h-3.5 text-[#8A7E75]" />
+              <span className="text-[15px] font-semibold" style={{ color: textColor }}>{userName} 님</span>
+              <ChevronRight className="w-3.5 h-3.5" style={{ color: C.muted }} />
             </button>
           ) : (
             !dark && (
               <button
                 onClick={() => navigate("/login")}
-                className="px-5 py-2 rounded-full border-2 text-[14px] font-bold border-[#C1653D] text-[#C1653D] transition-colors hover:bg-[#C1653D]/5"
+                className="px-5 py-2 rounded-full border-2 text-[14px] font-bold transition-colors"
+                style={{ borderColor: C.terracotta, color: C.terracotta }}
               >
                 로그인
               </button>

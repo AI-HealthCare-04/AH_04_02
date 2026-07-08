@@ -17,14 +17,23 @@ patients / caregivers / caregiver_patients(다대다)를 도입함.
 3) 환자 하나를 고르면 그 patient_id로 /monitoring/today?patient_id=... 호출
 """
 from __future__ import annotations
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, func, select
 
+from auth import hash_password
 from database import get_session
-from models import Caregiver, CaregiverPatient, MedicationLog, MedicationSchedule, Patient
+from models import (
+    Caregiver,
+    CaregiverPatient,
+    MedicalRecord,
+    MedicationLog,
+    MedicationSchedule,
+    OcrResult,
+    Patient,
+)
 
 router = APIRouter(prefix="/monitoring", tags=["Monitoring"])
 
@@ -35,28 +44,53 @@ router = APIRouter(prefix="/monitoring", tags=["Monitoring"])
 class PatientCreate(BaseModel):
     name: str
     note: str | None = None
+    phone: str | None = None  # [7/8 추가] 회원가입(SignUp.tsx)
+    email: str | None = None  # [7/8 추가] 회원가입 "아이디"
+    birth_date: str | None = None  # [7/8 추가]
+    password: str | None = None  # [7/8 추가] 평문으로 받아서 저장 전에 반드시 해시 처리
+    push_enabled: bool = True
+    sms_enabled: bool = False
+    email_opt_in: bool = False
 
 
 class PatientUpdate(BaseModel):
     name: str | None = None
     note: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    birth_date: str | None = None
 
 
-@router.post("/patients", response_model=Patient)
+class PatientPublic(BaseModel):
+    """hashed_password는 API 응답에 노출하지 않기 위한 응답 전용 모델 (CaregiverPublic과 동일한 원칙)"""
+    id: int
+    name: str
+    note: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    birth_date: str | None = None
+    push_enabled: bool = True
+    sms_enabled: bool = False
+    email_opt_in: bool = False
+    created_at: datetime
+
+
+@router.post("/patients", response_model=PatientPublic)
 def create_patient(payload: PatientCreate, session: Session = Depends(get_session)):
-    patient = Patient(**payload.model_dump())
+    data = payload.model_dump(exclude={"password"})
+    patient = Patient(**data, hashed_password=hash_password(payload.password) if payload.password else None)
     session.add(patient)
     session.commit()
     session.refresh(patient)
     return patient
 
 
-@router.get("/patients", response_model=list[Patient])
+@router.get("/patients", response_model=list[PatientPublic])
 def list_patients(session: Session = Depends(get_session)):
     return session.exec(select(Patient)).all()
 
 
-@router.patch("/patients/{patient_id}", response_model=Patient)
+@router.patch("/patients/{patient_id}", response_model=PatientPublic)
 def update_patient(patient_id: int, payload: PatientUpdate, session: Session = Depends(get_session)):
     patient = session.get(Patient, patient_id)
     if not patient:
@@ -89,7 +123,20 @@ def delete_patient(patient_id: int, session: Session = Depends(get_session)):
 # ══════════════════════════════════════════
 class CaregiverCreate(BaseModel):
     name: str
-    relation_type: str = "guardian"  # guardian / caregiver / life_support_worker / social_worker
+    relation_type: str = "guardian"  # guardian / caregiver / life_support_worker / social_worker / organization
+    phone: str | None = None  # [7/8 추가] 회원가입 연락처
+    email: str | None = None  # [7/8 추가] 회원가입 "아이디"(개인) / "담당자 이메일"(단체)
+    birth_date: str | None = None  # [7/8 추가]
+    password: str | None = None  # [7/8 추가] 평문으로 받아서 저장 전에 반드시 해시 처리
+    push_enabled: bool = True  # [7/8 추가] 회원가입 "Push 알림 허용" (필수)
+    sms_enabled: bool = False  # [7/8 추가] 회원가입 "문자(SMS) 수신 허용" (선택)
+    email_opt_in: bool = False  # [7/8 추가] 회원가입 "이메일 수신 허용" (선택)
+    # [7/8 추가] relation_type == "organization"일 때만 의미있는 필드들
+    org_name: str | None = None
+    org_type: str | None = None
+    business_reg_no: str | None = None
+    manager_name: str | None = None
+    manager_phone: str | None = None
 
 
 class CaregiverPublic(BaseModel):
@@ -97,12 +144,24 @@ class CaregiverPublic(BaseModel):
     id: int
     name: str
     relation_type: str
+    phone: str | None = None
+    email: str | None = None
+    birth_date: str | None = None
+    push_enabled: bool = True
+    sms_enabled: bool = False
+    email_opt_in: bool = False
+    org_name: str | None = None
+    org_type: str | None = None
+    business_reg_no: str | None = None
+    manager_name: str | None = None
+    manager_phone: str | None = None
     created_at: datetime
 
 
 @router.post("/caregivers", response_model=CaregiverPublic)
 def create_caregiver(payload: CaregiverCreate, session: Session = Depends(get_session)):
-    caregiver = Caregiver(**payload.model_dump())
+    data = payload.model_dump(exclude={"password"})
+    caregiver = Caregiver(**data, hashed_password=hash_password(payload.password) if payload.password else None)
     session.add(caregiver)
     session.commit()
     session.refresh(caregiver)
@@ -114,7 +173,7 @@ def list_caregivers(session: Session = Depends(get_session)):
     return session.exec(select(Caregiver)).all()
 
 
-@router.get("/caregivers/{caregiver_id}/patients", response_model=list[Patient])
+@router.get("/caregivers/{caregiver_id}/patients", response_model=list[PatientPublic])
 def list_patients_of_caregiver(caregiver_id: int, session: Session = Depends(get_session)):
     """핵심 기능: 이 보호자가 케어하는 환자 전체 목록 (여러 명 가능)"""
     caregiver = session.get(Caregiver, caregiver_id)
@@ -190,13 +249,17 @@ def unlink_caregiver_from_patient(
 class ScheduleCreate(BaseModel):
     patient_id: int
     drug_name: str
-    time_slot: str  # "아침" / "점심" / "저녁" 등 자유 텍스트
+    time_slot: str  # [7/8 변경] "08:00" 같은 실제 시각 문자열
+    dose_timing: str | None = None  # [7/8 추가] 공복 / 아침 식후 / 점심 식전 / 점심 식후 / 저녁 식전 / 저녁 식후
+    caregiver_alert: bool = True  # [7/8 추가]
     memo: str | None = None
 
 
 class ScheduleUpdate(BaseModel):
     drug_name: str | None = None
     time_slot: str | None = None
+    dose_timing: str | None = None
+    caregiver_alert: bool | None = None
     memo: str | None = None
     active: bool | None = None
 
@@ -241,6 +304,30 @@ def update_schedule(
     session.commit()
     session.refresh(schedule)
     return schedule
+
+
+@router.get("/patients/{patient_id}/known-drugs")
+def list_known_drugs(patient_id: int, session: Session = Depends(get_session)):
+    """
+    [7/8 추가] '새 일정 추가' 모달의 "약물 선택" 드롭다운용 — 이 환자의 처방전에서
+    실제로 OCR로 인식된 약 이름 + 이미 등록된 복약 일정의 약 이름을 합쳐 중복 제거해서 반환.
+    가짜 약물 목록이 아니라 이 환자 데이터에 실제로 존재하는 약 이름만 내려줍니다.
+    """
+    record_ids = session.exec(
+        select(MedicalRecord.id).where(MedicalRecord.patient_id == patient_id)
+    ).all()
+    ocr_names = (
+        session.exec(
+            select(OcrResult.drug_name).where(OcrResult.record_id.in_(record_ids))
+        ).all()
+        if record_ids
+        else []
+    )
+    schedule_names = session.exec(
+        select(MedicationSchedule.drug_name).where(MedicationSchedule.patient_id == patient_id)
+    ).all()
+    names = sorted({n.strip() for n in [*ocr_names, *schedule_names] if n and n.strip()})
+    return names
 
 
 @router.delete("/schedules/{schedule_id}")
@@ -301,6 +388,45 @@ def clear_intake(schedule_id: int, session: Session = Depends(get_session)):
         session.commit()
 
     return {"schedule_id": schedule_id, "status": "pending"}
+
+
+# ── [7/8 추가] 모니터링대시보드(보호자용) 캘린더·이행률 계산용 원본 로그 ──
+@router.get("/logs")
+def list_logs(patient_id: int, days: int = 30, session: Session = Depends(get_session)):
+    """
+    최근 N일간의 복약 체크 기록을 스케줄명과 함께 반환합니다.
+    프론트(모니터링대시보드)가 이 원본 로그로 캘린더 점 색상·주간 이행률·최근 기록 표를 직접 계산합니다.
+    (별도 집계 테이블 없이 MedicationLog를 그대로 조회하는 방식 — schedule_v6 단순화 원칙과 동일)
+    """
+    if not session.get(Patient, patient_id):
+        raise HTTPException(404, "해당 환자를 찾을 수 없어요")
+
+    schedules = session.exec(
+        select(MedicationSchedule).where(MedicationSchedule.patient_id == patient_id)
+    ).all()
+    schedule_map = {s.id: s for s in schedules}
+    if not schedule_map:
+        return []
+
+    since = datetime.now() - timedelta(days=days)
+    logs = session.exec(
+        select(MedicationLog)
+        .where(MedicationLog.schedule_id.in_(list(schedule_map.keys())))
+        .where(MedicationLog.checked_at >= since)
+        .order_by(MedicationLog.checked_at.desc())
+    ).all()
+
+    return [
+        {
+            "id": log.id,
+            "schedule_id": log.schedule_id,
+            "drug_name": schedule_map[log.schedule_id].drug_name,
+            "time_slot": schedule_map[log.schedule_id].time_slot,
+            "status": log.status,
+            "checked_at": log.checked_at.isoformat(),
+        }
+        for log in logs
+    ]
 
 
 # ── Dashboard.tsx가 그대로 쓸 수 있는 오늘자 통합 조회 [7/6: patient_id 필수로 변경] ──

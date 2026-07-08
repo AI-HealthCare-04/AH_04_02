@@ -3,6 +3,7 @@ import { monitoringClient } from "./monitoringClient";
 // ── 타입 정의 (records_router.py 응답 형태 그대로) ──
 
 export interface OcrMedication {
+  id: number;
   drug_name: string;
   dosage: string;
   frequency: string;
@@ -31,7 +32,7 @@ export interface SourceRef {
 
 export interface RecordResult {
   record_id: number;
-  status: "processing" | "completed" | "failed";
+  status: "processing" | "review_required" | "completed" | "failed";
   failure_reason: string | null;
   medications: OcrMedication[];
   guide: {
@@ -39,6 +40,15 @@ export interface RecordResult {
     lifestyle_guide: LifestyleGuide;
     source_refs: SourceRef[];
   } | null;
+}
+
+/** 이용기록(목록) 화면용 요약 — GET /records 응답 그대로 */
+export interface RecordSummary {
+  record_id: number;
+  status: "processing" | "review_required" | "completed" | "failed";
+  created_at: string;
+  diagnosis: string;
+  drug_names: string[];
 }
 
 /**
@@ -60,5 +70,34 @@ export async function createRecord(patientId: number, file: File) {
 /** 새로고침 등으로 결과 화면을 다시 열었을 때 재조회용 */
 export async function getRecord(recordId: number) {
   const { data } = await monitoringClient.get<RecordResult>(`/records/${recordId}`);
+  return data;
+}
+
+/** 이용기록 목록 (RecordsPage) */
+export async function listRecords(patientId: number) {
+  const { data } = await monitoringClient.get<RecordSummary[]>("/records", {
+    params: { patient_id: patientId },
+  });
+  return data;
+}
+
+/** 처방전확인 화면 — review_required 항목 수정 후 확정 제출용 */
+export interface MedicationCorrection {
+  id: number;
+  drug_name: string;
+  dosage: string;
+  frequency: string;
+  diagnosis: string;
+  drug_class: string;
+}
+
+/**
+ * 저신뢰(review_required) 항목을 수정해서 확정 제출 → 서버가 바로 RAG 가이드 생성까지 이어서 처리하고
+ * 최종 RecordResult를 돌려줍니다 (POST /records와 동일한 응답 형태).
+ */
+export async function confirmMedications(recordId: number, medications: MedicationCorrection[]) {
+  const { data } = await monitoringClient.post<RecordResult>(`/records/${recordId}/confirm`, {
+    medications,
+  });
   return data;
 }

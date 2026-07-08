@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import type { RecordResult } from "../api/records";
 
@@ -9,10 +10,31 @@ export default function Result() {
   const location = useLocation();
   const result = (location.state as { result?: RecordResult } | null)?.result;
 
-  if (!result) {
+  useEffect(() => {
     // Processing.tsx를 거치지 않고 직접 들어온 경우 (새로고침 등) — 다시 시작
-    navigate("/upload");
+    if (!result) navigate("/upload", { replace: true });
+  }, [result, navigate]);
+
+  if (!result) {
     return null;
+  }
+
+  if (result.status === "review_required") {
+    return (
+      <div style={styles.page}>
+        <nav style={styles.nav}>
+          <span style={styles.logo}>💊 건강동행</span>
+        </nav>
+        <main style={{ ...styles.main, textAlign: "center" as const, padding: "120px 24px" }}>
+          <p style={{ fontSize: 15, color: "#D98A2B", marginBottom: 20 }}>
+            일부 항목의 인식 정확도가 낮아 보호자 확인이 필요해요.
+          </p>
+          <button style={styles.chatBtn} onClick={() => navigate(`/records/${result.record_id}/review`)}>
+            처방전 확인하러 가기
+          </button>
+        </main>
+      </div>
+    );
   }
 
   if (result.status === "failed" || !result.guide) {

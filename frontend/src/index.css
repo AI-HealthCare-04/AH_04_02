@@ -1,66 +1,86 @@
 @import "tailwindcss";
 
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
+/*
+ * [7/8 수정] 아래 커스텀 리셋들을 @layer base로 감쌌습니다.
+ * Tailwind v4는 @import "tailwindcss"가 theme/base/components/utilities 레이어를 만드는데,
+ * 이 파일에 레이어 없이(unlayered) 그냥 CSS를 적으면 "레이어 없는 CSS는 명시성/순서와 무관하게
+ * 항상 모든 레이어 CSS를 이긴다"는 CSS Cascade Layers 규칙 때문에,
+ * 아래 `* { margin:0; padding:0 }`가 mx-auto/px-*/py-*/mt-*/mb-* 같은 Tailwind 유틸리티를
+ * 전부 무력화시키고 있었습니다 (max-w-* + mx-auto로 중앙정렬한 레이아웃이 다 깨져서
+ * 화면이 왼쪽으로 몰려 보인 원인). @layer base로 감싸면 Tailwind의 유틸리티 레이어보다
+ * 낮은 우선순위로 정상 편입되어 유틸리티 클래스가 다시 이깁니다.
+ */
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
 
-:root {
-  font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', system-ui, sans-serif;
-  font-size: 16px;
-  line-height: 1.5;
-  color: #2A2A2A;
-  background: #FAF6F1;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-body {
-  margin: 0;
-  min-height: 100vh;
-  background: #FAF6F1;
-}
-
-#root {
-  width: 100%;
-  min-height: 100vh;
-}
-
-img, video {
-  max-width: 100%;
-  height: auto;
-}
-
-button {
-  font-family: inherit;
-  outline: none !important;
-  -webkit-tap-highlight-color: transparent;
-}
-
-button:focus,
-button:focus-visible,
-button:active,
-button:focus-within {
-  outline: none !important;
-  box-shadow: none !important;
-}
-
-input, textarea {
-  font-family: inherit;
-}
-
-@media (max-width: 768px) {
   :root {
-    font-size: 15px;
+    font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    color: #2A2A2A;
+    background: #FAF6F1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: #FAF6F1;
+  }
+
+  #root {
+    width: 100%;
+    min-height: 100vh;
+  }
+
+  img, video {
+    max-width: 100%;
+    height: auto;
+  }
+
+  button {
+    font-family: inherit;
+    outline: none !important;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button:focus,
+  button:focus-visible,
+  button:active,
+  button:focus-within {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
+  input, textarea {
+    font-family: inherit;
+  }
+
+  @media (max-width: 768px) {
+    :root {
+      font-size: 15px;
+    }
+  }
+
+  /* Grammarly 및 브라우저 기본 포커스링 완전 제거 */
+  *:focus,
+  *:focus-visible,
+  *:focus-within {
+    outline: 0 !important;
+    outline-width: 0 !important;
+    box-shadow: none !important;
   }
 }
 
-/* Grammarly 및 브라우저 기본 포커스링 완전 제거 */
-*:focus,
-*:focus-visible,
-*:focus-within {
-  outline: 0 !important;
-  outline-width: 0 !important;
-  box-shadow: none !important;
+/* [7/8 추가] 복약 일정 "복용 시간" 휠 피커 스크롤바 숨김 — 유틸리티 클래스와 충돌 없는 전용 셀렉터라 레이어 밖에 둬도 안전함 */
+.wheel-scroll {
+  scrollbar-width: none;
+}
+.wheel-scroll::-webkit-scrollbar {
+  display: none;
 }

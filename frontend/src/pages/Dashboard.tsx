@@ -8,6 +8,7 @@ import {
   type Medication,
   type IntakeStatus,
 } from "../api/monitoring";
+import { listRecords, type RecordSummary } from "../api/records";
 
 // 로그인이 아직 없어서 patient_id를 localStorage에서 관리
 // (환자가 여러 명이 되면 "환자 선택" 화면에서 이 값을 설정하도록 확장)
@@ -21,6 +22,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showBanner, setShowBanner] = useState(true);
+  const [recentRecords, setRecentRecords] = useState<RecordSummary[]>([]);
 
   useEffect(() => {
     const patientId = getCurrentPatientId();
@@ -28,6 +30,9 @@ export default function Dashboard() {
       .then(setMeds)
       .catch(() => setError("복약 목록을 불러오지 못했어요."))
       .finally(() => setLoading(false));
+    listRecords(patientId)
+      .then((list) => setRecentRecords(list.filter((r) => r.status === "completed").slice(0, 2)))
+      .catch(() => {});
   }, []);
 
   const updateStatus = async (id: string, status: IntakeStatus) => {
@@ -143,21 +148,28 @@ export default function Dashboard() {
         </div>
 
         <h2 style={styles.sectionTitle}>최근 받은 가이드</h2>
-        <div style={styles.guideGrid}>
-          {[
-            { title: "고혈압·당뇨 복합 처방 안내", date: "2025.06.25" },
-            { title: "이상지질혈증 복약 가이드", date: "2025.06.10" },
-          ].map((g) => (
-            <div key={g.title} style={styles.guideCard}>
-              <div style={styles.guideIcon}>📄</div>
-              <p style={styles.guideTitle}>{g.title}</p>
-              <div style={styles.guideFooter}>
-                <span style={styles.guideDate}>생성일 {g.date}</span>
-                <button style={styles.guideBtn} onMouseDown={(e) => e.preventDefault()} onClick={() => navigate("/result")}>자세히 보기 ›</button>
+        {recentRecords.length === 0 ? (
+          <p style={{ ...styles.stateText, marginBottom: 32 }}>아직 받은 복약 가이드가 없어요.</p>
+        ) : (
+          <div style={styles.guideGrid}>
+            {recentRecords.map((r) => (
+              <div key={r.record_id} style={styles.guideCard}>
+                <div style={styles.guideIcon}>📄</div>
+                <p style={styles.guideTitle}>{r.diagnosis || "복약 가이드"}</p>
+                <div style={styles.guideFooter}>
+                  <span style={styles.guideDate}>생성일 {new Date(r.created_at).toLocaleDateString("ko-KR")}</span>
+                  <button
+                    style={styles.guideBtn}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => navigate(`/records/${r.record_id}`)}
+                  >
+                    자세히 보기 ›
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
         <p style={styles.disclaimer}>본 정보는 의료진의 진단·처방을 대체하지 않습니다</p>
       </main>

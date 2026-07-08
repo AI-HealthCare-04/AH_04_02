@@ -34,20 +34,40 @@ class Patient(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     note: Optional[str] = None  # 특이사항 (예: "치매 초기", "혼자 거주" 등 자유 텍스트)
+    phone: Optional[str] = None  # [7/8 추가] 회원가입(SignUp.tsx) 연락처
+    email: Optional[str] = None  # [7/8 추가] 회원가입 시 아이디 — 로그인 미구현이라 단순 저장용, unique 제약 없음
+    birth_date: Optional[str] = None  # [7/8 추가] 생년월일 (자유 텍스트, 예: "1945.03.15")
+    # [7/8 추가] "환자 본인"으로 가입할 때만 채워짐 — 실제 로그인 화면은 아직 없지만
+    # Caregiver.hashed_password와 동일한 원칙으로 나중에 로그인 붙일 때 바로 쓸 수 있게 real hash로 저장
+    hashed_password: Optional[str] = None
+    push_enabled: bool = True  # [7/8 추가] 회원가입 알림 수신 설정 (Caregiver와 동일한 3종)
+    sms_enabled: bool = False
+    email_opt_in: bool = False
     created_at: datetime = Field(default_factory=datetime.now)
 
 
-# ── 보호자·요양보호사 등 [7/6 추가] ──
+# ── 보호자·요양보호사·단체(기관) 등 [7/6 추가, 7/8 단체 지원 확장] ──
 class Caregiver(SQLModel, table=True):
     __tablename__ = "caregivers"
 
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     # [7/6 보류] 로그인 붙일 때(auth_router.py)만 채워지는 필드 — 지금은 로그인 없이
-    # /caregivers로 그냥 만들 수 있어야 해서 nullable로 둠.
+    # /caregivers로 그냥 만들 수 있어야 해서 nullable로 둠. 회원가입 화면의 "아이디" 입력이 여기 저장됨.
     email: Optional[str] = Field(default=None, unique=True, index=True)
     hashed_password: Optional[str] = None
-    relation_type: str = "guardian"  # guardian / caregiver / life_support_worker / social_worker
+    relation_type: str = "guardian"  # guardian / caregiver / life_support_worker / social_worker / organization
+    phone: Optional[str] = None  # [7/8 추가] 회원가입 연락처
+    birth_date: Optional[str] = None  # [7/8 추가] 생년월일 (자유 텍스트)
+    push_enabled: bool = True  # [7/8 추가] 회원가입 "Push 알림 허용" (필수 체크)
+    sms_enabled: bool = False  # [7/8 추가] 회원가입 "문자(SMS) 수신 허용" (선택)
+    email_opt_in: bool = False  # [7/8 추가] 회원가입 "이메일 수신 허용" (선택, 계정 아이디용 email과는 별개 동의 플래그)
+    # [7/8 추가] relation_type == "organization"일 때만 채워지는 단체(기관) 전용 필드들
+    org_name: Optional[str] = None  # 기관명
+    org_type: Optional[str] = None  # 요양원 / 재가센터 / 협회 / 보건소 / 기타
+    business_reg_no: Optional[str] = None  # 사업자등록번호
+    manager_name: Optional[str] = None  # 담당자 이름 (name과 별개 — 기관 소속 실무 담당자)
+    manager_phone: Optional[str] = None  # 담당자 전화번호
     created_at: datetime = Field(default_factory=datetime.now)
 
 
@@ -111,7 +131,9 @@ class MedicationSchedule(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     patient_id: int = Field(foreign_key="patients.id")  # [7/6 변경] 고정값 1 → 실제 환자 FK
     drug_name: str
-    time_slot: str  # "아침" / "점심" / "저녁" (또는 "08:00" 같은 시각 문자열)
+    time_slot: str  # [7/8 변경] "08:00" 같은 실제 시각 문자열 (기존 "아침"/"점심"/"저녁"에서 변경)
+    dose_timing: Optional[str] = None  # [7/8 추가] 복용상태: 공복/아침 식후/점심 식전/점심 식후/저녁 식전/저녁 식후
+    caregiver_alert: bool = True  # [7/8 추가] 이 일정 알림을 보호자에게도 보낼지
     memo: Optional[str] = None
     active: bool = True
     created_at: datetime = Field(default_factory=datetime.now)

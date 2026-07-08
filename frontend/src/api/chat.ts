@@ -9,6 +9,7 @@ export interface ChatAnswer {
   question: string;
   answer: string;
   created_at: string;
+  source?: string; // RAG 연동 전까지는 항상 undefined — 화면에서 있을 때만 표시
 }
 
 export async function getChatQuestions() {
