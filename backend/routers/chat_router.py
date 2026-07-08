@@ -1,21 +1,30 @@
 """
-chat_router.py — 담당: 김영혜 (Day6 계획)
+chat_router.py — 담당: 김영혜
 
-schedule_v6 확정 방식: 자유 대화 아님. 고정 질문 3개를 누르면 미리 준비된 답변이 나갑니다.
-지금은 "고정 답변"이지만, 나중에 실제 LLM(gpt-4o-mini) 연동 시
-ask() 안의 PRESET_QUESTIONS 매칭 부분만 실제 호출로 바꿔 끼우면 됩니다.
+schedule_v6 확정 방식: 자유 대화 아님. 고정 질문 3개 중 하나를 누르면 답변이 나갑니다.
+버튼(질문)은 고정이지만, [7/8] 답변은 이제 하드코딩이 아니라 **그 환자의 최근 처방전
+(OcrResult/GuideResult)을 참고해 GPT가 실제로 생성**하도록 바꿨습니다.
+
+CHAT_PROVIDER=real (OCR_PROVIDER/RAG_PROVIDER와 동일 컨벤션)을 .env에 켜야 LLM을
+시도합니다. 기본값(미설정)이거나, rag-prototype 의존성이 없거나, LLM 호출이 실패하면
+기존 PRESET_QUESTIONS의 고정 답변으로 조용히 폴백합니다 — 챗봇 자체가 죽는 것보단
+일반적인 답변이라도 나가는 게 낫다는 판단.
 """
 from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+from database import get_session
 from fastapi import APIRouter, Depends, HTTPException
+from models import ChatMessage, GuideResult, MedicalRecord, OcrResult, Patient
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from database import get_session
-from models import ChatMessage, Patient
-
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
-# TODO(김영혜): 실제 LLM 연동 시 이 목록 대신 gpt-4o-mini 호출 결과로 교체
 PRESET_QUESTIONS = [
     {
         "id": "q1",
@@ -34,6 +43,120 @@ PRESET_QUESTIONS = [
     },
 ]
 
+CHAT_SYSTEM_PROMPT = """\
+당신은 고령 만성질환 환자와 보호자를 위한 복약 상담 챗봇입니다.
+아래 [환자 정보]에 있는 내용만 근거로 답하세요 — 거기 없는 내용은 절대로 지어내지 마세요.
+정보가 부족해 확실히 답할 수 없으면 모른다고 솔직히 말하고, 반드시 의사나 약사와
+상담하도록 안내하세요. 쉬운 말로, 고령자도 이해할 수 있게 2~4문장 이내로 짧게 답하세요.
+"""
+
+# CHAT_PROVIDER=real일 때만 실제 LLM을 시도한다 (OCR_PROVIDER/RAG_PROVIDER와 동일 패턴).
+# 기본값은 항상 PRESET_QUESTIONS 고정 답변 — 의존성 유무만으로 동작이 바뀌지 않는다.
+_CHAT_PROVIDER = os.environ.get("CHAT_PROVIDER", "stub")
+
+_CHAT_LLM_AVAILABLE = False
+if _CHAT_PROVIDER == "real":
+    # rag-prototype/의 OpenAI 설정(.env의 OPENAI_API_KEY/OPENAI_MODEL)과 langchain-openai를
+    # 재사용한다 — 키를 backend에 따로 둘 필요 없이 한 곳(rag-prototype/.env)만 관리하면 됨.
+    _RAG_PROTOTYPE_DIR = Path(__file__).resolve().parent.parent.parent / "rag-prototype"
+    if _RAG_PROTOTYPE_DIR.is_dir() and str(_RAG_PROTOTYPE_DIR) not in sys.path:
+        sys.path.insert(0, str(_RAG_PROTOTYPE_DIR))
+
+    try:
+        from langchain_openai import ChatOpenAI  # noqa: F401 — 임포트 가능 여부만 확인(실사용은 지연 임포트)
+        from rag_prototype.config import settings as _rag_settings
+
+        _CHAT_LLM_AVAILABLE = bool(_rag_settings.OPENAI_API_KEY)
+    except Exception:  # noqa: BLE001 — 의존성 미설치/키 없음 등 어떤 이유로든 실패하면 폴백
+        _CHAT_LLM_AVAILABLE = False
+
+
+def _summarize_ocr_items(ocr_items: list[OcrResult]) -> list[str]:
+    if not ocr_items:
+        return []
+    lines = []
+    drugs = ", ".join(f"{item.drug_name}({item.dosage or '용량 미상'}, {item.frequency or '복용법 미상'})" for item in ocr_items)
+    lines.append(f"복용 중인 약: {drugs}")
+    if ocr_items[0].diagnosis:
+        lines.append(f"진단명: {ocr_items[0].diagnosis}")
+    low_confidence = [item.drug_name for item in ocr_items if item.review_required]
+    if low_confidence:
+        lines.append(f"인식 신뢰도가 낮아 보호자 확인이 필요한 약: {', '.join(low_confidence)}")
+    return lines
+
+
+def _summarize_medication_guide(medication_guide_json: str) -> list[str]:
+    """RAG_PROVIDER 설정에 따라 모양이 다를 수 있어(스텁 vs 실제 파이프라인) 방어적으로 읽는다."""
+    try:
+        medication_guide = json.loads(medication_guide_json)
+        drugs = medication_guide.get("drugs", [])
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        return []
+
+    lines = []
+    for drug in drugs:
+        text = drug.get("medication_guide") or drug.get("caution")
+        if text:
+            lines.append(f"[{drug.get('drug_name', '약')} 복약 안내] {text}")
+    return lines
+
+
+def _summarize_lifestyle_guide(lifestyle_guide_json: str) -> list[str]:
+    """마찬가지로 스텁(diet/exercise 구조) vs 실제 파이프라인(guides 리스트) 두 모양 다 처리."""
+    try:
+        lifestyle_guide = json.loads(lifestyle_guide_json)
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        return []
+
+    if lifestyle_guide.get("guides"):
+        return ["[생활습관 안내] " + " ".join(lifestyle_guide["guides"])]
+
+    lines = []
+    diet = lifestyle_guide.get("diet") or {}
+    exercise = lifestyle_guide.get("exercise") or {}
+    if diet.get("avoid"):
+        lines.append("[생활습관 안내] 피해야 할 음식: " + ", ".join(diet["avoid"]))
+    if exercise:
+        lines.append(f"운동 권장: {exercise.get('type', '')} {exercise.get('duration', '')}".strip())
+    return lines
+
+
+def _build_patient_context(patient_id: int, session: Session) -> str:
+    """환자의 가장 최근 처방전(OcrResult/GuideResult)을 텍스트로 요약합니다."""
+    record = session.exec(
+        select(MedicalRecord)
+        .where(MedicalRecord.patient_id == patient_id)
+        .order_by(MedicalRecord.created_at.desc())
+    ).first()
+    if not record:
+        return "아직 등록된 처방전 정보가 없습니다."
+
+    ocr_items = session.exec(select(OcrResult).where(OcrResult.record_id == record.id)).all()
+    lines = _summarize_ocr_items(ocr_items)
+
+    guide = session.exec(
+        select(GuideResult).where(GuideResult.record_id == record.id).order_by(GuideResult.id.desc())
+    ).first()
+    if guide:
+        lines.extend(_summarize_medication_guide(guide.medication_guide))
+        lines.extend(_summarize_lifestyle_guide(guide.lifestyle_guide))
+
+    return "\n".join(lines) if lines else "아직 등록된 처방전 정보가 없습니다."
+
+
+def _generate_llm_answer(question_text: str, context_text: str) -> str:
+    from langchain_openai import ChatOpenAI
+    from rag_prototype.config import settings as rag_settings
+
+    chat = ChatOpenAI(model=rag_settings.OPENAI_MODEL, api_key=rag_settings.OPENAI_API_KEY, temperature=0.4)
+    response = chat.invoke(
+        [
+            {"role": "system", "content": CHAT_SYSTEM_PROMPT},
+            {"role": "user", "content": f"[환자 정보]\n{context_text}\n\n[질문]\n{question_text}"},
+        ]
+    )
+    return response.content.strip()
+
 
 @router.get("/questions")
 def list_questions():
@@ -48,23 +171,43 @@ class ChatAsk(BaseModel):
 
 @router.post("/ask")
 def ask(payload: ChatAsk, session: Session = Depends(get_session)):
+    """고정 질문 하나를 골라 묻는다. CHAT_PROVIDER=real이면 그 환자의 최근 처방전을
+    참고해 GPT가 답변을 생성하고, 아니거나 실패하면 PRESET_QUESTIONS 고정 답변으로 나간다.
+    """
     match = next((q for q in PRESET_QUESTIONS if q["id"] == payload.question_id), None)
     if not match:
         raise HTTPException(404, "존재하지 않는 질문이에요")
     if not session.get(Patient, payload.patient_id):
         raise HTTPException(404, "해당 환자를 찾을 수 없어요")
 
+    answer_text = match["answer"]
+    answer_source = "preset"
+
+    if _CHAT_LLM_AVAILABLE:
+        try:
+            context_text = _build_patient_context(payload.patient_id, session)
+            answer_text = _generate_llm_answer(match["text"], context_text)
+            answer_source = "llm"
+        except Exception as exc:  # noqa: BLE001 — LLM 실패해도 챗봇 자체는 응답해야 함
+            answer_text = match["answer"]
+            answer_source = f"preset_fallback ({type(exc).__name__})"
+
     msg = ChatMessage(
         patient_id=payload.patient_id,
         question_id=match["id"],
         question_text=match["text"],
-        answer_text=match["answer"],
+        answer_text=answer_text,
     )
     session.add(msg)
     session.commit()
     session.refresh(msg)
 
-    return {"question": match["text"], "answer": match["answer"], "created_at": msg.created_at.isoformat()}
+    return {
+        "question": match["text"],
+        "answer": answer_text,
+        "answer_source": answer_source,
+        "created_at": msg.created_at.isoformat(),
+    }
 
 
 @router.get("/history")
