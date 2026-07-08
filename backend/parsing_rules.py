@@ -68,14 +68,14 @@ DRUG_CLASS_DICTIONARY: dict = {
 # ─────────────────────────────────────────────────────────────
 
 DRUG_NAME_RE = re.compile(
-    r"([가-힣A-Za-z]{3,}(?:\d+)?(?:연질)?(?:정|캡슐|주|산|시럽|액)"
+    r"([가-힣A-Za-z]{2,}(?:\d+)?(?:연질)?(?:정|캡슐|주|산|시럽|액|크림|연고|로션|겔|패취)"
     r"|(?-i:[A-Z][a-zA-Z]{4,})(?=\s+\d))"  # 영문 PascalCase 5자+, 바로 뒤에 숫자(용량/횟수) 필수
-    r"(\d+(?:\.\d+)?(?:mg|g|ml))?"
+    r"(\d+(?:\.\d+)?(?:mg|g|ml|%))?"
     r"(?:\([^)]+\))?",
     re.IGNORECASE,
 )
 
-DOSAGE_RE       = re.compile(r"(\d+(?:\.\d+)?)\s*(mg|g|ml)", re.IGNORECASE)
+DOSAGE_RE       = re.compile(r"(\d+(?:\.\d+)?)\s*(mg|g|ml|%)", re.IGNORECASE)
 KOR_FREQ_RE     = re.compile(r"(?:1\s*일|하루)\s*(\d+)\s*(?:회|번)")  # 1 일 3 회 같은 비표준 공백 허용
 BARE_FREQ_RE    = re.compile(r"(?<!\d)(\d+)\s*회(?!\s*[가-힣\)])")
 ABBREV_FREQ_RE  = re.compile(r"\b(qd|od|bid|tid|qid|prn|hs|ac|pc)\b", re.IGNORECASE)
@@ -166,8 +166,8 @@ def _detect_format(text: str) -> str:
 # ─────────────────────────────────────────────────────────────
 
 def _drug_name_only(form_str: str) -> str:
-    """'암로디핀정' → '암로디핀', '오메가3연질캡슐' → '오메가3'."""
-    result = re.sub(r"(?:연질)?(?:정|캡슐|주|산|시럽|액)$", "", form_str)
+    """'암로디핀정' → '암로디핀', '오메가3연질캡슐' → '오메가3', '데스오웬크림' → '데스오웬'."""
+    result = re.sub(r"(?:연질)?(?:정|캡슐|주|산|시럽|액|크림|연고|로션|겔|패취)$", "", form_str)
     return result if result else form_str
 
 

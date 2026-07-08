@@ -418,3 +418,17 @@ OCRResult { raw_text, medications[], overall_confidence,
 | 6-2 | 반환 타입 | `GuideResult` 객체 (SQLModel) | 교체 후에도 동일 타입 반환 필요. 반환값이 다르면 `_build_record_response()`의 `guide.medication_guide` 등 역직렬화 코드도 수정 | 김영혜 ★ |
 | 6-3 | `ValueError` 예외 처리 | `records_router.py:85`에서 `except ValueError` 포착 후 `status="failed"` 처리 | 실제 RAG 예외 타입이 다르면 except 절 추가 필요 | 김영혜 ★ |
 | 6-4 | 스텁 → 실제 교체 후 전체 흐름 재검증 | 9-1 ~ 9-5 전 항목 재실행 | mock/CLOVA 양쪽에서 9-1 ~ 9-5 재실행 | 김영혜 + 권순현 ★ |
+
+---
+
+## 10. 향후 개선 제안
+
+### 한방 첩약 파서 미지원 (2026-07-08)
+
+- **현황**: `mock_oriental_medicine.png` 포함 한방 처방전 전체 미인식 (`약품 없음` 반환)
+- **근거**: 현재 4개 포맷 분기(공식/테이블/리스트/약어) 어디에도 한약재 패턴 없음
+- **필요 작업**:
+  1. 생약재명 사전 확보 (당귀·천궁·작약·황기 등 주요 한약재 목록)
+  2. 중량 단위 파싱 로직 신규 설계 — `g`, `첩`, `포` 단위 처리
+  3. `_parse_oriental_format()` 함수 신규 추가 및 `_detect_format()`에 분기 등록
+- **권장**: 정확도 보장을 위해 한약재 데이터 소스(한국한의학연구원 DB 등) 확보 후 별도 스프린트로 진행
