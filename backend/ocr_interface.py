@@ -79,6 +79,69 @@ def _build_medications(raw_text: str, confidence: float) -> list:
 
 
 # ------------------------------------------------------------------
+# 1-c. bounding box 좌표 기반 행 재구성
+# ------------------------------------------------------------------
+
+def _sort_fields_by_bbox(fields: list) -> list:
+    """CLOVA fields를 boundingPoly 중심 좌표 기준으로 행→열 순서로 재정렬.
+
+    CLOVA는 표(table) 레이아웃에서 열(column) 단위로 텍스트를 출력하는 경우가 있어
+    약품명·용량·횟수가 뒤섞인다. 이 함수는 각 field의 bounding box 중심 y좌표로
+    행을 그룹핑한 뒤 x좌표로 정렬해 자연스러운 읽기 순서로 복원한다.
+
+    boundingPoly가 없는 field(mock 등)는 원래 순서 그대로 유지된다.
+    """
+    if not fields:
+        return fields
+
+    def _center(f: dict) -> tuple:
+        verts = f.get("boundingPoly", {}).get("vertices", [])
+        if not verts:
+            return (0.0, 0.0)
+        return (
+            sum(v.get("x", 0) for v in verts) / len(verts),
+            sum(v.get("y", 0) for v in verts) / len(verts),
+        )
+
+    def _height(f: dict) -> float:
+        verts = f.get("boundingPoly", {}).get("vertices", [])
+        if not verts:
+            return 0.0
+        ys = [v.get("y", 0) for v in verts]
+        return float(max(ys) - min(ys))
+
+    # boundingPoly가 하나도 없으면 정렬 의미 없음 — 원본 반환
+    if all(_height(f) == 0.0 for f in fields):
+        return fields
+
+    # 행 그룹핑 허용 오차: 필드 높이 중앙값 × 0.5
+    heights = sorted(_height(f) for f in fields if _height(f) > 0)
+    row_tol = heights[len(heights) // 2] * 0.5
+
+    # 1차: y 중심 오름차순 정렬
+    fields_by_y = sorted(fields, key=lambda f: _center(f)[1])
+
+    # 2차: 인접 필드를 동일 행으로 묶기
+    rows: list = []
+    row_anchor_y = None
+
+    for f in fields_by_y:
+        cy = _center(f)[1]
+        if row_anchor_y is None or abs(cy - row_anchor_y) > row_tol:
+            rows.append([f])
+            row_anchor_y = cy
+        else:
+            rows[-1].append(f)
+
+    # 3차: 행 내부를 x 중심 오름차순 정렬 후 펼치기
+    result = []
+    for row in rows:
+        row.sort(key=lambda f: _center(f)[0])
+        result.extend(row)
+    return result
+
+
+# ------------------------------------------------------------------
 # 2. 추상 인터페이스 — 모든 OCR 구현체는 이 계약을 따름
 # ------------------------------------------------------------------
 
@@ -178,6 +241,7 @@ class ClovaOCRProvider(OCRProvider):
         body = response.json()
 
         fields = body.get("images", [{}])[0].get("fields", [])
+        fields = _sort_fields_by_bbox(fields)  # bounding box 기반 행 재구성
         raw_text = " ".join(f.get("inferText", "") for f in fields)
         confidences = [f.get("inferConfidence", 0.0) for f in fields if "inferConfidence" in f]
         overall_confidence = sum(confidences) / len(confidences) if confidences else 0.0
