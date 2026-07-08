@@ -68,14 +68,18 @@ DRUG_CLASS_DICTIONARY: dict = {
 # ─────────────────────────────────────────────────────────────
 
 DRUG_NAME_RE = re.compile(
-    r"([가-힣A-Za-z]{3,}(?:\d+)?(?:연질)?(?:정|캡슐|주|산|시럽|액))"
-    r"(\d+(?:\.\d+)?(?:mg|g|ml))?"
+    # (?<![가-힣\d]): 한글·숫자 바로 뒤 부분 매칭 방지 (예: '이지엔6프로연질캡슐'에서 '프로'만 잡히는 것 차단)
+    # (?:\d+(?!연질)[가-힣A-Za-z]{2,})?: 숫자 삽입 복합 약품명 처리 (예: '이지엔6프로')
+    #   — '연질' 앞 lookahead로 '오메가3연질캡슐'에서 3이 연질을 삼키는 것을 방지
+    r"(?<![가-힣\d])([가-힣A-Za-z]{2,}(?:\d+(?!연질)[가-힣A-Za-z]{2,})?(?:\d+)?(?:연질)?(?:정|캡슐|주|산|시럽|액|크림|연고|로션|겔|패취)"
+    r"|(?-i:[A-Z][a-zA-Z]{4,})(?=\s+\d))"  # 영문 PascalCase 5자+, 바로 뒤에 숫자(용량/횟수) 필수
+    r"(\d+(?:\.\d+)?(?:mg|g|ml|%))?"
     r"(?:\([^)]+\))?",
     re.IGNORECASE,
 )
 
-DOSAGE_RE       = re.compile(r"(\d+(?:\.\d+)?)\s*(mg|g|ml)", re.IGNORECASE)
-KOR_FREQ_RE     = re.compile(r"(?:1일|하루)\s*(\d+)\s*(?:회|번)")
+DOSAGE_RE       = re.compile(r"(\d+(?:\.\d+)?)\s*(mg|g|ml|%)", re.IGNORECASE)
+KOR_FREQ_RE     = re.compile(r"(?:1\s*일|하루)\s*(\d+)\s*(?:회|번)")  # 1 일 3 회 같은 비표준 공백 허용
 BARE_FREQ_RE    = re.compile(r"(?<!\d)(\d+)\s*회(?!\s*[가-힣\)])")
 ABBREV_FREQ_RE  = re.compile(r"\b(qd|od|bid|tid|qid|prn|hs|ac|pc)\b", re.IGNORECASE)
 DAYS_KOR_RE     = re.compile(r"(\d+)\s*일\s*분")
@@ -165,8 +169,8 @@ def _detect_format(text: str) -> str:
 # ─────────────────────────────────────────────────────────────
 
 def _drug_name_only(form_str: str) -> str:
-    """'암로디핀정' → '암로디핀', '오메가3연질캡슐' → '오메가3'."""
-    result = re.sub(r"(?:연질)?(?:정|캡슐|주|산|시럽|액)$", "", form_str)
+    """'암로디핀정' → '암로디핀', '오메가3연질캡슐' → '오메가3', '데스오웬크림' → '데스오웬'."""
+    result = re.sub(r"(?:연질)?(?:정|캡슐|주|산|시럽|액|크림|연고|로션|겔|패취)$", "", form_str)
     return result if result else form_str
 
 
@@ -194,17 +198,30 @@ def _parse_official_format(text: str) -> list:
 
         post_raw = seg[dm.end():]
         post = post_raw.split("■")[0]
+        # 날짜(2026-07-09)·시각(10:00) 앞뒤 숫자를 col_nums에서 제외하기 위해
+        # 기존 패턴에 '-' ':' 추가
         col_nums = re.findall(
-            r"(?<![./\d])(\d+)(?![./\d]|mg|g|ml|분|시|초)", post
+            r"(?<![./\d:-])(\d+)(?![./\d:-]|mg|g|ml|분|시|초)", post
         )
 
         seg_clean = seg.split("■")[0]
-        freq = extract_frequency(seg_clean)
-        if not freq:
-            if drug_idx < len(all_freqs):
-                freq = all_freqs[drug_idx]
-            elif len(col_nums) >= 2:
-                freq = f"1일 {col_nums[1]}회"
+
+        # [중단]/[중지] 약물은 복약 횟수 없음
+        if re.search(r"\[중단\]|\[중지\]", seg):
+            freq = ""
+        else:
+            freq = extract_frequency(seg_clean)
+            if not freq:
+                # ① col_nums[1] 우선 (1일 최대 6회 기준 — 초과 시 일수로 판단)
+                # ② col_nums[1]이 일수로 추정되면 col_nums[0] 시도
+                # ③ 숫자 컬럼 없거나 모두 범위 초과 시 all_freqs 폴백
+                #    (CLOVA 컬럼 그룹 출력: 약품명 전체→횟수 전체 순으로 출력되는 경우)
+                if len(col_nums) >= 2 and 0 < int(col_nums[1]) <= 6:
+                    freq = f"1일 {col_nums[1]}회"
+                elif len(col_nums) >= 1 and 0 < int(col_nums[0]) <= 6:
+                    freq = f"1일 {col_nums[0]}회"
+                elif drug_idx < len(all_freqs):
+                    freq = all_freqs[drug_idx]
 
         days = f"{col_nums[2]}일" if len(col_nums) >= 3 else ""
         drug_code = all_codes[drug_idx] if drug_idx < len(all_codes) else ""
@@ -272,7 +289,7 @@ def _parse_table_format(text: str) -> list:
     frequencies = [f"1일 {n}회" for n in freq_nums]
 
     last_freq_end = 0
-    for m in re.finditer(r"(?:1일|하루)\s*\d+\s*(?:회|번)", text):
+    for m in re.finditer(r"(?:1\s*일|하루)\s*\d+\s*(?:회|번)", text):
         last_freq_end = m.end()
     tail = text[last_freq_end:]
     diag_m = re.search(r"진단명", tail)

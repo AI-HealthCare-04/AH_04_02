@@ -36,6 +36,27 @@ _*
 # _* 패턴이 __init__.py까지 가리는 것 방지
 !**/__init__.py
 
+# ===== macOS 홈 디렉터리 표준 폴더 (git root=/Users/admin, AH_04_02_soonhyun/·backend/ 제외 안 함) =====
+Desktop/
+Documents/
+Applications/
+Downloads/
+Library/
+Pictures/
+Music/
+Movies/
+Public/
+# 무관 프로젝트/파일
+Pregnancy-Success-Forecaster/
+aimers6th.fertility_patients_pregnancy_success_prediction/
+oz-ai-04-soon/
+docker/
+git/
+project/
+SHOW
+hello.py
+PyCharmMiscProject/
+
 # ===== 민감 데이터 / 의료정보 (절대 커밋 금지) =====
 data/private/
 uploads/

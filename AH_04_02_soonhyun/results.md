@@ -297,7 +297,7 @@ OCRResult { raw_text, medications[], overall_confidence,
 - `monitoring_router.py` prefix 버그 수정 (`/monitoring` 누락 발견 및 수정)
 - `review_required` 로직 실제 검증 완료: confidence 0.80 미만 시 `review_required=true`, `status="review_required"`로 정상 전환 확인 (`mock_prescription_table_tilt_blur.jpg`로 테스트, confidence 0.6388)
 - PR #8 생성 및 dev 머지 완료
-- **알려진 한계**: CLOVA가 다중 행 표에서 텍스트 순서를 가끔 뒤섞어 줘서 frequency가 잘못 매칭될 수 있음 (bounding box 재구성 필요, Day2+ 이슈)
+- ~~**알려진 한계**: CLOVA가 다중 행 표에서 텍스트 순서를 가끔 뒤섞어 줘서 frequency가 잘못 매칭될 수 있음~~ → **해결** (`7816a42`): `ocr_interface.py`에 `_sort_fields_by_bbox()` 추가, bounding box 중심 좌표 기반 행 재구성으로 열 우선 출력 문제 수정
 
 ## 8. 진행중 / 대기
 
@@ -336,11 +336,25 @@ OCRResult { raw_text, medications[], overall_confidence,
 
 ---
 
+## 7. 팀 결정 사항
+
+### 의약품 데이터 소스 최종 픽스 (2026-07-08)
+
+- **채택**: 약가마스터 + e약은요
+- **배제**: 허가사항(MFDS API)
+- **근거**:
+  - 타겟이 만성질환자 → 약가마스터가 만성질환 급여 우선 등재 구조라 커버리지 90%+ 확보
+  - 커버 안 되는 품목(위고비, 탈모치료제 등)은 프로젝트 타겟 범위 밖 → 실질적 영향 없음
+  - MFDS API는 게이트웨이 장애 이력도 있어 안정성 우려로 배제
+- **제안**: 김영혜 / **팀 확인**: 완료
+
+---
+
 ## 6. 미해결 이슈 (Day2 이후)
 
 | 우선순위 | 이슈 | 근거 샘플 |
 |----------|------|-----------|
-| 높음 | 약봉투 테이블형 — bounding box 기반 행 그룹핑 구현 | mock_pharmacy_bag_format.png |
+| ~~높음~~ | ~~약봉투 테이블형 — bounding box 기반 행 그룹핑 구현~~ → **해결** `7816a42` (`ocr_interface._sort_fields_by_bbox`) | mock_pharmacy_bag_format.png |
 | 높음 | 한방 첩약 파서 구현 (형태소 없는 자연어 처방) | mock_oriental_medicine.png |
 | 중간 | 영문 약품명 지원 — `DRUG_NAME_RE`에 `[A-Za-z]{3,}` 추가 | mock_english_mixed.png |
 | 중간 | 피부과 제형 추가 — `크림\|로션\|연고\|겔\|패취` | mock_dermatology.png |
@@ -349,3 +363,73 @@ OCRResult { raw_text, medications[], overall_confidence,
 | 중간 | 비표준 frequency 표기("7 회") KOR_FREQ_RE 보강 | prescription_01.jpg |
 | 낮음 | ~~정신건강의학과 브랜드명 미등록~~ → HIRA 연동으로 해결 | — |
 | 낮음 | ~~DRUG_CLASS_DICTIONARY 확장~~ → drug_reference.py로 대체 완료 | — |
+
+---
+
+## 9. Day7 통합테스트 체크리스트
+
+> 기준일: 2026-07-08 / 서버: `cd /Users/admin/backend && OCR_PROVIDER=mock uvicorn main:app --reload`  
+> 사전 준비: `patient_id=1` 존재 확인 (`GET /monitoring/patients`)
+
+### 9-1. 정상 케이스
+
+| # | 시나리오 | 예상 응답 | 확인 방법 | 담당 |
+|---|----------|-----------|-----------|------|
+| 1-1 | OCR(mock) → drug_code 매칭 → RAG 호출 → 결과 반환 | `status:"completed"`, `guide` 포함, `medications[].drug_code` 존재 | `curl -X POST "http://localhost:8000/records?patient_id=1" -F "file=@samples/mock_prescription_official.png"` | 권순현 |
+| 1-2 | OCR(CLOVA) 실제 호출 (.env에 키 있을 때) | `status:"completed"`, `overall_confidence > 0` | `.env`의 `OCR_PROVIDER=clova`로 변경 후 위 curl 재실행 | 권순현 |
+| 1-3 | RAG 스텁 결과 응답 JSON 구조 확인 | `guide.medication_guide.drugs[]`, `guide.lifestyle_guide`, `guide.source_refs[]` 모두 포함 | 1-1 응답 JSON에서 `guide` 키 검사 | 김영혜 |
+
+### 9-2. review_required=true 케이스
+
+| # | 시나리오 | 예상 응답 | 확인 방법 | 담당 |
+|---|----------|-----------|-----------|------|
+| 2-1 | CLOVA confidence < 0.80 → RAG 스킵 | `status:"review_required"`, `guide:null` | `curl -X POST "http://localhost:8000/records?patient_id=1" -F "file=@samples/mock_prescription_abbrev.png"` (실측 confidence 0.78) | 권순현 |
+| 2-2 | mock 강제 저신뢰: `.env`에 `OCR_PROVIDER=mock` 후 TestClient로 confidence 0.75 패치 | `status:"review_required"`, `medications[]` 비어있지 않음, `guide:null` | `python3 -c "import os; os.environ['OCR_PROVIDER']='mock'; ..."` (이전 세션 검증 스크립트 참조) | 권순현 |
+
+### 9-3. drug_code 매칭 실패 케이스
+
+| # | 시나리오 | 예상 응답 | 확인 방법 | 담당 |
+|---|----------|-----------|-----------|------|
+| 3-1 | OCR에서 drug_code 미추출 (약품명만 인식) | `medications[].drug_code:""`, `review_required` 플래그로 정상 폴백 — 에러 없음 | mock 처방전 업로드 후 응답의 `drug_code` 값 확인 (`""` 이면 정상) | 권순현 |
+| 3-2 | drug_code 없어도 RAG 호출 정상 진행 | `status:"completed"`, `guide` 포함 | 3-1과 동일 응답에서 `guide != null` 확인 | 권순현 |
+
+### 9-4. CLOVA 다중행 표 bounding box 정렬 케이스
+
+| # | 시나리오 | 예상 응답 | 확인 방법 | 담당 |
+|---|----------|-----------|-----------|------|
+| 4-1 | mock 21개 중 다중 약품 표 이미지 파싱 (현재 DB raw_text 기준) | 이상치 0건: "2026회·30회·7회·0회" 없음, 각 약품 frequency 정상 범위 | `python3 -c "from parsing_rules import parse_prescription; ..."` (배치 검증 스크립트 재실행) | 권순현 |
+| 4-2 | CLOVA 실제 호출 후 `raw_text` 텍스트 순서 확인 (열 우선 → 행 우선으로 재구성) | raw_text가 `약품A 횟수A 일수A 약품B 횟수B 일수B` 형태 (약품명+횟수 인접) | `OCR_PROVIDER=clova`로 다중 약품 처방전 업로드 후 DB에서 `raw_text` 확인: `sqlite3 app.db "SELECT raw_text FROM medical_records ORDER BY id DESC LIMIT 1;"` | 권순현 |
+| 4-3 | mock 21개 핵심 다중 약품 케이스 (`mock_prescription_official`, `mock_nursing_hospital`, `mock_university_hospital`) | 약품별 frequency 정확히 매칭 (세레콕시브 1일2회, 에페리손 1일3회 등) | 배치 검증 스크립트 결과표 참조 (`7cf421b` 기준 검증 완료) | 권순현 |
+
+### 9-5. 에러 케이스
+
+| # | 시나리오 | 예상 응답 | 확인 방법 | 담당 |
+|---|----------|-----------|-----------|------|
+| 5-1 | 빈 파일 업로드 | `HTTP 400`, `"빈 파일은 업로드할 수 없습니다."` | `curl -X POST "http://localhost:8000/records?patient_id=1" -F "file=@/dev/null;type=image/png;filename=empty.png"` | 권순현 |
+| 5-2 | 미지원 확장자 (.pdf) | `HTTP 400`, `"지원하지 않는 파일 형식"` 포함 메시지 | `curl -X POST "http://localhost:8000/records?patient_id=1" -F "file=@/dev/null;type=application/pdf;filename=test.pdf"` | 권순현 |
+| 5-3 | CLOVA 키 없음 (`.env`의 키 제거 후 `OCR_PROVIDER=clova`) | `HTTP 503`, `"CLOVA_OCR_API_URL / CLOVA_OCR_SECRET_KEY 환경변수가 없습니다."` | `.env`에서 `CLOVA_OCR_SECRET_KEY` 주석 처리 후 curl 재실행 | 권순현 |
+| 5-4 | 존재하지 않는 patient_id | `HTTP 404`, `"해당 환자를 찾을 수 없어요"` | `curl -X POST "http://localhost:8000/records?patient_id=9999" -F "file=@samples/mock_prescription_official.png"` | 권순현 |
+
+### 9-6. RAG 실제 연동 시 확인 항목 (김영혜님)
+
+| # | 확인 항목 | 현재 상태 | 연동 시 필요 조치 | 담당 |
+|---|-----------|-----------|-------------------|------|
+| 6-1 | `run_rag_stub` 시그니처 | `def run_rag_stub(record_id, session)` — **sync** | 실제 RAG가 `async def`이면 `records_router.py:84`의 호출을 `await run_rag_stub(...)` 으로 수정 | 김영혜 ★ |
+| 6-2 | 반환 타입 | `GuideResult` 객체 (SQLModel) | 교체 후에도 동일 타입 반환 필요. 반환값이 다르면 `_build_record_response()`의 `guide.medication_guide` 등 역직렬화 코드도 수정 | 김영혜 ★ |
+| 6-3 | `ValueError` 예외 처리 | `records_router.py:85`에서 `except ValueError` 포착 후 `status="failed"` 처리 | 실제 RAG 예외 타입이 다르면 except 절 추가 필요 | 김영혜 ★ |
+| 6-4 | 스텁 → 실제 교체 후 전체 흐름 재검증 | 9-1 ~ 9-5 전 항목 재실행 | mock/CLOVA 양쪽에서 9-1 ~ 9-5 재실행 | 김영혜 + 권순현 ★ |
+| 6-5 | `source_refs[]` 스키마 고정 | `[{"title": str, "url": str}]` — 2개 키만 사용 | Result.tsx 프론트 호환 필수. **RAG 실제 구현 시 키 이름 변경 금지.** `drug_reference.py`의 `atc_code` / `match_source` / `matched_item`은 내부용이며 API 응답 미노출 (2026-07-08, 김영혜 확인 예정) | 김영혜 ★ |
+
+---
+
+## 10. 향후 개선 제안
+
+### 한방 첩약 파서 미지원 (2026-07-08)
+
+- **현황**: `mock_oriental_medicine.png` 포함 한방 처방전 전체 미인식 (`약품 없음` 반환)
+- **근거**: 현재 4개 포맷 분기(공식/테이블/리스트/약어) 어디에도 한약재 패턴 없음
+- **필요 작업**:
+  1. 생약재명 사전 확보 (당귀·천궁·작약·황기 등 주요 한약재 목록)
+  2. 중량 단위 파싱 로직 신규 설계 — `g`, `첩`, `포` 단위 처리
+  3. `_parse_oriental_format()` 함수 신규 추가 및 `_detect_format()`에 분기 등록
+- **권장**: 정확도 보장을 위해 한약재 데이터 소스(한국한의학연구원 DB 등) 확보 후 별도 스프린트로 진행
