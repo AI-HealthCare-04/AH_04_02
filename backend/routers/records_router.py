@@ -33,6 +33,7 @@ def _build_record_response(record: MedicalRecord, session: Session, guide: Guide
         "medications": [
             {
                 "drug_name": item.drug_name,
+                "drug_code": item.drug_code,
                 "dosage": item.dosage,
                 "frequency": item.frequency,
                 "diagnosis": item.diagnosis,
