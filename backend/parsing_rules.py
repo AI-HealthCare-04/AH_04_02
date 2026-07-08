@@ -194,17 +194,30 @@ def _parse_official_format(text: str) -> list:
 
         post_raw = seg[dm.end():]
         post = post_raw.split("■")[0]
+        # 날짜(2026-07-09)·시각(10:00) 앞뒤 숫자를 col_nums에서 제외하기 위해
+        # 기존 패턴에 '-' ':' 추가
         col_nums = re.findall(
-            r"(?<![./\d])(\d+)(?![./\d]|mg|g|ml|분|시|초)", post
+            r"(?<![./\d:-])(\d+)(?![./\d:-]|mg|g|ml|분|시|초)", post
         )
 
         seg_clean = seg.split("■")[0]
-        freq = extract_frequency(seg_clean)
-        if not freq:
-            if drug_idx < len(all_freqs):
-                freq = all_freqs[drug_idx]
-            elif len(col_nums) >= 2:
-                freq = f"1일 {col_nums[1]}회"
+
+        # [중단]/[중지] 약물은 복약 횟수 없음
+        if re.search(r"\[중단\]|\[중지\]", seg):
+            freq = ""
+        else:
+            freq = extract_frequency(seg_clean)
+            if not freq:
+                # ① col_nums[1] 우선 (1일 최대 6회 기준 — 초과 시 일수로 판단)
+                # ② col_nums[1]이 일수로 추정되면 col_nums[0] 시도
+                # ③ 숫자 컬럼 없거나 모두 범위 초과 시 all_freqs 폴백
+                #    (CLOVA 컬럼 그룹 출력: 약품명 전체→횟수 전체 순으로 출력되는 경우)
+                if len(col_nums) >= 2 and 0 < int(col_nums[1]) <= 6:
+                    freq = f"1일 {col_nums[1]}회"
+                elif len(col_nums) >= 1 and 0 < int(col_nums[0]) <= 6:
+                    freq = f"1일 {col_nums[0]}회"
+                elif drug_idx < len(all_freqs):
+                    freq = all_freqs[drug_idx]
 
         days = f"{col_nums[2]}일" if len(col_nums) >= 3 else ""
         drug_code = all_codes[drug_idx] if drug_idx < len(all_codes) else ""
