@@ -12,21 +12,49 @@ export interface OcrMedication {
   review_required: boolean;
 }
 
+/**
+ * [7/8] RAG_PROVIDER=stub(기본값)과 RAG_PROVIDER=real이 서로 다른 모양을 반환한다.
+ * 두 모드를 전환하며 테스트해야 하는 과도기라 필드를 전부 optional로 두고,
+ * Result.tsx에서 어느 필드가 있는지 보고 어느 모드인지 판단해서 렌더링한다.
+ * (실제 응답 샘플: docs/rag-real-response-sample.md)
+ */
 export interface GuideDrug {
   drug_name: string;
-  dosage_text: string;
-  caution: string;
+  // stub 모양
+  dosage_text?: string;
+  caution?: string;
+  // 실제 파이프라인 모양
+  medication_guide?: string;
+  precautions?: string[];
+  review_required?: boolean;
+  review_flags?: string[];
 }
 
 export interface LifestyleGuide {
   diagnosis: string;
-  diet: { avoid: string[]; drug_specific: string[] };
-  exercise: { type: string; duration: string; intensity: string };
+  // stub 모양
+  diet?: { avoid: string[]; drug_specific: string[] };
+  exercise?: { type: string; duration: string; intensity: string };
+  // 실제 파이프라인 모양 — 약별 생활습관 안내 전문 리스트
+  guides?: string[];
 }
 
 export interface SourceRef {
-  title: string;
-  url: string;
+  drug_name?: string;
+  // stub 모양
+  title?: string;
+  url?: string;
+  // 실제 파이프라인 — 의약품 인용(e약은요 + HIRA 약가마스터)
+  item_name?: string;
+  field?: string;
+  hira_standard_code?: string;
+  hira_atc_code?: string;
+  hira_permit_date?: string;
+  hira_active?: boolean;
+  // 실제 파이프라인 — 생활지침 인용
+  disease?: string;
+  category?: string;
+  source?: string;
 }
 
 export interface RecordResult {
@@ -39,6 +67,14 @@ export interface RecordResult {
     lifestyle_guide: LifestyleGuide;
     source_refs: SourceRef[];
   } | null;
+}
+
+/** source_refs 항목 하나를 사람이 읽을 수 있는 한 줄로 표시 (stub/실제 두 모양 다 처리) */
+export function formatSourceRef(ref: SourceRef): string {
+  if (ref.title) return ref.title; // stub 모양
+  if (ref.item_name) return `${ref.item_name}${ref.field ? ` · ${ref.field}` : ""}`; // 의약품 인용
+  if (ref.disease) return `${ref.disease}${ref.category ? ` · ${ref.category}` : ""}`; // 생활지침 인용
+  return ref.drug_name ?? "출처 미상";
 }
 
 /**
