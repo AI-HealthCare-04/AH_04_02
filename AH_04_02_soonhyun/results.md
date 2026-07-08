@@ -418,6 +418,7 @@ OCRResult { raw_text, medications[], overall_confidence,
 | 6-2 | 반환 타입 | `GuideResult` 객체 (SQLModel) | 교체 후에도 동일 타입 반환 필요. 반환값이 다르면 `_build_record_response()`의 `guide.medication_guide` 등 역직렬화 코드도 수정 | 김영혜 ★ |
 | 6-3 | `ValueError` 예외 처리 | `records_router.py:85`에서 `except ValueError` 포착 후 `status="failed"` 처리 | 실제 RAG 예외 타입이 다르면 except 절 추가 필요 | 김영혜 ★ |
 | 6-4 | 스텁 → 실제 교체 후 전체 흐름 재검증 | 9-1 ~ 9-5 전 항목 재실행 | mock/CLOVA 양쪽에서 9-1 ~ 9-5 재실행 | 김영혜 + 권순현 ★ |
+| 6-5 | `source_refs[]` 스키마 고정 | `[{"title": str, "url": str}]` — 2개 키만 사용 | Result.tsx 프론트 호환 필수. **RAG 실제 구현 시 키 이름 변경 금지.** `drug_reference.py`의 `atc_code` / `match_source` / `matched_item`은 내부용이며 API 응답 미노출 (2026-07-08, 김영혜 확인 예정) | 김영혜 ★ |
 
 ---
 
