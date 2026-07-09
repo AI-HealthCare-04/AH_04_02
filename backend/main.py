@@ -5,14 +5,15 @@ v6 확정 구조:
 - DB: SQLite (app.db 파일 하나, 설치 불필요)
 - 동기 방식 (스트리밍/폴링 없음)
 - Redis 미사용
-- 로그인 없음 — caregiver_id/patient_id를 쿼리 파라미터로 넘기는 방식 (7/2 멘토링 결정, 백엔드 경험 0명 대응)
 - 라우터: ocr_router(권순현) / rag_router(김영혜) / monitoring_router(박소정)
 
-[7/6 보류] JWT 로그인(auth.py, dependencies.py, routers/auth_router.py)은 만들어뒀지만
-지금 스프린트 스코프에서는 뺐습니다. 요구사항정의서 REQ-001/031엔 있지만, 시간·인력 상
-schedule_v6에서 이미 제외하기로 한 항목이라 — 나중에 여유 생기면 main.py에 아래 주석 처리한
-두 줄만 살리고, 각 라우터 함수에 `caregiver: Caregiver = Depends(get_current_caregiver)`를
-다시 추가하면 됩니다.
+[7/6 보류 → 7/9 로그인 활성화] JWT 로그인(auth.py, dependencies.py, routers/auth_router.py)은
+schedule_v6에서 시간·인력 상 이번 스프린트 스코프에서 뺐었는데(백엔드 경험 0명 대응), 2026-07-08
+멘토링에서 개인정보 보호(암호화) 설계가 로그인 방식을 전제로 하게 되면서 auth_router를 다시
+등록함 — 보호자/환자 둘 다 로그인 가능(POST /auth/login). ⚠️ monitoring_router.py 등 기존
+엔드포인트들은 여전히 caregiver_id/patient_id를 쿼리 파라미터로 받는 기존 방식 그대로임 — 그
+엔드포인트들을 실제 토큰 기반(`Depends(get_current_caregiver)`)으로 바꾸는 건 이번 변경 범위
+밖(별도 작업)이고, 로그인 자체와 개인정보 암호화만 이번에 반영함.
 
 실행 방법 (backend 폴더에서):
     pip install -r requirements.txt
@@ -24,8 +25,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_db
-from routers import ocr_router, rag_router, monitoring_router, records_router, care_router, chat_router
-# from routers import auth_router  # [7/6 보류] 로그인 붙일 때 이 줄과 아래 include_router 주석 해제
+from routers import auth_router, ocr_router, rag_router, monitoring_router, records_router, care_router, chat_router
 
 app = FastAPI(
     title="건강동행 API",
@@ -56,7 +56,7 @@ def health_check():
 
 
 # ── 라우터 등록 (새 라우터 추가 시 여기에 한 줄씩) ──
-# app.include_router(auth_router.router)  # [7/6 보류] 로그인 붙일 때 주석 해제
+app.include_router(auth_router.router)  # [7/9] 로그인 활성화 — 보호자/환자 둘 다 지원
 app.include_router(records_router.router)
 app.include_router(ocr_router.router)
 app.include_router(rag_router.router)

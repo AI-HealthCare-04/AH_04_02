@@ -11,53 +11,89 @@ Day 2에 각자 자기 테이블을 검토하고 필요하면 컬럼을 고쳐�
 개발 중엔 app.db 파일을 지우고 재시작하는 게 제일 간단합니다.
 
 [7/6 추가] 환자 구분 도입 — patients / caregivers / caregiver_patients
-- 로그인이 아직 없어서 "본인이 로그인해서 자기 환자를 본다"는 안 됨.
-  대신 caregiver_id를 쿼리 파라미터로 넘겨서 "이 보호자가 담당하는 환자 목록"을 조회하는 방식.
 - 다대다로 만들어서 "한 보호자가 여러 환자"뿐 아니라 "한 환자를 여러 보호자가 같이 케어"도 커버함.
 - 서버 최초 기동 시 테스트용 환자 1명 + 보호자 1명을 자동으로 만들어둠 (database.py의 seed_demo_data 참고)
 
-[7/6 추가 2] 로그인/회원가입 도입 — caregivers에 email/hashed_password 추가
-- 환자(Patient)는 앱을 직접 쓰지 않는 케어 대상이라 로그인 계정이 없음.
-- 보호자·요양보호사(Caregiver)만 로그인해서 자기가 담당하는 환자 목록을 봄
-  (caregiver_id를 쿼리 파라미터로 넘기던 방식 → JWT 토큰에서 caregiver를 구함).
+[7/6 추가 2, 7/9 확장] 로그인/회원가입 — 보호자뿐 아니라 환자 본인도 로그인 대상
+- 처음엔 "환자는 앱을 직접 쓰지 않는 케어 대상"으로 보고 Caregiver만 로그인하게 했었지만,
+  실제로는 환자 본인도 서비스 이용 대상이라 로그인이 필요함 — Patient에도 email/hashed_password를
+  두고, routers/auth_router.py가 caregiver/patient 양쪽 다 로그인을 지원하도록 확장함(auth.py의
+  JWT에 role 클레임 추가). caregiver_id를 쿼리 파라미터로 넘기던 기존 방식(monitoring_router.py)은
+  이번 변경 범위 밖이라 그대로 둠 — 로그인 자체를 붙이는 것과, 기존 엔드포인트들이 실제 토큰을
+  쓰도록 바꾸는 건 별도 작업.
+
+[7/9 추가] 개인정보(이름·전화번호) 암호화 — 2026-07-08 멘토링 확정 방침 반영
+- name/phone을 평문 컬럼으로 두지 않고 name_encrypted/phone_encrypted(Fernet 대칭키 암호화)로
+  저장한다. phone은 로그인/검색에도 쓰이므로 조회용 HMAC-SHA256 해시(phone_hash)를 별도로 둠.
+- .name/.phone은 이제 실제 컬럼이 아니라 파이썬 프로퍼티(security.py의 encrypt_pii/decrypt_pii/
+  hash_phone 사용) — 기존 코드에서 `caregiver.name`처럼 읽던 곳은 그대로 동작하고(투명하게 복호화),
+  `Patient(name=..., phone=...)`처럼 생성자에 바로 넘기던 곳만 `patient.name = ...` 형태로 바꾸면 됨
+  (프로퍼티는 생성자 kwarg로는 못 받음 — 아래 각 라우터의 create_* 함수 참고).
+- PII_ENCRYPTION_KEY/PII_HASH_SECRET 환경변수가 없으면 security.py가 서버 기동 시점에 즉시 에러를
+  내므로, backend/.env에 반드시 채워야 함(생성 방법은 security.py 상단 주석 참고).
 """
 from datetime import datetime
 from typing import Optional
 
 from sqlmodel import Field, SQLModel
 
+from security import decrypt_pii, encrypt_pii, hash_phone
 
-# ── 환자 [7/6 추가] ──
+
+# ── 환자 [7/6 추가, 7/9 로그인 대상으로 전환 + PII 암호화] ──
 class Patient(SQLModel, table=True):
     __tablename__ = "patients"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str
+    # [7/9] 평문 name 대신 암호화 저장 — 아래 .name 프로퍼티로 투명하게 암복호화.
+    # 기본값 ""은 "Patient(**kwargs) 생성 후 patient.name = ... 로 설정"하는 2단계 생성
+    # 패턴을 쓰기 위한 것일 뿐, 실제로 빈 문자열로 남겨두면 안 됨(항상 .name으로 설정).
+    name_encrypted: str = Field(default="")
     note: Optional[str] = None  # 특이사항 (예: "치매 초기", "혼자 거주" 등 자유 텍스트)
-    phone: Optional[str] = None  # [7/8 추가] 회원가입(SignUp.tsx) 연락처
-    email: Optional[str] = None  # [7/8 추가] 회원가입 시 아이디 — 로그인 미구현이라 단순 저장용, unique 제약 없음
+    phone_encrypted: Optional[str] = None  # [7/8 추가, 7/9 암호화] 회원가입(SignUp.tsx) 연락처
+    phone_hash: Optional[str] = Field(default=None, index=True)  # [7/9] 로그인/검색용, 복호화 대상 아님
+    email: Optional[str] = None  # [7/8 추가] 회원가입 시 아이디 — unique 제약 없음(이메일/전화번호 둘 다 로그인 식별자로 허용)
     birth_date: Optional[str] = None  # [7/8 추가] 생년월일 (자유 텍스트, 예: "1945.03.15")
-    # [7/8 추가] "환자 본인"으로 가입할 때만 채워짐 — 실제 로그인 화면은 아직 없지만
-    # Caregiver.hashed_password와 동일한 원칙으로 나중에 로그인 붙일 때 바로 쓸 수 있게 real hash로 저장
+    # [7/8 추가, 7/9 실제 로그인 대상으로 전환] 환자 본인 계정 비밀번호 — Caregiver.hashed_password와 동일 원칙
     hashed_password: Optional[str] = None
     push_enabled: bool = True  # [7/8 추가] 회원가입 알림 수신 설정 (Caregiver와 동일한 3종)
     sms_enabled: bool = False
     email_opt_in: bool = False
     created_at: datetime = Field(default_factory=datetime.now)
 
+    @property
+    def name(self) -> str:
+        return decrypt_pii(self.name_encrypted)
 
-# ── 보호자·요양보호사·단체(기관) 등 [7/6 추가, 7/8 단체 지원 확장] ──
+    @name.setter
+    def name(self, value: str) -> None:
+        self.name_encrypted = encrypt_pii(value)
+
+    @property
+    def phone(self) -> Optional[str]:
+        return decrypt_pii(self.phone_encrypted) if self.phone_encrypted else None
+
+    @phone.setter
+    def phone(self, value: Optional[str]) -> None:
+        if value:
+            self.phone_encrypted = encrypt_pii(value)
+            self.phone_hash = hash_phone(value)
+        else:
+            self.phone_encrypted = None
+            self.phone_hash = None
+
+
+# ── 보호자·요양보호사·단체(기관) 등 [7/6 추가, 7/8 단체 지원 확장, 7/9 PII 암호화] ──
 class Caregiver(SQLModel, table=True):
     __tablename__ = "caregivers"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str
-    # [7/6 보류] 로그인 붙일 때(auth_router.py)만 채워지는 필드 — 지금은 로그인 없이
-    # /caregivers로 그냥 만들 수 있어야 해서 nullable로 둠. 회원가입 화면의 "아이디" 입력이 여기 저장됨.
-    email: Optional[str] = Field(default=None, unique=True, index=True)
+    name_encrypted: str = Field(default="")  # [7/9] Patient.name_encrypted와 동일한 원칙 — .name 프로퍼티 참고
+    email: Optional[str] = Field(default=None, unique=True, index=True)  # 회원가입 화면의 "아이디" 입력이 여기 저장됨
     hashed_password: Optional[str] = None
     relation_type: str = "guardian"  # guardian / caregiver / life_support_worker / social_worker / organization
-    phone: Optional[str] = None  # [7/8 추가] 회원가입 연락처
+    phone_encrypted: Optional[str] = None  # [7/8 추가, 7/9 암호화] 회원가입 연락처
+    phone_hash: Optional[str] = Field(default=None, index=True)  # [7/9] 로그인/검색용, 복호화 대상 아님
     birth_date: Optional[str] = None  # [7/8 추가] 생년월일 (자유 텍스트)
     push_enabled: bool = True  # [7/8 추가] 회원가입 "Push 알림 허용" (필수 체크)
     sms_enabled: bool = False  # [7/8 추가] 회원가입 "문자(SMS) 수신 허용" (선택)
@@ -66,9 +102,32 @@ class Caregiver(SQLModel, table=True):
     org_name: Optional[str] = None  # 기관명
     org_type: Optional[str] = None  # 요양원 / 재가센터 / 협회 / 보건소 / 기타
     business_reg_no: Optional[str] = None  # 사업자등록번호
+    # [7/9] manager_name/manager_phone(기관 소속 실무 담당자 연락처)은 로그인 계정 본인의 PII가
+    # 아니라 부가 정보라 이번 암호화 범위에서는 뺐음 — 필요하면 팀 논의 후 별도로 암호화 추가.
     manager_name: Optional[str] = None  # 담당자 이름 (name과 별개 — 기관 소속 실무 담당자)
     manager_phone: Optional[str] = None  # 담당자 전화번호
     created_at: datetime = Field(default_factory=datetime.now)
+
+    @property
+    def name(self) -> str:
+        return decrypt_pii(self.name_encrypted)
+
+    @name.setter
+    def name(self, value: str) -> None:
+        self.name_encrypted = encrypt_pii(value)
+
+    @property
+    def phone(self) -> Optional[str]:
+        return decrypt_pii(self.phone_encrypted) if self.phone_encrypted else None
+
+    @phone.setter
+    def phone(self, value: Optional[str]) -> None:
+        if value:
+            self.phone_encrypted = encrypt_pii(value)
+            self.phone_hash = hash_phone(value)
+        else:
+            self.phone_encrypted = None
+            self.phone_hash = None
 
 
 # ── 보호자-환자 연결 (다대다) [7/6 추가] ──
