@@ -1,2 +1,4 @@
 .env
 app.db
+data/*.csv
+data/*.xlsx
