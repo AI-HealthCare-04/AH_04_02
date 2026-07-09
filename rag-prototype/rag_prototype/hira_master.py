@@ -32,7 +32,7 @@ def _load_raw_index(path_str: str) -> dict[str, list[dict]]:
             f"HIRA 약가마스터 CSV가 없습니다.\n"
             f"  필요 경로: {csv_path}\n"
             f"  건강보험심사평가원 약가마스터(hira_drug_master_20251031.csv)를\n"
-            f"  rag-prototype/data/ 폴더에 넣고 다시 실행해주세요.\n"
+            f"  backend/data/ 폴더에 넣고 다시 실행해주세요.\n"
             f"  (파일 크기 약 52 MB, CP949 인코딩)"
         )
     index: dict[str, list[dict]] = {}
