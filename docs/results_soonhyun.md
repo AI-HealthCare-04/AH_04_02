@@ -470,6 +470,21 @@ OCRResult { raw_text, medications[], overall_confidence,
 
 ---
 
+## 12. 최종 정확도 요약 (D-4, 2026-07-09)
+
+> 기준: `backend/scripts/batch_regression.py` (24개 목업, `parse_prescription()` 직접 호출) + CLOVA OCR 실제 파이프라인 1건
+
+| 지표 | 결과 | 비고 |
+|------|:----:|------|
+| 포맷 인식률 | **24/24 (100%)** | table·list·official·abbrev·oriental 전 포맷 정상 |
+| 검증 조건 통과율 | **39/40 (97.5%)** | 약품명·frequency·dosage·진단명·drug_class 40건 검증 |
+| drug_class 정확도 | **8/9 (88.9%)** | 잔여 1건(이부프로펜 NSAIDs)은 HIRA/e약은요 데이터 없을 때의 알려진 폴백 한계 |
+| drug_code 매칭률 (실 파이프라인) | **4/4 (100%)** | CLOVA OCR → HIRA 코드 전건 매칭 |
+| review_required 오탐율 | **0/4 (0%)** | confidence 0.9564 → 전건 false |
+| needs_review 정탐 | **임계값(0.70) 미달 1건 정상 플래그** | 라베프라졸나트륨 0.667 → True, 나머지 False |
+
+---
+
 > ⚠️ **팀 공유 — 파싱 로직 회귀 테스트 방법론**
 >
 > `MockOCRProvider.extract()`는 `parsing_rules.py`를 **전혀 거치지 않고** 아스피린/로자탄을 하드코딩으로 반환한다.
