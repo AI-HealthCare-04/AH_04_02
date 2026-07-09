@@ -23,6 +23,11 @@ export default function DrugInfo() {
 
   const med = record?.medications.find((m) => m.id === Number(medId));
   const guideDrug = record?.guide?.medication_guide.drugs.find((d) => d.drug_name === med?.drug_name);
+  // [7/9] dosage_text(stub) / medication_guide(실제), caution(stub) / precautions(실제, 배열) —
+  // MedGuide.tsx/Result.tsx와 동일한 분기. 여기서 안 하면 RAG_PROVIDER=real일 때 이미
+  // guide에 들어있는 복용법·주의사항을 그대로 두고도 "없음"으로 잘못 표시됨.
+  const guideText = guideDrug?.medication_guide ?? guideDrug?.dosage_text;
+  const cautionText = guideDrug?.precautions?.length ? guideDrug.precautions.join(" ") : guideDrug?.caution;
 
   useEffect(() => {
     if (!med) return;
@@ -93,13 +98,13 @@ export default function DrugInfo() {
                 </div>
               )}
 
-              {guideDrug?.dosage_text && (
+              {guideText && (
                 <div className="rounded-2xl p-6" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
                   <div className="flex items-center gap-2.5 mb-3">
                     <span className="text-[18px]">💊</span>
                     <h2 className="text-[15px] font-black" style={{ color: C.dark }}>복용 방법</h2>
                   </div>
-                  <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>{guideDrug.dosage_text}</p>
+                  <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>{guideText}</p>
                 </div>
               )}
 
@@ -109,7 +114,7 @@ export default function DrugInfo() {
                   <h2 className="text-[15px] font-black" style={{ color: C.dark }}>주의사항</h2>
                 </div>
                 <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>
-                  {guideDrug?.caution || "등록된 주의사항이 없어요."}
+                  {cautionText || "등록된 주의사항이 없어요."}
                 </p>
               </div>
 

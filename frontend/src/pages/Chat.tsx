@@ -62,7 +62,7 @@ export default function Chat() {
     setLoading(true);
     try {
       const res = await askChat(patientId, q.id);
-      setMessages((prev) => [...prev, { role: "bot", text: res.answer, source: res.source }]);
+      setMessages((prev) => [...prev, { role: "bot", text: res.answer, source: res.answer_source }]);
     } catch {
       setMessages((prev) => [
         ...prev,
