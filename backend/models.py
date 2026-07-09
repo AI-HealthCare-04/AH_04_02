@@ -111,6 +111,9 @@ class OcrResult(SQLModel, table=True):
     confidence: float = 0.0  # 0.0 ~ 1.0
     review_required: bool = False  # [7/6 추가] confidence 낮아서 보호자 확인 필요한지
     user_confirmed: bool = False
+    matched_drug_name: str = ""    # drug_matcher: 기준 약품명 목록에서 가장 유사한 이름
+    match_score: float = 0.0       # drug_matcher: SequenceMatcher 유사도 (0~1)
+    needs_review: bool = False     # drug_matcher: match_score < 0.7 이면 True (review_required와 별개)
 
 
 # ── RAG 가이드 결과 (담당: 김영혜) ──

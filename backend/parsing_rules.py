@@ -29,7 +29,10 @@ mock_pharmacy_bag_format.png 같이 "약품명/성분 | 복약안내 | 투약량
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
+import csv
 import re
+from pathlib import Path
+from typing import Optional
 
 # ─────────────────────────────────────────────────────────────
 # 1. 약어 → 한국어 매핑
@@ -88,6 +91,13 @@ DIAGNOSIS_KOR_RE  = re.compile(r"진단(?:명)?\s*[:：]\s*([^\[\n■]+?)(?=\s+\
 DRUG_CODE_RE      = re.compile(r"\[(?:급여|비급여)\]\[(\w+)\]")
 DIAGNOSIS_EN_RE   = re.compile(r"Dx\s*[:：]\s*(.+?)(?=\s+Rx\b|\Z)", re.IGNORECASE)
 DIAGNOSIS_CODE_RE = re.compile(r"질병분류기호\s*[:：]\s*\S+\s*[（(]([^)）]+)[)）]")
+
+# ── 한방 첩약 포맷 전용 ──────────────────────────────────────────
+# "당귀 8g", "천궁(川芎) 4g" 형태: 한글 약재명(2~6자) + 선택 한자괄호 + 중량g
+_HERB_ITEM_RE    = re.compile(r"([가-힣]{2,6})(?:\([^\)]*\))?\s+(\d+(?:\.\d+)?)g\b", re.IGNORECASE)
+_HERB_DETECT_RE  = re.compile(r"[가-힣]{2,6}(?:\([^\)]*\))?\s+\d+(?:\.\d+)?g\b", re.IGNORECASE)
+_ORIENTAL_FREQ_RE = re.compile(r"(?:1일|하루)\s*(\d+)\s*(?:첩|회|번)")
+_ORIENTAL_DAYS_RE = re.compile(r"(\d+)\s*첩")
 
 # ─────────────────────────────────────────────────────────────
 # 4. 유틸리티 함수 (공개 API)
@@ -150,12 +160,62 @@ def lookup_drug_class(drug_name: str) -> str:
     return ""
 
 
+# ── 한방 첩약 보조 함수 ──────────────────────────────────────────
+
+_herb_name_set: Optional[set] = None
+
+
+def _load_herb_names() -> set[str]:
+    """herb_reference.csv의 herb_name 컬럼을 set으로 지연 로드."""
+    global _herb_name_set
+    if _herb_name_set is not None:
+        return _herb_name_set
+    try:
+        csv_path = Path(__file__).parent / "herb_reference.csv"
+        names: set[str] = set()
+        with open(csv_path, encoding="utf-8-sig", newline="") as f:
+            for row in csv.DictReader(f):
+                name = row.get("herb_name", "").strip()
+                if name:
+                    names.add(name)
+        _herb_name_set = names
+    except Exception:
+        _herb_name_set = set()
+    return _herb_name_set
+
+
+def _is_oriental_format(text: str) -> bool:
+    """'약재명 Ng' 패턴이 2개 이상이면 한방 첩약 처방전으로 판정."""
+    return len(_HERB_DETECT_RE.findall(text)) >= 2
+
+
+def _extract_oriental_frequency(text: str) -> str:
+    m = _ORIENTAL_FREQ_RE.search(text)
+    if m:
+        unit = "첩" if "첩" in m.group(0) else "회"
+        return f"1일 {m.group(1)}{unit}"
+    return extract_frequency(text)
+
+
+def _extract_oriental_days(text: str) -> str:
+    # frequency 패턴("1일 N첩/회")을 먼저 소비한 나머지에서 days를 탐색.
+    # 이렇게 하지 않으면 "1일 2첩 … 20첩"에서 2첩이 days로 잘못 잡힌다.
+    freq_m = _ORIENTAL_FREQ_RE.search(text)
+    search_text = text[freq_m.end():] if freq_m else text
+    m = _ORIENTAL_DAYS_RE.search(search_text)
+    if m:
+        return f"{m.group(1)}첩"
+    return extract_days(text)
+
+
 # ─────────────────────────────────────────────────────────────
 # 5. 포맷 감지
 # ─────────────────────────────────────────────────────────────
 
 def _detect_format(text: str) -> str:
-    """'official' | 'abbrev' | 'list' | 'table' 반환."""
+    """'oriental' | 'official' | 'abbrev' | 'list' | 'table' 반환."""
+    if _is_oriental_format(text):
+        return "oriental"
     if re.search(r"\[(?:급여|비급여)\]\[\w+\]", text):
         return "official"
     if re.search(r"\b(?:bid|qd|tid|qid)\b", text, re.IGNORECASE):
@@ -279,18 +339,53 @@ def _parse_list_format(text: str) -> list:
     return results
 
 
+def _parse_oriental_format(text: str) -> list:
+    """한방 첩약 처방전: '약재명 Ng' 반복 패턴.
+
+    herb_reference.csv 로드 후 herb_name 컬럼으로 검증.
+    CSV에 없는 약재명도 포함하되 drug_class를 '한방 첩약(미확인)'으로 표시.
+    """
+    herb_names = _load_herb_names()
+    freq = _extract_oriental_frequency(text)
+    days = _extract_oriental_days(text)
+
+    results = []
+    for m in _HERB_ITEM_RE.finditer(text):
+        name = m.group(1).strip()
+        weight = m.group(2)
+        in_ref = name in herb_names
+        results.append({
+            "drug_name":  name,
+            "drug_code":  "",
+            "dosage":     f"{weight}g",
+            "frequency":  freq,
+            "days":       days,
+            "drug_class": "한방 첩약" if in_ref else "한방 첩약(미확인)",
+        })
+    return results
+
+
 def _parse_table_format(text: str) -> list:
     """테이블 포맷: OCR이 컬럼을 그룹으로 출력."""
     drug_matches = list(DRUG_NAME_RE.finditer(text))
     if not drug_matches:
         return []
 
-    freq_nums = KOR_FREQ_RE.findall(text)
-    frequencies = [f"1일 {n}회" for n in freq_nums]
+    # KOR_FREQ_RE("1일 N회")와 BARE_FREQ_RE(독립 "N회") 모두 수집, 중복 없이 위치 순 정렬.
+    # KOR 매치 구간을 consumed로 표시해 BARE가 같은 숫자를 다시 소비하지 않도록 한다.
+    kor_spans: list[tuple[int, int]] = []
+    freq_entries: list[tuple[int, int, str]] = []  # (start, end, freq_str)
+    for m in re.finditer(r"(?:1\s*일|하루)\s*(\d+)\s*(?:회|번)", text):
+        freq_entries.append((m.start(), m.end(), f"1일 {m.group(1)}회"))
+        kor_spans.append((m.start(), m.end()))
+    for m in BARE_FREQ_RE.finditer(text):
+        if not any(s <= m.start() < e for s, e in kor_spans):
+            freq_entries.append((m.start(), m.end(), f"1일 {m.group(1)}회"))
+    freq_entries.sort()
+    frequencies = [freq for _, _, freq in freq_entries]
 
-    last_freq_end = 0
-    for m in re.finditer(r"(?:1\s*일|하루)\s*\d+\s*(?:회|번)", text):
-        last_freq_end = m.end()
+    # 마지막 freq 매치 이후 텍스트에서만 일수를 탐색 (freq 숫자를 일수로 오인하지 않도록)
+    last_freq_end = max((end for _, end, _ in freq_entries), default=0)
     tail = text[last_freq_end:]
     diag_m = re.search(r"진단명", tail)
     if diag_m:
@@ -318,7 +413,9 @@ def _parse_table_format(text: str) -> list:
 def parse_prescription(raw_text: str) -> tuple:
     """raw_text → (약품 목록, 진단명)"""
     fmt = _detect_format(raw_text)
-    if fmt == "official":
+    if fmt == "oriental":
+        meds = _parse_oriental_format(raw_text)
+    elif fmt == "official":
         meds = _parse_official_format(raw_text)
     elif fmt == "abbrev":
         meds = _parse_abbrev_format(raw_text)

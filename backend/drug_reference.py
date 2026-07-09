@@ -350,8 +350,10 @@ _HARDCODED_FALLBACK: dict[str, str] = {
 
 
 def _class_from_fallback(drug_name: str) -> str:
+    # key in drug_name 방향만 허용. drug_name in key(역방향)는 "프로"→"아스피린프로텍트"처럼
+    # 2자 단편명이 긴 키의 부분 문자열로 오매칭되는 원인이므로 제거한다.
     for key, cls in _HARDCODED_FALLBACK.items():
-        if key in drug_name or drug_name in key:
+        if key in drug_name:
             return cls
     return ""
 
@@ -395,34 +397,58 @@ def get_drug_class(drug_name: str, drug_code: str = "") -> str:
     return _class_from_fallback(drug_name)
 
 
+def get_drug_name_list() -> list[str]:
+    """drug_matcher.py에서 재사용할 기준 약품명 목록 반환.
+
+    HIRA 약가마스터 한글상품명 + e약은요 정규화 이름 + 하드코딩 폴백 키
+    를 합쳐서 중복 제거한 리스트를 돌려준다. 데이터 파일이 없으면 하드코딩만 반환.
+    """
+    names: list[str] = []
+    _load_hira()
+    if _hira_name_df is not None and not _hira_name_df.empty:
+        names.extend(_hira_name_df["한글상품명"].tolist())
+    for entry in _load_drug_table():
+        if entry["norm"]:
+            names.append(entry["norm"])
+    names.extend(_HARDCODED_FALLBACK.keys())
+    seen: set[str] = set()
+    result: list[str] = []
+    for name in names:
+        if name and name not in seen:
+            seen.add(name)
+            result.append(name)
+    return result
+
+
 def get_drug_info(drug_name: str, drug_code: str = "") -> dict:
-    """상세 정보 반환 (match_source 포함)."""
+    """상세 정보 반환 (match_source 포함). efficacy는 e약은요 매칭(emed)일 때만 채워짐."""
     if drug_code:
         atc = _lookup_hira_by_code(drug_code)
         if atc:
             cls = _class_from_atc_code(atc)
             if cls:
-                return {"drug_name": drug_name, "drug_class": cls,
+                return {"drug_name": drug_name, "drug_class": cls, "efficacy": "",
                         "match_source": "hira_code", "matched_item": f"코드:{drug_code}", "atc_code": atc}
 
     atc = _lookup_hira_by_name(drug_name)
     if atc:
         cls = _class_from_atc_code(atc)
         if cls:
-            return {"drug_name": drug_name, "drug_class": cls,
+            return {"drug_name": drug_name, "drug_class": cls, "efficacy": "",
                     "match_source": "hira_name", "matched_item": drug_name, "atc_code": atc}
 
     entry = _lookup_emedinfo(drug_name)
     if entry:
         cls = _class_from_efcy(entry["efcy"])
         return {"drug_name": drug_name, "drug_class": cls or _class_from_fallback(drug_name),
-                "match_source": "emed", "matched_item": entry["item_name"], "atc_code": ""}
+                "efficacy": entry["efcy"], "match_source": "emed", "matched_item": entry["item_name"],
+                "atc_code": ""}
 
     cls = _class_from_atc_pattern(drug_name)
     if cls:
-        return {"drug_name": drug_name, "drug_class": cls,
+        return {"drug_name": drug_name, "drug_class": cls, "efficacy": "",
                 "match_source": "atc_pattern", "matched_item": "", "atc_code": ""}
 
     cls = _class_from_fallback(drug_name)
-    return {"drug_name": drug_name, "drug_class": cls,
+    return {"drug_name": drug_name, "drug_class": cls, "efficacy": "",
             "match_source": "fallback" if cls else "unknown", "matched_item": "", "atc_code": ""}

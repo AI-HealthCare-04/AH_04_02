@@ -28,9 +28,9 @@ load_dotenv(_ROOT / ".env")
 
 from ocr_interface import get_ocr_provider  # noqa: E402
 from database import get_session
+from drug_matcher import MATCH_THRESHOLD, match_drug
 from models import MedicalRecord, OcrResult
-from drug_matcher import match_drug_name
-from drug_reference import get_drug_class
+from drug_reference import get_drug_info
 
 router = APIRouter(prefix="/ocr", tags=["OCR"])
 
@@ -48,14 +48,14 @@ def drug_info(drug_name: str):
     """
     [7/8] 약물상세 화면(DrugInfo.tsx/DrugDetail.tsx)의 "약효분류·적응증" 표시용 —
     OCR 세션과 무관하게 약품명만으로 다시 조회하는 stateless 조회입니다.
-    match_drug_name()이 OCR 검증 때 쓰는 것과 같은 매칭 로직을 재사용합니다.
+    get_drug_info()이 HIRA/e약은요/ATC/폴백 순으로 조회하는 로직을 재사용합니다.
     """
-    result = match_drug_name(drug_name)
+    result = get_drug_info(drug_name)
     efficacy = result["efficacy"]
     return {
         "drug_name": drug_name,
-        "matched_name": result["matched_name"],
-        "drug_class": get_drug_class(drug_name),
+        "matched_name": result["matched_item"] or drug_name,
+        "drug_class": result["drug_class"],
         "indication": efficacy.strip() if efficacy else efficacy,
     }
 
@@ -148,6 +148,7 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
     session.add(record)
 
     for med in ocr_result.medications:
+        matched_name, score = match_drug(med.drug_name)
         row = OcrResult(
             record_id=record.id,
             drug_name=med.drug_name,
@@ -158,6 +159,9 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
             drug_class=med.drug_class,
             confidence=med.confidence,
             review_required=ocr_result.review_required,
+            matched_drug_name=matched_name,
+            match_score=score,
+            needs_review=score < MATCH_THRESHOLD,
         )
         session.add(row)
 
