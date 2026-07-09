@@ -198,7 +198,11 @@ def _extract_oriental_frequency(text: str) -> str:
 
 
 def _extract_oriental_days(text: str) -> str:
-    m = _ORIENTAL_DAYS_RE.search(text)
+    # frequency 패턴("1일 N첩/회")을 먼저 소비한 나머지에서 days를 탐색.
+    # 이렇게 하지 않으면 "1일 2첩 … 20첩"에서 2첩이 days로 잘못 잡힌다.
+    freq_m = _ORIENTAL_FREQ_RE.search(text)
+    search_text = text[freq_m.end():] if freq_m else text
+    m = _ORIENTAL_DAYS_RE.search(search_text)
     if m:
         return f"{m.group(1)}첩"
     return extract_days(text)
