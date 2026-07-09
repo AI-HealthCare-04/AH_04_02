@@ -424,12 +424,13 @@ OCRResult { raw_text, medications[], overall_confidence,
 
 ## 10. 향후 개선 제안
 
-### 한방 첩약 파서 미지원 (2026-07-08)
+### ~~한방 첩약 파서 미지원~~ → ✅ 해결 (2026-07-09, 커밋 `86f4d0f`)
 
-- **현황**: `mock_oriental_medicine.png` 포함 한방 처방전 전체 미인식 (`약품 없음` 반환)
-- **근거**: 현재 4개 포맷 분기(공식/테이블/리스트/약어) 어디에도 한약재 패턴 없음
-- **필요 작업**:
-  1. 생약재명 사전 확보 (당귀·천궁·작약·황기 등 주요 한약재 목록)
-  2. 중량 단위 파싱 로직 신규 설계 — `g`, `첩`, `포` 단위 처리
-  3. `_parse_oriental_format()` 함수 신규 추가 및 `_detect_format()`에 분기 등록
-- **권장**: 정확도 보장을 위해 한약재 데이터 소스(한국한의학연구원 DB 등) 확보 후 별도 스프린트로 진행
+- **해결 내용**:
+  1. **데이터소스 확보**: 식약처 생약 약재정보 API(HerbMdntfService, IROS_335) — 원본 2,060건 → 이명 포함 3,573개 약재명 수집, `backend/herb_reference.csv` 저장
+  2. **스크립트 추가**: `backend/scripts/build_herb_reference.py` — API 페이지네이션 수집 자동화(재현 가능)
+  3. **파서 구현**: `_parse_oriental_format()` 신규 추가 — `약재명(한자) Ng` 반복 패턴 인식, herb_reference.csv 기반 약재 검증, `drug_class="한방 첩약"` 반환
+  4. **포맷 감지**: `_detect_format()`에 `oriental` 분기 최우선 등록 (`_is_oriental_format()`: `약재명 Ng` 패턴 2개 이상)
+  5. **목업 이미지 추가**: `samples/mock_oriental_prescription.png` (쌍화탕 가감방 12약재, `generate_mock_oriental_prescription.py`)
+- **검증**: 시뮬레이션 OCR 텍스트 → 12개 약재 전량 파싱, CSV 확인율 12/12 (100%)
+- **배치 회귀**: 기존 21개 + 신규 3개 = **24개 이미지 anomaly 0건** ✓
