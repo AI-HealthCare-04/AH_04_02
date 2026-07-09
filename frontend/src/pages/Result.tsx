@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import NavBar from "../components/NavBar";
-import type { RecordResult } from "../api/records";
+import { formatSourceRef, type RecordResult } from "../api/records";
 
 const STATIC_DISCLAIMER =
   "이 정보는 AI가 생성한 참고용 안내입니다. 정확한 복약 지도는 담당 의사 또는 약사에게 확인하세요.";
@@ -105,42 +105,67 @@ export default function Result() {
 
             <div style={styles.card}>
               <h2 style={styles.cardTitle}>💊 맞춤 복약 지도</h2>
-              {guide.medication_guide.drugs.map((drug, i) => (
-                <div key={i} style={styles.guideItem}>
-                  <p style={styles.guideLabel}>💊 {drug.drug_name}</p>
-                  <p style={styles.guideText}>{drug.dosage_text}</p>
-                  {drug.caution && (
-                    <p style={{ ...styles.guideText, color: "#C16A45", marginTop: 4 }}>
-                      ⚠️ {drug.caution}
-                    </p>
-                  )}
-                </div>
-              ))}
+              {guide.medication_guide.drugs.map((drug, i) => {
+                // [7/9] dosage_text(stub) / medication_guide(실제) 중 있는 걸 씀
+                const guideText = drug.medication_guide ?? drug.dosage_text ?? "";
+                // caution(stub, 단일 문자열) / precautions(실제, 배열) 중 있는 걸 씀
+                const cautionText = drug.precautions?.length ? drug.precautions.join(" ") : drug.caution;
+                return (
+                  <div key={i} style={styles.guideItem}>
+                    <p style={styles.guideLabel}>💊 {drug.drug_name}</p>
+                    <p style={styles.guideText}>{guideText}</p>
+                    {cautionText && (
+                      <p style={{ ...styles.guideText, color: "#C16A45", marginTop: 4 }}>
+                        ⚠️ {cautionText}
+                      </p>
+                    )}
+                    {drug.review_required && (
+                      <p style={{ fontSize: 11, color: "#D98A2B", marginTop: 4 }}>
+                        AI 검토 필요 — 참고자료 인용이 부족하거나 OCR 인식 신뢰도가 낮아요.
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
             <div style={styles.card}>
               <h2 style={styles.cardTitle}>🌿 생활습관 개선 가이드</h2>
-              <div style={styles.guideItem}>
-                <p style={styles.guideLabel}>🥗 식이</p>
-                <p style={styles.guideText}>
-                  피해야 할 음식: {guide.lifestyle_guide.diet.avoid.join(", ") || "없음"}
-                </p>
-                {guide.lifestyle_guide.diet.drug_specific.length > 0 && (
-                  <p style={styles.guideText}>
-                    {guide.lifestyle_guide.diet.drug_specific.join(" ")}
-                  </p>
-                )}
-              </div>
-              <div style={styles.guideItem}>
-                <p style={styles.guideLabel}>🏃 운동</p>
-                <p style={styles.guideText}>
-                  {guide.lifestyle_guide.exercise.type} · {guide.lifestyle_guide.exercise.duration} · {guide.lifestyle_guide.exercise.intensity}
-                </p>
-              </div>
+              {guide.lifestyle_guide.guides?.length ? (
+                // [7/9] 실제 파이프라인 모양 — 약별 생활습관 안내 전문
+                guide.lifestyle_guide.guides.map((text, i) => (
+                  <div key={i} style={styles.guideItem}>
+                    <p style={styles.guideLabel}>🌿 안내 {i + 1}</p>
+                    <p style={styles.guideText}>{text}</p>
+                  </div>
+                ))
+              ) : (
+                // stub 모양 — 구조화된 diet/exercise
+                <>
+                  <div style={styles.guideItem}>
+                    <p style={styles.guideLabel}>🥗 식이</p>
+                    <p style={styles.guideText}>
+                      피해야 할 음식: {guide.lifestyle_guide.diet?.avoid.join(", ") || "없음"}
+                    </p>
+                    {!!guide.lifestyle_guide.diet?.drug_specific.length && (
+                      <p style={styles.guideText}>
+                        {guide.lifestyle_guide.diet.drug_specific.join(" ")}
+                      </p>
+                    )}
+                  </div>
+                  <div style={styles.guideItem}>
+                    <p style={styles.guideLabel}>🏃 운동</p>
+                    <p style={styles.guideText}>
+                      {guide.lifestyle_guide.exercise?.type} · {guide.lifestyle_guide.exercise?.duration} ·{" "}
+                      {guide.lifestyle_guide.exercise?.intensity}
+                    </p>
+                  </div>
+                </>
+              )}
               {guide.source_refs.length > 0 && (
                 <div style={styles.sources}>
                   <p style={styles.sourcesText}>
-                    출처: {guide.source_refs.map((s) => s.title).join(", ")}
+                    출처: {guide.source_refs.map(formatSourceRef).join(", ")}
                   </p>
                 </div>
               )}
