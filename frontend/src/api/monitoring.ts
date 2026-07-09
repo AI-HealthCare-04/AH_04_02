@@ -16,6 +16,12 @@ export interface Patient {
   id: number;
   name: string;
   note: string | null;
+  phone: string | null;
+  email: string | null;
+  birth_date: string | null;
+  push_enabled: boolean;
+  sms_enabled: boolean;
+  email_opt_in: boolean;
   created_at: string;
 }
 
@@ -23,6 +29,17 @@ export interface Caregiver {
   id: number;
   name: string;
   relation_type: string;
+  phone: string | null;
+  email: string | null;
+  birth_date: string | null;
+  push_enabled: boolean;
+  sms_enabled: boolean;
+  email_opt_in: boolean;
+  org_name: string | null;
+  org_type: string | null;
+  business_reg_no: string | null;
+  manager_name: string | null;
+  manager_phone: string | null;
   created_at: string;
 }
 
@@ -40,10 +57,16 @@ export async function getTodayMedications(patientId: number) {
 
 /**
  * 복약 체크 — "복용했어요"/"건너뛸게요" 버튼
+ * [7/9 추가] confirmedByCaregiverId를 넘기면 "보호자가 대신 체크"로 기록됩니다 (생략하면 본인).
  */
-export async function checkIntake(scheduleId: string, status: "taken" | "skipped") {
+export async function checkIntake(
+  scheduleId: string,
+  status: "taken" | "skipped",
+  confirmedByCaregiverId?: number
+) {
   const { data } = await monitoringClient.post(`/monitoring/schedules/${scheduleId}/check`, {
     status,
+    confirmed_by_caregiver_id: confirmedByCaregiverId,
   });
   return data;
 }
@@ -75,6 +98,27 @@ export async function getCaregivers() {
   return data;
 }
 
+/** [7/8 추가] 회원가입(SignUp.tsx) — 새 보호자/요양보호사/단체 프로필 생성 */
+export async function createCaregiver(payload: {
+  name: string;
+  relation_type: string;
+  phone?: string;
+  email?: string;
+  birth_date?: string;
+  password?: string;
+  push_enabled?: boolean;
+  sms_enabled?: boolean;
+  email_opt_in?: boolean;
+  org_name?: string;
+  org_type?: string;
+  business_reg_no?: string;
+  manager_name?: string;
+  manager_phone?: string;
+}) {
+  const { data } = await monitoringClient.post<Caregiver>("/monitoring/caregivers", payload);
+  return data;
+}
+
 /**
  * [7/8 추가] 반대 방향 — 이 환자를 케어하는 보호자 전체 목록 (Connect.tsx '연결된 사람' 표)
  */
@@ -103,14 +147,24 @@ export async function getPatients() {
   return data;
 }
 
-export async function createPatient(payload: { name: string; note?: string }) {
+export async function createPatient(payload: {
+  name: string;
+  note?: string;
+  phone?: string;
+  email?: string;
+  birth_date?: string;
+  password?: string;
+  push_enabled?: boolean;
+  sms_enabled?: boolean;
+  email_opt_in?: boolean;
+}) {
   const { data } = await monitoringClient.post<Patient>("/monitoring/patients", payload);
   return data;
 }
 
 export async function updatePatient(
   patientId: number,
-  payload: { name?: string; note?: string }
+  payload: { name?: string; note?: string; phone?: string; email?: string; birth_date?: string }
 ) {
   const { data } = await monitoringClient.patch<Patient>(
     `/monitoring/patients/${patientId}`,
@@ -131,6 +185,8 @@ export async function createSchedule(payload: {
   patient_id: number;
   drug_name: string;
   time_slot: string;
+  dose_timing?: string | null;
+  caregiver_alert?: boolean;
   memo?: string;
 }) {
   const { data } = await monitoringClient.post("/monitoring/schedules", payload);
@@ -145,6 +201,8 @@ export interface Schedule {
   patient_id: number;
   drug_name: string;
   time_slot: string;
+  dose_timing: string | null;
+  caregiver_alert: boolean;
   memo: string | null;
   active: boolean;
   created_at: string;
@@ -159,7 +217,14 @@ export async function getSchedules(patientId: number, activeOnly = false) {
 
 export async function updateSchedule(
   scheduleId: number,
-  payload: { drug_name?: string; time_slot?: string; memo?: string; active?: boolean }
+  payload: {
+    drug_name?: string;
+    time_slot?: string;
+    dose_timing?: string | null;
+    caregiver_alert?: boolean;
+    memo?: string;
+    active?: boolean;
+  }
 ) {
   const { data } = await monitoringClient.patch<Schedule>(
     `/monitoring/schedules/${scheduleId}`,
@@ -168,7 +233,39 @@ export async function updateSchedule(
   return data;
 }
 
+/**
+ * [7/8 추가] '새 일정 추가' 모달의 "약물 선택" 드롭다운 — 이 환자에게 실제로 존재하는 약 이름 목록
+ */
+export async function getKnownDrugs(patientId: number) {
+  const { data } = await monitoringClient.get<string[]>(
+    `/monitoring/patients/${patientId}/known-drugs`
+  );
+  return data;
+}
+
 export async function deleteSchedule(scheduleId: number) {
   const { data } = await monitoringClient.delete(`/monitoring/schedules/${scheduleId}`);
+  return data;
+}
+
+/**
+ * [7/8 추가] 모니터링대시보드(보호자용) 캘린더·이행률 계산용 원본 로그.
+ * 별도 집계 endpoint 없이 최근 N일 로그를 그대로 받아 프론트에서 계산합니다.
+ */
+export interface MedicationLogEntry {
+  id: number;
+  schedule_id: number;
+  drug_name: string;
+  time_slot: string;
+  status: "taken" | "skipped";
+  checked_at: string;
+  confirmed_by_type: "patient" | "caregiver";
+  confirmed_by_name: string;
+}
+
+export async function getLogs(patientId: number, days = 30) {
+  const { data } = await monitoringClient.get<MedicationLogEntry[]>("/monitoring/logs", {
+    params: { patient_id: patientId, days },
+  });
   return data;
 }

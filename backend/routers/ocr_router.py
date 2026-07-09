@@ -30,6 +30,7 @@ from ocr_interface import get_ocr_provider  # noqa: E402
 from database import get_session
 from drug_matcher import MATCH_THRESHOLD, match_drug
 from models import MedicalRecord, OcrResult
+from drug_reference import get_drug_info
 
 router = APIRouter(prefix="/ocr", tags=["OCR"])
 
@@ -40,6 +41,23 @@ _ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
 def ping():
     """서버에 이 라우터가 잘 붙었는지 확인용. /docs에서 눌러보면 됨"""
     return {"status": "ok", "owner": "권순현"}
+
+
+@router.get("/drug-info")
+def drug_info(drug_name: str):
+    """
+    [7/8] 약물상세 화면(DrugInfo.tsx/DrugDetail.tsx)의 "약효분류·적응증" 표시용 —
+    OCR 세션과 무관하게 약품명만으로 다시 조회하는 stateless 조회입니다.
+    get_drug_info()이 HIRA/e약은요/ATC/폴백 순으로 조회하는 로직을 재사용합니다.
+    """
+    result = get_drug_info(drug_name)
+    efficacy = result["efficacy"]
+    return {
+        "drug_name": drug_name,
+        "matched_name": result["matched_item"] or drug_name,
+        "drug_class": result["drug_class"],
+        "indication": efficacy.strip() if efficacy else efficacy,
+    }
 
 
 async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> MedicalRecord:

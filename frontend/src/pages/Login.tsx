@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import NavBar from "../components/NavBar";
 import {
   getCaregivers,
   getCaregiverPatients,
@@ -72,9 +73,7 @@ export default function Login() {
 
   return (
     <div style={styles.page}>
-      <nav style={styles.nav}>
-        <span style={styles.logo}>💊 건강동행</span>
-      </nav>
+      <NavBar />
 
       <main style={styles.main}>
         <div style={styles.header}>
@@ -121,6 +120,15 @@ export default function Login() {
         <p style={styles.trust}>
           🔒 비밀번호 로그인은 아직 준비 중이에요 — 임시로 이름을 선택하는 방식이에요
         </p>
+        <p style={{ ...styles.trust, marginTop: 12 }}>
+          처음이신가요?{" "}
+          <button
+            onClick={() => navigate("/register")}
+            style={{ color: "#C16A45", fontWeight: 700, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+          >
+            회원가입
+          </button>
+        </p>
       </main>
     </div>
   );
@@ -132,14 +140,6 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#FAF6F1",
     fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif",
   },
-  nav: {
-    padding: "16px 40px",
-    background: "#FFFFFF",
-    borderBottom: "1px solid #EEE6DC",
-    display: "flex",
-    alignItems: "center",
-  },
-  logo: { fontSize: 20, fontWeight: 700, color: "#C16A45", letterSpacing: "-0.3px" },
   main: {
     maxWidth: 480,
     margin: "0 auto",

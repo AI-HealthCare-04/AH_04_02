@@ -306,17 +306,18 @@ def _class_from_efcy(efcy: str) -> str:
 
 
 def _lookup_emedinfo(drug_name: str) -> Optional[dict]:
-    if len(drug_name) < 3:
+    norm_name = _normalize_name(drug_name)
+    if len(norm_name) < 3:
         return None
     table = _load_drug_table()
     if not table:
         return None
-    candidates = [e for e in table if drug_name in e["norm"] or e["norm"] in drug_name]
+    candidates = [e for e in table if norm_name in e["norm"] or e["norm"] in norm_name]
     if candidates:
         return min(candidates, key=lambda e: len(e["norm"]))
     best_score, best_entry = 0.0, None
     for entry in table:
-        score = SequenceMatcher(None, drug_name, entry["norm"]).ratio()
+        score = SequenceMatcher(None, norm_name, entry["norm"]).ratio()
         if score > best_score:
             best_score, best_entry = score, entry
     if best_score >= 0.72 and best_entry:
@@ -421,33 +422,34 @@ def get_drug_name_list() -> list[str]:
 
 
 def get_drug_info(drug_name: str, drug_code: str = "") -> dict:
-    """상세 정보 반환 (match_source 포함)."""
+    """상세 정보 반환 (match_source 포함). efficacy는 e약은요 매칭(emed)일 때만 채워짐."""
     if drug_code:
         atc = _lookup_hira_by_code(drug_code)
         if atc:
             cls = _class_from_atc_code(atc)
             if cls:
-                return {"drug_name": drug_name, "drug_class": cls,
+                return {"drug_name": drug_name, "drug_class": cls, "efficacy": "",
                         "match_source": "hira_code", "matched_item": f"코드:{drug_code}", "atc_code": atc}
 
     atc = _lookup_hira_by_name(drug_name)
     if atc:
         cls = _class_from_atc_code(atc)
         if cls:
-            return {"drug_name": drug_name, "drug_class": cls,
+            return {"drug_name": drug_name, "drug_class": cls, "efficacy": "",
                     "match_source": "hira_name", "matched_item": drug_name, "atc_code": atc}
 
     entry = _lookup_emedinfo(drug_name)
     if entry:
         cls = _class_from_efcy(entry["efcy"])
         return {"drug_name": drug_name, "drug_class": cls or _class_from_fallback(drug_name),
-                "match_source": "emed", "matched_item": entry["item_name"], "atc_code": ""}
+                "efficacy": entry["efcy"], "match_source": "emed", "matched_item": entry["item_name"],
+                "atc_code": ""}
 
     cls = _class_from_atc_pattern(drug_name)
     if cls:
-        return {"drug_name": drug_name, "drug_class": cls,
+        return {"drug_name": drug_name, "drug_class": cls, "efficacy": "",
                 "match_source": "atc_pattern", "matched_item": "", "atc_code": ""}
 
     cls = _class_from_fallback(drug_name)
-    return {"drug_name": drug_name, "drug_class": cls,
+    return {"drug_name": drug_name, "drug_class": cls, "efficacy": "",
             "match_source": "fallback" if cls else "unknown", "matched_item": "", "atc_code": ""}
