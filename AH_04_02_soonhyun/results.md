@@ -449,6 +449,27 @@ OCRResult { raw_text, medications[], overall_confidence,
 
 ---
 
+## 11. 엔드투엔드 통합테스트 결과 (2026-07-09)
+
+> 실행 조건: `OCR_PROVIDER=clova`, `RAG_PROVIDER=stub` (OPENAI 키 미설정으로 real 폴백), `mock_prescription_official.png`
+
+| 단계 | 결과 |
+|------|------|
+| CLOVA OCR 호출 | ✅ 성공 — 4개 약품 인식 (세레콕시브·에페리손염산염·라베프라졸나트륨장용·조인트콘드로이친) |
+| drug_code 매칭 | ✅ 4개 전부 HIRA 코드 매칭 (649500560·642201540·644308830·658101480) |
+| drug_matcher (`matched_drug_name`/`match_score`) | ✅ DB 저장 정상 — 세레콕시브 1.0, 에페리손염산 0.923, 벤프라정 0.667, 종근당조인트콘드로 0.706 |
+| `needs_review` 임계값 판정 | ✅ 라베프라졸나트륨장용 0.667 < 0.7 → True, 나머지 False — 정상 |
+| RAG 자동 트리거 | ✅ confidence 0.9564 > 0.80 → `status: completed` → RAG 자동 호출 |
+| `medication_guide` / `lifestyle_guide` / `source_refs` | ✅ 3개 필드 모두 정상 반환 |
+| 에러 | **0건** |
+
+**비고 — RAG_PROVIDER=real 전환 선행 조건**:
+- `OPENAI_API_KEY` 추가 필요 (현재 `.env`에 없음)
+- `pip install -r rag-prototype/requirements.txt` 실행 필요 (`langchain_core` 미설치)
+- 위 2개 충족 시 `RAG_PROVIDER=real`로 변경하면 `rag_prototype.rag_chain.generate_guides_from_medications()` 실제 호출로 전환됨
+
+---
+
 > ⚠️ **팀 공유 — 파싱 로직 회귀 테스트 방법론**
 >
 > `MockOCRProvider.extract()`는 `parsing_rules.py`를 **전혀 거치지 않고** 아스피린/로자탄을 하드코딩으로 반환한다.
