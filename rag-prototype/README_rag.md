@@ -151,6 +151,27 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+### 데이터 파일 준비
+
+> **⚠ `data/` 폴더의 CSV 파일은 용량(52 MB) 문제로 git에서 제외되어 있습니다.**
+> 클론 후 아래 파일을 직접 받아서 `rag-prototype/data/` 에 넣어야 합니다.
+
+| 파일 | 출처 | 비고 |
+|------|------|------|
+| `hira_drug_master_20251031.csv` | 건강보험심사평가원 약가마스터 (공공데이터포털) | 약 30.5만 행, CP949 인코딩, 약 52 MB |
+
+파일이 없는 상태에서 HIRA 조회 기능(`hira_master.py`)을 호출하면 아래와 같은 오류가 발생합니다:
+
+```
+FileNotFoundError: HIRA 약가마스터 CSV가 없습니다.
+  필요 경로: .../rag-prototype/data/hira_drug_master_20251031.csv
+  건강보험심사평가원 약가마스터(hira_drug_master_20251031.csv)를
+  rag-prototype/data/ 폴더에 넣고 다시 실행해주세요.
+  (파일 크기 약 52 MB, CP949 인코딩)
+```
+
+`data/lifestyle_guidelines.json`은 git에 포함되어 있으므로 별도 작업이 필요 없습니다.
+
 ## 환경변수
 
 `.env` 파일에 이미 식약처 서비스키가 채워져 있습니다. OpenAI 키는 발급받는 대로

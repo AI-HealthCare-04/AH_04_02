@@ -21,8 +21,17 @@ def _load_raw_index(path_str: str) -> dict[str, list[dict]]:
     30만 행 규모라, 조회할 때마다 pydantic 모델로 변환하지 않고 raw dict으로만 인덱싱해둔다
     (실제 모델 검증은 검색으로 걸러진 소수 결과에 대해서만 수행 — search_by_product_name 참고).
     """
+    csv_path = Path(path_str)
+    if not csv_path.exists():
+        raise FileNotFoundError(
+            f"HIRA 약가마스터 CSV가 없습니다.\n"
+            f"  필요 경로: {csv_path}\n"
+            f"  건강보험심사평가원 약가마스터(hira_drug_master_20251031.csv)를\n"
+            f"  rag-prototype/data/ 폴더에 넣고 다시 실행해주세요.\n"
+            f"  (파일 크기 약 52 MB, CP949 인코딩)"
+        )
     index: dict[str, list[dict]] = {}
-    with Path(path_str).open(encoding="cp949", newline="") as f:
+    with csv_path.open(encoding="cp949", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
             cleaned = {k: (v.strip() if isinstance(v, str) else v) for k, v in row.items()}
