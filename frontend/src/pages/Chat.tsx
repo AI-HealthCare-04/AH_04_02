@@ -1,38 +1,68 @@
 import { useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import NavBar from "../components/NavBar";
 import { askChat, getChatQuestions, type ChatQuestion } from "../api/chat";
 import { getCurrentPatientId } from "../lib/session";
+import { C } from "../theme";
 
-type Message = { role: "user" | "bot"; text: string };
+type Message = { role: "user" | "bot"; text: string; source?: string };
+type ChatContext = { drugName?: string; diagnosis?: string };
 
-const INITIAL: Message[] = [
-  { role: "bot", text: "안녕하세요 😊 아래 질문 중 하나를 눌러 물어보세요." },
-];
+const DEFAULT_GREETING = "안녕하세요 😊 복약 안내 결과에 대해 궁금한 점을 물어보세요.";
 
+// 한글 받침 유무에 따라 "을"/"를" 조사를 골라줍니다 (예: 아스피린 → 을, 로자탄 → 을, 노바스크 → 를).
+function withObjectParticle(word: string): string {
+  const lastChar = word.charCodeAt(word.length - 1);
+  if (lastChar >= 0xac00 && lastChar <= 0xd7a3) {
+    const hasBatchim = (lastChar - 0xac00) % 28 !== 0;
+    return `${word}${hasBatchim ? "을" : "를"}`;
+  }
+  return `${word}를`;
+}
+
+function buildGreeting(context: ChatContext | null): string {
+  if (context?.drugName) {
+    return `${withObjectParticle(context.drugName)} 드시고 계시군요. 관련해서 무엇을 도와드릴까요?`;
+  }
+  if (context?.diagnosis) {
+    return `${context.diagnosis} 관련 복약 가이드를 보고 계시군요. 무엇을 도와드릴까요?`;
+  }
+  return DEFAULT_GREETING;
+}
+
+// 자유 입력창은 디자인상 필요하지만, 백엔드(schedule_v6 확정 방식)는 아직 고정 질문
+// 3개만 답변할 수 있어요(자유 대화 아님). 입력한 문장이 고정 질문과 정확히 같으면
+// 그 질문으로 물어보고, 아니면 아직은 답변할 수 없다고 안내합니다.
 export default function Chat() {
   const patientId = getCurrentPatientId();
+  const location = useLocation();
+  const context = (location.state as ChatContext | null) ?? null;
   const [questions, setQuestions] = useState<ChatQuestion[]>([]);
-  const [messages, setMessages] = useState<Message[]>(INITIAL);
+  const [messages, setMessages] = useState<Message[]>(() => [
+    { role: "bot", text: buildGreeting(context) },
+  ]);
   const [loading, setLoading] = useState(false);
-  const [askedIds, setAskedIds] = useState<Set<string>>(new Set());
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const [input, setInput] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     getChatQuestions().then(setQuestions).catch(() => setQuestions([]));
   }, []);
 
+  // scrollIntoView는 페이지 전체 스크롤 위치까지 건드릴 수 있어서, 메시지 목록 div의
+  // scrollTop만 직접 조작해 채팅창 내부만 스크롤되게 합니다.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = listRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
-  const handleAsk = async (q: ChatQuestion) => {
+  const askPreset = async (q: ChatQuestion) => {
     if (loading) return;
     setMessages((prev) => [...prev, { role: "user", text: q.text }]);
     setLoading(true);
     try {
       const res = await askChat(patientId, q.id);
-      setMessages((prev) => [...prev, { role: "bot", text: res.answer }]);
-      setAskedIds((prev) => new Set([...prev, q.id]));
+      setMessages((prev) => [...prev, { role: "bot", text: res.answer, source: res.source }]);
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -43,64 +73,108 @@ export default function Chat() {
     }
   };
 
+  const handleSend = () => {
+    const text = input.trim();
+    if (!text || loading) return;
+    setInput("");
+    const match = questions.find((q) => q.text === text);
+    if (match) {
+      askPreset(match);
+      return;
+    }
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", text },
+      {
+        role: "bot",
+        text: "죄송해요, 지금은 아래 질문 3가지에 대해서만 답변드릴 수 있어요. 다른 궁금한 점은 담당 의사나 약사에게 확인해주세요.",
+      },
+    ]);
+  };
+
   return (
-    <div className="min-h-screen flex flex-col bg-[#FAF6F1]">
+    <div className="h-screen flex flex-col" style={{ background: C.ivory }}>
       <NavBar isLoggedIn userName="김건강" />
-      <main className="max-w-2xl mx-auto w-full px-4 py-6 flex flex-col flex-1">
-        <div className="mb-5">
-          <p className="text-[13px] font-bold text-[#C1653D] mb-1">복약 상담 챗봇</p>
-          <h1 className="text-[22px] font-black text-[#2A2A2A]">궁금한 걸 눌러서 물어보세요</h1>
+      <main className="max-w-2xl lg:max-w-4xl mx-auto w-full px-4 py-6 flex flex-col flex-1 min-h-0">
+        <div className="mb-5 shrink-0">
+          <p className="text-[13px] font-bold mb-1" style={{ color: C.terracotta }}>AI 복약 상담</p>
+          <h1 className="text-[24px] font-black" style={{ color: C.dark }}>복약 상담 챗봇</h1>
+          <p className="text-[14px]" style={{ color: C.muted }}>복약 안내 결과에 대해 궁금한 점을 물어보세요</p>
         </div>
 
-        <div className="bg-white rounded-3xl flex flex-col overflow-hidden shadow-sm flex-1">
-          <div className="flex-1 overflow-y-auto space-y-5 p-5" style={{ minHeight: 280, maxHeight: 420 }}>
+        <div className="rounded-3xl mb-4 flex flex-col overflow-hidden flex-1 min-h-0" style={{ background: C.white, boxShadow: "0 2px 20px rgba(30,26,23,0.07)" }}>
+          <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto space-y-5 p-5">
             {messages.map((m, i) => (
               <div key={i} className={`flex items-end gap-3 ${m.role === "user" ? "flex-row-reverse" : ""}`}>
                 {m.role === "bot" && (
-                  <div className="w-9 h-9 rounded-full shrink-0 flex items-center justify-center text-[16px] bg-[#C1653D]/10">
+                  <div
+                    className="w-9 h-9 rounded-full shrink-0 flex items-center justify-center text-[18px]"
+                    style={{ background: `${C.terracotta}12` }}
+                  >
                     💊
                   </div>
                 )}
-                <div
-                  className="max-w-[80%] px-4 py-3.5 text-[15px] leading-relaxed"
-                  style={{
-                    background: m.role === "user" ? "#C1653D" : "#F4F0EA",
-                    color: m.role === "user" ? "#FFFFFF" : "#2A2A2A",
-                    borderRadius: m.role === "user" ? "20px 20px 4px 20px" : "20px 20px 20px 4px",
-                  }}
-                >
-                  {m.text}
+                <div className="max-w-[80%]">
+                  <div
+                    className="px-4 py-3.5 text-[15px] leading-relaxed"
+                    style={{
+                      background: m.role === "user" ? C.terracotta : C.bubbleBg,
+                      color: m.role === "user" ? C.white : C.dark,
+                      borderRadius: m.role === "user" ? "20px 20px 4px 20px" : "20px 20px 20px 4px",
+                    }}
+                  >
+                    {m.text}
+                  </div>
+                  {m.source && (
+                    <p className="text-[11px] mt-1.5 px-1" style={{ color: C.muted }}>{m.source}</p>
+                  )}
                 </div>
               </div>
             ))}
-            {loading && <p className="text-[13px] text-[#888888] pl-12">답변을 준비하고 있어요...</p>}
-            <div ref={bottomRef} />
+            {loading && <p className="text-[13px] pl-12" style={{ color: C.muted }}>답변을 준비하고 있어요...</p>}
           </div>
 
-          <div className="p-4 border-t border-black/6 space-y-2">
-            <p className="text-[12px] font-bold text-[#888888] mb-1">질문 선택</p>
-            {questions.map((q) => (
-              <button
-                key={q.id}
-                onClick={() => handleAsk(q)}
-                disabled={loading}
-                className="w-full text-left px-4 py-3 rounded-xl text-[14px] font-medium border transition-all disabled:opacity-50"
-                style={{
-                  borderColor: askedIds.has(q.id) ? "#8FAE8B60" : "#C1653D40",
-                  background: askedIds.has(q.id) ? "#8FAE8B10" : "#C1653D06",
-                  color: "#2A2A2A",
-                }}
-              >
-                {q.text} {askedIds.has(q.id) && <span className="text-[#8FAE8B]">✓</span>}
-              </button>
-            ))}
+          {questions.length > 0 && (
+            <div className="shrink-0 flex gap-2 flex-wrap px-5 py-3 border-t" style={{ borderColor: "rgba(30,26,23,0.07)" }}>
+              {questions.map((q) => (
+                <button
+                  key={q.id}
+                  onClick={() => askPreset(q)}
+                  disabled={loading}
+                  className="px-3.5 py-2 rounded-full text-[13px] font-bold border transition-all hover:opacity-80 disabled:opacity-50"
+                  style={{ borderColor: `${C.terracotta}50`, color: C.terracotta, background: `${C.terracotta}06` }}
+                >
+                  {q.text}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="shrink-0 flex gap-2 px-4 py-4 border-t" style={{ borderColor: "rgba(30,26,23,0.07)" }}>
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSend()}
+              disabled={loading}
+              placeholder="궁금한 점을 입력해주세요"
+              className="flex-1 px-5 py-3.5 rounded-full text-[15px] outline-none disabled:opacity-60"
+              style={{ background: C.ivory, border: "1.5px solid rgba(30,26,23,0.10)", color: C.dark }}
+            />
+            <button
+              onClick={handleSend}
+              disabled={loading || !input.trim()}
+              className="px-7 py-3.5 rounded-full text-white font-bold text-[15px] shrink-0 transition-all hover:opacity-88 disabled:opacity-50"
+              style={{ background: C.terracotta }}
+            >
+              전송
+            </button>
           </div>
         </div>
 
-        <div className="rounded-2xl px-5 py-4 mt-4 flex items-start gap-2.5 bg-[#E08A5B]/10 border border-[#E08A5B]/25">
+        <div className="shrink-0 rounded-2xl px-5 py-4 flex items-start gap-2.5" style={{ background: C.warningBg, border: `1px solid ${C.warningBorder}` }}>
           <span className="text-[15px] shrink-0">⚠️</span>
-          <span className="text-[13px] leading-relaxed text-[#7A4B28]">
-            챗봇 답변은 미리 준비된 안내입니다. 정확한 복약 지도는 담당 의사 또는 약사에게 확인하세요.
+          <span className="text-[13px] leading-relaxed" style={{ color: C.warningText }}>
+            챗봇 답변은 AI가 생성한 참고용 정보입니다. 정확한 복약 지도는 담당 의사 또는 약사에게 확인하세요.
           </span>
         </div>
       </main>

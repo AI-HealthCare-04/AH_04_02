@@ -165,27 +165,31 @@ class MockOCRProvider(OCRProvider):
     """실제 OCR 없이 고정된 샘플 결과를 반환. ②③이 이걸로 선행 개발."""
 
     def extract(self, image_path: str) -> OCRResult:
+        # [7/9] 일부러 인식 정확도가 낮은 항목을 섞어둠 — review_required가 실제로
+        # 트리거돼야 처방전확인(PrescriptionReview.tsx) 화면을 흐름상 볼 수 있음.
+        # "암로디민"(오타), "500"(단위 누락)은 실제 OCR에서 흔한 오류 패턴.
+        confidences = [0.65, 0.72]
         result = OCRResult(
-            raw_text="아스피린 100mg 1일 1회 / 고혈압 / 로자탄 50mg 1일 1회",
+            raw_text="암로디민 5mg 1일 1회 / 고혈압, 제2형 당뇨병 / 메트포르민 500 1일 2회",
             medications=[
                 MedicationItem(
-                    drug_name="아스피린",
-                    dosage="100mg",
+                    drug_name="암로디민 5mg",
+                    dosage="5mg",
                     frequency="1일 1회",
                     diagnosis="고혈압",
-                    drug_class="항혈소판제",
-                    confidence=0.92,
+                    drug_class="칼슘채널차단제",
+                    confidence=confidences[0],
                 ),
                 MedicationItem(
-                    drug_name="로자탄",
-                    dosage="50mg",
-                    frequency="1일 1회",
-                    diagnosis="고혈압",
-                    drug_class="ARB(안지오텐신수용체차단제)",
-                    confidence=0.78,
+                    drug_name="메트포르민 500mg",
+                    dosage="500",
+                    frequency="1일 2회",
+                    diagnosis="제2형 당뇨병",
+                    drug_class="당뇨병용제(비구아니드)",
+                    confidence=confidences[1],
                 ),
             ],
-            overall_confidence=0.85,
+            overall_confidence=round(sum(confidences) / len(confidences), 4),
             source="mock",
         )
         return self._apply_review_flag(result)
