@@ -65,7 +65,7 @@ DRUG_FIELD_LABELS: dict[str, str] = {
 
 
 class HiraDrugMasterEntry(BaseModel):
-    """건강보험심사평가원 약가마스터·의약품표준코드 CSV(data/hira_drug_master_20251031.csv) 1개 행.
+    """건강보험심사평가원 약가마스터·의약품표준코드 CSV(backend/data/hira_drug_master_20251031.csv) 1개 행.
 
     e약은요와 원천이 다른 별도 로컬 데이터 — 효능효과 등 설명문은 없지만, 표준코드·ATC코드·
     허가일자·취소일자 등 e약은요에 없는 코드성 정보를 담고 있어 품목 식별/검증 보조용으로 쓴다.
