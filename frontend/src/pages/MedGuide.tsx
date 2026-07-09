@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import NavBar from "../components/NavBar";
-import { getRecord, type RecordResult } from "../api/records";
+import { formatSourceRef, getRecord, type RecordResult } from "../api/records";
 import { C } from "../theme";
 
 // ponytail: Figma 원본은 병명 백과사전·시간대별 복약 일정 탭도 있었지만, 백엔드가
@@ -84,6 +84,8 @@ export default function MedGuide() {
           <div className="space-y-3">
             {guide.medication_guide.drugs.map((d, i) => {
               const med = result.medications.find((m) => m.drug_name === d.drug_name);
+              // [7/9] dosage_text(stub) / medication_guide(실제) 중 있는 걸 씀
+              const guideText = d.medication_guide ?? d.dosage_text ?? "";
               const content = (
                 <>
                   <div className="flex items-center justify-between gap-3 mb-1.5">
@@ -103,7 +105,7 @@ export default function MedGuide() {
                   {med?.frequency && (
                     <p className="text-[12px] mb-2" style={{ color: C.muted }}>{med.frequency}</p>
                   )}
-                  <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>{d.dosage_text}</p>
+                  <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>{guideText}</p>
                 </>
               );
               return med ? (
@@ -126,69 +128,90 @@ export default function MedGuide() {
 
         {/* 약물 주의사항(caution)과 생활습관상 주의사항(피해야 할 음식)은 둘 다 "조심해야 할 것"이라
             겹치는 성격이라, 한 탭에 같이 모아서 보여줍니다. */}
-        {tab === "주의사항" && (
-          <div className="space-y-4">
-            {guide.medication_guide.drugs.some((d) => d.caution) && (
-              <div className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
-                <p className="text-[15px] font-black mb-3" style={{ color: C.dark }}>💊 약물별 주의사항</p>
-                <ul className="space-y-2.5">
-                  {guide.medication_guide.drugs.filter((d) => d.caution).map((d, i) => (
-                    <li key={i} className="flex items-start gap-2.5">
-                      <div className="w-1.5 h-1.5 rounded-full mt-2 shrink-0" style={{ background: C.terracotta }} />
-                      <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>
-                        <span className="font-bold">{d.drug_name}</span> — {d.caution}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {(guide.lifestyle_guide.diet.avoid.length > 0 || guide.lifestyle_guide.diet.drug_specific.length > 0) && (
-              <div className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
-                <p className="text-[15px] font-black mb-3" style={{ color: C.dark }}>🥗 생활 속 주의사항</p>
-                <ul className="space-y-2.5">
-                  {guide.lifestyle_guide.diet.avoid.map((food, i) => (
-                    <li key={`avoid-${i}`} className="flex items-start gap-2.5">
-                      <div className="w-1.5 h-1.5 rounded-full mt-2 shrink-0" style={{ background: C.terracottaLight }} />
-                      <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>{food} 섭취를 피하세요</p>
-                    </li>
-                  ))}
-                  {guide.lifestyle_guide.diet.drug_specific.map((note, i) => (
-                    <li key={`specific-${i}`} className="flex items-start gap-2.5">
-                      <div className="w-1.5 h-1.5 rounded-full mt-2 shrink-0" style={{ background: C.terracottaLight }} />
-                      <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>{note}</p>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {!guide.medication_guide.drugs.some((d) => d.caution) &&
-              guide.lifestyle_guide.diet.avoid.length === 0 &&
-              guide.lifestyle_guide.diet.drug_specific.length === 0 && (
+        {tab === "주의사항" && (() => {
+          // [7/9] caution(stub, 단일 문자열) / precautions(실제, 배열) 중 있는 걸 씀
+          const drugsWithCaution = guide.medication_guide.drugs
+            .map((d) => ({ d, cautionText: d.precautions?.length ? d.precautions.join(" ") : d.caution }))
+            .filter((x) => x.cautionText);
+          const dietAvoid = guide.lifestyle_guide.diet?.avoid ?? [];
+          const dietSpecific = guide.lifestyle_guide.diet?.drug_specific ?? [];
+          const hasDietWarning = dietAvoid.length > 0 || dietSpecific.length > 0;
+          return (
+            <div className="space-y-4">
+              {drugsWithCaution.length > 0 && (
+                <div className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
+                  <p className="text-[15px] font-black mb-3" style={{ color: C.dark }}>💊 약물별 주의사항</p>
+                  <ul className="space-y-2.5">
+                    {drugsWithCaution.map(({ d, cautionText }, i) => (
+                      <li key={i} className="flex items-start gap-2.5">
+                        <div className="w-1.5 h-1.5 rounded-full mt-2 shrink-0" style={{ background: C.terracotta }} />
+                        <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>
+                          <span className="font-bold">{d.drug_name}</span> — {cautionText}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {hasDietWarning && (
+                <div className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
+                  <p className="text-[15px] font-black mb-3" style={{ color: C.dark }}>🥗 생활 속 주의사항</p>
+                  <ul className="space-y-2.5">
+                    {dietAvoid.map((food, i) => (
+                      <li key={`avoid-${i}`} className="flex items-start gap-2.5">
+                        <div className="w-1.5 h-1.5 rounded-full mt-2 shrink-0" style={{ background: C.terracottaLight }} />
+                        <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>{food} 섭취를 피하세요</p>
+                      </li>
+                    ))}
+                    {dietSpecific.map((note, i) => (
+                      <li key={`specific-${i}`} className="flex items-start gap-2.5">
+                        <div className="w-1.5 h-1.5 rounded-full mt-2 shrink-0" style={{ background: C.terracottaLight }} />
+                        <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>{note}</p>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {drugsWithCaution.length === 0 && !hasDietWarning && (
                 <p className="text-[14px]" style={{ color: C.muted }}>특별히 주의할 사항이 없어요.</p>
               )}
-          </div>
-        )}
+            </div>
+          );
+        })()}
 
         {tab === "생활습관" && (
           <div className="space-y-4">
-            <div className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
-              <p className="text-[15px] font-black mb-3" style={{ color: C.dark }}>🥗 식이</p>
-              <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>
-                피해야 할 음식: {guide.lifestyle_guide.diet.avoid.join(", ") || "없음"}
-              </p>
-              {guide.lifestyle_guide.diet.drug_specific.length > 0 && (
-                <p className="text-[13px] mt-2" style={{ color: C.muted }}>
-                  {guide.lifestyle_guide.diet.drug_specific.join(" ")}
-                </p>
-              )}
-            </div>
-            <div className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
-              <p className="text-[15px] font-black mb-3" style={{ color: C.dark }}>🏃 운동</p>
-              <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>
-                {guide.lifestyle_guide.exercise.type} · {guide.lifestyle_guide.exercise.duration} · {guide.lifestyle_guide.exercise.intensity}
-              </p>
-            </div>
+            {guide.lifestyle_guide.guides?.length ? (
+              // [7/9] 실제 파이프라인 모양 — 약별 생활습관 안내 전문
+              guide.lifestyle_guide.guides.map((text, i) => (
+                <div key={i} className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
+                  <p className="text-[15px] font-black mb-3" style={{ color: C.dark }}>🌿 안내 {i + 1}</p>
+                  <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>{text}</p>
+                </div>
+              ))
+            ) : (
+              // stub 모양 — 구조화된 diet/exercise
+              <>
+                <div className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
+                  <p className="text-[15px] font-black mb-3" style={{ color: C.dark }}>🥗 식이</p>
+                  <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>
+                    피해야 할 음식: {guide.lifestyle_guide.diet?.avoid.join(", ") || "없음"}
+                  </p>
+                  {!!guide.lifestyle_guide.diet?.drug_specific.length && (
+                    <p className="text-[13px] mt-2" style={{ color: C.muted }}>
+                      {guide.lifestyle_guide.diet.drug_specific.join(" ")}
+                    </p>
+                  )}
+                </div>
+                <div className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
+                  <p className="text-[15px] font-black mb-3" style={{ color: C.dark }}>🏃 운동</p>
+                  <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>
+                    {guide.lifestyle_guide.exercise?.type} · {guide.lifestyle_guide.exercise?.duration} ·{" "}
+                    {guide.lifestyle_guide.exercise?.intensity}
+                  </p>
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -197,9 +220,14 @@ export default function MedGuide() {
             출처:{" "}
             {guide.source_refs.map((s, i) => (
               <span key={i}>
-                <a href={s.url} target="_blank" rel="noreferrer" className="underline" style={{ color: C.muted }}>
-                  {s.title}
-                </a>
+                {/* [7/9] url(stub)이 있을 때만 링크로, 실제 파이프라인 인용(url 없음)은 텍스트로만 표시 */}
+                {s.url ? (
+                  <a href={s.url} target="_blank" rel="noreferrer" className="underline" style={{ color: C.muted }}>
+                    {formatSourceRef(s)}
+                  </a>
+                ) : (
+                  formatSourceRef(s)
+                )}
                 {i < guide.source_refs.length - 1 && ", "}
               </span>
             ))}
