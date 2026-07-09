@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import NavBar from "../components/NavBar";
-import { getLogs, getSchedules, type MedicationLogEntry, type Schedule } from "../api/monitoring";
-import { getCurrentPatientId } from "../lib/session";
+import { checkIntake, getLogs, getSchedules, type MedicationLogEntry, type Schedule } from "../api/monitoring";
+import { getDrugIndication, type DrugIndicationInfo } from "../api/records";
+import { getCurrentCaregiverId, getCurrentPatientId } from "../lib/session";
 import { C } from "../theme";
 
 export default function DrugDetail() {
@@ -14,8 +15,10 @@ export default function DrugDetail() {
 
   const [schedule, setSchedule] = useState<Schedule | null>(stateSchedule ?? null);
   const [logs, setLogs] = useState<MedicationLogEntry[]>([]);
+  const [drugInfo, setDrugInfo] = useState<DrugIndicationInfo | null>(null);
   const [loading, setLoading] = useState(!stateSchedule);
   const [error, setError] = useState("");
+  const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     if (!scheduleId) return;
@@ -35,6 +38,29 @@ export default function DrugDetail() {
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scheduleId]);
+
+  useEffect(() => {
+    if (!schedule) return;
+    getDrugIndication(schedule.drug_name)
+      .then(setDrugInfo)
+      .catch(() => setDrugInfo(null));
+  }, [schedule]);
+
+  // 모니터링(보호자용) 화면에서만 오는 경로라, 여기서 체크하면 "보호자가 대신" 기록으로 남깁니다.
+  const handleCheck = async (status: "taken" | "skipped") => {
+    if (!scheduleId || checking) return;
+    setChecking(true);
+    try {
+      await checkIntake(scheduleId, status, getCurrentCaregiverId() ?? undefined);
+      const patientId = getCurrentPatientId();
+      const allLogs = await getLogs(patientId, 60);
+      setLogs(allLogs.filter((l) => l.schedule_id === Number(scheduleId)));
+    } catch {
+      setError("체크에 실패했어요. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setChecking(false);
+    }
+  };
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
@@ -66,6 +92,11 @@ export default function DrugDetail() {
                   </p>
                   <h1 className="text-[26px] font-black leading-tight mb-2" style={{ color: C.white }}>{schedule.drug_name}</h1>
                   <div className="flex flex-wrap gap-2">
+                    {drugInfo?.drug_class && (
+                      <span className="px-3 py-1 rounded-full text-[12px] font-bold" style={{ background: "rgba(255,255,255,0.18)", color: C.white }}>
+                        {drugInfo.drug_class}
+                      </span>
+                    )}
                     <span className="px-3 py-1 rounded-full text-[12px] font-bold" style={{ background: "rgba(255,255,255,0.18)", color: C.white }}>
                       복용 시간 {schedule.time_slot}
                     </span>
@@ -79,10 +110,47 @@ export default function DrugDetail() {
               </div>
             </div>
 
+            <div className="flex gap-3 mb-5">
+              <button
+                onClick={() => handleCheck("taken")}
+                disabled={checking}
+                className="flex-1 py-3.5 rounded-full font-bold text-[14px] text-white transition-all disabled:opacity-50"
+                style={{ background: C.success }}
+              >
+                ✓ 오늘 복용 확인
+              </button>
+              <button
+                onClick={() => handleCheck("skipped")}
+                disabled={checking}
+                className="flex-1 py-3.5 rounded-full font-bold text-[14px] border-2 transition-all disabled:opacity-50"
+                style={{ borderColor: "rgba(30,26,23,0.15)", color: C.muted }}
+              >
+                건너뛰었어요
+              </button>
+            </div>
+
             <div className="flex items-start gap-2.5 px-4 py-3.5 rounded-2xl mb-5" style={{ background: C.warningBg, border: `1px solid ${C.warningBorder}` }}>
               <span className="text-[14px] shrink-0">ℹ️</span>
               <p className="text-[12px] leading-relaxed" style={{ color: C.warningText }}>
-                복용법·주의사항 등 상세 의약품 정보는 아직 준비 중이에요. 정확한 복약 지도는 담당 의사·약사에게 확인하세요.
+                아래 정보는 일반적인 복약 안내입니다. 정확한 복약 지도는 담당 의사·약사에게 확인하세요.
+              </p>
+            </div>
+
+            {drugInfo?.indication && (
+              <div className="rounded-2xl p-6 mb-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
+                <div className="flex items-center gap-2.5 mb-3">
+                  <span className="text-[18px]">🩺</span>
+                  <h2 className="text-[15px] font-black" style={{ color: C.dark }}>적응증</h2>
+                </div>
+                <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>{drugInfo.indication}</p>
+              </div>
+            )}
+
+            {/* ponytail: 복약 일정(MedicationSchedule)은 처방전 OCR 기록과 연결돼 있지 않아서
+                caution/부작용/상호작용/보관법 데이터가 없습니다 — 지어내지 않고 준비 중이라고 안내 */}
+            <div className="rounded-2xl p-5 mb-5" style={{ background: "#F5F2ED" }}>
+              <p className="text-[13px]" style={{ color: C.muted }}>
+                주의사항·부작용·약물 상호작용·보관 방법 정보는 아직 준비 중이에요.
               </p>
             </div>
 
@@ -98,9 +166,12 @@ export default function DrugDetail() {
                   .slice(0, 20)
                   .map((log) => (
                     <div key={log.id} className="flex items-center justify-between px-6 py-3.5 border-b last:border-0" style={{ borderColor: "rgba(30,26,23,0.06)" }}>
-                      <span className="text-[13px]" style={{ color: C.dark }}>
-                        {new Date(log.checked_at).toLocaleString("ko-KR", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-                      </span>
+                      <div>
+                        <p className="text-[13px]" style={{ color: C.dark }}>
+                          {new Date(log.checked_at).toLocaleString("ko-KR", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        </p>
+                        <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>확인자 · {log.confirmed_by_name}</p>
+                      </div>
                       <span
                         className="px-3 py-1 rounded-full text-[12px] font-bold"
                         style={{
@@ -117,7 +188,7 @@ export default function DrugDetail() {
 
             <div className="mt-6 flex gap-3">
               <button
-                onClick={() => navigate("/chat")}
+                onClick={() => navigate("/chat", { state: { drugName: schedule.drug_name } })}
                 className="flex-1 py-4 rounded-full font-bold text-[15px] border-2 transition-all"
                 style={{ borderColor: C.terracotta, color: C.terracotta }}
               >

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import NavBar from "../components/NavBar";
 import { createRecord } from "../api/records";
 
 const steps = [
@@ -11,13 +12,10 @@ const steps = [
 export default function Processing() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { file, patientId } =
-    (location.state as { file?: File; patientId?: number }) ?? {};
+  const { file, patientId, caregiverId } =
+    (location.state as { file?: File; patientId?: number; caregiverId?: number }) ?? {};
 
   const [current, setCurrent] = useState(0);
-  const [failed, setFailed] = useState(false);
-  const [failureReason, setFailureReason] = useState("");
-  const [retrying, setRetrying] = useState(false);
   const visualRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const runUpload = async () => {
@@ -26,7 +24,6 @@ export default function Processing() {
       return;
     }
 
-    setFailed(false);
     setCurrent(0);
 
     // 실제 단계와 무관한 시각 효과 — 응답 올 때까지 기대감만 주는 용도
@@ -35,7 +32,7 @@ export default function Processing() {
     }, 1200);
 
     try {
-      const result = await createRecord(patientId, file);
+      const result = await createRecord(patientId, file, caregiverId);
       if (visualRef.current) clearInterval(visualRef.current);
       setCurrent(steps.length - 1);
       setTimeout(() => navigate("/result", { state: { result } }), 400);
@@ -43,8 +40,7 @@ export default function Processing() {
       if (visualRef.current) clearInterval(visualRef.current);
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data
         ?.detail;
-      setFailed(true);
-      setFailureReason(detail ?? "처리 중 문제가 발생했어요. 잠시 후 다시 시도해 주세요.");
+      navigate("/ocr-error", { state: { reason: detail } });
     }
   };
 
@@ -56,62 +52,42 @@ export default function Processing() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleRetry = () => {
-    setRetrying(true);
-    runUpload().finally(() => setRetrying(false));
-  };
-
   return (
     <div style={styles.page}>
-      <nav style={styles.nav}>
-        <span style={styles.logo}>💊 건강동행</span>
-      </nav>
+      <NavBar isLoggedIn userName="김건강" />
       <main style={styles.main}>
         <div style={styles.card}>
-          {failed ? (
-            <>
-              <div style={styles.spinner}>⚠️</div>
-              <h1 style={styles.title}>처리 중 문제가 발생했어요</h1>
-              <p style={styles.subtitle}>{failureReason}</p>
-              <button style={styles.retryBtn} onClick={handleRetry} disabled={retrying}>
-                {retrying ? "다시 시도 중..." : "다시 시도하기"}
-              </button>
-            </>
-          ) : (
-            <>
-              <div style={styles.spinner}>⏳</div>
-              <h1 style={styles.title}>분석을 시작할게요</h1>
-              <p style={styles.subtitle}>잠시만 기다려 주세요. 보통 10초 이내에 완료돼요.</p>
+          <div style={styles.spinner}>⏳</div>
+          <h1 style={styles.title}>분석을 시작할게요</h1>
+          <p style={styles.subtitle}>잠시만 기다려 주세요. 보통 10초 이내에 완료돼요.</p>
 
-              <div style={styles.steps}>
-                {steps.map((step, i) => (
-                  <div key={step.id} style={styles.stepRow}>
-                    <div style={{
-                      ...styles.stepDot,
-                      ...(i < current ? styles.stepDone : {}),
-                      ...(i === current ? styles.stepActive : {}),
-                    }}>
-                      {i < current ? "✓" : step.id}
-                    </div>
-                    <div style={styles.stepContent}>
-                      <p style={{
-                        ...styles.stepLabel,
-                        ...(i === current ? styles.stepLabelActive : {}),
-                      }}>{step.label}</p>
-                      {i === current && (
-                        <p style={styles.stepDesc}>{step.desc}</p>
-                      )}
-                    </div>
-                    <div style={styles.stepStatus}>
-                      {i < current && <span style={styles.statusDone}>완료</span>}
-                      {i === current && <span style={styles.statusActive}>진행 중</span>}
-                      {i > current && <span style={styles.statusWait}>대기 중</span>}
-                    </div>
-                  </div>
-                ))}
+          <div style={styles.steps}>
+            {steps.map((step, i) => (
+              <div key={step.id} style={styles.stepRow}>
+                <div style={{
+                  ...styles.stepDot,
+                  ...(i < current ? styles.stepDone : {}),
+                  ...(i === current ? styles.stepActive : {}),
+                }}>
+                  {i < current ? "✓" : step.id}
+                </div>
+                <div style={styles.stepContent}>
+                  <p style={{
+                    ...styles.stepLabel,
+                    ...(i === current ? styles.stepLabelActive : {}),
+                  }}>{step.label}</p>
+                  {i === current && (
+                    <p style={styles.stepDesc}>{step.desc}</p>
+                  )}
+                </div>
+                <div style={styles.stepStatus}>
+                  {i < current && <span style={styles.statusDone}>완료</span>}
+                  {i === current && <span style={styles.statusActive}>진행 중</span>}
+                  {i > current && <span style={styles.statusWait}>대기 중</span>}
+                </div>
               </div>
-            </>
-          )}
+            ))}
+          </div>
 
           <div style={styles.disclaimer}>
             <p style={styles.disclaimerText}>
@@ -126,8 +102,6 @@ export default function Processing() {
 
 const styles: Record<string, React.CSSProperties> = {
   page: { minHeight: "100vh", background: "#FAF6F1", fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" },
-  nav: { padding: "16px 40px", background: "#FFFFFF", borderBottom: "1px solid #EEE6DC", display: "flex", alignItems: "center" },
-  logo: { fontSize: 20, fontWeight: 700, color: "#C16A45" },
   main: { maxWidth: 600, margin: "0 auto", padding: "80px 24px", display: "flex", flexDirection: "column" as const, alignItems: "center" },
   card: { width: "100%", background: "#FFFFFF", border: "1px solid #EEE6DC", borderRadius: 20, padding: "48px 40px", textAlign: "center" as const },
   spinner: { fontSize: 48, marginBottom: 20 },
@@ -148,5 +122,4 @@ const styles: Record<string, React.CSSProperties> = {
   statusWait: { fontSize: 12, color: "#CCCCCC" },
   disclaimer: { background: "#FFF8F4", border: "1px solid #F0E5D8", borderRadius: 10, padding: "12px 16px" },
   disclaimerText: { fontSize: 13, color: "#C16A45", lineHeight: 1.6 },
-  retryBtn: { padding: "14px 36px", fontSize: 15, fontWeight: 700, background: "#C16A45", color: "#FFFFFF", border: "none", borderRadius: 10, cursor: "pointer", marginBottom: 32 },
 };

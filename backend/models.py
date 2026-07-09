@@ -92,6 +92,8 @@ class MedicalRecord(SQLModel, table=True):
     raw_text: Optional[str] = None  # OCR 원문 (완료 후 기록)
     failure_reason: Optional[str] = None  # 실패 시 사유
     created_at: datetime = Field(default_factory=datetime.now)
+    # [7/9 추가] 보호자가 대신 업로드한 경우에만 채워짐 — 본인이 직접 올렸으면 None
+    uploaded_by_caregiver_id: Optional[int] = Field(default=None, foreign_key="caregivers.id")
 
 
 # ── OCR 추출 결과 (약품 1개 = 1행, 담당: 권순현) ──
@@ -148,6 +150,9 @@ class MedicationLog(SQLModel, table=True):
     status: str = "taken"  # taken(복용) / skipped(건너뜀)
     checked_at: datetime = Field(default_factory=datetime.now)
     note: Optional[str] = None
+    # [7/9 추가] 이 체크를 누가 했는지 — 환자 본인(patient) vs 보호자 대신(caregiver)
+    confirmed_by_type: str = "patient"
+    confirmed_by_caregiver_id: Optional[int] = Field(default=None, foreign_key="caregivers.id")
 
 
 # ══════════════════════════════════════════════════════════

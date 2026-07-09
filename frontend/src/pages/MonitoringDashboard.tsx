@@ -263,10 +263,14 @@ export default function MonitoringDashboard() {
                   const key = `${calMonth.year}-${String(calMonth.month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
                   const st = dayStatus.get(key);
                   return (
-                    <div key={i} className="flex flex-col items-center py-2">
+                    <button
+                      key={i}
+                      onClick={() => navigate(`/monitoring/logs/${key}?patient_id=${patientId}`)}
+                      className="flex flex-col items-center py-2 rounded-xl transition-colors hover:bg-black/[0.05]"
+                    >
                       <span className="text-[12px] font-bold mb-1" style={{ color: C.dark }}>{day}</span>
                       {st ? <div className="w-2 h-2 rounded-full" style={{ background: dotColor[st] }} /> : <div className="w-2 h-2" />}
-                    </div>
+                    </button>
                   );
                 })}
               </div>

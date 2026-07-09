@@ -266,6 +266,8 @@ class ScheduleUpdate(BaseModel):
 
 class CheckIn(BaseModel):
     status: str  # "taken" | "skipped" (Dashboard.tsx IntakeStatus와 동일)
+    # [7/9 추가] 보호자가 모니터링 화면에서 대신 체크할 때만 채워짐 — 환자 본인이 체크하면 None
+    confirmed_by_caregiver_id: int | None = None
 
 
 @router.post("/schedules", response_model=MedicationSchedule)
@@ -359,12 +361,23 @@ def check_intake(schedule_id: int, payload: CheckIn, session: Session = Depends(
         .where(func.date(MedicationLog.checked_at) == today_str)
     ).first()
 
+    confirmed_by_type = "caregiver" if payload.confirmed_by_caregiver_id else "patient"
+
     if existing:
         existing.status = payload.status
         existing.checked_at = datetime.now()
+        existing.confirmed_by_type = confirmed_by_type
+        existing.confirmed_by_caregiver_id = payload.confirmed_by_caregiver_id
         session.add(existing)
     else:
-        session.add(MedicationLog(schedule_id=schedule_id, status=payload.status))
+        session.add(
+            MedicationLog(
+                schedule_id=schedule_id,
+                status=payload.status,
+                confirmed_by_type=confirmed_by_type,
+                confirmed_by_caregiver_id=payload.confirmed_by_caregiver_id,
+            )
+        )
 
     session.commit()
     return {"schedule_id": schedule_id, "status": payload.status}
@@ -416,6 +429,11 @@ def list_logs(patient_id: int, days: int = 30, session: Session = Depends(get_se
         .order_by(MedicationLog.checked_at.desc())
     ).all()
 
+    caregiver_ids = {log.confirmed_by_caregiver_id for log in logs if log.confirmed_by_caregiver_id}
+    caregiver_names = {
+        c.id: c.name for c in session.exec(select(Caregiver).where(Caregiver.id.in_(caregiver_ids)))
+    } if caregiver_ids else {}
+
     return [
         {
             "id": log.id,
@@ -424,6 +442,12 @@ def list_logs(patient_id: int, days: int = 30, session: Session = Depends(get_se
             "time_slot": schedule_map[log.schedule_id].time_slot,
             "status": log.status,
             "checked_at": log.checked_at.isoformat(),
+            "confirmed_by_type": log.confirmed_by_type,
+            "confirmed_by_name": (
+                caregiver_names.get(log.confirmed_by_caregiver_id, "보호자")
+                if log.confirmed_by_type == "caregiver"
+                else "본인"
+            ),
         }
         for log in logs
     ]

@@ -57,10 +57,16 @@ export async function getTodayMedications(patientId: number) {
 
 /**
  * 복약 체크 — "복용했어요"/"건너뛸게요" 버튼
+ * [7/9 추가] confirmedByCaregiverId를 넘기면 "보호자가 대신 체크"로 기록됩니다 (생략하면 본인).
  */
-export async function checkIntake(scheduleId: string, status: "taken" | "skipped") {
+export async function checkIntake(
+  scheduleId: string,
+  status: "taken" | "skipped",
+  confirmedByCaregiverId?: number
+) {
   const { data } = await monitoringClient.post(`/monitoring/schedules/${scheduleId}/check`, {
     status,
+    confirmed_by_caregiver_id: confirmedByCaregiverId,
   });
   return data;
 }
@@ -253,6 +259,8 @@ export interface MedicationLogEntry {
   time_slot: string;
   status: "taken" | "skipped";
   checked_at: string;
+  confirmed_by_type: "patient" | "caregiver";
+  confirmed_by_name: string;
 }
 
 export async function getLogs(patientId: number, days = 30) {

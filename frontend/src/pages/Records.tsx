@@ -19,41 +19,59 @@ export default function Records() {
   const patientId = Number(searchParams.get("patient_id")) || getCurrentPatientId();
   const [records, setRecords] = useState<RecordSummary[]>([]);
   const [search, setSearch] = useState("");
+  const [dateFilter, setDateFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     listRecords(patientId)
       .then(setRecords)
-      .catch(() => setError("이용 기록을 불러오지 못했어요."))
+      .catch(() => setError("등록내역을 불러오지 못했어요."))
       .finally(() => setLoading(false));
   }, [patientId]);
 
   const filtered = records.filter(
     (r) =>
-      !search ||
-      r.diagnosis.includes(search) ||
-      r.drug_names.some((d) => d.includes(search))
+      (!search || r.diagnosis.includes(search) || r.drug_names.some((d) => d.includes(search))) &&
+      (!dateFilter || r.created_at.slice(0, 10) === dateFilter)
   );
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
       <NavBar isLoggedIn userName="김건강" />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
-        <h1 className="text-[26px] font-black mb-1" style={{ color: C.dark }}>이용 기록</h1>
+        <h1 className="text-[26px] font-black mb-1" style={{ color: C.dark }}>등록내역</h1>
         <p className="text-[14px] mb-7" style={{ color: C.muted }}>
           지금까지 업로드한 처방전과 복약 안내 결과를 확인할 수 있어요.
         </p>
 
-        <div className="relative mb-6">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: C.muted }} />
+        <div className="flex gap-2 mb-6">
+          <div className="relative flex-1">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: C.muted }} />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="진단명 또는 약품명 검색"
+              className="w-full pl-11 pr-4 py-3 rounded-xl border text-[14px] outline-none bg-white"
+              style={{ borderColor: "rgba(30,26,23,0.15)" }}
+            />
+          </div>
           <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="진단명 또는 약품명 검색"
-            className="w-full pl-11 pr-4 py-3 rounded-xl border text-[14px] outline-none bg-white"
-            style={{ borderColor: "rgba(30,26,23,0.15)" }}
+            type="date"
+            value={dateFilter}
+            onChange={(e) => setDateFilter(e.target.value)}
+            className="px-4 py-3 rounded-xl border text-[14px] outline-none bg-white"
+            style={{ borderColor: "rgba(30,26,23,0.15)", color: dateFilter ? C.dark : C.muted }}
           />
+          {dateFilter && (
+            <button
+              onClick={() => setDateFilter("")}
+              className="px-4 py-3 rounded-xl text-[13px] font-bold shrink-0"
+              style={{ background: `${C.terracotta}12`, color: C.terracotta }}
+            >
+              초기화
+            </button>
+          )}
         </div>
 
         {error && <p className="text-[13px] mb-4" style={{ color: "#D94F4F" }}>{error}</p>}
@@ -85,6 +103,11 @@ export default function Records() {
                       <p className="text-[17px] font-black" style={{ color: C.dark }}>
                         {r.diagnosis || "진단명 확인 중"}
                       </p>
+                      {r.uploaded_by_name && (
+                        <p className="text-[11px] font-bold mt-1" style={{ color: C.terracotta }}>
+                          {r.uploaded_by_name}님이 대신 올려드렸어요
+                        </p>
+                      )}
                     </div>
                     <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${C.terracotta}12` }}>
                       <FileText className="w-5 h-5" style={{ color: C.terracotta }} />

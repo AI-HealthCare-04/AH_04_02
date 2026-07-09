@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "r
 import { useNavigate } from "react-router-dom";
 import { Camera, Check, FileText, Image as ImageIcon, X } from "lucide-react";
 import NavBar from "../components/NavBar";
-import { getCurrentPatientId } from "../lib/session";
+import { getCurrentCaregiverId, getCurrentPatientId } from "../lib/session";
 import { C } from "../theme";
 
 const TIPS = [
@@ -58,7 +58,9 @@ export default function Upload() {
     if (!file) return;
     // 실제 업로드 요청은 Processing.tsx에서 보냄 (동기 방식이라 몇 초 걸릴 수 있어서
     // 애니메이션이 있는 화면으로 넘어간 다음 거기서 기다리는 구조)
-    navigate("/processing", { state: { file, patientId: getCurrentPatientId() } });
+    navigate("/processing", {
+      state: { file, patientId: getCurrentPatientId(), caregiverId: getCurrentCaregiverId() ?? undefined },
+    });
   };
 
   return (
