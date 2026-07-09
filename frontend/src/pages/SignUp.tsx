@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Check, Phone } from "lucide-react";
+import NavBar from "../components/NavBar";
 import { createCaregiver, createPatient } from "../api/monitoring";
 import { C } from "../theme";
 
@@ -47,19 +48,27 @@ const inputCss = "w-full px-4 py-3.5 rounded-xl border text-[15px] outline-none"
 const inputStyle = { borderColor: "rgba(30,26,23,0.12)", color: C.dark, background: C.ivory };
 
 function Field({
-  label, value, onChange, placeholder, type = "text",
-}: { label: string; value: string; onChange: (v: string) => void; placeholder: string; type?: string }) {
+  label, value, onChange, placeholder, type = "text", error,
+}: { label: string; value: string; onChange: (v: string) => void; placeholder: string; type?: string; error?: string }) {
   return (
     <div>
       <label className="block text-[13px] font-bold mb-1.5" style={{ color: C.dark }}>{label}</label>
-      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className={inputCss} style={inputStyle} />
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className={inputCss}
+        style={{ ...inputStyle, borderColor: error ? "#D94F4F" : inputStyle.borderColor }}
+      />
+      {error && <p className="text-[12px] mt-1" style={{ color: "#D94F4F" }}>{error}</p>}
     </div>
   );
 }
 
 interface NotifPrefs { push: boolean; sms: boolean; email: boolean; }
 
-function NotificationSettings({ prefs, setPrefs }: { prefs: NotifPrefs; setPrefs: (p: NotifPrefs) => void }) {
+function NotificationSettings({ prefs, setPrefs, pushError }: { prefs: NotifPrefs; setPrefs: (p: NotifPrefs) => void; pushError?: boolean }) {
   const items: { key: keyof NotifPrefs; icon: string; label: string; desc: string; required: boolean }[] = [
     { key: "push", icon: "🔔", label: "Push 알림 허용", desc: "복약 시간, 건강 정보 앱 푸시 알림", required: true },
     { key: "sms", icon: "💬", label: "문자(SMS) 수신 허용", desc: "복약 안내·보호자 알림 문자 수신", required: false },
@@ -74,14 +83,15 @@ function NotificationSettings({ prefs, setPrefs }: { prefs: NotifPrefs; setPrefs
       <div className="space-y-2">
         {items.map(({ key, icon, label, desc, required }) => {
           const checked = prefs[key];
+          const showError = key === "push" && pushError && !checked;
           return (
             <button
               key={key}
               onClick={() => { if (!required || !checked) setPrefs({ ...prefs, [key]: !checked }); }}
               className="flex items-center gap-3 w-full px-4 py-3 rounded-xl transition-all text-left"
               style={{
-                background: checked ? (required ? `${C.terracotta}08` : `${C.success}10`) : "rgba(30,26,23,0.03)",
-                border: `1.5px solid ${checked ? (required ? C.terracotta : C.success) : "rgba(30,26,23,0.09)"}`,
+                background: showError ? "rgba(217,79,79,0.06)" : checked ? (required ? `${C.terracotta}08` : `${C.success}10`) : "rgba(30,26,23,0.03)",
+                border: `1.5px solid ${showError ? "#D94F4F" : checked ? (required ? C.terracotta : C.success) : "rgba(30,26,23,0.09)"}`,
               }}
             >
               <div
@@ -103,7 +113,7 @@ function NotificationSettings({ prefs, setPrefs }: { prefs: NotifPrefs; setPrefs
         })}
       </div>
       {!prefs.push && (
-        <p className="text-[12px] mt-2" style={{ color: C.terracotta }}>
+        <p className="text-[12px] mt-2" style={{ color: pushError ? "#D94F4F" : C.terracotta }}>
           Push 알림은 복약 알림 서비스 이용을 위해 필수로 허용해주세요.
         </p>
       )}
@@ -145,6 +155,10 @@ export default function SignUp() {
 
   const [notifPrefs, setNotifPrefs] = useState<NotifPrefs>({ push: false, sms: false, email: false });
 
+  // step3Valid이 false일 때 "왜 안 눌리는지" 알려주기 위한 필드별 표시 — 버튼을 누르기
+  // 전까지는 빨간 테두리를 숨겨서(attempted) 처음 화면 진입 시 전부 빨갛게 보이지 않게 함
+  const [step3Attempted, setStep3Attempted] = useState(false);
+
   // Step 4 — 본인인증 (데모: 실제 SMS 발송 없이 6자리 입력하면 통과)
   const [codeSent, setCodeSent] = useState(false);
   const [code, setCode] = useState("");
@@ -167,6 +181,22 @@ export default function SignUp() {
     memberType === "organization"
       ? Boolean(orgName.trim() && businessRegNo.trim() && managerName.trim() && managerPhone.trim() && passwordValid)
       : Boolean(name.trim() && phone.trim() && passwordValid);
+
+  const showErr = (invalid: boolean) => step3Attempted && invalid;
+  const nameError = showErr(!name.trim()) ? "이름을 입력해주세요" : undefined;
+  const phoneError = showErr(!phone.trim()) ? "전화번호를 입력해주세요" : undefined;
+  const orgNameError = showErr(!orgName.trim()) ? "기관명을 입력해주세요" : undefined;
+  const businessRegNoError = showErr(!businessRegNo.trim()) ? "사업자등록번호를 입력해주세요" : undefined;
+  const managerNameError = showErr(!managerName.trim()) ? "담당자 이름을 입력해주세요" : undefined;
+  const managerPhoneError = showErr(!managerPhone.trim()) ? "담당자 전화번호를 입력해주세요" : undefined;
+  const passwordError = showErr(password.length < 8) ? "비밀번호는 8자 이상이어야 해요" : undefined;
+  const passwordConfirmError =
+    passwordConfirm.length > 0 && password !== passwordConfirm
+      ? "비밀번호가 일치하지 않아요."
+      : showErr(!passwordConfirm)
+      ? "비밀번호를 다시 입력해주세요"
+      : undefined;
+  const pushError = showErr(!notifPrefs.push);
 
   const sendCode = () => {
     setCodeSent(true);
@@ -237,9 +267,7 @@ export default function SignUp() {
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: C.ivory }}>
-      <nav className="px-10 py-4 bg-white border-b" style={{ borderColor: "#EEE6DC" }}>
-        <span className="text-[20px] font-bold" style={{ color: C.terracotta }}>💊 건강동행</span>
-      </nav>
+      <NavBar />
 
       <main className="flex-1 flex items-start justify-center px-4 py-10">
         <div className="w-full" style={{ maxWidth: 480 }}>
@@ -363,33 +391,30 @@ export default function SignUp() {
                 <div className="space-y-4">
                   {memberType === "organization" ? (
                     <>
-                      <Field label="기관명" value={orgName} onChange={setOrgName} placeholder="예: 행복요양원" />
+                      <Field label="기관명" value={orgName} onChange={setOrgName} placeholder="예: 행복요양원" error={orgNameError} />
                       <div>
                         <label className="block text-[13px] font-bold mb-1.5" style={{ color: C.dark }}>기관 유형</label>
                         <select value={orgType} onChange={(e) => setOrgType(e.target.value)} className={inputCss} style={inputStyle}>
                           {ORG_TYPE_OPTIONS.map((t) => <option key={t}>{t}</option>)}
                         </select>
                       </div>
-                      <Field label="사업자등록번호" value={businessRegNo} onChange={setBusinessRegNo} placeholder="000-00-00000" />
-                      <Field label="담당자 이름" value={managerName} onChange={setManagerName} placeholder="홍길동" />
+                      <Field label="사업자등록번호" value={businessRegNo} onChange={setBusinessRegNo} placeholder="000-00-00000" error={businessRegNoError} />
+                      <Field label="담당자 이름" value={managerName} onChange={setManagerName} placeholder="홍길동" error={managerNameError} />
                       <Field label="담당자 이메일" value={managerEmail} onChange={setManagerEmail} placeholder="manager@agency.com" />
-                      <Field label="담당자 전화번호" value={managerPhone} onChange={setManagerPhone} placeholder="010-0000-0000" />
+                      <Field label="담당자 전화번호" value={managerPhone} onChange={setManagerPhone} placeholder="010-0000-0000" error={managerPhoneError} />
                     </>
                   ) : (
                     <>
-                      <Field label="이름" value={name} onChange={setName} placeholder="홍길동" />
+                      <Field label="이름" value={name} onChange={setName} placeholder="홍길동" error={nameError} />
                       <Field label="생년월일" value={birthDate} onChange={setBirthDate} placeholder="1945.03.15" />
                       <Field label="이메일" value={email} onChange={setEmail} placeholder="example@email.com" type="email" />
-                      <Field label="전화번호" value={phone} onChange={setPhone} placeholder="010-0000-0000" />
+                      <Field label="전화번호" value={phone} onChange={setPhone} placeholder="010-0000-0000" error={phoneError} />
                     </>
                   )}
 
-                  <Field label="비밀번호" value={password} onChange={setPassword} placeholder="비밀번호 입력" type="password" />
-                  <p className="text-[12px] -mt-2" style={{ color: C.muted }}>8자 이상, 영문+숫자 조합</p>
-                  <Field label="비밀번호 확인" value={passwordConfirm} onChange={setPasswordConfirm} placeholder="비밀번호 재입력" type="password" />
-                  {passwordConfirm.length > 0 && password !== passwordConfirm && (
-                    <p className="text-[12px] -mt-2" style={{ color: "#D94F4F" }}>비밀번호가 일치하지 않아요.</p>
-                  )}
+                  <Field label="비밀번호" value={password} onChange={setPassword} placeholder="비밀번호 입력" type="password" error={passwordError} />
+                  <p className="text-[12px] -mt-2" style={{ color: C.muted }}>8자 이상</p>
+                  <Field label="비밀번호 확인" value={passwordConfirm} onChange={setPasswordConfirm} placeholder="비밀번호 재입력" type="password" error={passwordConfirmError} />
 
                   {memberType === "personal" && (
                     <div>
@@ -413,13 +438,15 @@ export default function SignUp() {
                   )}
                 </div>
 
-                <NotificationSettings prefs={notifPrefs} setPrefs={setNotifPrefs} />
+                <NotificationSettings prefs={notifPrefs} setPrefs={setNotifPrefs} pushError={pushError} />
 
                 <button
-                  disabled={!step3Valid || !notifPrefs.push}
-                  onClick={() => setStep(4)}
-                  className="w-full py-4 rounded-full text-white font-black text-[16px] mt-6 disabled:opacity-40"
-                  style={{ background: C.terracotta }}
+                  onClick={() => {
+                    if (step3Valid && notifPrefs.push) setStep(4);
+                    else setStep3Attempted(true);
+                  }}
+                  className="w-full py-4 rounded-full text-white font-black text-[16px] mt-6 transition-opacity"
+                  style={{ background: C.terracotta, opacity: step3Attempted && (!step3Valid || !notifPrefs.push) ? 0.6 : 1 }}
                 >
                   다음 (본인인증)
                 </button>

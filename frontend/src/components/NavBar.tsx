@@ -9,10 +9,10 @@ interface NavBarProps {
 }
 
 const NAV_ITEMS = [
+  { label: "처방전 등록", to: "/upload" },
   { label: "복약 일정", to: "/schedule" },
-  { label: "알림 설정", to: "/notification" },
-  { label: "대시보드", to: "/dashboard" },
-  { label: "이용 기록", to: "/records" },
+  { label: "등록내역", to: "/records" },
+  { label: "복약기록", to: "/monitoring" },
 ];
 
 /**
@@ -30,21 +30,21 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
       className={dark ? "sticky top-0 z-40 bg-transparent" : "sticky top-0 z-40 backdrop-blur-sm border-b"}
       style={dark ? undefined : { background: "rgba(255,255,255,0.95)", borderColor: "rgba(30,26,23,0.10)" }}
     >
-      <div className="max-w-7xl mx-auto px-6 sm:px-10 h-16 flex items-center justify-between">
-        <Link to="/" className="flex items-center gap-2 shrink-0">
+      <div className="max-w-7xl mx-auto px-6 sm:px-10 h-16 flex items-center justify-between gap-4">
+        <Link to={isLoggedIn ? "/dashboard" : "/"} className="flex items-center gap-2 shrink-0">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: C.terracotta }}>
             <span className="text-white text-sm">💊</span>
           </div>
-          <span className="text-xl font-black" style={{ color: textColor }}>건강동행</span>
+          <span className="text-xl font-black whitespace-nowrap" style={{ color: textColor }}>건강동행</span>
         </Link>
 
         {isLoggedIn && (
-          <nav className="hidden sm:flex items-center gap-8">
+          <nav className="hidden lg:flex items-center gap-6 min-w-0">
             {NAV_ITEMS.map((item) => (
               <Link
                 key={item.to}
                 to={item.to}
-                className="text-[15px] font-medium transition-opacity hover:opacity-60"
+                className="text-[15px] font-medium whitespace-nowrap transition-opacity hover:opacity-60"
                 style={{ color: textColor }}
               >
                 {item.label}
@@ -53,20 +53,20 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
           </nav>
         )}
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           {isLoggedIn ? (
             <button onClick={() => navigate("/mypage")} className="flex items-center gap-2.5 transition-opacity hover:opacity-75">
-              <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold" style={{ background: C.terracotta }}>
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0" style={{ background: C.terracotta }}>
                 {userName ? userName[0] : "?"}
               </div>
-              <span className="text-[15px] font-semibold" style={{ color: textColor }}>{userName} 님</span>
-              <ChevronRight className="w-3.5 h-3.5" style={{ color: C.muted }} />
+              <span className="hidden md:inline text-[15px] font-semibold whitespace-nowrap" style={{ color: textColor }}>{userName} 님</span>
+              <ChevronRight className="w-3.5 h-3.5 hidden md:inline" style={{ color: C.muted }} />
             </button>
           ) : (
             !dark && (
               <button
                 onClick={() => navigate("/login")}
-                className="px-5 py-2 rounded-full border-2 text-[14px] font-bold transition-colors"
+                className="px-5 py-2 rounded-full border-2 text-[14px] font-bold whitespace-nowrap transition-colors"
                 style={{ borderColor: C.terracotta, color: C.terracotta }}
               >
                 로그인

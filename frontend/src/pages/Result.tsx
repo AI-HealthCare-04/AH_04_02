@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import NavBar from "../components/NavBar";
 import type { RecordResult } from "../api/records";
 
 const STATIC_DISCLAIMER =
@@ -22,12 +23,10 @@ export default function Result() {
   if (result.status === "review_required") {
     return (
       <div style={styles.page}>
-        <nav style={styles.nav}>
-          <span style={styles.logo}>💊 건강동행</span>
-        </nav>
+        <NavBar isLoggedIn userName="김건강" />
         <main style={{ ...styles.main, textAlign: "center" as const, padding: "120px 24px" }}>
           <p style={{ fontSize: 15, color: "#D98A2B", marginBottom: 20 }}>
-            일부 항목의 인식 정확도가 낮아 보호자 확인이 필요해요.
+            일부 항목의 인식 정확도가 낮아 확인이 필요해요.
           </p>
           <button style={styles.chatBtn} onClick={() => navigate(`/records/${result.record_id}/review`)}>
             처방전 확인하러 가기
@@ -40,9 +39,7 @@ export default function Result() {
   if (result.status === "failed" || !result.guide) {
     return (
       <div style={styles.page}>
-        <nav style={styles.nav}>
-          <span style={styles.logo}>💊 건강동행</span>
-        </nav>
+        <NavBar isLoggedIn userName="김건강" />
         <main style={{ ...styles.main, textAlign: "center" as const, padding: "120px 24px" }}>
           <p style={{ fontSize: 15, color: "#D94F4F", marginBottom: 20 }}>
             {result.failure_reason || "결과를 생성하지 못했어요."}
@@ -59,9 +56,7 @@ export default function Result() {
 
   return (
     <div style={styles.page}>
-      <nav style={styles.nav}>
-        <span style={styles.logo}>💊 건강동행</span>
-      </nav>
+      <NavBar isLoggedIn userName="김건강" />
 
       <main style={styles.main}>
         {/* 헤더 */}
@@ -153,8 +148,13 @@ export default function Result() {
           </div>
         </div>
 
+        {/* 복약·생활 가이드(탭 화면) 이동 버튼 */}
+        <button style={styles.guideCtaBtn} onClick={() => navigate(`/records/${result.record_id}/guide`)}>
+          📋 가이드 생성하기
+        </button>
+
         {/* 챗봇 이동 버튼 */}
-        <button style={styles.chatBtn} onClick={() => navigate("/chat")}>
+        <button style={styles.chatBtn} onClick={() => navigate("/chat", { state: { diagnosis: guide.lifestyle_guide.diagnosis } })}>
           💬 더 궁금한 점이 있으신가요? 챗봇에게 물어보기
         </button>
       </main>
@@ -164,8 +164,6 @@ export default function Result() {
 
 const styles: Record<string, React.CSSProperties> = {
   page: { minHeight: "100vh", background: "#FAF6F1", fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" },
-  nav: { padding: "16px 40px", background: "#FFFFFF", borderBottom: "1px solid #EEE6DC", display: "flex", alignItems: "center" },
-  logo: { fontSize: 20, fontWeight: 700, color: "#C16A45" },
   main: { maxWidth: 1100, margin: "0 auto", padding: "40px 24px 80px" },
   header: { marginBottom: 20 },
   headerTop: { display: "flex", alignItems: "center", gap: 12, marginBottom: 6 },
@@ -191,5 +189,6 @@ const styles: Record<string, React.CSSProperties> = {
   guideText: { fontSize: 13, color: "#555555", lineHeight: 1.6 },
   sources: { marginTop: 12, paddingTop: 10, borderTop: "1px solid #F5F0EB" },
   sourcesText: { fontSize: 12, color: "#AAAAAA" },
+  guideCtaBtn: { width: "100%", padding: "16px", fontSize: 15, fontWeight: 700, background: "#2A211B", color: "#FFFFFF", border: "none", borderRadius: 12, cursor: "pointer", marginBottom: 12 },
   chatBtn: { width: "100%", padding: "16px", fontSize: 15, fontWeight: 600, background: "#C16A45", color: "#FFFFFF", border: "none", borderRadius: 12, cursor: "pointer" },
 };

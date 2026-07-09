@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import NavBar from "../components/NavBar";
 import { getRecord, type RecordResult } from "../api/records";
 import { C } from "../theme";
@@ -26,13 +26,13 @@ export default function PrescriptionDetail() {
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
       <NavBar isLoggedIn userName="김건강" />
-      <main className="max-w-3xl mx-auto px-6 sm:px-8 py-10">
+      <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <button
           onClick={() => navigate("/records")}
           className="flex items-center gap-1 text-[13px] font-bold mb-5 hover:opacity-60 transition-opacity"
           style={{ color: C.muted }}
         >
-          <ChevronLeft className="w-3.5 h-3.5" /> 이용 기록으로
+          <ChevronLeft className="w-3.5 h-3.5" /> 등록내역으로
         </button>
 
         {loading ? (
@@ -43,7 +43,7 @@ export default function PrescriptionDetail() {
           </div>
         ) : result.status === "review_required" ? (
           <div className="rounded-2xl p-10 text-center" style={{ background: C.white }}>
-            <p className="text-[15px] font-bold mb-2" style={{ color: C.dark }}>보호자 확인이 필요해요</p>
+            <p className="text-[15px] font-bold mb-2" style={{ color: C.dark }}>확인이 필요해요</p>
             <p className="text-[13px] mb-5" style={{ color: C.muted }}>
               OCR 인식 정확도가 낮은 항목이 있어요. 직접 확인·수정하면 복약 가이드를 만들어드려요.
             </p>
@@ -64,14 +64,24 @@ export default function PrescriptionDetail() {
           </div>
         ) : (
           <>
-            <div className="flex items-center gap-3 mb-2">
-              <h1 className="text-[26px] font-black" style={{ color: C.dark }}>복약 안내 결과</h1>
-              <span
-                className="px-3 py-1 rounded-full text-[12px] font-bold"
-                style={{ background: `${C.success}20`, color: "#4A7A47" }}
-              >
-                ✓ 분석 완료
-              </span>
+            {/* 처방 헤더 — Figma 처방 상세 화면 스타일 */}
+            <div
+              className="rounded-3xl p-7 mb-5"
+              style={{ background: "linear-gradient(135deg, #2C2318 0%, #1E1A17 100%)", boxShadow: "0 8px 32px rgba(30,26,23,0.25)" }}
+            >
+              <p className="text-[13px] mb-2" style={{ color: "rgba(255,255,255,0.5)" }}>
+                처방일 {new Date(result.created_at).toLocaleDateString("ko-KR")}
+              </p>
+              <h1 className="text-[24px] font-black mb-3" style={{ color: C.white }}>
+                {result.guide.lifestyle_guide.diagnosis}
+              </h1>
+              <div className="flex flex-wrap gap-2">
+                {result.medications.map((m) => (
+                  <span key={m.id} className="px-3 py-1 rounded-full text-[12px] font-bold" style={{ background: "rgba(255,255,255,0.12)", color: C.white }}>
+                    {m.drug_name}
+                  </span>
+                ))}
+              </div>
             </div>
 
             <div
@@ -81,90 +91,35 @@ export default function PrescriptionDetail() {
               <p className="text-[13px]" style={{ color: C.terracotta }}>⚠️ {STATIC_DISCLAIMER}</p>
             </div>
 
-            <div className="grid gap-5 sm:grid-cols-2">
-              <section className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
-                <h2 className="text-[15px] font-bold mb-4" style={{ color: C.dark }}>📄 OCR 인식 결과</h2>
-                {result.medications.map((med, i) => (
-                  <div
-                    key={i}
-                    className="flex items-start justify-between py-2.5"
-                    style={{ borderTop: i > 0 ? "1px solid #F5F0EB" : undefined }}
-                  >
-                    <div>
-                      <p className="text-[14px] font-bold" style={{ color: C.dark }}>{med.drug_name}</p>
-                      <p className="text-[12px]" style={{ color: C.muted }}>{med.dosage} · {med.frequency}</p>
-                      {med.review_required && (
-                        <p className="text-[11px] mt-1" style={{ color: "#D98A2B" }}>
-                          확인 필요 (인식 정확도 {Math.round(med.confidence * 100)}%)
-                        </p>
-                      )}
+            {/* 처방 약물 정보 */}
+            <h2 className="text-[16px] font-black mb-4" style={{ color: C.dark }}>📄 처방 약물 정보</h2>
+            <div className="space-y-3 mb-8">
+              {result.medications.map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => navigate(`/records/${result.record_id}/drugs/${m.id}`)}
+                  className="w-full text-left rounded-2xl p-5 flex items-start gap-4 transition-all hover:shadow-md"
+                  style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)", border: "1.5px solid rgba(30,26,23,0.07)" }}
+                >
+                  <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 text-[20px]" style={{ background: `${C.terracotta}12` }}>💊</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="font-black text-[15px]" style={{ color: C.dark }}>{m.drug_name}</p>
+                      <ChevronRight className="w-4 h-4 shrink-0" style={{ color: C.muted }} />
                     </div>
-                    <span
-                      className="text-[11px] px-2 py-1 rounded-full shrink-0"
-                      style={{ background: "#F0E5D8", color: C.terracotta }}
-                    >
-                      {med.drug_class}
-                    </span>
+                    <p className="text-[12px] mb-1" style={{ color: C.muted }}>{m.drug_class}</p>
+                    <p className="text-[13px]" style={{ color: C.dark }}>{m.dosage} · {m.frequency}</p>
                   </div>
-                ))}
-              </section>
-
-              <div className="flex flex-col gap-5">
-                <section className="rounded-2xl p-5" style={{ background: "#FFF8F4", border: "1px solid #F0E5D8" }}>
-                  <h2 className="text-[15px] font-bold mb-2" style={{ color: C.dark }}>🔍 진단 기반 안내</h2>
-                  <p className="text-[16px] font-bold" style={{ color: C.terracotta }}>
-                    {result.guide.lifestyle_guide.diagnosis}
-                  </p>
-                </section>
-
-                <section className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
-                  <h2 className="text-[15px] font-bold mb-3" style={{ color: C.dark }}>💊 맞춤 복약 지도</h2>
-                  {result.guide.medication_guide.drugs.map((drug, i) => (
-                    <div key={i} className="py-2.5" style={{ borderTop: i > 0 ? "1px solid #F5F0EB" : undefined }}>
-                      <p className="text-[13px] font-bold" style={{ color: "#4A4A4A" }}>💊 {drug.drug_name}</p>
-                      <p className="text-[13px]" style={{ color: "#555555" }}>{drug.dosage_text}</p>
-                      {drug.caution && (
-                        <p className="text-[13px] mt-1" style={{ color: C.terracotta }}>⚠️ {drug.caution}</p>
-                      )}
-                    </div>
-                  ))}
-                </section>
-
-                <section className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
-                  <h2 className="text-[15px] font-bold mb-3" style={{ color: C.dark }}>🌿 생활습관 개선 가이드</h2>
-                  <div className="py-2.5">
-                    <p className="text-[13px] font-bold" style={{ color: "#4A4A4A" }}>🥗 식이</p>
-                    <p className="text-[13px]" style={{ color: "#555555" }}>
-                      피해야 할 음식: {result.guide.lifestyle_guide.diet.avoid.join(", ") || "없음"}
-                    </p>
-                    {result.guide.lifestyle_guide.diet.drug_specific.length > 0 && (
-                      <p className="text-[13px]" style={{ color: "#555555" }}>
-                        {result.guide.lifestyle_guide.diet.drug_specific.join(" ")}
-                      </p>
-                    )}
-                  </div>
-                  <div className="py-2.5" style={{ borderTop: "1px solid #F5F0EB" }}>
-                    <p className="text-[13px] font-bold" style={{ color: "#4A4A4A" }}>🏃 운동</p>
-                    <p className="text-[13px]" style={{ color: "#555555" }}>
-                      {result.guide.lifestyle_guide.exercise.type} · {result.guide.lifestyle_guide.exercise.duration} ·{" "}
-                      {result.guide.lifestyle_guide.exercise.intensity}
-                    </p>
-                  </div>
-                  {result.guide.source_refs.length > 0 && (
-                    <p className="text-[12px] mt-3 pt-3" style={{ color: "#AAAAAA", borderTop: "1px solid #F5F0EB" }}>
-                      출처: {result.guide.source_refs.map((s) => s.title).join(", ")}
-                    </p>
-                  )}
-                </section>
-              </div>
+                </button>
+              ))}
             </div>
 
             <button
-              onClick={() => navigate("/chat")}
-              className="w-full mt-6 py-4 rounded-xl font-bold text-[15px] text-white"
+              onClick={() => navigate(`/records/${result.record_id}/guide`)}
+              className="w-full py-4 rounded-full text-white font-black text-[16px] hover:opacity-88 transition-all flex items-center justify-center gap-1.5"
               style={{ background: C.terracotta }}
             >
-              💬 더 궁금한 점이 있으신가요? 챗봇에게 물어보기
+              이 처방전 복약 가이드 보기 <ChevronRight className="w-4 h-4" />
             </button>
           </>
         )}

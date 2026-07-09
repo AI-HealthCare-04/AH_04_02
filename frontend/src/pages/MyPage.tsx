@@ -44,7 +44,7 @@ export default function MyPage() {
   const menu: MenuItem[] = [
     { label: "복약 일정", icon: "💊", to: "/schedule" },
     { label: "알림 설정", icon: "🔔", to: "/notification" },
-    { label: "이용 기록", icon: "📋", to: "/records" },
+    { label: "등록내역", icon: "📋", to: "/records" },
     { label: "보호자 연결 관리", icon: "👥", to: "/connect" },
     ...(caregiverId
       ? [

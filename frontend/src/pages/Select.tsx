@@ -1,12 +1,11 @@
 import { useNavigate } from "react-router-dom";
+import NavBar from "../components/NavBar";
 
 export default function Select() {
   const navigate = useNavigate();
   return (
     <div style={styles.page}>
-      <nav style={styles.nav}>
-        <span style={styles.logo}>💊 건강동행</span>
-      </nav>
+      <NavBar />
       <main style={styles.main}>
         <div style={styles.header}>
           <h1 style={styles.title}>어떤 방식으로 이용하시나요?</h1>
@@ -44,8 +43,6 @@ export default function Select() {
 
 const styles: Record<string, React.CSSProperties> = {
   page: { minHeight: "100vh", background: "#FAF6F1", fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" },
-  nav: { padding: "16px 40px", background: "#FFFFFF", borderBottom: "1px solid #EEE6DC", display: "flex", alignItems: "center" },
-  logo: { fontSize: 20, fontWeight: 700, color: "#C16A45" },
   main: { maxWidth: 900, margin: "0 auto", padding: "60px 24px" },
   header: { marginBottom: 48, textAlign: "center" as const },
   title: { fontSize: 28, fontWeight: 700, color: "#2A2A2A", marginBottom: 12 },

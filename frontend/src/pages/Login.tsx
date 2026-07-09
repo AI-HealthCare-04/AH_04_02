@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import NavBar from "../components/NavBar";
 import {
   getCaregivers,
   getCaregiverPatients,
@@ -72,9 +73,7 @@ export default function Login() {
 
   return (
     <div style={styles.page}>
-      <nav style={styles.nav}>
-        <span style={styles.logo}>💊 건강동행</span>
-      </nav>
+      <NavBar />
 
       <main style={styles.main}>
         <div style={styles.header}>
@@ -141,14 +140,6 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#FAF6F1",
     fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif",
   },
-  nav: {
-    padding: "16px 40px",
-    background: "#FFFFFF",
-    borderBottom: "1px solid #EEE6DC",
-    display: "flex",
-    alignItems: "center",
-  },
-  logo: { fontSize: 20, fontWeight: 700, color: "#C16A45", letterSpacing: "-0.3px" },
   main: {
     maxWidth: 480,
     margin: "0 auto",

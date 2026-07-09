@@ -76,13 +76,22 @@ export default function PatientManagement() {
             <h1 className="text-[26px] font-black" style={{ color: C.dark }}>환자 관리</h1>
             <p className="text-[14px] mt-1" style={{ color: C.muted }}>연결된 환자 {patients.length}명을 관리하세요.</p>
           </div>
-          <button
-            onClick={() => setModalOpen(true)}
-            className="flex items-center gap-2 px-5 py-3 rounded-full text-white font-bold text-[14px]"
-            style={{ background: C.terracotta }}
-          >
-            <Plus className="w-4 h-4" /> 환자 등록
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate("/care-education")}
+              className="px-5 py-3 rounded-full font-bold text-[14px] border-2"
+              style={{ borderColor: C.terracotta, color: C.terracotta }}
+            >
+              교육 관리
+            </button>
+            <button
+              onClick={() => setModalOpen(true)}
+              className="flex items-center gap-2 px-5 py-3 rounded-full text-white font-bold text-[14px]"
+              style={{ background: C.terracotta }}
+            >
+              <Plus className="w-4 h-4" /> 환자 등록
+            </button>
+          </div>
         </div>
 
         <div className="relative mb-6">
