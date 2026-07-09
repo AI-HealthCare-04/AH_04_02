@@ -306,17 +306,18 @@ def _class_from_efcy(efcy: str) -> str:
 
 
 def _lookup_emedinfo(drug_name: str) -> Optional[dict]:
-    if len(drug_name) < 3:
+    norm_name = _normalize_name(drug_name)
+    if len(norm_name) < 3:
         return None
     table = _load_drug_table()
     if not table:
         return None
-    candidates = [e for e in table if drug_name in e["norm"] or e["norm"] in drug_name]
+    candidates = [e for e in table if norm_name in e["norm"] or e["norm"] in norm_name]
     if candidates:
         return min(candidates, key=lambda e: len(e["norm"]))
     best_score, best_entry = 0.0, None
     for entry in table:
-        score = SequenceMatcher(None, drug_name, entry["norm"]).ratio()
+        score = SequenceMatcher(None, norm_name, entry["norm"]).ratio()
         if score > best_score:
             best_score, best_entry = score, entry
     if best_score >= 0.72 and best_entry:
