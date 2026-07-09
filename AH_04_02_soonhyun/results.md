@@ -424,7 +424,7 @@ OCRResult { raw_text, medications[], overall_confidence,
 
 ## 10. 향후 개선 제안
 
-### ~~한방 첩약 파서 미지원~~ → ✅ 해결 (2026-07-09, 커밋 `86f4d0f`)
+### ~~한방 첩약 파서 미지원~~ → ✅ 해결 (2026-07-09, 커밋 `86f4d0f` + 버그수정 `72cf011`)
 
 - **해결 내용**:
   1. **데이터소스 확보**: 식약처 생약 약재정보 API(HerbMdntfService, IROS_335) — 원본 2,060건 → 이명 포함 3,573개 약재명 수집, `backend/herb_reference.csv` 저장
@@ -432,5 +432,29 @@ OCRResult { raw_text, medications[], overall_confidence,
   3. **파서 구현**: `_parse_oriental_format()` 신규 추가 — `약재명(한자) Ng` 반복 패턴 인식, herb_reference.csv 기반 약재 검증, `drug_class="한방 첩약"` 반환
   4. **포맷 감지**: `_detect_format()`에 `oriental` 분기 최우선 등록 (`_is_oriental_format()`: `약재명 Ng` 패턴 2개 이상)
   5. **목업 이미지 추가**: `samples/mock_oriental_prescription.png` (쌍화탕 가감방 12약재, `generate_mock_oriental_prescription.py`)
-- **검증**: 시뮬레이션 OCR 텍스트 → 12개 약재 전량 파싱, CSV 확인율 12/12 (100%)
-- **배치 회귀**: 기존 21개 + 신규 3개 = **24개 이미지 anomaly 0건** ✓
+
+- **버그 수정** (`72cf011`): `_extract_oriental_days()` freq/days 패턴 충돌 수정
+  - 현상: "1일 2첩 … 20첩" 텍스트에서 `days=2첩`으로 잘못 파싱 (20첩이어야 함)
+  - 원인: `_ORIENTAL_FREQ_RE`와 `_ORIENTAL_DAYS_RE`가 동일 구간에서 경쟁
+  - 수정: `_extract_oriental_days()`에서 frequency 매치 구간을 먼저 소비(consume)한 이후 텍스트에서만 days 탐색
+
+- **검증**: `parse_prescription()` 직접 호출 단위 테스트(ORI-1~4)로 검증
+  - ORI-1: 기본 한방 텍스트 5약재 — 전량 `herb_reference` 확인, freq/days 정상
+  - ORI-2: 쌍화탕 가감방 12약재 + 한자 괄호 — 12/12 (100%), days=20첩 정상 (`72cf011` 수정 후)
+  - ORI-3: `herb_reference`에 없는 약재 혼합 — `drug_class="한방 첩약(미확인)"` 정상 분기
+  - ORI-4: 횟수·첩수 없는 최소 텍스트 — freq/days 빈값 정상 처리
+  - 기존 4포맷(official/abbrev/list/table) 회귀 없음 ✓
+
+- **배치 회귀**: 24개 이미지 에러 0건 ✓ (단, mock provider 배치는 파싱 로직 검증 수단으로 부적합 — 아래 주의사항 참조)
+
+---
+
+> ⚠️ **팀 공유 — 파싱 로직 회귀 테스트 방법론**
+>
+> `MockOCRProvider.extract()`는 `parsing_rules.py`를 **전혀 거치지 않고** 아스피린/로자탄을 하드코딩으로 반환한다.
+> 따라서 mock provider를 이용한 배치 테스트(`get_ocr_provider("mock")` → `provider.extract(img)`)는
+> drug_class 매핑·drug_matcher·에러 핸들링 파이프라인 검증에는 유효하지만,
+> **`_detect_format()` / `_parse_oriental_format()` 등 파싱 로직 자체의 회귀 테스트 수단으로는 부적합**하다.
+>
+> **파싱 로직 회귀 테스트는 반드시 `parse_prescription(raw_text)` 직접 호출 방식을 사용해야 한다.**
+> (`86f4d0f` 커밋 메시지의 "24개 배치 anomaly 0건"은 mock provider 파이프라인 기준이었으며, 파싱 함수 레벨 검증은 이후 `72cf011`에서 별도로 수행됨.)
