@@ -371,12 +371,21 @@ def _parse_table_format(text: str) -> list:
     if not drug_matches:
         return []
 
-    freq_nums = KOR_FREQ_RE.findall(text)
-    frequencies = [f"1일 {n}회" for n in freq_nums]
+    # KOR_FREQ_RE("1일 N회")와 BARE_FREQ_RE(독립 "N회") 모두 수집, 중복 없이 위치 순 정렬.
+    # KOR 매치 구간을 consumed로 표시해 BARE가 같은 숫자를 다시 소비하지 않도록 한다.
+    kor_spans: list[tuple[int, int]] = []
+    freq_entries: list[tuple[int, int, str]] = []  # (start, end, freq_str)
+    for m in re.finditer(r"(?:1\s*일|하루)\s*(\d+)\s*(?:회|번)", text):
+        freq_entries.append((m.start(), m.end(), f"1일 {m.group(1)}회"))
+        kor_spans.append((m.start(), m.end()))
+    for m in BARE_FREQ_RE.finditer(text):
+        if not any(s <= m.start() < e for s, e in kor_spans):
+            freq_entries.append((m.start(), m.end(), f"1일 {m.group(1)}회"))
+    freq_entries.sort()
+    frequencies = [freq for _, _, freq in freq_entries]
 
-    last_freq_end = 0
-    for m in re.finditer(r"(?:1\s*일|하루)\s*\d+\s*(?:회|번)", text):
-        last_freq_end = m.end()
+    # 마지막 freq 매치 이후 텍스트에서만 일수를 탐색 (freq 숫자를 일수로 오인하지 않도록)
+    last_freq_end = max((end for _, end, _ in freq_entries), default=0)
     tail = text[last_freq_end:]
     diag_m = re.search(r"진단명", tail)
     if diag_m:

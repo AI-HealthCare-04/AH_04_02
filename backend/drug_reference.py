@@ -350,8 +350,10 @@ _HARDCODED_FALLBACK: dict[str, str] = {
 
 
 def _class_from_fallback(drug_name: str) -> str:
+    # key in drug_name 방향만 허용. drug_name in key(역방향)는 "프로"→"아스피린프로텍트"처럼
+    # 2자 단편명이 긴 키의 부분 문자열로 오매칭되는 원인이므로 제거한다.
     for key, cls in _HARDCODED_FALLBACK.items():
-        if key in drug_name or drug_name in key:
+        if key in drug_name:
             return cls
     return ""
 
