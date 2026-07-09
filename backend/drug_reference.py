@@ -22,10 +22,13 @@ drug_reference.py — HIRA 약가마스터 + e약은요 DB + ATC 패턴 기반 �
 
 from __future__ import annotations
 
+import logging
 import re
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Optional
+
+_logger = logging.getLogger(__name__)
 
 _BASE = Path(__file__).parent / "data"
 
@@ -134,6 +137,16 @@ _hira_name_df = None
 def _load_hira():
     global _hira_code_map, _hira_name_df
     if _hira_code_map is not None:
+        return
+    if not _HIRA_PATH.exists():
+        _logger.warning(
+            "HIRA 약가마스터 CSV가 없습니다 — HIRA 조회 비활성, ATC 패턴 폴백으로 동작합니다.\n"
+            "  필요 경로: %s\n"
+            "  backend/data/ 폴더에 hira_drug_master_20251031.csv를 넣으면 활성화됩니다.",
+            _HIRA_PATH,
+        )
+        _hira_code_map = {}
+        _hira_name_df = None
         return
     try:
         import pandas as pd
@@ -278,6 +291,15 @@ def _normalize_name(name: str) -> str:
 def _load_drug_table() -> list[dict]:
     global _drug_table
     if _drug_table is not None:
+        return _drug_table
+    if not _EMED_PATH.exists():
+        _logger.warning(
+            "e약은요 DB xlsx가 없습니다 — e약은요 매칭 비활성, ATC 패턴 폴백으로 동작합니다.\n"
+            "  필요 경로: %s\n"
+            "  backend/data/ 폴더에 2_e약은요_정리.xlsx를 넣으면 활성화됩니다.",
+            _EMED_PATH,
+        )
+        _drug_table = []
         return _drug_table
     try:
         import openpyxl
