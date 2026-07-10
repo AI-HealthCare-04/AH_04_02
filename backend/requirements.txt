@@ -5,9 +5,11 @@ python-multipart
 pyjwt
 passlib[bcrypt]
 bcrypt<=4.0.1
+cryptography
 email-validator
 python-dotenv
 requests
 pandas
 openpyxl
 rapidfuzz
+pytest  # [7/9] security.py 테스트용 (backend/tests/)

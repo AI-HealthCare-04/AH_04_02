@@ -36,13 +36,15 @@ def _seed_demo_data() -> None:
         if existing:
             return
 
-        patient = models.Patient(name="테스트 환자")
+        # [7/9] name은 프로퍼티(암호화 setter)라 생성자 kwarg로 못 받음 — 생성 후 대입.
+        patient = models.Patient()
+        patient.name = "테스트 환자"
         caregiver = models.Caregiver(
-            name="테스트 보호자",
             email="demo@example.com",
             hashed_password=hash_password("password1234"),
             relation_type="guardian",
         )
+        caregiver.name = "테스트 보호자"
         session.add(patient)
         session.add(caregiver)
         session.commit()
