@@ -9,7 +9,7 @@ export interface ChatAnswer {
   question: string;
   answer: string;
   created_at: string;
-  source?: string; // RAG 연동 전까지는 항상 undefined — 화면에서 있을 때만 표시
+  answer_source?: string; // "llm" | "preset" | "unsupported" | "*_fallback (...)" 등 — 화면 하단에 작게 표시
 }
 
 export async function getChatQuestions() {
@@ -22,5 +22,15 @@ export async function askChat(patientId: number, questionId: string) {
     patient_id: patientId,
     question_id: questionId,
   });
+  return data;
+}
+
+/** [7/10 추가] 고정 질문 3개 외의 자유 텍스트 질문 — LLM 호출이라 기본 10초보다 넉넉하게 잡음. */
+export async function askChatFreeform(patientId: number, question: string) {
+  const { data } = await monitoringClient.post<ChatAnswer>(
+    "/chat/ask",
+    { patient_id: patientId, question },
+    { timeout: 60000 }
+  );
   return data;
 }

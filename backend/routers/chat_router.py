@@ -1,14 +1,15 @@
 """
 chat_router.py — 담당: 김영혜
 
-schedule_v6 확정 방식: 자유 대화 아님. 고정 질문 3개 중 하나를 누르면 답변이 나갑니다.
-버튼(질문)은 고정이지만, [7/8] 답변은 이제 하드코딩이 아니라 **그 환자의 최근 처방전
-(OcrResult/GuideResult)을 참고해 GPT가 실제로 생성**하도록 바꿨습니다.
+[7/8] 고정 질문 3개는 그대로 버튼으로 유지하되, 답변은 하드코딩이 아니라 **그 환자의
+최근 처방전(OcrResult/GuideResult)을 참고해 GPT가 실제로 생성**하도록 바꿨습니다.
+[7/10] CHAT_PROVIDER=real이 실제로 동작 확인된 뒤 — 고정 질문 3개 제한을 풀고
+자유 텍스트 질문(question)도 같은 방식(환자 컨텍스트 + GPT)으로 답변하게 확장했습니다.
 
 CHAT_PROVIDER=real (OCR_PROVIDER/RAG_PROVIDER와 동일 컨벤션)을 .env에 켜야 LLM을
 시도합니다. 기본값(미설정)이거나, rag-prototype 의존성이 없거나, LLM 호출이 실패하면
-기존 PRESET_QUESTIONS의 고정 답변으로 조용히 폴백합니다 — 챗봇 자체가 죽는 것보단
-일반적인 답변이라도 나가는 게 낫다는 판단.
+고정 질문은 PRESET_QUESTIONS 답변으로, 자유 질문은 "지금은 어렵다"는 안내로 조용히
+폴백합니다 — 챗봇 자체가 죽는 것보단 뭐라도 답이 나가는 게 낫다는 판단.
 """
 from __future__ import annotations
 
@@ -166,36 +167,46 @@ def list_questions():
 
 class ChatAsk(BaseModel):
     patient_id: int
-    question_id: str
+    question_id: str | None = None  # 고정 질문 버튼 (q1/q2/q3)
+    question: str | None = None  # [7/10 추가] 자유 텍스트 질문 — 입력창에서 직접 타이핑한 경우
 
 
 @router.post("/ask")
 def ask(payload: ChatAsk, session: Session = Depends(get_session)):
-    """고정 질문 하나를 골라 묻는다. CHAT_PROVIDER=real이면 그 환자의 최근 처방전을
-    참고해 GPT가 답변을 생성하고, 아니거나 실패하면 PRESET_QUESTIONS 고정 답변으로 나간다.
+    """고정 질문(question_id) 또는 자유 텍스트(question) 중 하나로 묻는다.
+    CHAT_PROVIDER=real이면 그 환자의 최근 처방전을 참고해 GPT가 답변을 생성하고,
+    아니거나 실패하면 고정 질문은 PRESET_QUESTIONS 답변으로, 자유 질문은 안내 문구로 나간다.
     """
-    match = next((q for q in PRESET_QUESTIONS if q["id"] == payload.question_id), None)
-    if not match:
-        raise HTTPException(404, "존재하지 않는 질문이에요")
     if not session.get(Patient, payload.patient_id):
         raise HTTPException(404, "해당 환자를 찾을 수 없어요")
 
-    answer_text = match["answer"]
-    answer_source = "preset"
+    if payload.question_id:
+        match = next((q for q in PRESET_QUESTIONS if q["id"] == payload.question_id), None)
+        if not match:
+            raise HTTPException(404, "존재하지 않는 질문이에요")
+        question_id, question_text = match["id"], match["text"]
+        fallback_answer, fallback_source = match["answer"], "preset"
+    elif payload.question and payload.question.strip():
+        question_id, question_text = "freeform", payload.question.strip()
+        fallback_answer = "죄송해요, 지금은 이 질문에 실시간으로 답변드리기 어려워요. 담당 의사나 약사에게 확인해주세요."
+        fallback_source = "unsupported"
+    else:
+        raise HTTPException(422, "question_id 또는 question 중 하나는 필요해요")
+
+    answer_text, answer_source = fallback_answer, fallback_source
 
     if _CHAT_LLM_AVAILABLE:
         try:
             context_text = _build_patient_context(payload.patient_id, session)
-            answer_text = _generate_llm_answer(match["text"], context_text)
+            answer_text = _generate_llm_answer(question_text, context_text)
             answer_source = "llm"
         except Exception as exc:  # noqa: BLE001 — LLM 실패해도 챗봇 자체는 응답해야 함
-            answer_text = match["answer"]
-            answer_source = f"preset_fallback ({type(exc).__name__})"
+            answer_text, answer_source = fallback_answer, f"{fallback_source}_fallback ({type(exc).__name__})"
 
     msg = ChatMessage(
         patient_id=payload.patient_id,
-        question_id=match["id"],
-        question_text=match["text"],
+        question_id=question_id,
+        question_text=question_text,
         answer_text=answer_text,
     )
     session.add(msg)
@@ -203,7 +214,7 @@ def ask(payload: ChatAsk, session: Session = Depends(get_session)):
     session.refresh(msg)
 
     return {
-        "question": match["text"],
+        "question": question_text,
         "answer": answer_text,
         "answer_source": answer_source,
         "created_at": msg.created_at.isoformat(),
