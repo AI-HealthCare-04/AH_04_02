@@ -241,6 +241,24 @@ _ATC_PATTERNS: list[tuple[str, str]] = [
     (r"알렌드론산|리세드론산|포사맥스|악토넬",                    "비스포스포네이트(골다공증치료제)"),
     (r"케토티펜|세티리진|로라타딘|펙소페나딘|지르텍",             "항히스타민제"),
     (r"레보티록신|신지로이드",                                    "갑상선호르몬제"),
+    # 항생제 (J01) — 아목시실린계·퀴놀론계·마크로라이드·세팔로스포린
+    (r"아목시실린|아모클란|오구멘틴|아목시클라브",                 "항생제(페니실린계)"),
+    (r"세팔렉신|세파클러|세픽심|세프트리악손",                    "항생제(세팔로스포린계)"),
+    (r"시프로플록사신|레보플록사신|목시플록사신|플록사신",          "항생제(퀴놀론계)"),
+    (r"아지트로마이신|클래리트로마이신|에리트로마이신",             "항생제(마크로라이드계)"),
+    (r"독시사이클린|미노사이클린|테트라사이클린",                  "항생제(테트라사이클린계)"),
+    # 부신피질호르몬제 (H02/D07) — 전신·국소 스테로이드
+    (r"덱사메타손|프레드니솔론|메틸프레드니솔론|트리암시놀론|"
+     r"베타메타손|하이드로코르티손|데스오웬|플루티카손|부데소니드", "부신피질호르몬제(스테로이드)"),
+    # 안과용제 (S01)
+    (r"히알루론산.*점안|아이드롭|인공눈물|히알루론산",             "안과용제(인공눈물)"),
+    (r"라타노프로스트|트라보프로스트|비마토프로스트",              "안과용제(녹내장치료제)"),
+    # 영양·보조제
+    (r"엽산|폴산|폴릭애시드",                                    "조혈제(엽산)"),
+    (r"철분|페러스|훼로바|황산철|글루콘산철|철결핍",              "조혈제(철분제)"),
+    (r"오메가.?3|EPA|DHA|오메가쓰리|피시오일",                   "건강기능식품(오메가3)"),
+    # 관절·연골
+    (r"글루코사민|콘드로이친|조인트",                             "관절·연골보호제"),
 ]
 
 _COMPILED_ATC: list[tuple[re.Pattern, str]] = [
@@ -390,9 +408,14 @@ def get_drug_class(drug_name: str, drug_code: str = "") -> str:
     우선순위:
       1. HIRA 약가마스터 — 품목기준코드 exact 매칭 → ATC코드 → drug_class
       2. HIRA 약가마스터 — 한글상품명 부분일치 → ATC코드 → drug_class
-      3. e약은요 DB — OTC 부분/유사도 매칭 + efcyQesitm 분류
-      4. ATC 패턴 정규식 (하드코딩)
-      5. 하드코딩 폴백 사전
+      3. ATC 패턴 정규식 (성분명/브랜드명 키워드 기반, 신뢰도 높음)
+      4. 하드코딩 폴백 사전 (소수 고빈도 약품 보장)
+      5. e약은요 DB — OTC 부분/유사도 매칭 (마지막 수단; 유사도 매칭이라 오매칭 가능)
+
+    [순서 변경 이유] e약은요는 약품명 유사도 매칭을 사용하므로 "아스피린프로텍트"가
+    항히스타민제 약품과 매칭되거나, "베타메타손연고"가 알레르기 적응증 기준으로
+    항히스타민제로 분류되는 등의 오분류가 발생한다. ATC 패턴과 폴백을 먼저 소진한
+    뒤 마지막에만 e약은요를 사용한다.
     """
     if drug_code:
         atc = _lookup_hira_by_code(drug_code)
@@ -407,17 +430,21 @@ def get_drug_class(drug_name: str, drug_code: str = "") -> str:
         if cls:
             return cls
 
+    cls = _class_from_atc_pattern(drug_name)
+    if cls:
+        return cls
+
+    cls = _class_from_fallback(drug_name)
+    if cls:
+        return cls
+
     entry = _lookup_emedinfo(drug_name)
     if entry:
         cls = _class_from_efcy(entry["efcy"])
         if cls:
             return cls
 
-    cls = _class_from_atc_pattern(drug_name)
-    if cls:
-        return cls
-
-    return _class_from_fallback(drug_name)
+    return ""
 
 
 def get_drug_name_list() -> list[str]:
