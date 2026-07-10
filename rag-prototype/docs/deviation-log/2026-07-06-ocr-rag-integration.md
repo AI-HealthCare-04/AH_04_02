@@ -1,4 +1,4 @@
-5 # 편차(Deviation) 로그 — OCR ↔ RAG 통합 검증
+# 편차(Deviation) 로그 — OCR ↔ RAG 통합 검증
 
 - **날짜**: 2026-07-06
 - **작성자**: 김영혜 (RAG 담당)
