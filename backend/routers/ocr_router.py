@@ -11,6 +11,7 @@ records_router.py(실제 업로드→OCR→가이드 한 번에 처리) 양쪽�
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 import tempfile
@@ -102,7 +103,7 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
 
         provider_kind = os.environ.get("OCR_PROVIDER", "clova")
         provider = get_ocr_provider(provider_kind)
-        ocr_result = provider.extract(tmp_path)
+        ocr_result = await asyncio.to_thread(provider.extract, tmp_path)
 
     except requests.exceptions.Timeout as exc:
         record.status = "failed"
