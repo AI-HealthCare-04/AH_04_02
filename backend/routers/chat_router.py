@@ -5,6 +5,9 @@ chat_router.py — 담당: 김영혜
 최근 처방전(OcrResult/GuideResult)을 참고해 GPT가 실제로 생성**하도록 바꿨습니다.
 [7/10] CHAT_PROVIDER=real이 실제로 동작 확인된 뒤 — 고정 질문 3개 제한을 풀고
 자유 텍스트 질문(question)도 같은 방식(환자 컨텍스트 + GPT)으로 답변하게 확장했습니다.
+[7/10] 서비스 메뉴 안내(MENU_MAP) 추가 — "OO 하려면 어디로 가야 하나요?" 같은 질문에
+해당 화면 경로를 안내할 수 있도록, 환자별 컨텍스트와 별개로 항상 포함되는 고정 정보를
+프롬프트에 추가했습니다.
 
 CHAT_PROVIDER=real (OCR_PROVIDER/RAG_PROVIDER와 동일 컨벤션)을 .env에 켜야 LLM을
 시도합니다. 기본값(미설정)이거나, rag-prototype 의존성이 없거나, LLM 호출이 실패하면
@@ -49,7 +52,34 @@ CHAT_SYSTEM_PROMPT = """\
 아래 [환자 정보]에 있는 내용만 근거로 답하세요 — 거기 없는 내용은 절대로 지어내지 마세요.
 정보가 부족해 확실히 답할 수 없으면 모른다고 솔직히 말하고, 반드시 의사나 약사와
 상담하도록 안내하세요. 쉬운 말로, 고령자도 이해할 수 있게 2~4문장 이내로 짧게 답하세요.
+
+[메뉴 안내]에 있는 화면 목록은 환자 개인 정보가 아니라 서비스 자체의 고정된 안내이니,
+"OO 하려면 어디로 가야 하나요?" 같은 질문에는 이 목록만 근거로 화면 이름을 안내해도 됩니다
+(예: "복약 일정은 하단의 '일정' 메뉴에서 확인하실 수 있어요"). [메뉴 안내]에 없는 기능을
+지어내지는 마세요.
 """
+
+# [7/10 추가] 서비스 메뉴 지도 — "OO 어디서 해요?" 질문에 답하기 위한 고정 정보.
+# 환자별 컨텍스트(_build_patient_context)와 달리 모든 대화에 항상 포함된다.
+# frontend/src/App.tsx의 라우트와 동기화 — 화면이 추가/삭제되면 여기도 같이 갱신할 것.
+MENU_MAP: list[dict[str, str]] = [
+    {"name": "처방전 등록", "path": "/upload", "desc": "처방전 사진을 찍거나 올려서 새로 등록"},
+    {"name": "처방전 기록", "path": "/records", "desc": "지금까지 등록한 처방전 목록 확인"},
+    {"name": "복약 지도", "path": "/records/:recordId/guide", "desc": "등록한 처방전의 복약·생활습관 안내(이 화면)"},
+    {"name": "복약 일정", "path": "/schedule", "desc": "하루 복용 시간표 확인 및 복용 체크"},
+    {"name": "알림 설정", "path": "/notification", "desc": "복약 알림 켜고 끄기"},
+    {"name": "복약 대시보드", "path": "/dashboard", "desc": "오늘의 복약 현황 요약"},
+    {"name": "자가진단", "path": "/check", "desc": "간단한 건강 자가진단"},
+    {"name": "마이페이지", "path": "/mypage", "desc": "내 정보·계정 설정"},
+    {"name": "환자 관리", "path": "/patients", "desc": "(보호자용) 돌보는 환자 등록·관리"},
+    {"name": "보호자 연결", "path": "/connect", "desc": "환자-보호자 연결/연결 해제"},
+    {"name": "모니터링", "path": "/monitoring", "desc": "(보호자용) 환자의 복약 현황 확인"},
+    {"name": "돌봄 교육자료", "path": "/care-education", "desc": "보호자를 위한 돌봄 안내 자료"},
+]
+
+
+def _menu_map_text() -> str:
+    return "\n".join(f"- {m['name']}({m['path']}): {m['desc']}" for m in MENU_MAP)
 
 # CHAT_PROVIDER=real일 때만 실제 LLM을 시도한다 (OCR_PROVIDER/RAG_PROVIDER와 동일 패턴).
 # 기본값은 항상 PRESET_QUESTIONS 고정 답변 — 의존성 유무만으로 동작이 바뀌지 않는다.
@@ -153,7 +183,13 @@ def _generate_llm_answer(question_text: str, context_text: str) -> str:
     response = chat.invoke(
         [
             {"role": "system", "content": CHAT_SYSTEM_PROMPT},
-            {"role": "user", "content": f"[환자 정보]\n{context_text}\n\n[질문]\n{question_text}"},
+            {
+                "role": "user",
+                "content": (
+                    f"[메뉴 안내]\n{_menu_map_text()}\n\n"
+                    f"[환자 정보]\n{context_text}\n\n[질문]\n{question_text}"
+                ),
+            },
         ]
     )
     return response.content.strip()
