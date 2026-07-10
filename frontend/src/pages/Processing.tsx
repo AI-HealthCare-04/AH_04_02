@@ -35,7 +35,8 @@ export default function Processing() {
       const result = await createRecord(patientId, file, caregiverId);
       if (visualRef.current) clearInterval(visualRef.current);
       setCurrent(steps.length - 1);
-      setTimeout(() => navigate("/result", { state: { result } }), 400);
+      // [7/9 변경] OCR 신뢰도와 무관하게 항상 확인 화면을 거치므로 /result 인터스티셜 없이 바로 이동
+      setTimeout(() => navigate(`/records/${result.record_id}/review`), 400);
     } catch (err: unknown) {
       if (visualRef.current) clearInterval(visualRef.current);
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data

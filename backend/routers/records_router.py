@@ -18,11 +18,38 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from database import get_session
-from models import Caregiver, GuideResult, MedicalRecord, OcrResult, Patient
+from models import Caregiver, GuideResult, MedicalRecord, MedicationSchedule, OcrResult, Patient
 from routers.ocr_router import run_ocr
 from routers.rag_router import run_rag
 
 router = APIRouter(prefix="/records", tags=["Records"])
+
+# [7/9 추가] OCR은 "1일 N회"까지만 뽑아내고 몇 시에·식전/식후인지는 파싱하지 않는다
+# (parsing_rules.py 참고 — 그 정보 자체가 OcrResult에 없음). 그래서 여기서는 횟수만 보고
+# 합리적인 기본 시간대로 복약일정을 만들고, 식전/식후(dose_timing)는 비워서 사용자가
+# Schedule.tsx에서 직접 채우게 한다 — 모르는 걸 아는 척 지어내지 않음.
+_DEFAULT_TIME_SLOTS = {
+    "1일 1회": ["09:00"],
+    "1일 2회": ["09:00", "19:00"],
+    "1일 3회": ["08:00", "13:00", "19:00"],
+    "1일 4회": ["08:00", "12:00", "17:00", "21:00"],
+}
+
+
+def _create_schedules_from_ocr(record: MedicalRecord, ocr_items: list[OcrResult], session: Session) -> None:
+    for item in ocr_items:
+        if not item.drug_name:
+            continue
+        for slot in _DEFAULT_TIME_SLOTS.get(item.frequency, ["09:00"]):
+            session.add(
+                MedicationSchedule(
+                    patient_id=record.patient_id,
+                    drug_name=item.drug_name,
+                    time_slot=slot,
+                    memo="처방전에서 자동 등록됨 — 시간·식전후 여부는 확인 후 수정해주세요",
+                )
+            )
+    session.commit()
 
 
 def _build_record_response(record: MedicalRecord, session: Session, guide: GuideResult | None) -> dict:
@@ -72,22 +99,20 @@ async def create_record(
     session: Session = Depends(get_session),
 ):
     """
-    처방전 이미지를 받아서 OCR → RAG 가이드 생성까지 끝내고 결과를 반환합니다.
+    처방전 이미지를 받아서 OCR까지 끝내고 결과를 반환합니다.
+
+    [7/9 변경] OCR 신뢰도와 상관없이 항상 review_required 상태로 반환합니다 — 가이드(RAG)
+    생성은 더 이상 여기서 하지 않고, 사용자가 PrescriptionReview.tsx에서 내용을 확인/수정하고
+    POST /{record_id}/confirm을 호출할 때만 트리거됩니다. run_ocr()이 신뢰도에 따라 정한
+    status는 참고용으로 남겨두지 않고 덮어씁니다 — "확인 화면을 항상 거친다"는 게 지금
+    유일한 진입 규칙이라, 두 상태를 따로 유지하면 나중에 헷갈리기만 합니다.
 
     [7/9 추가] caregiver_id를 넘기면 "보호자가 대신 업로드"로 기록됩니다(생략하면 본인 업로드).
 
     [7/8] 권순현님 PR #9 실제 CLOVA 로직 통합 완료 — run_ocr()가 이제 진짜 CLOVA를 호출합니다.
-    review_required(저신뢰, 보호자 확인 필요)면 RAG는 호출하지 않고 그 상태로 바로 반환합니다.
-    프론트(Result.tsx)는 review_required를 받으면 "확인 필요" 배지를 보여주고,
-    보호자가 확인/수정한 뒤 재요청하는 흐름으로 이어집니다(재요청 엔드포인트는 별도 TODO).
 
     ⚠️ CLOVA_OCR_API_URL/SECRET_KEY가 .env에 없으면 503으로 실패합니다(의도된 동작).
        키 없이 파이프라인만 테스트하려면 .env에 OCR_PROVIDER=mock 추가하세요.
-
-    [7/8] run_rag_stub -> run_rag로 이름이 바뀌고 async def가 됐습니다 (김영혜).
-    RAG_PROVIDER=real로 켜지 않는 한 지금까지와 동일한 가짜 데이터가 나갑니다 — 자세한
-    내용은 rag_router.py 상단 설명 참고. 반드시 await로 호출해야 합니다(안 붙이면
-    coroutine 객체만 만들고 실제로 실행되지 않는데 예외도 안 떠서 발견하기 어렵습니다).
     """
     if not session.get(Patient, patient_id):
         raise HTTPException(404, "해당 환자를 찾을 수 없어요")
@@ -102,22 +127,12 @@ async def create_record(
         session.commit()
         session.refresh(record)
 
-    if record.status == "review_required":
-        # RAG 호출 자체를 안 함 — OCR 결과만 담아서 바로 반환
-        return _build_record_response(record, session, None)
-
-    try:
-        guide = await run_rag(record.id, session)
-    except ValueError as e:
-        # OCR은 됐는데 RAG가 실패한 경우 — records/OCR결과는 남기고 실패로 표시
-        record.status = "failed"
-        record.failure_reason = str(e)
-        session.add(record)
-        session.commit()
-        session.refresh(record)
-        return _build_record_response(record, session, None)
-
-    return _build_record_response(record, session, guide)
+    # 신뢰도와 무관하게 항상 확인 화면을 거치게 한다 — RAG는 /confirm에서만 호출된다.
+    record.status = "review_required"
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return _build_record_response(record, session, None)
 
 
 @router.post("/manual")
@@ -280,6 +295,12 @@ async def confirm_medications(
     session.add(record)
     session.commit()
     session.refresh(record)
+
+    # [7/9 추가] 확인이 끝난 약을 복약 일정에도 자동으로 등록 — 사용자가 Schedule.tsx에서
+    # 매번 손으로 다시 입력하지 않도록.
+    ocr_items = session.exec(select(OcrResult).where(OcrResult.record_id == record.id)).all()
+    _create_schedules_from_ocr(record, ocr_items, session)
+
     return _build_record_response(record, session, guide)
 
 

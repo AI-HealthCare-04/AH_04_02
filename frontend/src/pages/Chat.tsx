@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import NavBar from "../components/NavBar";
-import { askChat, getChatQuestions, type ChatQuestion } from "../api/chat";
+import { askChat, askChatFreeform, getChatQuestions, type ChatQuestion } from "../api/chat";
 import { getCurrentPatientId } from "../lib/session";
 import { C } from "../theme";
 
@@ -30,9 +30,8 @@ function buildGreeting(context: ChatContext | null): string {
   return DEFAULT_GREETING;
 }
 
-// 자유 입력창은 디자인상 필요하지만, 백엔드(schedule_v6 확정 방식)는 아직 고정 질문
-// 3개만 답변할 수 있어요(자유 대화 아님). 입력한 문장이 고정 질문과 정확히 같으면
-// 그 질문으로 물어보고, 아니면 아직은 답변할 수 없다고 안내합니다.
+// [7/10] 입력한 문장이 고정 질문과 정확히 같으면 그 질문(캐시된 프리셋 답변 폴백 포함)으로
+// 묻고, 아니면 자유 텍스트 그대로 /chat/ask에 보내 GPT가 환자 컨텍스트 기반으로 답한다.
 export default function Chat() {
   const patientId = getCurrentPatientId();
   const location = useLocation();
@@ -62,7 +61,7 @@ export default function Chat() {
     setLoading(true);
     try {
       const res = await askChat(patientId, q.id);
-      setMessages((prev) => [...prev, { role: "bot", text: res.answer, source: res.source }]);
+      setMessages((prev) => [...prev, { role: "bot", text: res.answer, source: res.answer_source }]);
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -73,7 +72,7 @@ export default function Chat() {
     }
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const text = input.trim();
     if (!text || loading) return;
     setInput("");
@@ -82,14 +81,19 @@ export default function Chat() {
       askPreset(match);
       return;
     }
-    setMessages((prev) => [
-      ...prev,
-      { role: "user", text },
-      {
-        role: "bot",
-        text: "죄송해요, 지금은 아래 질문 3가지에 대해서만 답변드릴 수 있어요. 다른 궁금한 점은 담당 의사나 약사에게 확인해주세요.",
-      },
-    ]);
+    setMessages((prev) => [...prev, { role: "user", text }]);
+    setLoading(true);
+    try {
+      const res = await askChatFreeform(patientId, text);
+      setMessages((prev) => [...prev, { role: "bot", text: res.answer, source: res.answer_source }]);
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        { role: "bot", text: "죄송해요, 답변을 가져오지 못했어요. 잠시 후 다시 시도해 주세요." },
+      ]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

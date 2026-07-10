@@ -139,6 +139,13 @@ export async function unlinkCaregiverPatient(caregiverId: number, patientId: num
   return data;
 }
 
+export async function linkCaregiverPatient(caregiverId: number, patientId: number) {
+  const { data } = await monitoringClient.post(
+    `/monitoring/caregivers/${caregiverId}/patients/${patientId}`
+  );
+  return data;
+}
+
 /**
  * [7/8 추가] 환자 목록 (환자관리 화면)
  */

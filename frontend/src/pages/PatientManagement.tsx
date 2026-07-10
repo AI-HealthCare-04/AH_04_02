@@ -2,11 +2,13 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronLeft, Plus, Search, X } from "lucide-react";
 import NavBar from "../components/NavBar";
-import { createPatient, deletePatient, getPatients, type Patient } from "../api/monitoring";
+import { createPatient, deletePatient, getCaregiverPatients, linkCaregiverPatient, type Patient } from "../api/monitoring";
+import { getCurrentCaregiverId } from "../lib/session";
 import { C } from "../theme";
 
 export default function PatientManagement() {
   const navigate = useNavigate();
+  const caregiverId = getCurrentCaregiverId();
   const [patients, setPatients] = useState<Patient[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -18,8 +20,13 @@ export default function PatientManagement() {
   const [saving, setSaving] = useState(false);
 
   const load = async () => {
+    if (!caregiverId) {
+      setError("로그인 정보를 확인할 수 없어요.");
+      setLoading(false);
+      return;
+    }
     try {
-      setPatients(await getPatients());
+      setPatients(await getCaregiverPatients(caregiverId));
     } catch {
       setError("환자 목록을 불러오지 못했어요.");
     } finally {
@@ -34,10 +41,11 @@ export default function PatientManagement() {
   const filtered = patients.filter((p) => !search || p.name.includes(search));
 
   const save = async () => {
-    if (!name.trim()) return;
+    if (!name.trim() || !caregiverId) return;
     setSaving(true);
     try {
-      await createPatient({ name: name.trim(), note: note.trim() || undefined });
+      const patient = await createPatient({ name: name.trim(), note: note.trim() || undefined });
+      await linkCaregiverPatient(caregiverId, patient.id);
       setModalOpen(false);
       setName("");
       setNote("");

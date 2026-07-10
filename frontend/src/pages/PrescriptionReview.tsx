@@ -29,6 +29,29 @@ function isDosageValid(dosage: string) {
 
 type FieldIssue = { field: keyof OcrMedication; message: string };
 
+// [7/9] 신뢰도(review_required)와 무관하게 항상 확인 화면을 거치므로, "어떤 항목이 문제인지"는
+// OCR의 overall_confidence가 아니라 실제 필드 값(약품명 매칭 여부·용량 형식·빈 칸)으로 판단한다.
+// 초기 로드 시(비동기 검증 전)와 렌더링 시 양쪽에서 같은 기준을 써야 해서 순수 함수로 분리했다.
+function computeIssues(m: OcrMedication, drugNameOk: boolean | undefined): FieldIssue[] {
+  const issues: FieldIssue[] = [];
+  if (drugNameOk === false) {
+    issues.push({ field: "drug_name", message: "약품명이 올바르지 않아요. 처방전의 철자를 다시 확인해주세요." });
+  } else if (!m.drug_name.trim()) {
+    issues.push({ field: "drug_name", message: "약품명이 비어있어요. 입력해주세요." });
+  }
+  if (m.dosage.trim() && !isDosageValid(m.dosage)) {
+    issues.push({ field: "dosage", message: "용량 형식이 잘못됐어요 (예: 500mg처럼 단위를 함께 입력)." });
+  } else if (!m.dosage.trim()) {
+    issues.push({ field: "dosage", message: "용량이 비어있어요. 입력해주세요." });
+  }
+  (["frequency", "diagnosis", "drug_class"] as const).forEach((f) => {
+    if (!m[f].trim()) {
+      issues.push({ field: f, message: `${FIELDS.find((x) => x.key === f)?.label}이 비어있어요. 입력해주세요.` });
+    }
+  });
+  return issues;
+}
+
 // 실제 백엔드 응답에는 어떤 단계가 지났는지 알려주는 값이 없어서(동기 호출 한 번으로 끝남),
 // 사용자에게 진행 중임을 보여주기 위한 연출용 진행률입니다. 실제 완료 시 바로 100%로 점프합니다.
 const FAKE_PROGRESS_STEPS = [22, 48, 72, 90];
@@ -59,18 +82,33 @@ export default function PrescriptionReview() {
   useEffect(() => {
     if (!recordId) return;
     getRecord(Number(recordId))
-      .then((data) => {
+      .then(async (data) => {
         setRecord(data);
         const initial: Record<number, OcrMedication> = {};
         data.medications.forEach((m) => (initial[m.id] = { ...m }));
         setEdited(initial);
-        data.medications
-          .filter((m) => m.review_required)
-          .forEach((m) => {
-            getDrugIndication(m.drug_name)
-              .then((info) => setDrugNameOk((prev) => ({ ...prev, [m.id]: info.matched_name !== null })))
-              .catch(() => {});
-          });
+
+        // [7/9] 신뢰도와 무관하게 항상 모든 항목의 약품명을 검증한다 (예전엔 review_required
+        // 항목만 검증했음 — 그래서 신뢰도가 높으면 오타가 있어도 그냥 넘어갔었다).
+        const nameOkEntries = await Promise.all(
+          data.medications.map(async (m) => {
+            try {
+              const info = await getDrugIndication(m.drug_name);
+              return [m.id, info.matched_name !== null] as const;
+            } catch {
+              return [m.id, true] as const; // 조회 실패(네트워크 등)는 오류로 단정하지 않음
+            }
+          })
+        );
+        const nameOkMap: Record<number, boolean> = {};
+        nameOkEntries.forEach(([id, ok]) => { nameOkMap[id] = ok; });
+        setDrugNameOk(nameOkMap);
+
+        // 문제 없는 항목은 바로 "확인 완료"(초록)로 시작 — 사용자가 다시 볼 필요 없게.
+        const doneIds = data.medications
+          .filter((m) => computeIssues(m, nameOkMap[m.id]).length === 0)
+          .map((m) => m.id);
+        setConfirmed(new Set(doneIds));
       })
       .catch(() => setError("처방전 정보를 불러오지 못했어요."))
       .finally(() => setLoading(false));
@@ -80,17 +118,8 @@ export default function PrescriptionReview() {
     setEdited((prev) => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
   };
 
-  const fieldIssues = (item: OcrMedication): FieldIssue[] => {
-    const m = edited[item.id] ?? item;
-    const issues: FieldIssue[] = [];
-    if (drugNameOk[item.id] === false) {
-      issues.push({ field: "drug_name", message: "약품명이 올바르지 않아요. 처방전의 철자를 다시 확인해주세요." });
-    }
-    if (m.dosage.trim() && !isDosageValid(m.dosage)) {
-      issues.push({ field: "dosage", message: "용량 형식이 잘못됐어요 (예: 500mg처럼 단위를 함께 입력)." });
-    }
-    return issues;
-  };
+  const fieldIssues = (item: OcrMedication): FieldIssue[] =>
+    computeIssues(edited[item.id] ?? item, drugNameOk[item.id]);
 
   // 항목의 모든 칸을 채운 채로 다른 칸으로 이동하면(blur) 자동으로 "확인 완료" 처리합니다.
   // 약품명은 다시 입력했으면 e약은요/HIRA 재조회로 실제 존재하는 약인지 확인하고,
@@ -111,8 +140,7 @@ export default function PrescriptionReview() {
     }
 
     const current = edited[id];
-    const allFilled = FIELDS.every((f) => String(current[f.key] ?? "").trim().length > 0);
-    if (allFilled && nameOk !== false && isDosageValid(current.dosage)) {
+    if (computeIssues(current, nameOk).length === 0) {
       setConfirmed((prev) => new Set([...prev, id]));
     }
   };
@@ -166,9 +194,10 @@ export default function PrescriptionReview() {
     }
   };
 
-  const reviewItems = record?.medications.filter((m) => m.review_required) ?? [];
-  const autoItems = record?.medications.filter((m) => !m.review_required) ?? [];
-  const allOk = reviewItems.length > 0 && reviewItems.every((m) => confirmed.has(m.id));
+  // [7/9] review_required(OCR 전체 신뢰도) 기준으로 나누던 걸 없앴다 — 이제 모든 항목을
+  // 똑같이 보여주고, 문제 있는지는 항목별로(computeIssues) 판단한다.
+  const allItems = record?.medications ?? [];
+  const allOk = allItems.length > 0 && allItems.every((m) => confirmed.has(m.id));
 
   const startGuideGeneration = async () => {
     if (!record) return;
@@ -187,7 +216,7 @@ export default function PrescriptionReview() {
     })();
 
     try {
-      const corrections = reviewItems.map((m) => {
+      const corrections = allItems.map((m) => {
         const e = edited[m.id];
         return {
           id: m.id,
@@ -345,7 +374,7 @@ export default function PrescriptionReview() {
                 <div className="flex items-center gap-1.5">
                   {allOk && <Check className="w-4 h-4" style={{ color: C.success }} />}
                   <span className="text-[14px] font-black" style={{ color: allOk ? C.success : C.terracotta }}>
-                    {confirmed.size} / {reviewItems.length} 완료
+                    {confirmed.size} / {allItems.length} 완료
                   </span>
                 </div>
               </div>
@@ -353,7 +382,7 @@ export default function PrescriptionReview() {
                 <div
                   className="h-full rounded-full transition-all"
                   style={{
-                    width: `${reviewItems.length ? (confirmed.size / reviewItems.length) * 100 : 0}%`,
+                    width: `${allItems.length ? (confirmed.size / allItems.length) * 100 : 0}%`,
                     background: allOk ? C.success : C.terracotta,
                     transitionDuration: "600ms",
                   }}
@@ -367,7 +396,7 @@ export default function PrescriptionReview() {
             </div>
 
             <div className="space-y-5 mb-7">
-              {reviewItems.map((item) => {
+              {allItems.map((item) => {
                 const isDone = confirmed.has(item.id);
                 const issues = fieldIssues(item);
                 return (
@@ -438,7 +467,7 @@ export default function PrescriptionReview() {
                             </div>
                           ) : (
                             <p className="text-[12px]" style={{ color: "#C13F3F" }}>
-                              인식 정확도가 낮아요 (신뢰도 {Math.round(item.confidence * 100)}%). 처방전을 보고 내용을 확인·수정해주세요.
+                              이 항목은 문제없이 인식됐어요. 필요하면 내용을 직접 수정해주세요.
                             </p>
                           )}
                         </div>
@@ -518,18 +547,6 @@ export default function PrescriptionReview() {
               >
                 {addingItem ? "추가하는 중..." : "+ 약물 추가"}
               </button>
-
-              {autoItems.length > 0 && (
-                <div className="rounded-2xl p-5" style={{ background: "#F5F2ED" }}>
-                  <p className="text-[12px] font-bold mb-3" style={{ color: C.muted }}>✓ 자동 인식됨 (수정 불필요)</p>
-                  {autoItems.map((m) => (
-                    <div key={m.id} className="flex items-center gap-2 py-1.5">
-                      <Check className="w-3.5 h-3.5" style={{ color: C.success }} />
-                      <span className="text-[13px]" style={{ color: C.dark }}>{m.drug_name} · {m.dosage}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
 
             {!allOk && (
@@ -581,7 +598,7 @@ export default function PrescriptionReview() {
               아래 내용으로 복약 가이드를 만들게 돼요. 맞으면 "가이드 만들기"를 눌러주세요.
             </p>
             <div className="rounded-2xl p-4 mb-6 space-y-2" style={{ background: C.ivory }}>
-              {[...reviewItems, ...autoItems].map((m) => {
+              {allItems.map((m) => {
                 const e = edited[m.id] ?? m;
                 return (
                   <div key={m.id} className="flex items-center gap-3">

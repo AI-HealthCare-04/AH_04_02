@@ -38,6 +38,8 @@ class LoginRequest(BaseModel):
 class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    caregiver_id: int
+    name: str
 
 
 def _find_by_identifier(session: Session, model, identifier: str):
@@ -70,20 +72,20 @@ def login(payload: LoginRequest, response: Response, session: Session = Depends(
     """[7/9] 보호자/환자 양쪽 다 로그인 가능. 이메일 또는 전화번호로 식별."""
     caregiver = _find_by_identifier(session, Caregiver, payload.identifier)
     if caregiver and caregiver.hashed_password and verify_password(payload.password, caregiver.hashed_password):
-        return _issue_login_response(response, caregiver.id, "caregiver")
+        return _issue_login_response(response, caregiver.id, "caregiver", caregiver.name)
 
     patient = _find_by_identifier(session, Patient, payload.identifier)
     if patient and patient.hashed_password and verify_password(payload.password, patient.hashed_password):
-        return _issue_login_response(response, patient.id, "patient")
+        return _issue_login_response(response, patient.id, "patient", patient.name)
 
     raise HTTPException(status.HTTP_400_BAD_REQUEST, "이메일/전화번호 또는 비밀번호가 올바르지 않습니다.")
 
 
-def _issue_login_response(response: Response, subject_id: int, role: str) -> LoginResponse:
+def _issue_login_response(response: Response, subject_id: int, role: str, name: str) -> LoginResponse:
     access_token = create_access_token(subject_id, role)
     refresh_token = create_refresh_token(subject_id, role)
     response.set_cookie(key="refresh_token", value=refresh_token, httponly=True)
-    return LoginResponse(access_token=access_token)
+    return LoginResponse(access_token=access_token, caregiver_id=subject_id, name=name)
 
 
 @router.get("/token/refresh", response_model=LoginResponse)
@@ -97,6 +99,7 @@ def refresh_token(refresh_token: str | None = Cookie(default=None), session: Ses
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "유효하지 않거나 만료된 refresh token입니다.")
 
     model = Caregiver if role == "caregiver" else Patient
-    if not session.get(model, subject_id):
+    subject = session.get(model, subject_id)
+    if not subject:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "인증에 실패했습니다.")
-    return LoginResponse(access_token=create_access_token(subject_id, role))
+    return LoginResponse(access_token=create_access_token(subject_id, role), caregiver_id=subject_id, name=subject.name)

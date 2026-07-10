@@ -103,6 +103,10 @@ export async function createRecord(patientId: number, file: File, caregiverId?: 
   const { data } = await monitoringClient.post<RecordResult>("/records", formData, {
     params: { patient_id: patientId, caregiver_id: caregiverId },
     headers: { "Content-Type": "multipart/form-data" },
+    // OCR+RAG_PROVIDER=real 파이프라인은 수십 초가 걸릴 수 있어 클라이언트 기본
+    // timeout(10s, monitoringClient.ts)보다 훨씬 길게 잡는다. 실제로는 응답이
+    // 오는데도 프론트가 먼저 타임아웃 나서 OcrError 화면이 뜨던 문제 수정.
+    timeout: 120000,
   });
   return data;
 }
@@ -155,13 +159,17 @@ export interface MedicationCorrection {
 }
 
 /**
- * 저신뢰(review_required) 항목을 수정해서 확정 제출 → 서버가 바로 RAG 가이드 생성까지 이어서 처리하고
+ * 확인 화면에서 확정 제출 → 서버가 바로 RAG 가이드 생성까지 이어서 처리하고
  * 최종 RecordResult를 돌려줍니다 (POST /records와 동일한 응답 형태).
+ * [7/9 변경] 신뢰도와 무관하게 항상 이 호출에서 RAG를 생성하므로, createRecord와 같은
+ * 이유로 timeout을 늘린다 — 기본 10초로는 실제 파이프라인이 끝나기 전에 타임아웃난다.
  */
 export async function confirmMedications(recordId: number, medications: MedicationCorrection[]) {
-  const { data } = await monitoringClient.post<RecordResult>(`/records/${recordId}/confirm`, {
-    medications,
-  });
+  const { data } = await monitoringClient.post<RecordResult>(
+    `/records/${recordId}/confirm`,
+    { medications },
+    { timeout: 120000 }
+  );
   return data;
 }
 
