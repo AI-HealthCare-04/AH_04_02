@@ -85,6 +85,7 @@ DOSAGE_RE       = re.compile(r"(\d+(?:\.\d+)?)\s*(mg|g|ml|%)", re.IGNORECASE)
 KOR_FREQ_RE     = re.compile(r"(?:1\s*일|하루)\s*(\d+)\s*(?:회|번)")  # 1 일 3 회 같은 비표준 공백 허용
 BARE_FREQ_RE    = re.compile(r"(?<!\d)(\d+)\s*회(?!\s*[가-힣\)])")
 ABBREV_FREQ_RE  = re.compile(r"\b(qd|od|bid|tid|qid|prn|hs|ac|pc)\b", re.IGNORECASE)
+MEAL_RE         = re.compile(r"식전|식후")  # 한국어 식사 타이밍 직접 표현 ("식후 30분", "아침 식전" 등)
 DAYS_KOR_RE     = re.compile(r"(\d+)\s*일\s*분")
 DAYS_ABBREV_RE  = re.compile(r"#\s*(\d+)")
 DIAGNOSIS_KOR_RE  = re.compile(r"진단(?:명)?\s*[:：]\s*([^\[\n■]+?)(?=\s+\d+[.)]\s+|[\[\n■]|\Z)")
@@ -109,13 +110,16 @@ def extract_dosage(text: str) -> str:
 
 
 def extract_frequency(text: str) -> str:
-    """한국어 횟수 우선, 없으면 약어, 없으면 단독 N회 패턴."""
+    """한국어 횟수 우선, 없으면 약어, 없으면 식사타이밍, 없으면 단독 N회 패턴."""
     m = KOR_FREQ_RE.search(text)
     if m:
         return f"1일 {m.group(1)}회"
     m = ABBREV_FREQ_RE.search(text)
     if m:
         return FREQ_ABBREV_MAP.get(m.group(1).lower(), m.group(1))
+    m = MEAL_RE.search(text)
+    if m:
+        return m.group(0)
     m = BARE_FREQ_RE.search(text)
     if m:
         return f"1일 {m.group(1)}회"

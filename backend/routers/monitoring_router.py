@@ -77,8 +77,12 @@ class PatientPublic(BaseModel):
 
 @router.post("/patients", response_model=PatientPublic)
 def create_patient(payload: PatientCreate, session: Session = Depends(get_session)):
-    data = payload.model_dump(exclude={"password"})
+    # [7/9] name/phone은 Patient의 프로퍼티(암호화 setter)라 생성자 kwarg로 못 받음 —
+    # 나머지 필드로 먼저 만들고 .name/.phone에 대입해서 암호화·해시 처리한다.
+    data = payload.model_dump(exclude={"password", "name", "phone"})
     patient = Patient(**data, hashed_password=hash_password(payload.password) if payload.password else None)
+    patient.name = payload.name
+    patient.phone = payload.phone
     session.add(patient)
     session.commit()
     session.refresh(patient)
@@ -160,8 +164,12 @@ class CaregiverPublic(BaseModel):
 
 @router.post("/caregivers", response_model=CaregiverPublic)
 def create_caregiver(payload: CaregiverCreate, session: Session = Depends(get_session)):
-    data = payload.model_dump(exclude={"password"})
+    # [7/9] name/phone은 Caregiver의 프로퍼티(암호화 setter)라 생성자 kwarg로 못 받음 —
+    # 나머지 필드로 먼저 만들고 .name/.phone에 대입해서 암호화·해시 처리한다.
+    data = payload.model_dump(exclude={"password", "name", "phone"})
     caregiver = Caregiver(**data, hashed_password=hash_password(payload.password) if payload.password else None)
+    caregiver.name = payload.name
+    caregiver.phone = payload.phone
     session.add(caregiver)
     session.commit()
     session.refresh(caregiver)

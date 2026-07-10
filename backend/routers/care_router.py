@@ -157,7 +157,9 @@ def accept_invitation(token: str, payload: InvitationAccept, session: Session = 
         if not caregiver:
             raise HTTPException(404, "해당 보호자를 찾을 수 없어요")
     else:
-        caregiver = Caregiver(name=payload.caregiver_name, relation_type=invitation.relation_type)
+        # [7/9] name은 프로퍼티(암호화 setter)라 생성자 kwarg로 못 받음 — 생성 후 대입.
+        caregiver = Caregiver(relation_type=invitation.relation_type)
+        caregiver.name = payload.caregiver_name
         session.add(caregiver)
         session.commit()
         session.refresh(caregiver)

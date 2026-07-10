@@ -1,8 +1,13 @@
 """
-auth_router.py — 보호자·요양보호사 회원가입/로그인 (담당: 박소정)
+auth_router.py — 보호자·환자 로그인, 보호자 회원가입 (담당: 박소정, 환자 로그인 확장: 김영혜)
 
 [7/6 추가] app/ 예시 프로젝트의 JWT 로그인 방식을 이 SQLite 백엔드로 옮겨왔습니다.
-환자(Patient)는 로그인하지 않고, Caregiver만 계정을 가집니다.
+
+[7/9] 환자(Patient)도 이제 로그인 대상입니다. 회원가입(계정 생성)은 이미
+monitoring_router.py의 POST /monitoring/patients, /monitoring/caregivers가
+이름/연락처/비밀번호를 다 받아 처리하므로 여기서 중복 만들지 않고, 로그인만
+보호자/환자 양쪽을 지원하도록 확장합니다 — 이메일 또는 전화번호 중 하나로
+로그인할 수 있습니다(이름은 로그인 식별자로 쓰지 않음).
 """
 from __future__ import annotations
 import jwt
@@ -12,7 +17,8 @@ from sqlmodel import Session, select
 
 from auth import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
 from database import get_session
-from models import Caregiver
+from models import Caregiver, Patient
+from security import hash_phone
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -25,7 +31,7 @@ class SignUpRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    identifier: str  # 이메일 또는 전화번호
     password: str
 
 
@@ -34,6 +40,13 @@ class LoginResponse(BaseModel):
     token_type: str = "bearer"
     caregiver_id: int
     name: str
+
+
+def _find_by_identifier(session: Session, model, identifier: str):
+    """identifier가 이메일 형식이면 email로, 아니면 전화번호로 보고 phone_hash로 조회."""
+    if "@" in identifier:
+        return session.exec(select(model).where(model.email == identifier)).first()
+    return session.exec(select(model).where(model.phone_hash == hash_phone(identifier))).first()
 
 
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
@@ -45,9 +58,9 @@ def signup(payload: SignUpRequest, session: Session = Depends(get_session)):
     caregiver = Caregiver(
         email=payload.email,
         hashed_password=hash_password(payload.password),
-        name=payload.name,
         relation_type=payload.relation_type,
     )
+    caregiver.name = payload.name  # [7/9] setter가 암호화해서 name_encrypted에 저장
     session.add(caregiver)
     session.commit()
     session.refresh(caregiver)
@@ -56,12 +69,21 @@ def signup(payload: SignUpRequest, session: Session = Depends(get_session)):
 
 @router.post("/login", response_model=LoginResponse)
 def login(payload: LoginRequest, response: Response, session: Session = Depends(get_session)):
-    caregiver = session.exec(select(Caregiver).where(Caregiver.email == payload.email)).first()
-    if not caregiver or not verify_password(payload.password, caregiver.hashed_password):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "이메일 또는 비밀번호가 올바르지 않습니다.")
+    """[7/9] 보호자/환자 양쪽 다 로그인 가능. 이메일 또는 전화번호로 식별."""
+    caregiver = _find_by_identifier(session, Caregiver, payload.identifier)
+    if caregiver and caregiver.hashed_password and verify_password(payload.password, caregiver.hashed_password):
+        return _issue_login_response(response, caregiver.id, "caregiver")
 
-    access_token = create_access_token(caregiver.id)
-    refresh_token = create_refresh_token(caregiver.id)
+    patient = _find_by_identifier(session, Patient, payload.identifier)
+    if patient and patient.hashed_password and verify_password(payload.password, patient.hashed_password):
+        return _issue_login_response(response, patient.id, "patient")
+
+    raise HTTPException(status.HTTP_400_BAD_REQUEST, "이메일/전화번호 또는 비밀번호가 올바르지 않습니다.")
+
+
+def _issue_login_response(response: Response, subject_id: int, role: str) -> LoginResponse:
+    access_token = create_access_token(subject_id, role)
+    refresh_token = create_refresh_token(subject_id, role)
     response.set_cookie(key="refresh_token", value=refresh_token, httponly=True)
     return LoginResponse(access_token=access_token, caregiver_id=caregiver.id, name=caregiver.name)
 
@@ -72,10 +94,11 @@ def refresh_token(refresh_token: str | None = Cookie(default=None), session: Ses
     if not refresh_token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Refresh token이 없습니다.")
     try:
-        caregiver_id = decode_token(refresh_token, expected_type="refresh")
+        subject_id, role = decode_token(refresh_token, expected_type="refresh")
     except jwt.PyJWTError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "유효하지 않거나 만료된 refresh token입니다.")
 
-    if not session.get(Caregiver, caregiver_id):
+    model = Caregiver if role == "caregiver" else Patient
+    if not session.get(model, subject_id):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "인증에 실패했습니다.")
-    return LoginResponse(access_token=create_access_token(caregiver_id))
+    return LoginResponse(access_token=create_access_token(subject_id, role))

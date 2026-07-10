@@ -8,9 +8,14 @@ v6 확정 구조:
 - 로그인: /auth/login으로 Caregiver 이메일/비밀번호 인증, JWT 발급 (7/10 재개)
 - 라우터: ocr_router(권순현) / rag_router(김영혜) / monitoring_router(박소정) / auth_router(박소정)
 
-[7/10] 로그인 화면은 복원했지만, monitoring_router 등 나머지 라우터는 아직
-`caregiver_id`/`patient_id`를 쿼리 파라미터로 그대로 신뢰합니다 — 발급된 토큰을
-각 엔드포인트에서 검증하는 작업은 별도(issue #21)로 남아 있습니다.
+[7/6 보류 → 7/9 로그인 활성화] JWT 로그인(auth.py, dependencies.py, routers/auth_router.py)은
+schedule_v6에서 시간·인력 상 이번 스프린트 스코프에서 뺐었는데(백엔드 경험 0명 대응), 2026-07-08
+멘토링에서 개인정보 보호(암호화) 설계가 로그인 방식을 전제로 하게 되면서 auth_router를 다시
+등록함 — 보호자/환자 둘 다 로그인 가능(POST /auth/login).
+
+[7/10] 로그인 화면(Login.tsx)도 실제 이메일/비밀번호 폼으로 복원했지만, monitoring_router 등
+나머지 라우터는 아직 caregiver_id/patient_id를 쿼리 파라미터로 그대로 신뢰합니다 — 발급된
+토큰을 각 엔드포인트에서 검증하는 작업은 별도(issue #21)로 남아 있습니다.
 
 실행 방법 (backend 폴더에서):
     pip install -r requirements.txt
@@ -53,7 +58,7 @@ def health_check():
 
 
 # ── 라우터 등록 (새 라우터 추가 시 여기에 한 줄씩) ──
-app.include_router(auth_router.router)
+app.include_router(auth_router.router)  # [7/9] 로그인 활성화 — 보호자/환자 둘 다 지원
 app.include_router(records_router.router)
 app.include_router(ocr_router.router)
 app.include_router(rag_router.router)
