@@ -494,3 +494,9 @@ OCRResult { raw_text, medications[], overall_confidence,
 >
 > **파싱 로직 회귀 테스트는 반드시 `parse_prescription(raw_text)` 직접 호출 방식을 사용해야 한다.**
 > (`86f4d0f` 커밋 메시지의 "24개 배치 anomaly 0건"은 mock provider 파이프라인 기준이었으며, 파싱 함수 레벨 검증은 이후 `72cf011`에서 별도로 수행됨.)
+
+---
+
+## 13. drug_matcher 정규화 개선 (2026-07-10)
+
+용량 정보(mg/ml/정/캡슐 등)가 매칭 유사도 계산에 포함되어 정상 약품명도 점수가 낮게 나오던 문제 발견 및 해결. `_normalize()` 함수로 용량 제거 후 비교하도록 개선. 46건 검증 기준 `needs_review=False` 4건→24건으로 개선(오매칭 없이). (2026-07-10)
