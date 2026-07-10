@@ -54,7 +54,10 @@ def drug_info(drug_name: str):
     efficacy = result["efficacy"]
     return {
         "drug_name": drug_name,
-        "matched_name": result["matched_item"] or drug_name,
+        # [7/9 수정] "or drug_name" 폴백 때문에 매칭 실패("암로디민" 같은 오타)도 항상
+        # non-null로 나가서, 프론트(PrescriptionReview.tsx)의 "실제 존재하는 약인지"
+        # 검증이 무력화되고 있었다 — HIRA/e약은요 매칭 실패 시엔 그대로 null로 내려준다.
+        "matched_name": result["matched_item"] or None,
         "drug_class": result["drug_class"],
         "indication": efficacy.strip() if efficacy else efficacy,
     }
