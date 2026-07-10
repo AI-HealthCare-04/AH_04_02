@@ -75,19 +75,19 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
     """
     filename = file.filename or ""
     if not filename:
-        raise HTTPException(status_code=400, detail="파일명이 없습니다. 파일을 다시 선택해주세요.")
+        raise HTTPException(status_code=400, detail="파일을 다시 선택해주시겠어요?")
     _, ext = os.path.splitext(filename)
     if ext.lower() not in _ALLOWED_EXT:
         raise HTTPException(
             status_code=400,
-            detail=f"지원하지 않는 파일 형식입니다: '{ext or '확장자 없음'}'. "
-                   f"지원 형식: {', '.join(sorted(_ALLOWED_EXT))}",
+            detail="JPG, PNG 형식의 사진 파일만 올릴 수 있어요. "
+                   "다른 형식의 파일이라면 사진으로 변환한 뒤 다시 올려주시겠어요?",
         )
 
     content = await file.read()
 
     if not content:
-        raise HTTPException(status_code=400, detail="빈 파일은 업로드할 수 없습니다.")
+        raise HTTPException(status_code=400, detail="사진 파일이 비어있어요. 다시 찍어서 올려주시겠어요?")
 
     record = MedicalRecord(patient_id=patient_id, image_path=filename, status="processing")
     session.add(record)
@@ -110,7 +110,7 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
         session.add(record); session.commit()
         raise HTTPException(
             status_code=504,
-            detail="CLOVA OCR API 응답 시간이 초과됐습니다. 잠시 후 다시 시도해주세요.",
+            detail="처방전 인식에 시간이 너무 걸렸어요. 잠시 후 다시 시도해주시겠어요?",
         ) from exc
     except requests.exceptions.ConnectionError as exc:
         record.status = "failed"
@@ -118,27 +118,33 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
         session.add(record); session.commit()
         raise HTTPException(
             status_code=503,
-            detail="CLOVA OCR API에 연결할 수 없습니다. 네트워크 상태를 확인해주세요.",
+            detail="인터넷 연결을 확인하고 다시 시도해주시겠어요?",
         ) from exc
     except requests.exceptions.HTTPError as exc:
-        status_code = exc.response.status_code if exc.response is not None else "?"
+        http_status = exc.response.status_code if exc.response is not None else "?"
         record.status = "failed"
-        record.failure_reason = f"CLOVA API HTTP {status_code} 오류"
+        record.failure_reason = f"CLOVA API HTTP {http_status} 오류"
         session.add(record); session.commit()
         raise HTTPException(
             status_code=502,
-            detail=f"CLOVA OCR API가 오류를 반환했습니다 (HTTP {status_code}). API 키·할당량을 확인해주세요.",
+            detail="처방전 인식 서비스에 일시적인 문제가 생겼어요. 잠시 후 다시 시도해주시겠어요?",
         ) from exc
     except RuntimeError as exc:
         record.status = "failed"
         record.failure_reason = str(exc)
         session.add(record); session.commit()
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=503,
+            detail="처방전 인식 서비스를 현재 사용할 수 없어요. 관리자에게 문의해주세요.",
+        ) from exc
     except Exception as exc:
         record.status = "failed"
         record.failure_reason = str(exc)
         session.add(record); session.commit()
-        raise HTTPException(status_code=500, detail=f"OCR 처리 중 예기치 못한 오류가 발생했습니다: {exc}") from exc
+        raise HTTPException(
+            status_code=500,
+            detail="처방전을 처리하는 중에 문제가 생겼어요. 잠시 후 다시 시도해주시겠어요?",
+        ) from exc
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
@@ -146,6 +152,15 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
     record.raw_text = ocr_result.raw_text
     record.status = "review_required" if ocr_result.review_required else "completed"
     session.add(record)
+
+    if not ocr_result.medications:
+        record.status = "review_required"
+        session.add(record)
+        session.commit()
+        raise HTTPException(
+            status_code=422,
+            detail="처방전에서 약품 정보를 찾지 못했어요. 처방전이 잘 보이도록 다시 찍어서 올려주시겠어요?",
+        )
 
     for med in ocr_result.medications:
         matched_name, score = match_drug(med.drug_name)
