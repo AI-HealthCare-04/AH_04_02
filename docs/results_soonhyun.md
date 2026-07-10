@@ -500,3 +500,9 @@ OCRResult { raw_text, medications[], overall_confidence,
 ## 13. drug_matcher 정규화 개선 (2026-07-10)
 
 용량 정보(mg/ml/정/캡슐 등)가 매칭 유사도 계산에 포함되어 정상 약품명도 점수가 낮게 나오던 문제 발견 및 해결. `_normalize()` 함수로 용량 제거 후 비교하도록 개선. 46건 검증 기준 `needs_review=False` 4건→24건으로 개선(오매칭 없이). (2026-07-10)
+
+---
+
+## 14. drug_class 커버리지 개선 (2026-07-10)
+
+오분류 3종(`_lookup_emedinfo`가 fallback보다 먼저 실행되던 순서 문제) 수정 + ATC/fallback 패턴 11종 추가. 48종 검증 기준 62.5%→85.4% 개선. 잔존 7종은 HIRA CSV 로드 시 해결(3종)/복합제 특성(1종)/한방 약재로 별도 처리(3종)라 정상 범위. (2026-07-10)
