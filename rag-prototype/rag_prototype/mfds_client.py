@@ -3,7 +3,7 @@ import time
 import requests
 
 from rag_prototype.config import settings
-from rag_prototype.schemas import DrugInfo
+from rag_prototype.schemas import DrugInfo, DurTabooInfo
 
 
 class MfdsApiError(RuntimeError):
@@ -52,6 +52,23 @@ def fetch_page(num_of_rows: int = 100, page_no: int = 1) -> tuple[list[DrugInfo]
 def fetch_first_match(item_name: str) -> DrugInfo | None:
     results = search_by_name(item_name, num_of_rows=1)
     return results[0] if results else None
+
+
+def search_usjnt_taboo(item_name: str, num_of_rows: int = 20, page_no: int = 1) -> list[DurTabooInfo]:
+    """품목명(부분일치)으로 DUR 병용금기 정보를 조회합니다.
+
+    [2026-07-10] DATA_GO_KR_SERVICE_KEY로 실제 호출해보니 403 Forbidden — e약은요/허가정보와
+    달리 이 API는 data.go.kr에서 별도 활용신청 승인이 필요한 것으로 보인다(신청 진행 중).
+    활용신청 승인 전까지는 이 함수를 호출하면 MfdsApiError가 발생한다. 호출부(rag_chain의
+    _check_dur_taboo)는 이 실패를 조용히 흡수하도록 설계돼 있어, 승인 전에도 나머지 가이드
+    생성 흐름은 영향받지 않는다.
+    """
+    data = _request(
+        {"itemName": item_name, "numOfRows": num_of_rows, "pageNo": page_no},
+        base_url=settings.DUR_TABOO_BASE_URL,
+    )
+    items = data.get("body", {}).get("items") or []
+    return [DurTabooInfo.model_validate(item) for item in items]
 
 
 # [보류] e약은요·약가마스터만으로 우선 조회하기로 하고 비활성화 (schemas.DrugPermitInfo 참고).

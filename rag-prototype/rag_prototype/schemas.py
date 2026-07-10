@@ -90,6 +90,38 @@ class HiraDrugMasterEntry(BaseModel):
         return not self.cancel_date
 
 
+class DurTabooInfo(BaseModel):
+    """식약처 DURPrdlstInfoService03 getUsjntTabooInfoList03(병용금기) 응답 1개 행.
+
+    e약은요(DrugInfo)와 원천이 다른 별도 API — "이 약과 이 약을 같이 먹으면 안 된다"는
+    금기 쌍(item ↔ mixture_item) 정보를 담는다. 응답 필드명은 공공데이터포털 문서에
+    swagger 상세가 없어, 동일 API의 실제 동작 예제(GitHub 공개 구현체)로 확인한
+    필드명을 기준으로 정리했다 — 활용신청 승인 후 실제 응답으로 재검증 필요.
+    """
+
+    item_seq: str = Field(alias="ITEM_SEQ")
+    item_name: str = Field(alias="ITEM_NAME")
+    ingr_kor_name: str | None = Field(default=None, alias="INGR_KOR_NAME")
+    mixture_item_seq: str | None = Field(default=None, alias="MIXTURE_ITEM_SEQ")
+    mixture_item_name: str | None = Field(default=None, alias="MIXTURE_ITEM_NAME")
+    mixture_ingr_kor_name: str | None = Field(default=None, alias="MIXTURE_INGR_KOR_NAME")
+    prohbt_content: str | None = Field(default=None, alias="PROHBT_CONTENT")  # 금기 사유 설명
+    notification_date: str | None = Field(default=None, alias="NOTIFICATION_DATE")
+
+    model_config = {"populate_by_name": True}
+
+
+class DurWarning(BaseModel):
+    """같은 처방전 안의 다른 약과 DUR 병용금기 관계가 확인됐을 때만 채워지는 경고.
+
+    SourceRef(단일 약 인용)와 달리 두 약 사이의 관계를 나타내므로 별도 모델로 둔다.
+    """
+
+    mixture_item_name: str = Field(description="병용금기 상대 약물명 (처방전에 실제로 함께 있는 약)")
+    prohbt_content: str | None = Field(default=None, description="금기 사유")
+    source: str = "식약처 DUR(의약품안전사용서비스)"
+
+
 class LifestyleGuideline(BaseModel):
     """만성질환 생활지침 항목 (질병관리청·학회 진료지침 기반, 도메인 지식 참고자료).
 
@@ -147,6 +179,9 @@ class GuideResponse(BaseModel):
     precautions: list[str] = Field(default_factory=list, description="반드시 확인해야 할 주의사항 목록")
     source_refs: list[SourceRef] = Field(default_factory=list)
     lifestyle_source_refs: list[LifestyleSourceRef] = Field(default_factory=list)
+    dur_warnings: list[DurWarning] = Field(
+        default_factory=list, description="같은 처방전의 다른 약과 DUR 병용금기 관계가 확인된 경우만 채워짐"
+    )
     disclaimer: str
     self_consistency_score: float | None = None
     review_required: bool = False
@@ -155,7 +190,8 @@ class GuideResponse(BaseModel):
         default_factory=list,
         description=(
             "검토 사유 코드: no_citation | low_self_consistency | "
-            "ocr_low_confidence | ocr_confidence_unavailable | dry_run | generation_error"
+            "ocr_low_confidence | ocr_confidence_unavailable | dry_run | generation_error | "
+            "dur_taboo_warning"
         ),
     )
     ocr_confidence: float | None = Field(

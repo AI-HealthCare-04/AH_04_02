@@ -64,6 +64,7 @@ RAG의 개별 confidence 체크는 새 기능이 아니라 **이 판정 한계�
 | `ocr_confidence_unavailable` | OCR 개별 인식 신뢰도가 0.0 (Tesseract 등 미제공) |
 | `dry_run` | `OPENAI_API_KEY` 미설정으로 LLM 생성을 건너뜀 |
 | `generation_error` | 배치 처리 중 해당 약 하나의 가이드 생성이 예외로 실패 |
+| `dur_taboo_warning` | 같은 처방전의 다른 약과 DUR 병용금기 관계가 확인됨 (`GuideResponse.dur_warnings` 참고, §6 DUR 항목) |
 
 **다운스트림(`ai_worker/` 등)에서 두 `review_required`를 함께 로깅/병합할 때는 반드시 `ocr_review_required`
 (OCR용) / `rag_review_required`(RAG용)처럼 접두어를 붙여 구분할 것.** 같은 키로 덮어쓰지 말 것.
@@ -158,3 +159,40 @@ FAQ 형식인 게 e약은요의 시그니처). "진짜 의약품 허가정보"�
 
 재활성화 시 체크할 것: `mfds_client._request()`는 이미 `base_url` 파라미터를 받도록 일반화돼
 있어 e약은요 호출부(`search_by_name`/`fetch_page`)는 그대로 두고 permit 함수만 살리면 된다.
+
+## 7. DUR(의약품안전사용서비스) 병용금기 연동 — [2026-07-10] 구현 완료, 활용신청 승인 대기
+
+RAG 파트에 병용금기(같은 처방전 안의 두 약이 함께 먹으면 안 되는 조합) 경고를 붙이기로 하고
+구현했다. e약은요와 같은 `DATA_GO_KR_SERVICE_KEY`를 재사용하지만, **실제로 호출해보니
+403 Forbidden**이 나왔다 — e약은요/의약품제품허가정보와 달리 이 API는 data.go.kr에서
+별도 활용신청 승인이 필요한 것으로 보인다(김영혜가 신청 진행 중, [보류] 아님 — 코드는
+활성 상태로 있고 승인만 기다리는 중).
+
+### API 정보
+
+- **서비스명**: 공공데이터포털 "식품의약품안전처_의약품안전사용서비스(DUR)품목정보"
+- **Base URL + operation**: `http://apis.data.go.kr/1471000/DURPrdlstInfoService03/getUsjntTabooInfoList03`
+- 응답 필드명은 공공데이터포털 페이지 자체에 상세 swagger가 없어, 동일 API의 공개된 실제
+  구현체(GitHub)에서 확인한 필드명 기준으로 스키마(`schemas.DurTabooInfo`)를 작성했다 —
+  **활용신청 승인 후 실제 응답으로 필드명 재검증 필요**.
+
+### 코드 위치
+
+| 파일 | 내용 |
+|---|---|
+| `rag_prototype/config.py` | `DUR_TABOO_BASE_URL` |
+| `rag_prototype/schemas.py` | `DurTabooInfo`(API 응답 모델), `DurWarning`(경고 모델), `GuideResponse.dur_warnings` |
+| `rag_prototype/mfds_client.py` | `search_usjnt_taboo(item_name)` |
+| `rag_prototype/rag_chain.py` | `_check_dur_taboo()` — 이 약이 **같은 처방전에 실제로 함께 있는** 다른 약과 금기 관계인지 확인. `generate_guides_from_medications()`가 배치 내 다른 약 이름들을 `other_drug_names`로 넘겨줌 |
+| `backend/routers/rag_router.py` | `dur_warnings`를 `source_refs` 배열에 병합해 프론트로 전달 |
+| `frontend/src/api/records.ts` | `SourceRef.mixture_item_name`/`prohbt_content`, `formatSourceRef`가 "⚠️ OO와 병용금기" 형태로 표시 |
+| `tests/test_mfds_client.py`, `tests/test_rag_chain.py` | mock 기반 테스트 (활용신청 전이라 실제 응답으로는 검증 불가) |
+
+### 설계 노트
+
+- DUR 병용금기는 "약 하나의 속성"이 아니라 "두 약 사이의 관계"라, HIRA처럼 `SourceRef`에
+  필드를 추가하는 방식 대신 별도 `DurWarning` 모델 + `GuideResponse.dur_warnings`로 분리했다.
+- `_check_dur_taboo()`는 DUR 조회가 실패(403 등)해도 예외를 삼키고 빈 리스트를 반환한다 —
+  활용신청 승인 전에도 나머지 가이드 생성 흐름(HIRA/e약은요 인용, LLM 생성)은 전혀 영향받지
+  않는다. 활용신청이 끝나면 코드 변경 없이 그대로 동작할 것으로 예상되지만, 필드명이 문서
+  추정치라 실제 응답으로 한 번은 재검증해야 한다.

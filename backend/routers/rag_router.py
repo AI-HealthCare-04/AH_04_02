@@ -124,6 +124,17 @@ def _generate_via_rag_prototype(ocr_items: list[OcrResult]) -> tuple[dict, dict,
         {"drug_name": g.drug_name, "disease": ref.disease, "category": ref.category, "source": ref.source}
         for g in guides
         for ref in g.lifestyle_source_refs
+    ] + [
+        # [7/10 추가] DUR 병용금기 경고 — 같은 처방전의 다른 약과 실제로 금기 관계일 때만 존재.
+        # 활용신청 승인 전까지는 DUR 조회가 항상 실패해 dur_warnings가 늘 빈 리스트다(정상 동작).
+        {
+            "drug_name": g.drug_name,
+            "mixture_item_name": w.mixture_item_name,
+            "prohbt_content": w.prohbt_content,
+            "source": w.source,
+        }
+        for g in guides
+        for w in g.dur_warnings
     ]
     return medication_guide, lifestyle_guide, source_refs
 

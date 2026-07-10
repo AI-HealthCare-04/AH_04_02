@@ -56,11 +56,15 @@ export interface SourceRef {
   disease?: string;
   category?: string;
   source?: string;
+  // 실제 파이프라인 — DUR 병용금기 경고 (같은 처방전의 다른 약과 금기 관계일 때만 존재)
+  mixture_item_name?: string;
+  prohbt_content?: string;
 }
 
 /** source_refs 항목 하나를 사람이 읽을 수 있는 한 줄로 표시 (stub/실제 두 모양 다 처리) */
 export function formatSourceRef(ref: SourceRef): string {
   if (ref.title) return ref.title; // stub 모양
+  if (ref.mixture_item_name) return `⚠️ ${ref.mixture_item_name}와 병용금기${ref.prohbt_content ? ` (${ref.prohbt_content})` : ""}`;
   if (ref.item_name) return `${ref.item_name}${ref.field ? ` · ${ref.field}` : ""}`; // 의약품 인용
   if (ref.disease) return `${ref.disease}${ref.category ? ` · ${ref.category}` : ""}`; // 생활지침 인용
   return ref.drug_name ?? "출처 미상";

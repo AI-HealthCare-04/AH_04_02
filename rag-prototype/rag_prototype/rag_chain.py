@@ -3,8 +3,15 @@ import json
 from rag_prototype.chunking import drugs_to_documents
 from rag_prototype.config import settings
 from rag_prototype.hira_master import search_by_product_name as search_hira_by_product_name
-from rag_prototype.mfds_client import search_by_name
-from rag_prototype.schemas import GuideResponse, HiraDrugMasterEntry, LifestyleSourceRef, MedicationInput, SourceRef
+from rag_prototype.mfds_client import search_by_name, search_usjnt_taboo
+from rag_prototype.schemas import (
+    DurWarning,
+    GuideResponse,
+    HiraDrugMasterEntry,
+    LifestyleSourceRef,
+    MedicationInput,
+    SourceRef,
+)
 from rag_prototype.self_consistency import pick_consistent_answer
 from rag_prototype.vectorstore import add_documents, search_by_disease, search_by_item_name, similarity_search
 
@@ -309,12 +316,43 @@ def _merge_ocr_confidence(guide: GuideResponse, confidence: float) -> GuideRespo
     )
 
 
-def generate_guide_from_medication(medication) -> GuideResponse:
+def _check_dur_taboo(drug_name: str, other_drug_names: list[str]) -> list[DurWarning]:
+    """이 약이 같은 처방전의 다른 약과 DUR 병용금기 관계인지 확인한다.
+
+    DUR 병용금기는 두 약 사이의 관계이므로, 이 처방전에 실제로 함께 있는 약(other_drug_names)
+    중 하나가 DUR이 알려주는 금기 상대(mixture_item_name)와 일치할 때만 경고를 만든다 —
+    단순히 "이 약에 금기 상대가 존재한다"만으로는 이 환자에게 실제로 해당하는지 알 수 없다.
+
+    DUR API 호출 실패(활용신청 미승인, 네트워크 오류 등)는 가이드 생성 자체를 막으면 안 되므로
+    조용히 빈 리스트로 넘어간다 (_lookup_hira_entry와 동일한 fail-safe 원칙).
+    """
+    if not other_drug_names:
+        return []
+    try:
+        taboo_entries = search_usjnt_taboo(drug_name)
+    except Exception:  # noqa: BLE001 — DUR 조회 실패가 가이드 생성 자체를 막으면 안 됨
+        return []
+
+    warnings: list[DurWarning] = []
+    for entry in taboo_entries:
+        mixture_name = entry.mixture_item_name
+        if not mixture_name:
+            continue
+        if any(mixture_name in other or other in mixture_name for other in other_drug_names if other):
+            warnings.append(DurWarning(mixture_item_name=mixture_name, prohbt_content=entry.prohbt_content))
+    return warnings
+
+
+def generate_guide_from_medication(medication, other_drug_names: list[str] | None = None) -> GuideResponse:
     """OCR 파트(ocr_interface.MedicationItem)의 출력을 그대로 받아 가이드를 생성하는 어댑터.
 
     dataclass 인스턴스, 그 dict 표현(`MedicationItem.__dict__`), 또는 동일한 필드명의
     dict 무엇이든 받는다. situation은 진단명·복용법·약효분류를 조합해 자동 구성하고,
     diagnosis는 원문 그대로 별도 전달해 만성질환 생활지침 검색(disease_code 매칭)에 사용한다.
+
+    other_drug_names: 같은 처방전에 함께 있는 다른 약들의 이름(DUR 병용금기 대조용).
+    generate_guides_from_medications()가 배치 처리 시 채워서 넘긴다 — 단일 약만 다룰 때는
+    비교 대상이 없으므로 생략(None)해도 된다.
     """
     if not isinstance(medication, dict):
         medication = medication.__dict__
@@ -328,7 +366,21 @@ def generate_guide_from_medication(medication) -> GuideResponse:
     situation = ", ".join(part for part in situation_parts if part) or None
 
     guide = generate_guide(item.drug_name, situation=situation, dosage=item.dosage, diagnosis=item.diagnosis or None)
-    return _merge_ocr_confidence(guide, item.confidence)
+    guide = _merge_ocr_confidence(guide, item.confidence)
+
+    dur_warnings = _check_dur_taboo(item.drug_name, other_drug_names or [])
+    if dur_warnings:
+        reason = "병용 중인 다른 약과 DUR 병용금기 경고가 있어 확인이 필요합니다."
+        merged_reason = " ".join(part for part in (guide.review_reason, reason) if part)
+        guide = guide.model_copy(
+            update={
+                "dur_warnings": dur_warnings,
+                "review_required": True,
+                "review_reason": merged_reason,
+                "review_flags": [*guide.review_flags, "dur_taboo_warning"],
+            }
+        )
+    return guide
 
 
 def generate_guides_from_medications(medications: list) -> list[GuideResponse]:
@@ -341,11 +393,19 @@ def generate_guides_from_medications(medications: list) -> list[GuideResponse]:
     항목 하나가 NoContextFoundError 등으로 실패해도 나머지 약 처리를 막지 않도록,
     실패한 항목은 review_required=True인 GuideResponse로 대체한다. 집계/통계가 필요한
     BatchGuideResponse류 스키마는 실제 ai_worker 이식 시점까지 보류한다 (YAGNI).
+
+    각 항목 처리 시 나머지 약 이름들을 other_drug_names로 함께 넘겨 DUR 병용금기 대조에 쓴다.
     """
+    drug_names = [
+        (medication.get("drug_name") if isinstance(medication, dict) else getattr(medication, "drug_name", None))
+        for medication in medications
+    ]
+
     guides: list[GuideResponse] = []
-    for medication in medications:
+    for idx, medication in enumerate(medications):
         try:
-            guides.append(generate_guide_from_medication(medication))
+            other_names = [name for i, name in enumerate(drug_names) if i != idx and name]
+            guides.append(generate_guide_from_medication(medication, other_drug_names=other_names))
         except Exception as exc:
             drug_name = (
                 medication.get("drug_name") if isinstance(medication, dict) else getattr(medication, "drug_name", "")

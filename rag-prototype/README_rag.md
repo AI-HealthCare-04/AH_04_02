@@ -8,6 +8,7 @@ AH04_2조 파이널 프로젝트의 "② RAG·가이드생성" 파트 프로토�
 ## 구성 (요약)
 
 - 검색: 식약처 `DrbEasyDrugInfoService/getDrbEasyDrugList`(e약은요, 품목명 부분검색/전체 목록 페이징) + `backend/data/hira_drug_master_20251031.csv`(HIRA 약가마스터, 표준코드·ATC코드·허가/취소 상태 로컬 조회 — OCR 파트 `drug_reference.py`와 파일 공유, 아래 참고)
+- 병용금기: 식약처 `DURPrdlstInfoService03/getUsjntTabooInfoList03`(DUR) — 같은 처방전의 다른 약과 금기 관계일 때 `dur_warnings`로 경고 (CONTRACT.md §7 참고, **2026-07-10 기준 활용신청 승인 대기중**)
 - 만성질환 생활지침: `data/lifestyle_guidelines.json` (고혈압·당뇨병·이상지질혈증·만성콩팥병, 학회/질병관리청 출처)
 - 임베딩: `sentence-transformers` 로컬 모델 (`jhgan/ko-sroberta-multitask`) — **OpenAI 키 없이 동작**
 - 벡터DB: ChromaDB (로컬 영속 저장, `./chroma_db`), 의약품·생활지침이 같은 컬렉션에 공존
@@ -128,7 +129,7 @@ e약은요와 원천이 다른 **로컬 정적 데이터**. 효능효과 같은 
 | 파일 | 역할 |
 |---|---|
 | `rag_prototype/schemas.py` | 데이터 모델 전체: `DrugInfo`, `HiraDrugMasterEntry`, `LifestyleGuideline`, `SourceRef`, `LifestyleSourceRef`, `GuideResponse`, OCR 입력 `MedicationInput` (`DrugPermitInfo`는 `[보류]` 주석 처리됨) |
-| `rag_prototype/mfds_client.py` | 식약처 e약은요 API 호출 (검색 / 전체목록 페이지 조회, 재시도). 허가정보 관련 함수는 `[보류]` 주석 처리됨 |
+| `rag_prototype/mfds_client.py` | 식약처 e약은요 API 호출 (검색 / 전체목록 페이지 조회, 재시도) + DUR 병용금기 조회(`search_usjnt_taboo`, 활용신청 승인 대기중). 허가정보 관련 함수는 `[보류]` 주석 처리됨 |
 | `rag_prototype/hira_master.py` | `backend/data/hira_drug_master_20251031.csv`(HIRA 약가마스터) 로컬 조회 — 표준코드/ATC코드/허가·취소 상태 |
 | `rag_prototype/lifestyle_data.py` | `data/lifestyle_guidelines.json` 로더 |
 | `rag_prototype/chunking.py` | 의약품/생활지침 데이터 → `Document` 청크 변환 |

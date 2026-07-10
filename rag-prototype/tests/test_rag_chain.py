@@ -3,11 +3,12 @@ from unittest.mock import patch
 from langchain_core.documents import Document
 from rag_prototype.rag_chain import (
     _build_context,
+    _check_dur_taboo,
     generate_guide,
     generate_guide_from_medication,
     generate_guides_from_medications,
 )
-from rag_prototype.schemas import DrugInfo, GuideResponse, HiraDrugMasterEntry
+from rag_prototype.schemas import DrugInfo, DurTabooInfo, GuideResponse, HiraDrugMasterEntry
 
 FAKE_DOC = Document(
     page_content="[암로디핀정5밀리그램] 효능·효과: 고혈압에 사용합니다.",
@@ -259,7 +260,7 @@ def test_high_confidence_preserves_review_state():
 def test_batch_isolates_failure():
     """여러 약 중 하나가 실패해도 나머지 결과는 정상 반환되고, 실패건만 generation_error로 표시된다."""
 
-    def fake_generate_guide_from_medication(medication):
+    def fake_generate_guide_from_medication(medication, other_drug_names=None):
         if medication["drug_name"] == "실패약":
             raise RuntimeError("MFDS 데이터 없음")
         return _base_guide(drug_name=medication["drug_name"])
@@ -278,3 +279,76 @@ def test_batch_isolates_failure():
     assert guides[1].drug_name == "실패약"
     assert guides[1].review_required is True
     assert guides[1].review_flags == ["generation_error"]
+
+
+def _dur_entry(**overrides) -> DurTabooInfo:
+    defaults = dict(item_seq="1", item_name="와파린정", mixture_item_name="아스피린정", prohbt_content="출혈 위험 증가")
+    defaults.update(overrides)
+    return DurTabooInfo(**defaults)
+
+
+def test_check_dur_taboo_warns_when_mixture_partner_is_in_prescription():
+    """DUR이 알려주는 금기 상대가 이 처방전에 실제로 있을 때만 경고를 만든다."""
+    with patch("rag_prototype.rag_chain.search_usjnt_taboo", return_value=[_dur_entry()]):
+        warnings = _check_dur_taboo("와파린", other_drug_names=["아스피린정"])
+
+    assert len(warnings) == 1
+    assert warnings[0].mixture_item_name == "아스피린정"
+    assert warnings[0].prohbt_content == "출혈 위험 증가"
+
+
+def test_check_dur_taboo_silent_when_mixture_partner_not_in_prescription():
+    """DUR에 금기 상대가 있어도, 이 환자가 그 약을 같이 안 먹으면 경고하지 않는다."""
+    with patch("rag_prototype.rag_chain.search_usjnt_taboo", return_value=[_dur_entry()]):
+        warnings = _check_dur_taboo("와파린", other_drug_names=["로자탄"])
+
+    assert warnings == []
+
+
+def test_check_dur_taboo_returns_empty_without_other_drugs():
+    """비교 대상 약이 없으면(단일 약 조회 등) DUR API 자체를 호출하지 않는다."""
+    with patch("rag_prototype.rag_chain.search_usjnt_taboo") as mock_search:
+        warnings = _check_dur_taboo("와파린", other_drug_names=[])
+
+    mock_search.assert_not_called()
+    assert warnings == []
+
+
+def test_check_dur_taboo_fails_silently_when_api_errors():
+    """[활용신청 승인 전 상태와 동일한 시나리오] DUR 조회가 예외를 던져도 가이드 생성은 안 막힌다."""
+    with patch("rag_prototype.rag_chain.search_usjnt_taboo", side_effect=RuntimeError("403 Forbidden")):
+        warnings = _check_dur_taboo("와파린", other_drug_names=["아스피린정"])
+
+    assert warnings == []
+
+
+def test_generate_guide_from_medication_adds_dur_warning_and_forces_review():
+    """배치 처리 중 병용금기가 확인되면 review_required가 강제로 True가 되고 사유가 남는다."""
+    with (
+        patch("rag_prototype.rag_chain.generate_guide", return_value=_base_guide(drug_name="와파린")),
+        patch("rag_prototype.rag_chain.search_usjnt_taboo", return_value=[_dur_entry()]),
+    ):
+        guide = generate_guide_from_medication(
+            {"drug_name": "와파린", "confidence": 0.95}, other_drug_names=["아스피린정"]
+        )
+
+    assert guide.review_required is True
+    assert "dur_taboo_warning" in guide.review_flags
+    assert len(guide.dur_warnings) == 1
+    assert guide.dur_warnings[0].mixture_item_name == "아스피린정"
+
+
+def test_generate_guides_from_medications_passes_sibling_drug_names():
+    """배치의 각 약에게 '나머지 약들'의 이름이 정확히 전달되는지(자기 자신은 제외) 확인한다."""
+    with patch("rag_prototype.rag_chain.generate_guide_from_medication") as mock_generate:
+        mock_generate.side_effect = lambda medication, other_drug_names=None: _base_guide(
+            drug_name=medication["drug_name"]
+        )
+        generate_guides_from_medications(
+            [{"drug_name": "와파린"}, {"drug_name": "아스피린"}, {"drug_name": "로자탄"}]
+        )
+
+    calls = mock_generate.call_args_list
+    assert calls[0].kwargs["other_drug_names"] == ["아스피린", "로자탄"]
+    assert calls[1].kwargs["other_drug_names"] == ["와파린", "로자탄"]
+    assert calls[2].kwargs["other_drug_names"] == ["와파린", "아스피린"]
