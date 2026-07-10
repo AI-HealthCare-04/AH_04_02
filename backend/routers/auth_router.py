@@ -32,6 +32,8 @@ class LoginRequest(BaseModel):
 class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    caregiver_id: int
+    name: str
 
 
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
@@ -61,7 +63,7 @@ def login(payload: LoginRequest, response: Response, session: Session = Depends(
     access_token = create_access_token(caregiver.id)
     refresh_token = create_refresh_token(caregiver.id)
     response.set_cookie(key="refresh_token", value=refresh_token, httponly=True)
-    return LoginResponse(access_token=access_token)
+    return LoginResponse(access_token=access_token, caregiver_id=caregiver.id, name=caregiver.name)
 
 
 @router.get("/token/refresh", response_model=LoginResponse)
