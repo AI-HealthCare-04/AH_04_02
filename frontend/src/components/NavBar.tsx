@@ -31,7 +31,7 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
       style={dark ? undefined : { background: "rgba(255,255,255,0.95)", borderColor: "rgba(30,26,23,0.10)" }}
     >
       <div className="max-w-7xl mx-auto px-6 sm:px-10 h-16 flex items-center justify-between gap-4">
-        <Link to={isLoggedIn ? "/dashboard" : "/"} className="flex items-center gap-2 shrink-0">
+        <Link to="/" className="flex items-center gap-2 shrink-0">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: C.terracotta }}>
             <span className="text-white text-sm">💊</span>
           </div>
