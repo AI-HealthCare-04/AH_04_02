@@ -63,6 +63,9 @@ uploads/
 *.dicom
 *.dcm
 
+# ===== 멘토링 보고서 (팀 취합용, 원격 push 제외) =====
+mentoring*
+
 # ===== AI 모델 / 대용량 파일 =====
 models/
 *.pt

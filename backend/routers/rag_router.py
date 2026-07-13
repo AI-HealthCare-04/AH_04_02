@@ -124,6 +124,28 @@ def _generate_via_rag_prototype(ocr_items: list[OcrResult]) -> tuple[dict, dict,
         {"drug_name": g.drug_name, "disease": ref.disease, "category": ref.category, "source": ref.source}
         for g in guides
         for ref in g.lifestyle_source_refs
+    ] + [
+        # [7/10] DUR 병용금기 경고 — 같은 처방전의 다른 약과 실제로 금기 관계일 때만 존재.
+        # [7/13] API 대신 로컬 CSV 조회로 전환(dur_master.py) — backend/data/에 해당 CSV가
+        # 없으면 이 리스트는 조용히 빈 상태로 남는다(CONTRACT.md §7).
+        {
+            "drug_name": g.drug_name,
+            "mixture_item_name": w.mixture_item_name,
+            "prohbt_content": w.prohbt_content,
+            "source": w.source,
+        }
+        for g in guides
+        for w in g.dur_warnings
+    ] + [
+        # [7/13 추가] DUR 노인주의/연령금기/임부금기 — 다른 약과 무관하게 이 약 자체의 주의사항.
+        {
+            "drug_name": g.drug_name,
+            "dur_category": c.category,
+            "dur_detail": c.detail,
+            "dur_extra": c.extra,
+        }
+        for g in guides
+        for c in g.dur_cautions
     ]
     return medication_guide, lifestyle_guide, source_refs
 

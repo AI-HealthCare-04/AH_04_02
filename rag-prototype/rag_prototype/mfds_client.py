@@ -54,6 +54,12 @@ def fetch_first_match(item_name: str) -> DrugInfo | None:
     return results[0] if results else None
 
 
+
+# [2026-07-10 → 7/13] DUR 병용금기는 API(getUsjntTabooInfoList03)로 시도했으나 활용신청
+# 승인 대기(403 Forbidden)라 로컬 CSV 조회로 대체했다 — rag_prototype/dur_master.py의
+# search_usjnt_taboo() 참고. 이 API가 나중에 승인되면 그때 다시 여기에 추가할 수 있다.
+
+
 # [보류] e약은요·약가마스터만으로 우선 조회하기로 하고 비활성화 (schemas.DrugPermitInfo 참고).
 # 나중에 정말 경로를 바꿔야 하는 문제가 생기면 그때 schemas.py의 DrugPermitInfo 주석과
 # 함께 풀어서 쓴다.
