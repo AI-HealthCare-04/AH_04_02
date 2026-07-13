@@ -6,7 +6,7 @@ import { getCaregiverPatients, type Caregiver, type Patient } from "../api/monit
 
 export default function Login() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [selectedCaregiver, setSelectedCaregiver] = useState<Caregiver | null>(null);
   const [patients, setPatients] = useState<Patient[]>([]);
@@ -20,11 +20,11 @@ export default function Login() {
   };
 
   const handleLogin = async () => {
-    if (!email.trim() || !password) return;
+    if (!identifier.trim() || !password) return;
     setError("");
     setLoading(true);
     try {
-      const { access_token, caregiver_id, name } = await login(email.trim(), password);
+      const { access_token, caregiver_id, name } = await login(identifier.trim(), password);
       localStorage.setItem("access_token", access_token);
       localStorage.setItem("caregiver_id", String(caregiver_id));
       setSelectedCaregiver({ id: caregiver_id, name } as Caregiver);
@@ -39,7 +39,7 @@ export default function Login() {
         setPatients(list);
       }
     } catch {
-      setError("이메일 또는 비밀번호가 올바르지 않아요.");
+      setError("이메일/전화번호 또는 비밀번호가 올바르지 않아요.");
     } finally {
       setLoading(false);
     }
@@ -59,7 +59,7 @@ export default function Login() {
         <div style={styles.header}>
           <h1 style={styles.title}>안녕하세요</h1>
           <p style={styles.subtitle}>
-            {patients.length > 0 ? "케어하실 환자를 선택해 주세요" : "이메일과 비밀번호를 입력해 주세요"}
+            {patients.length > 0 ? "케어하실 환자를 선택해 주세요" : "이메일(또는 전화번호)과 비밀번호를 입력해 주세요"}
           </p>
         </div>
 
@@ -73,12 +73,12 @@ export default function Login() {
               }}
             >
               <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="이메일"
+                type="text"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
+                placeholder="이메일 또는 전화번호"
                 style={styles.input}
-                autoComplete="email"
+                autoComplete="username"
               />
               <input
                 type="password"
