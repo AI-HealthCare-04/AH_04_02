@@ -193,44 +193,60 @@ Redis Stream (메시지 브로커)
 
 ## 🚀 시작하기
 
+> ⚠️ 이 README의 [기술 스택](#-기술-스택)/[시스템 아키텍처](#-시스템-아키텍처)/[프로젝트 구조](#-프로젝트-구조) 섹션은
+> 초기 기획 당시(Redis Stream + PostgreSQL + S3 + Nginx, 5인 체제) 내용이 그대로 남아있어 실제 코드와
+> 다릅니다 — 아래 "시작하기"/"배포"는 실제 코드 기준으로 갱신했고, 나머지 섹션은 별도 문서 정리 작업으로
+> 남겨뒀습니다.
+
+### 실제 스택
+
+`FastAPI`(동기, SQLite) + `React`(Vite) — Redis/PostgreSQL/S3/Nginx 없음.
+
 ### 사전 요구사항
 
 - Python 3.13+
-- [uv](https://docs.astral.sh/uv/)
-- Docker / Docker Compose
+- Node.js 20+
+- Docker / Docker Compose (선택 — 로컬 개발엔 없어도 됨)
 
 ### 1. 저장소 클론
 
 ```bash
-git clone https://github.com/pecs0310/Final_medication_guidance_based_on_medical_records.git
-cd Final_medication_guidance_based_on_medical_records
+git clone https://github.com/AI-HealthCare-04/AH_04_02.git
+cd AH_04_02
 ```
 
-### 2. 의존성 설치
+### 2. 환경변수 설정
 
 ```bash
-uv sync --all-groups --frozen
+cp backend/.env.example backend/.env
+cp rag-prototype/.env.example rag-prototype/.env   # RAG_PROVIDER/CHAT_PROVIDER를 real로 쓸 때만 필요
 ```
 
-### 3. 환경변수 설정
+각 `.env`를 열어 팀 내 공유된 값(OpenAI/CLOVA 키, `PII_ENCRYPTION_KEY`/`PII_HASH_SECRET` 등)으로 채워주세요.
+**절대 실제 키 값을 커밋하지 않습니다.** 값 없이도 OCR/RAG/챗봇은 전부 mock/stub으로 동작합니다.
 
-```bash
-cp envs/example.local.env envs/.local.env
-ln -s envs/.local.env .env
-```
-
-`.env` 파일을 열어 팀 내 공유된 값(DB 계정, API 키 등)으로 채워주세요. **절대 실제 키 값을 커밋하지 않습니다.**
-
-### 4. 서버 실행
+### 3-A. Docker Compose로 실행 (권장)
 
 ```bash
 docker compose up --build -d
-docker ps   # 컨테이너 정상 실행 확인
+docker compose ps   # backend(8000), frontend(5173) 정상 실행 확인
 ```
 
-### 5. 접속 확인
+### 3-B. 직접 실행
 
-- API 문서(Swagger): http://localhost/api/docs
+```bash
+# 백엔드
+pip install -r backend/requirements.txt
+cd backend && uvicorn main:app --reload   # http://localhost:8000
+
+# 프론트엔드 (새 터미널)
+cd frontend && npm install && npm run dev   # http://localhost:5173
+```
+
+### 4. 접속 확인
+
+- 프론트: http://localhost:5173
+- API 문서(Swagger): http://localhost:8000/docs
 
 ---
 
@@ -387,12 +403,24 @@ main
 
 ## ☁️ 배포
 
-- **배포 환경**: AWS EC2 (Ubuntu) + Docker Compose
-- **구성**: Nginx → FastAPI → Redis Stream → AI Worker, PostgreSQL, S3
-- **배포 링크**: _추후 업데이트_
-- **API 문서**: _추후 업데이트_
+- **현재 상태**: 로컬 Docker Compose(`docker-compose.yml`)로 backend(8000)/frontend(5173) 컨테이너 기동 확인 완료. **실제 클라우드 배포는 아직 안 함.**
+- **구성**: FastAPI(SQLite, 동기) + React(Vite) 2개 컨테이너뿐 — Redis/PostgreSQL/S3/Nginx 없음
+- **배포 링크**: _아직 없음_
 
-배포 절차는 [Docker를 활용한 EC2 백엔드 서버 배포 가이드]와 [FastAPI + Docker 자동화 스크립트 가이드]를 참고합니다.
+### 배포 시 로컬 개발과 달라지는 점
+
+`docker-compose.yml`은 소스를 바인드 마운트하고 `backend/.env`/`rag-prototype/.env` 파일을 그대로 읽는 로컬 개발용 구성입니다. 실제 서버(EC2/Render/Railway 등)에 올릴 땐 아래를 반드시 바꿔야 합니다.
+
+1. **환경변수 주입 방식** — 바인드 마운트된 `.env` 파일 대신, 배포 플랫폼의 환경변수/시크릿 기능으로 `SECRET_KEY`, `PII_ENCRYPTION_KEY`, `PII_HASH_SECRET`, (필요시) `OPENAI_API_KEY`, `DATA_GO_KR_SERVICE_KEY`, `CLOVA_OCR_*`를 주입
+2. **`VITE_MONITORING_API_URL`** — 프론트 빌드 시 `http://localhost:8000` 대신 실제 배포된 백엔드 도메인으로 설정 (`frontend/src/api/monitoringClient.ts` 참고)
+3. **CORS `allow_origins`** — `backend/main.py`에 배포된 프론트 도메인 추가
+4. **`--reload` 제거** — 개발용 Dockerfile은 `uvicorn --reload`를 쓰는데, 운영에서는 빼는 게 안전(코드 변경 시 불필요한 재시작 방지)
+5. **SQLite 파일 영속성** — `backend/app.db`가 컨테이너 안에만 있으면 재배포 시 데이터가 날아감 — 볼륨 마운트 필요
+
+### 후보 배포 방식 (아직 미결정)
+
+- **가장 간단**: Render/Railway 같은 PaaS에 backend/frontend 각각 서비스로 올리기 (Dockerfile 이미 있어서 바로 사용 가능)
+- **직접 제어**: EC2 1대 + `docker compose up -d` (지금 로컬 구성과 거의 동일하게 유지 가능)
 
 ---
 
