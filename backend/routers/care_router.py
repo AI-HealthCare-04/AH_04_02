@@ -236,8 +236,7 @@ def get_notification_settings(
     if not setting:
         if not session.get(Patient, patient_id):
             raise HTTPException(404, "해당 환자를 찾을 수 없어요")
-        # [순현님 수정 반영, 역할분담 26번] GET은 조회 전용 — 저장하지 않고 기본값만 반환.
-        # 실제 저장은 PUT 호출 시 수행 (REST 컨벤션 위반 수정).
+        # 저장하지 않고 기본값만 반환 — 실제 저장은 PUT 호출 시 수행
         return NotificationSetting(patient_id=patient_id)
     return setting
 
