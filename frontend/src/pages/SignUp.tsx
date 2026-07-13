@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Check, Phone } from "lucide-react";
 import NavBar from "../components/NavBar";
 import { createCaregiver, createPatient } from "../api/monitoring";
+import { login } from "../api/auth";
 import { C } from "../theme";
 
 type MemberType = "personal" | "organization";
@@ -221,8 +222,12 @@ export default function SignUp() {
         });
         localStorage.setItem("patient_id", String(patient.id));
         localStorage.removeItem("caregiver_id");
+        // [7/13] 환자 본인도 가입 직후 로그인해 토큰을 받는다 — Dashboard/Schedule/
+        // Notification 등 공유 화면의 인가된 API 호출에 필요 (issue #28).
+        const { access_token } = await login(phone.trim(), password);
+        localStorage.setItem("access_token", access_token);
       } else if (memberType === "personal") {
-        const caregiver = await createCaregiver({
+        await createCaregiver({
           name: name.trim(),
           relation_type: "guardian",
           phone: phone.trim(),
@@ -233,9 +238,13 @@ export default function SignUp() {
           sms_enabled: notifPrefs.sms,
           email_opt_in: notifPrefs.email,
         });
-        localStorage.setItem("caregiver_id", String(caregiver.id));
+        // [7/10] 가입 직후엔 토큰이 없어서 다음 화면(PatientManagement.tsx)의 인가된
+        // API 호출이 401 나던 문제 — 방금 만든 계정으로 바로 로그인해 토큰을 받는다.
+        const { access_token, caregiver_id } = await login(phone.trim(), password);
+        localStorage.setItem("access_token", access_token);
+        localStorage.setItem("caregiver_id", String(caregiver_id));
       } else {
-        const caregiver = await createCaregiver({
+        await createCaregiver({
           name: orgName.trim(),
           relation_type: "organization",
           phone: managerPhone.trim(),
@@ -250,7 +259,9 @@ export default function SignUp() {
           manager_name: managerName.trim(),
           manager_phone: managerPhone.trim(),
         });
-        localStorage.setItem("caregiver_id", String(caregiver.id));
+        const { access_token, caregiver_id } = await login(managerPhone.trim(), password);
+        localStorage.setItem("access_token", access_token);
+        localStorage.setItem("caregiver_id", String(caregiver_id));
       }
       setDone(true);
     } catch {

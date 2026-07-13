@@ -23,6 +23,15 @@ schedule_v6에서 시간·인력 상 이번 스프린트 스코프에서 뺐었�
 → http://localhost:8000/docs 열리면 성공
 """
 from __future__ import annotations
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# [7/11] .env 로드가 ocr_router.py 안에만 있어서, auth_router(→models→security.py가
+# 기동 시점에 PII_ENCRYPTION_KEY를 요구함)가 먼저 임포트되면 .env가 아직 안 읽힌
+# 상태로 실패했다. 라우터 임포트보다 먼저, 여기 한 곳에서만 로드한다.
+load_dotenv(Path(__file__).parent / ".env")
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -38,7 +47,10 @@ app = FastAPI(
 # 프론트(Vite 개발서버)에서 호출 허용
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=[
+        "http://localhost:5173", "http://127.0.0.1:5173",
+        "http://localhost:5174", "http://127.0.0.1:5174",  # [7/10] 별도 포트 미리보기 서버(backend-dev/frontend-dev)
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
