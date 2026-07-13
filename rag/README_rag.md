@@ -74,11 +74,31 @@ e약은요와 원천이 다른 **로컬 정적 데이터**. 효능효과 같은 
 > **주의**: `data/lifestyle_guidelines.json`은 각 학회 진료지침 원문이 아니라, AI 챗봇과의 요약 대화에서
 > 정리한 2차 가공 데이터다. 실제 서비스에 반영하기 전에는 각 학회 진료지침 원문과 반드시 대조 검증해야 한다.
 
-### 임베딩 & 벡터DB (두 데이터 공통)
+### 출처 3 — 질병관리청 국가건강정보포털 건강정보 (Open API, 로컬 배치 수집)
+
+`data/lifestyle_guidelines.json`(4개 만성질환, 사람이 손으로 정리한 11건)이 다루지 못하는 질환·주제를
+보강하기 위한 전체 건강정보 백과사전(2026-07-13 기준 663건, 관절염/골절/감기/부종 등 질환·증상 전반).
+
+| 단계 | 코드 | 설명 |
+|---|---|---|
+| 목록 수집 | `scripts/kdca_crawl_list.py` | 포털의 "Open API 신청내역"(83페이지, 로그인 세션 필요)을 순회해 `cntntsSn`(콘텐츠 식별자) 목록을 CSV로 저장. `KDCA_COOKIE` 환경변수로 로그인 세션 쿠키 전달(브라우저 DevTools의 `document.cookie` 값) |
+| 본문 수집 | `scripts/kdca_crawl_content.py` | 목록 CSV의 `cntntsSn`마다 `healthInfoNew` Open API(로그인 불필요, `TOKEN`만 있으면 호출 가능)를 호출해 `data/kdca_healthinfo_content.jsonl`로 저장. `KDCA_TOKEN` 환경변수로 API 토큰 전달. `api.kdca.go.kr`가 legacy SSL renegotiation을 요구해 커스텀 `HTTPAdapter`로 우회함 |
+| 데이터 모양 | `rag/schemas.py`의 `KdcaHealthInfoSection` | 건강정보 1건(`cntnts_sn`)은 여러 섹션(개요정의/증상/치료 등, `section_name`)으로 구성되고, 같은 섹션 안에서도 텍스트/이미지 블록이 반복될 수 있어 `index`로 완전히 구분한다 |
+| 로딩 | `rag/kdca_health_info_data.py`의 `load_kdca_health_info_sections()` | JSONL을 섹션 단위로 펼쳐서 읽음 |
+| 청킹 | `rag/chunking.py`의 `kdca_health_info_sections_to_documents()` | 섹션 1개 = `Document` 1개, HTML 태그를 제거해 순수 텍스트만 남김. 텍스트가 거의 없는 순수 이미지 섹션은 건너뜀(2026-07-13 기준 11205개 섹션 중 2999개 제외, 8206개 저장) |
+| 적재 | `rag/vectorstore.py`의 `add_kdca_health_info_documents()` | id = `kdca::{cntnts_sn}::{section_sn}::{index}`. 8000건 이상이라 Chroma의 단일 upsert 배치 한도(약 5461)를 넘어 내부적으로 배치 분할 |
+| 검색 | `rag/vectorstore.py`의 `search_kdca_health_info(query, k)` | 663건을 4개 질환처럼 사람이 하나하나 별칭 등록할 수 없어, `doc_type="kdca_health_info"` 필터를 건 임베딩 유사도 검색으로 대체 |
+| 실행 시점 | `python -m rag.cli ingest-kdca-health-info` (로컬 파일이라 배치 1회 실행이면 충분) | |
+
+> **주의**: `data/kdca_healthinfo_cntntsSn.csv`/`data/kdca_healthinfo_content.jsonl`은 로그인 세션 쿠키와
+> API 토큰이 있어야 재수집할 수 있는 원본 스크래핑 데이터라 git에 커밋하지 않는다(`.gitignore`의 `data/*.jsonl`).
+> 팀원이 로컬에서 이 기능을 쓰려면 직접 두 스크립트를 순서대로 실행해 데이터를 받아야 한다.
+
+### 임베딩 & 벡터DB (세 데이터 공통)
 
 - 임베딩 모델: `sentence-transformers`의 `jhgan/ko-sroberta-multitask` — 로컬에서 실행되며 OpenAI 키가 없어도 동작한다 (`vectorstore.get_embedding_function()`)
 - 저장소: ChromaDB, 로컬 영속 디렉터리 `./chroma_db`, 컬렉션명 `mfds_drug_info` (`config.py`의 `CHROMA_PERSIST_DIR` / `CHROMA_COLLECTION_NAME`)
-- 의약품 청크와 생활지침 청크가 **같은 컬렉션**에 함께 들어있고, 조회할 때 메타데이터 필터(`item_name` 또는 `disease_code`)로 구분해서 꺼낸다
+- 의약품·생활지침·건강정보 청크가 **같은 컬렉션**에 함께 들어있고, 조회할 때 메타데이터 필터(`item_name`, `disease_code`, `doc_type` 등)로 구분해서 꺼낸다
 
 ### 질의 시점 검색 흐름 (`rag/rag_chain.py`의 `_build_context()`)
 
@@ -95,10 +115,13 @@ e약은요와 원천이 다른 **로컬 정적 데이터**. 효능효과 같은 
   │
   ├─ 3) (2도 비면) 유사도 검색 폴백   similarity_search(약품명+용량+상황)
   │
-  └─ 4) 생활지침 질환 매칭   진단명 텍스트에서 DIAGNOSIS_DISEASE_ALIASES로 disease_code 추론
-         └─ 예: "고혈압"→hypertension, "당뇨"/"당뇨병"→diabetes, "고지혈증"/"이상지질혈증"→dyslipidemia,
-                "만성콩팥병"/"신장질환"→chronic_kidney_disease (진단에 여러 질환이 있으면 전부 매칭)
-         └─ search_by_disease(disease_code)로 해당 질환의 생활지침 전체를 가져온다
+  ├─ 4) 생활지침 질환 매칭   진단명 텍스트에서 DIAGNOSIS_DISEASE_ALIASES로 disease_code 추론
+  │      └─ 예: "고혈압"→hypertension, "당뇨"/"당뇨병"→diabetes, "고지혈증"/"이상지질혈증"→dyslipidemia,
+  │             "만성콩팥병"/"신장질환"→chronic_kidney_disease (진단에 여러 질환이 있으면 전부 매칭)
+  │      └─ search_by_disease(disease_code)로 해당 질환의 생활지침 전체를 가져온다
+  │
+  └─ 5) (4가 비고 진단명이 있으면) 건강정보 유사도 검색 폴백   search_kdca_health_info(diagnosis, k=3)
+         └─ 4개 질환 큐레이션 목록에 없는 진단명(예: "관절염")을 질병관리청 건강정보 663건에서 보강
 ```
 
 1~4에서 모인 항목을 전부 하나의 번호(`[1] ... [2] ...`) 목록으로 합쳐 LLM에게 "참고자료"로 전달한다.
@@ -133,11 +156,13 @@ e약은요와 원천이 다른 **로컬 정적 데이터**. 효능효과 같은 
 | `rag/hira_master.py` | `backend/data/hira_drug_master_20251031.csv`(HIRA 약가마스터) 로컬 조회 — 표준코드/ATC코드/허가·취소 상태 |
 | `rag/dur_master.py` | `backend/data/dur_*_202606.csv` 5개(DUR 전 카테고리) 로컬 조회 — 병용금기는 양방향 인덱스, 나머지는 품목명 단일 인덱스 |
 | `rag/lifestyle_data.py` | `data/lifestyle_guidelines.json` 로더 |
-| `rag/chunking.py` | 의약품/생활지침 데이터 → `Document` 청크 변환 |
-| `rag/vectorstore.py` | ChromaDB 연결, 적재(`add_documents` / `add_lifestyle_documents`), 조회(`search_by_item_name` / `search_by_disease` / `similarity_search`) |
+| `rag/kdca_health_info_data.py` | `data/kdca_healthinfo_content.jsonl`(질병관리청 건강정보) 로더 — 섹션 단위로 펼침 |
+| `rag/chunking.py` | 의약품/생활지침/건강정보 데이터 → `Document` 청크 변환 |
+| `rag/vectorstore.py` | ChromaDB 연결, 적재(`add_documents` / `add_lifestyle_documents` / `add_kdca_health_info_documents`), 조회(`search_by_item_name` / `search_by_disease` / `search_kdca_health_info` / `similarity_search`) |
 | `rag/rag_chain.py` | 참고자료 컨텍스트 구성, 질환 별칭 매칭, LLM 호출, self-consistency, 최종 `GuideResponse` 조립 |
-| `rag/cli.py` | `ingest` / `ingest-lifestyle` / `query` 커맨드라인 진입점 |
+| `rag/cli.py` | `ingest` / `ingest-lifestyle` / `ingest-kdca-health-info` / `query` 커맨드라인 진입점 |
 | `data/lifestyle_guidelines.json` | 만성질환 생활지침 원본 데이터 (텍스트 에디터로 직접 수정 가능) |
+| `scripts/kdca_crawl_list.py` / `kdca_crawl_content.py` | 질병관리청 국가건강정보포털 Open API 목록·본문 수집 스크립트(재현용, `data/kdca_healthinfo_*`는 git 미추적) |
 | `backend/data/hira_drug_master_20251031.csv` | HIRA 약가마스터 원본 (약 30.5만 행, CP949, 54MB). `backend/`에만 실물 1개 두고 여기서 상위 디렉터리 경로로 참조 — 권순현님 `drug_reference.py`와 완전히 동일한 파일(중복 보관 안 함) |
 | `backend/data/dur_*_202606.csv` (5개) | DUR 전 카테고리 원본(병용금기 87만행/250MB·노인주의·노인주의(해열진통소염제)·연령금기·임부금기). git 미추적(`backend/.gitignore`의 `data/*.csv`) — 각자 로컬에 받아서 채워야 함 (CONTRACT.md §7) |
 | `scripts/demo_e2e.py` | 배치 수집 → 검색 → 가이드 생성 데모 |
@@ -175,10 +200,18 @@ FileNotFoundError: HIRA 약가마스터 CSV가 없습니다.
 
 `data/lifestyle_guidelines.json`은 git에 포함되어 있으므로 별도 작업이 필요 없습니다.
 
+`data/kdca_healthinfo_cntntsSn.csv`/`data/kdca_healthinfo_content.jsonl`(질병관리청 건강정보)도
+git에 없습니다 — 이 기능을 쓰려면 `scripts/kdca_crawl_list.py`(KDCA_COOKIE 필요) →
+`scripts/kdca_crawl_content.py`(KDCA_TOKEN 필요) 순서로 직접 실행해 받아야 합니다.
+없어도 나머지 기능(의약품/생활지침 4개 질환)은 정상 동작하고, `_build_context`의
+건강정보 폴백 검색만 항상 빈 결과를 반환합니다.
+
 ## 환경변수
 
 `.env` 파일에 이미 식약처 서비스키가 채워져 있습니다. OpenAI 키는 발급받는 대로
 `OPENAI_API_KEY`에 채워 넣으면 됩니다 (`.env`는 상위 프로젝트 `.gitignore`에 의해 커밋되지 않습니다).
+`KDCA_COOKIE`/`KDCA_TOKEN`은 질병관리청 건강정보 수집 스크립트 실행 시에만 필요하며(`.env`가 아니라
+그때그때 셸 환경변수로 전달), 평소 `rag.cli` 사용에는 필요 없습니다.
 
 ## 사용법
 
@@ -191,6 +224,10 @@ python -m rag.cli ingest --pages 3 --num-of-rows 100
 
 # 1-1. 만성질환 생활지침 데이터 적재 (data/lifestyle_guidelines.json -> 벡터DB, 최초 1회)
 python -m rag.cli ingest-lifestyle
+
+# 1-2. 질병관리청 건강정보 데이터 적재 (data/kdca_healthinfo_content.jsonl -> 벡터DB, 최초 1회.
+#      먼저 scripts/kdca_crawl_list.py -> kdca_crawl_content.py로 JSONL을 받아둬야 함)
+python -m rag.cli ingest-kdca-health-info
 
 # 2. 가이드 생성 (약품명은 정확한 품목명 권장, 진단명을 주면 해당 질환의 생활지침이 함께 인용됨)
 python -m rag.cli query --drug "타이레놀정500밀리그램" --situation "고령" --diagnosis "고혈압"

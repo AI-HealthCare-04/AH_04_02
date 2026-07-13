@@ -1,11 +1,12 @@
 import argparse
 import json
 
-from rag.chunking import drugs_to_documents, lifestyle_guidelines_to_documents
+from rag.chunking import drugs_to_documents, kdca_health_info_sections_to_documents, lifestyle_guidelines_to_documents
+from rag.kdca_health_info_data import load_kdca_health_info_sections
 from rag.lifestyle_data import load_lifestyle_guidelines
 from rag.mfds_client import fetch_page, search_by_name
 from rag.rag_chain import generate_guide
-from rag.vectorstore import add_documents, add_lifestyle_documents
+from rag.vectorstore import add_documents, add_kdca_health_info_documents, add_lifestyle_documents
 
 
 def cmd_ingest(args: argparse.Namespace) -> None:
@@ -40,6 +41,17 @@ def cmd_ingest_lifestyle(args: argparse.Namespace) -> None:
     print(f"[ingest-lifestyle] 완료: 생활지침 {len(guidelines)}건 -> 청크 {count}건 저장")
 
 
+def cmd_ingest_kdca_health_info(args: argparse.Namespace) -> None:
+    sections = load_kdca_health_info_sections(args.path)
+    documents = kdca_health_info_sections_to_documents(sections)
+    count = add_kdca_health_info_documents(documents)
+    skipped = len(sections) - count
+    print(
+        f"[ingest-kdca-health-info] 완료: 섹션 {len(sections)}건 -> 청크 {count}건 저장"
+        f"(순수 이미지 등 텍스트 없는 섹션 {skipped}건 제외)"
+    )
+
+
 def cmd_query(args: argparse.Namespace) -> None:
     guide = generate_guide(args.drug, situation=args.situation, diagnosis=args.diagnosis)
     print(json.dumps(guide.model_dump(), ensure_ascii=False, indent=2))
@@ -60,6 +72,15 @@ def build_parser() -> argparse.ArgumentParser:
         "ingest-lifestyle", help="data/lifestyle_guidelines.json의 만성질환 생활지침을 벡터DB에 저장"
     )
     ingest_lifestyle_parser.set_defaults(func=cmd_ingest_lifestyle)
+
+    ingest_kdca_parser = sub.add_parser(
+        "ingest-kdca-health-info",
+        help="질병관리청 국가건강정보포털 Open API 수집분(JSONL)을 벡터DB에 저장",
+    )
+    ingest_kdca_parser.add_argument(
+        "--path", default=None, help="JSONL 경로 (기본값: data/kdca_healthinfo_content.jsonl)"
+    )
+    ingest_kdca_parser.set_defaults(func=cmd_ingest_kdca_health_info)
 
     query_parser = sub.add_parser("query", help="약품명으로 복약/생활습관 가이드를 생성")
     query_parser.add_argument("--drug", required=True, help="약품명 (정확한 품목명 권장)")
