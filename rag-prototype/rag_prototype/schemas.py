@@ -115,6 +115,25 @@ class DurWarning(BaseModel):
     source: str = "식약처 DUR(의약품안전사용서비스)"
 
 
+class DurCaution(BaseModel):
+    """DUR 병용금기를 제외한 나머지 카테고리 — "약 하나"에 대한 주의/금기 정보.
+
+    [2026-07-13] 병용금기(DurWarning, 두 약 사이의 관계)와 달리 이 4개 카테고리는
+    다른 약과 무관하게 그 약 자체의 속성이라 처방전에 이 약 하나만 있어도 표시된다:
+    - 노인주의 / 노인주의(해열진통소염제): 고령 환자에게 특히 주의가 필요한 약 (이 서비스의
+      주 사용자층인 고령 만성질환자와 직접 관련)
+    - 연령금기: 특정 연령대(주로 소아·청소년) 사용 금기
+    - 임부금기: 임부 사용 금기(금기등급 포함)
+    환자의 실제 나이·임신 여부를 이 시스템이 알지 못하므로, "이 환자에게 해당되는지"는
+    판단하지 않고 "이 약에 이런 조건부 주의사항이 있다"는 사실만 정보성으로 전달한다.
+    """
+
+    item_name: str
+    category: str = Field(description='"노인주의" | "노인주의(해열진통소염제)" | "연령금기" | "임부금기"')
+    detail: str | None = Field(default=None, description="금기/주의 사유 설명")
+    extra: str | None = Field(default=None, description="카테고리별 부가 정보 (연령금기의 연령 조건, 임부금기의 금기등급 등)")
+
+
 class LifestyleGuideline(BaseModel):
     """만성질환 생활지침 항목 (질병관리청·학회 진료지침 기반, 도메인 지식 참고자료).
 
@@ -175,6 +194,9 @@ class GuideResponse(BaseModel):
     dur_warnings: list[DurWarning] = Field(
         default_factory=list, description="같은 처방전의 다른 약과 DUR 병용금기 관계가 확인된 경우만 채워짐"
     )
+    dur_cautions: list[DurCaution] = Field(
+        default_factory=list, description="이 약 자체의 DUR 주의/금기 정보(노인주의/연령금기/임부금기 등, 다른 약과 무관)"
+    )
     disclaimer: str
     self_consistency_score: float | None = None
     review_required: bool = False
@@ -184,7 +206,7 @@ class GuideResponse(BaseModel):
         description=(
             "검토 사유 코드: no_citation | low_self_consistency | "
             "ocr_low_confidence | ocr_confidence_unavailable | dry_run | generation_error | "
-            "dur_taboo_warning"
+            "dur_taboo_warning | dur_caution"
         ),
     )
     ocr_confidence: float | None = Field(

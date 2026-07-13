@@ -2,10 +2,16 @@ import json
 
 from rag_prototype.chunking import drugs_to_documents
 from rag_prototype.config import settings
-from rag_prototype.dur_master import search_usjnt_taboo
+from rag_prototype.dur_master import (
+    search_age_taboo,
+    search_elderly_caution,
+    search_pregnancy_taboo,
+    search_usjnt_taboo,
+)
 from rag_prototype.hira_master import search_by_product_name as search_hira_by_product_name
 from rag_prototype.mfds_client import search_by_name
 from rag_prototype.schemas import (
+    DurCaution,
     DurWarning,
     GuideResponse,
     HiraDrugMasterEntry,
@@ -359,6 +365,22 @@ def _check_dur_taboo(drug_name: str, other_drug_names: list[str]) -> list[DurWar
     return warnings
 
 
+def _check_dur_cautions(drug_name: str) -> list[DurCaution]:
+    """이 약 자체의 DUR 주의/금기 정보(노인주의/연령금기/임부금기)를 조회한다.
+
+    _check_dur_taboo(병용금기)와 달리 다른 약과 무관하게 이 약 하나만으로 판단되므로
+    other_drug_names가 필요 없다. 각 조회가 실패해도(CSV 부재 등) 나머지 조회와 가이드
+    생성 자체는 막지 않는다 (_check_dur_taboo와 동일한 fail-safe 원칙).
+    """
+    cautions: list[DurCaution] = []
+    for search_fn in (search_elderly_caution, search_age_taboo, search_pregnancy_taboo):
+        try:
+            cautions.extend(search_fn(drug_name))
+        except Exception:  # noqa: BLE001 — DUR 조회 실패가 가이드 생성 자체를 막으면 안 됨
+            continue
+    return cautions
+
+
 def generate_guide_from_medication(medication, other_drug_names: list[str] | None = None) -> GuideResponse:
     """OCR 파트(ocr_interface.MedicationItem)의 출력을 그대로 받아 가이드를 생성하는 어댑터.
 
@@ -394,6 +416,19 @@ def generate_guide_from_medication(medication, other_drug_names: list[str] | Non
                 "review_required": True,
                 "review_reason": merged_reason,
                 "review_flags": [*guide.review_flags, "dur_taboo_warning"],
+            }
+        )
+
+    dur_cautions = _check_dur_cautions(item.drug_name)
+    if dur_cautions:
+        reason = "DUR 노인주의/연령금기/임부금기 등 확인이 필요한 주의사항이 있습니다."
+        merged_reason = " ".join(part for part in (guide.review_reason, reason) if part)
+        guide = guide.model_copy(
+            update={
+                "dur_cautions": dur_cautions,
+                "review_required": True,
+                "review_reason": merged_reason,
+                "review_flags": [*guide.review_flags, "dur_caution"],
             }
         )
     return guide

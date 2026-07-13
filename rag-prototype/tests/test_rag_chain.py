@@ -3,12 +3,13 @@ from unittest.mock import patch
 from langchain_core.documents import Document
 from rag_prototype.rag_chain import (
     _build_context,
+    _check_dur_cautions,
     _check_dur_taboo,
     generate_guide,
     generate_guide_from_medication,
     generate_guides_from_medications,
 )
-from rag_prototype.schemas import DrugInfo, DurTabooInfo, GuideResponse, HiraDrugMasterEntry
+from rag_prototype.schemas import DrugInfo, DurCaution, DurTabooInfo, GuideResponse, HiraDrugMasterEntry
 
 FAKE_DOC = Document(
     page_content="[암로디핀정5밀리그램] 효능·효과: 고혈압에 사용합니다.",
@@ -368,3 +369,52 @@ def test_generate_guides_from_medications_passes_sibling_drug_names():
     assert calls[0].kwargs["other_drug_names"] == ["아스피린", "로자탄"]
     assert calls[1].kwargs["other_drug_names"] == ["와파린", "로자탄"]
     assert calls[2].kwargs["other_drug_names"] == ["와파린", "아스피린"]
+
+
+def _caution(**overrides) -> DurCaution:
+    defaults = dict(item_name="솔리페나신", category="노인주의", detail="항콜린 부작용 증가")
+    defaults.update(overrides)
+    return DurCaution(**defaults)
+
+
+def test_check_dur_cautions_aggregates_all_three_sources():
+    """노인주의·연령금기·임부금기 세 소스 결과를 전부 합쳐서 돌려준다."""
+    with (
+        patch("rag_prototype.rag_chain.search_elderly_caution", return_value=[_caution(category="노인주의")]),
+        patch("rag_prototype.rag_chain.search_age_taboo", return_value=[_caution(category="연령금기", extra="18세 미만")]),
+        patch("rag_prototype.rag_chain.search_pregnancy_taboo", return_value=[_caution(category="임부금기", extra="금기등급 1")]),
+    ):
+        cautions = _check_dur_cautions("솔리페나신")
+
+    assert len(cautions) == 3
+    assert {c.category for c in cautions} == {"노인주의", "연령금기", "임부금기"}
+
+
+def test_check_dur_cautions_one_source_failing_does_not_block_others():
+    """세 소스 중 하나가 실패(CSV 부재 등)해도 나머지 결과는 정상 반환된다."""
+    with (
+        patch("rag_prototype.rag_chain.search_elderly_caution", side_effect=FileNotFoundError("no csv")),
+        patch("rag_prototype.rag_chain.search_age_taboo", return_value=[_caution(category="연령금기")]),
+        patch("rag_prototype.rag_chain.search_pregnancy_taboo", return_value=[]),
+    ):
+        cautions = _check_dur_cautions("솔리페나신")
+
+    assert len(cautions) == 1
+    assert cautions[0].category == "연령금기"
+
+
+def test_generate_guide_from_medication_adds_dur_caution_and_forces_review():
+    """DUR 주의사항(노인주의 등)이 있으면 review_required가 강제로 True가 되고 사유가 남는다."""
+    with (
+        patch("rag_prototype.rag_chain.generate_guide", return_value=_base_guide(drug_name="솔리페나신")),
+        patch("rag_prototype.rag_chain.search_usjnt_taboo", return_value=[]),
+        patch("rag_prototype.rag_chain.search_elderly_caution", return_value=[_caution()]),
+        patch("rag_prototype.rag_chain.search_age_taboo", return_value=[]),
+        patch("rag_prototype.rag_chain.search_pregnancy_taboo", return_value=[]),
+    ):
+        guide = generate_guide_from_medication({"drug_name": "솔리페나신", "confidence": 0.95})
+
+    assert guide.review_required is True
+    assert "dur_caution" in guide.review_flags
+    assert len(guide.dur_cautions) == 1
+    assert guide.dur_cautions[0].category == "노인주의"
