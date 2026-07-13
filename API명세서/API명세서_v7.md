@@ -43,13 +43,17 @@ Base URL 없음(각 라우터가 자체 prefix 사용, 아래 참고). 데이터
 | POST | `/monitoring/caregivers` | 보호자/단체 회원가입(조직 가입 겸용) | `{name, relation_type, phone?, email?, birth_date?, password?, push_enabled?, sms_enabled?, email_opt_in?, org_name?, org_type?, business_reg_no?, manager_name?, manager_phone?}` | `200 CaregiverPublic{...}` | X | 완료 |
 | POST | `/auth/login` | 로그인 — 보호자/환자 통합, 이메일 또는 전화번호로 식별 | `{identifier, password}` | `200 {access_token, token_type:"bearer", caregiver_id, name}` + 쿠키 `refresh_token` | X | 완료 |
 | GET | `/auth/token/refresh` | access_token 재발급 | 쿠키 `refresh_token` | `200 {access_token, token_type, caregiver_id, name}` | 쿠키 검증만(access 토큰 아님) | 완료 |
+| GET | `/monitoring/patients` | 내 정보(환자 본인) 또는 내가 케어하는 환자 목록 조회 — "전체 목록"이 아니라 토큰 본인 범위로 좁힘(`MyPage.tsx` 본인 조회 전용) | 없음 | `200 [PatientPublic]` | O(`get_current_actor`) | 완료 |
+| PATCH | `/monitoring/patients/{patient_id}` | 환자 정보 수정 | 경로 `patient_id`; 수정할 필드만 | `200 PatientPublic` | O(`get_current_caregiver` + `require_patient_access`) | 완료 |
+| DELETE | `/monitoring/patients/{patient_id}` | 환자 계정·연결 삭제 | 경로 `patient_id` | `200 {deleted: patient_id}` | O(`get_current_caregiver` + `require_patient_access`) | 완료 |
+| GET | `/monitoring/caregivers` | 내 정보(보호자 본인) 조회 — 전체 목록이 아니라 로그인한 본인 1건만 반환(`MyPage.tsx` 전용, issue #21) | 없음 | `200 [CaregiverPublic]`(항상 1건) | O(`get_current_caregiver`) | 완료 |
 
 **PII 암호화**: `patients`/`caregivers`의 `name`/`phone`은 DB에 Fernet 대칭키로 암호화(`name_encrypted`/`phone_encrypted`) + 조회용 `phone_hash`(HMAC-SHA256)로 저장되지만, **응답에는 항상 평문으로 복호화되어 나간다**(`.name`/`.phone` 프로퍼티가 투명하게 복호화). `caregivers.manager_name`/`manager_phone`(단체 담당자 연락처)은 암호화 대상이 아니다(계정 본인 PII가 아니라는 이유로 의도적으로 평문 저장).
 
 **REQ-049(앱 최초 실행 화면 정책)**: 클라이언트 동작 규약이라 API 없음 — 부분 구현(로그인/refresh 자체는 있으나 "저장된 토큰으로 자동 로그인" 로직은 프론트 미확인).
 
 ### 미구현 항목 (v6 설계에는 있었음)
-- `GET /users/me`(내 정보 조회 — 애초에 "나"를 식별할 인가 수단이 없음), `PATCH /users/me`
+- `GET /users/me`/`PATCH /users/me` 같은 전용 단일 경로는 없지만, PR #29(인가 적용) 이후로는 "나"를 식별하는 인가 수단(`get_current_actor`/`get_current_caregiver`) 자체는 생겼다 — 조회는 `GET /monitoring/patients`·`GET /monitoring/caregivers`(둘 다 본인 범위로 좁혀 반환)가, 환자 정보 수정·삭제는 `PATCH`/`DELETE /monitoring/patients/{id}`가 그 역할을 한다. 다만 **보호자 본인의 정보 수정·삭제 엔드포인트는 없다**(환자만 PATCH/DELETE 있음) — 이 부분만 실제 미구현.
 - 로그인 5회 실패 시 계정 잠금 + 임시번호 발송·재로그인(REQ-039) — `POST /auth/login` 실패 처리는 400 하나뿐, 잠금·임시코드 로직 없음
 - 비밀번호 재설정(`/auth/password-reset/*`)
 - 회원 탈퇴(`DELETE /users/me`, 30일 유예 삭제, REQ-035)
@@ -82,7 +86,7 @@ Base URL 없음(각 라우터가 자체 prefix 사용, 아래 참고). 데이터
 
 | Method | Endpoint | 설명 | 요청 | 응답 | 인증 | 구현 |
 |---|---|---|---|---|---|---|
-| POST | `/assessments` | 자가진단 결과 저장 + 케어등급 즉시 판정 | `{patient_id, cognitive_level, mobility_level, vision_level, medication_awareness, medication_willingness}` | O(`get_current_actor`) | 완료 |
+| POST | `/assessments` | 자가진단 결과 저장 + 케어등급 즉시 판정 | `{patient_id, cognitive_level, mobility_level, vision_level, medication_awareness, medication_willingness}` | `200 CareLevelAssessment` | O(`get_current_actor`) | 완료 |
 | GET | `/assessments/latest` | 최신 평가 1건 | 쿼리 `patient_id` | `200 CareLevelAssessment` 또는 `200 null`(없으면) | O(`get_current_actor`) | 완료 |
 
 v6은 "상태 저장"과 "평가"를 별개 리소스(`status`/`care_level`)로 분리했지만, 실제로는 `POST /assessments` 하나가 입력·평가·저장을 한 번에 처리한다(트랜잭션 분리 없이 애초에 한 테이블·한 요청).
@@ -125,11 +129,12 @@ OCR 제공자는 `OCR_PROVIDER` 환경변수로 전환한다(`clova`=기본값, 
 |---|---|---|---|---|---|---|
 | POST | `/records/{record_id}/confirm` | 약물 항목 확정 → RAG 가이드 생성 → 복약일정 자동 등록까지 한 번에 | 경로 `record_id`; `{medications:[{id, drug_name, dosage, frequency, diagnosis, drug_class}]}` | `200` (레코드 응답, `guide` 필드 포함) | X | 완료 |
 | GET | `/rag/ping` | RAG 라우터 연결 확인(디버그) | 없음 | `200 {status:"ok", owner:"김영혜"}` | X | 완료(디버그용) |
+| POST | `/rag/test/{record_id}` | RAG 가이드 생성 단독 테스트(실제 흐름은 `POST /records/{id}/confirm`) | 경로 `record_id` | `200 {guide_id, note}` | X | 완료(테스트용) |
 
 `RAG_PROVIDER` 환경변수로 전환한다 — 기본값(`stub`)은 고정 가짜 데이터(`{"title":"테스트 출처","url":"..."}`)를 반환하고, `real`로 켜야 실제 파이프라인(`rag-prototype/`, LangChain+ChromaDB+OpenAI)이 동작한다. 실제 파이프라인의 가이드에는:
 - **출처 인용**(`source_refs`): e약은요(식약처) + HIRA 약가마스터(표준코드·ATC코드·허가상태)를 병합해 인용(REQ-014)
 - **DUR 경고**: 병용금기(같은 처방전의 다른 약과 실제로 함께 있을 때만), 노인주의·연령금기·임부금기(약 하나의 속성, 다른 약과 무관) — 전부 로컬 CSV 조회(`backend/data/dur_*.csv`), API 활용신청 승인 대기 상태
-- **면책 고지**(`disclaimer`, REQ-032): 매 응답에 고정 문구 포함
+- **면책 고지**(REQ-032): `rag-prototype`의 `GuideResponse`는 `disclaimer` 필드를 생성하지만, `rag_router.py`의 `_generate_via_rag_prototype()`이 이 필드를 추출하지 않아 API 응답에는 포함되지 않는다 — 실제 고지 문구는 프론트엔드(`Result.tsx`/`Dashboard.tsx`/`Processing.tsx`)에 하드코딩되어 있다(2026-07-13 재검토로 확인, REQ-032 "완료" 표기를 정정).
 
 캐싱(`cache_key`, `cache_expires_at`), TTS 음성(`GET .../guide/audio`), SSE 진행률 스트리밍은 없음 — 매 확정마다 새로 생성한다.
 
@@ -183,4 +188,4 @@ SSE 스트리밍 응답은 없음(동기 응답 한 번에 전체 답변 반환)
 
 ## 상태 코드
 
-`200` 성공(이 프로젝트는 `201`/`202`를 쓰지 않고 생성도 `200`으로 통일), `400` 잘못된 요청(로그인 실패 등), `404` 리소스 없음, `409` 상태 충돌(예: 확인 대기 상태가 아닌데 확정 시도), `422` pydantic 검증 실패(FastAPI 기본), `500` 서버 오류(예: RAG 파이프라인 예외).
+`200` 성공(대부분의 생성도 `200`으로 처리), `201` 생성(예외적으로 `POST /auth/signup`만 `status_code=201`을 명시적으로 지정, `auth_router.py`), `400` 잘못된 요청(로그인 실패 등), `404` 리소스 없음, `409` 상태 충돌(예: 확인 대기 상태가 아닌데 확정 시도), `422` pydantic 검증 실패(FastAPI 기본), `500` 서버 오류(예: RAG 파이프라인 예외), `502`/`503`/`504` OCR 외부 호출(CLOVA) 실패 — `ocr_router.py`에서 HTTP 오류는 `502`, 연결 실패·런타임 오류는 `503`, 타임아웃은 `504`로 구분해 반환한다.
