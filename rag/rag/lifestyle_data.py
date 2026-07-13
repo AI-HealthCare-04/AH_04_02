@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from rag_prototype.schemas import LifestyleGuideline
+from rag.schemas import LifestyleGuideline
 
 DEFAULT_LIFESTYLE_DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "lifestyle_guidelines.json"
 

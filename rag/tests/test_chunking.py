@@ -1,5 +1,5 @@
-from rag_prototype.chunking import drug_to_documents
-from rag_prototype.schemas import DrugInfo
+from rag.chunking import drug_to_documents
+from rag.schemas import DrugInfo
 
 DRUG = DrugInfo.model_validate(
     {

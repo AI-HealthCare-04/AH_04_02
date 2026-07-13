@@ -10,7 +10,7 @@ chat_router.py — 담당: 김영혜
 프롬프트에 추가했습니다.
 
 CHAT_PROVIDER=real (OCR_PROVIDER/RAG_PROVIDER와 동일 컨벤션)을 .env에 켜야 LLM을
-시도합니다. 기본값(미설정)이거나, rag-prototype 의존성이 없거나, LLM 호출이 실패하면
+시도합니다. 기본값(미설정)이거나, rag 의존성이 없거나, LLM 호출이 실패하면
 고정 질문은 PRESET_QUESTIONS 답변으로, 자유 질문은 "지금은 어렵다"는 안내로 조용히
 폴백합니다 — 챗봇 자체가 죽는 것보단 뭐라도 답이 나가는 게 낫다는 판단.
 """
@@ -87,15 +87,15 @@ _CHAT_PROVIDER = os.environ.get("CHAT_PROVIDER", "stub")
 
 _CHAT_LLM_AVAILABLE = False
 if _CHAT_PROVIDER == "real":
-    # rag-prototype/의 OpenAI 설정(.env의 OPENAI_API_KEY/OPENAI_MODEL)과 langchain-openai를
-    # 재사용한다 — 키를 backend에 따로 둘 필요 없이 한 곳(rag-prototype/.env)만 관리하면 됨.
-    _RAG_PROTOTYPE_DIR = Path(__file__).resolve().parent.parent.parent / "rag-prototype"
-    if _RAG_PROTOTYPE_DIR.is_dir() and str(_RAG_PROTOTYPE_DIR) not in sys.path:
-        sys.path.insert(0, str(_RAG_PROTOTYPE_DIR))
+    # rag/의 OpenAI 설정(.env의 OPENAI_API_KEY/OPENAI_MODEL)과 langchain-openai를
+    # 재사용한다 — 키를 backend에 따로 둘 필요 없이 한 곳(rag/.env)만 관리하면 됨.
+    _RAG_DIR = Path(__file__).resolve().parent.parent.parent / "rag"
+    if _RAG_DIR.is_dir() and str(_RAG_DIR) not in sys.path:
+        sys.path.insert(0, str(_RAG_DIR))
 
     try:
         from langchain_openai import ChatOpenAI  # noqa: F401 — 임포트 가능 여부만 확인(실사용은 지연 임포트)
-        from rag_prototype.config import settings as _rag_settings
+        from rag.config import settings as _rag_settings
 
         _CHAT_LLM_AVAILABLE = bool(_rag_settings.OPENAI_API_KEY)
     except Exception:  # noqa: BLE001 — 의존성 미설치/키 없음 등 어떤 이유로든 실패하면 폴백
@@ -177,7 +177,7 @@ def _build_patient_context(patient_id: int, session: Session) -> str:
 
 def _generate_llm_answer(question_text: str, context_text: str) -> str:
     from langchain_openai import ChatOpenAI
-    from rag_prototype.config import settings as rag_settings
+    from rag.config import settings as rag_settings
 
     chat = ChatOpenAI(model=rag_settings.OPENAI_MODEL, api_key=rag_settings.OPENAI_API_KEY, temperature=0.4)
     response = chat.invoke(

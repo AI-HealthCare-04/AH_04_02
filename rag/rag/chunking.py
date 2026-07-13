@@ -1,6 +1,6 @@
 from langchain_core.documents import Document
 
-from rag_prototype.schemas import DRUG_FIELD_LABELS, DrugInfo, LifestyleGuideline
+from rag.schemas import DRUG_FIELD_LABELS, DrugInfo, LifestyleGuideline
 
 
 def drug_to_documents(drug: DrugInfo) -> list[Document]:

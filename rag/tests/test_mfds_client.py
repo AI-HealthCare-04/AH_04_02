@@ -1,11 +1,11 @@
 from unittest.mock import patch
 
 import pytest
-from rag_prototype.mfds_client import MfdsApiError, search_by_name
+from rag.mfds_client import MfdsApiError, search_by_name
 
 # [보류] is_officially_approved/search_permit_info가 mfds_client.py에서 주석 처리돼 있어
 # (schemas.DrugPermitInfo 참고) 이 테스트들도 함께 비활성화. 나중에 풀 때 같이 복원.
-# from rag_prototype.mfds_client import is_officially_approved, search_permit_info
+# from rag.mfds_client import is_officially_approved, search_permit_info
 
 SAMPLE_RESPONSE = {
     "header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE."},
@@ -49,7 +49,7 @@ class _FakeResponse:
 
 
 def test_search_by_name_parses_items():
-    with patch("rag_prototype.mfds_client.requests.get", return_value=_FakeResponse(SAMPLE_RESPONSE)):
+    with patch("rag.mfds_client.requests.get", return_value=_FakeResponse(SAMPLE_RESPONSE)):
         results = search_by_name("활명수")
 
     assert len(results) == 1
@@ -59,7 +59,7 @@ def test_search_by_name_parses_items():
 
 
 def test_search_by_name_raises_on_error_code():
-    with patch("rag_prototype.mfds_client.requests.get", return_value=_FakeResponse(ERROR_RESPONSE)):
+    with patch("rag.mfds_client.requests.get", return_value=_FakeResponse(ERROR_RESPONSE)):
         with pytest.raises(MfdsApiError):
             search_by_name("활명수")
 
@@ -120,7 +120,7 @@ def test_search_by_name_raises_on_error_code():
 #
 #
 # def test_search_permit_info_parses_items():
-#     with patch("rag_prototype.mfds_client.requests.get", return_value=_FakeResponse(PERMIT_RESPONSE_ACTIVE)):
+#     with patch("rag.mfds_client.requests.get", return_value=_FakeResponse(PERMIT_RESPONSE_ACTIVE)):
 #         results = search_permit_info("타이레놀")
 #
 #     assert len(results) == 1
@@ -130,15 +130,15 @@ def test_search_by_name_raises_on_error_code():
 #
 #
 # def test_is_officially_approved_true_when_active():
-#     with patch("rag_prototype.mfds_client.requests.get", return_value=_FakeResponse(PERMIT_RESPONSE_ACTIVE)):
+#     with patch("rag.mfds_client.requests.get", return_value=_FakeResponse(PERMIT_RESPONSE_ACTIVE)):
 #         assert is_officially_approved("타이레놀") is True
 #
 #
 # def test_is_officially_approved_false_when_cancelled():
-#     with patch("rag_prototype.mfds_client.requests.get", return_value=_FakeResponse(PERMIT_RESPONSE_CANCELLED)):
+#     with patch("rag.mfds_client.requests.get", return_value=_FakeResponse(PERMIT_RESPONSE_CANCELLED)):
 #         assert is_officially_approved("가짜의약품") is False
 #
 #
 # def test_is_officially_approved_none_when_not_found():
-#     with patch("rag_prototype.mfds_client.requests.get", return_value=_FakeResponse(PERMIT_RESPONSE_EMPTY)):
+#     with patch("rag.mfds_client.requests.get", return_value=_FakeResponse(PERMIT_RESPONSE_EMPTY)):
 #         assert is_officially_approved("존재하지않는약") is None

@@ -1,6 +1,6 @@
-from rag_prototype.chunking import lifestyle_guidelines_to_documents
-from rag_prototype.lifestyle_data import load_lifestyle_guidelines
-from rag_prototype.schemas import LifestyleGuideline
+from rag.chunking import lifestyle_guidelines_to_documents
+from rag.lifestyle_data import load_lifestyle_guidelines
+from rag.schemas import LifestyleGuideline
 
 GUIDELINE = LifestyleGuideline.model_validate(
     {

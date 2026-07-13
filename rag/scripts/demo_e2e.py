@@ -6,10 +6,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from rag_prototype.chunking import drugs_to_documents  # noqa: E402
-from rag_prototype.mfds_client import search_by_name  # noqa: E402
-from rag_prototype.rag_chain import generate_guide  # noqa: E402
-from rag_prototype.vectorstore import add_documents  # noqa: E402
+from rag.chunking import drugs_to_documents  # noqa: E402
+from rag.mfds_client import search_by_name  # noqa: E402
+from rag.rag_chain import generate_guide  # noqa: E402
+from rag.vectorstore import add_documents  # noqa: E402
 
 SAMPLE_DRUG_NAMES = [
     "타이레놀정500밀리그람(아세트아미노펜)",

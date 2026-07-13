@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from rag_prototype.hira_master import is_registered_and_active, search_by_product_name
+from rag.hira_master import is_registered_and_active, search_by_product_name
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "hira_master_sample.csv"
 

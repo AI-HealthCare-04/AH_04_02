@@ -1,16 +1,16 @@
 import json
 
-from rag_prototype.chunking import drugs_to_documents
-from rag_prototype.config import settings
-from rag_prototype.dur_master import (
+from rag.chunking import drugs_to_documents
+from rag.config import settings
+from rag.dur_master import (
     search_age_taboo,
     search_elderly_caution,
     search_pregnancy_taboo,
     search_usjnt_taboo,
 )
-from rag_prototype.hira_master import search_by_product_name as search_hira_by_product_name
-from rag_prototype.mfds_client import search_by_name
-from rag_prototype.schemas import (
+from rag.hira_master import search_by_product_name as search_hira_by_product_name
+from rag.mfds_client import search_by_name
+from rag.schemas import (
     DurCaution,
     DurWarning,
     GuideResponse,
@@ -19,8 +19,8 @@ from rag_prototype.schemas import (
     MedicationInput,
     SourceRef,
 )
-from rag_prototype.self_consistency import pick_consistent_answer
-from rag_prototype.vectorstore import add_documents, search_by_disease, search_by_item_name, similarity_search
+from rag.self_consistency import pick_consistent_answer
+from rag.vectorstore import add_documents, search_by_disease, search_by_item_name, similarity_search
 
 SYSTEM_PROMPT = """\
 당신은 고령 만성질환 환자와 보호자를 위한 복약·생활습관 가이드를 작성하는 보조자입니다.

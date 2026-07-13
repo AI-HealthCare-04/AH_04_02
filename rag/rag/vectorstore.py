@@ -4,7 +4,7 @@ from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 
-from rag_prototype.config import settings
+from rag.config import settings
 
 
 @lru_cache(maxsize=1)

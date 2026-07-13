@@ -12,7 +12,7 @@ import csv
 from functools import lru_cache
 from pathlib import Path
 
-from rag_prototype.schemas import HiraDrugMasterEntry
+from rag.schemas import HiraDrugMasterEntry
 
 DEFAULT_HIRA_CSV_PATH = (
     Path(__file__).resolve().parent.parent.parent / "backend" / "data" / "hira_drug_master_20251031.csv"

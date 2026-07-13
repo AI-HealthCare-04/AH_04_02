@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from rag_prototype.dur_master import (
+from rag.dur_master import (
     search_age_taboo,
     search_elderly_caution,
     search_pregnancy_taboo,
