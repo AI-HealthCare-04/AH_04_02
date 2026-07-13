@@ -172,10 +172,14 @@ def accept_invitation(token: str, payload: InvitationAccept, session: Session = 
             raise HTTPException(404, "해당 보호자를 찾을 수 없어요")
     else:
         # [7/9] name은 프로퍼티(암호화 setter)라 생성자 kwarg로 못 받음 — 생성 후 대입.
+        # [7/13] commit 대신 flush — caregiver.id만 미리 확정하고, 아래 CaregiverPatient
+        # 연결·invitation 상태 변경과 한 트랜잭션으로 묶어 마지막에 한 번에 커밋한다.
+        # (이전엔 여기서 바로 commit해서, 이 직후 장애가 나면 CaregiverPatient 연결도
+        # 없고 invitation도 pending인 채로 Caregiver row만 영구히 남는 문제가 있었음)
         caregiver = Caregiver(relation_type=invitation.relation_type)
         caregiver.name = payload.caregiver_name
         session.add(caregiver)
-        session.commit()
+        session.flush()
         session.refresh(caregiver)
 
     existing_link = session.exec(

@@ -63,6 +63,9 @@ def test_search_by_name_raises_on_error_code():
         with pytest.raises(MfdsApiError):
             search_by_name("활명수")
 
+# DUR 병용금기 관련 테스트는 API가 아니라 로컬 CSV 조회(dur_master.py)로 옮겨졌다 —
+# test_dur_master.py 참고 (CONTRACT.md §7).
+
 
 # [보류] 허가정보 API 테스트 — mfds_client.py의 search_permit_info/is_officially_approved와
 # 함께 비활성화. 나중에 코드 주석을 풀 때 여기도 같이 복원.
