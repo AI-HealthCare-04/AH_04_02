@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from database import get_session
+from dependencies import Actor, get_current_actor, require_actor_patient_access
 from models import Caregiver, GuideResult, MedicalRecord, MedicationSchedule, OcrResult, Patient
 from routers.ocr_router import run_ocr
 from routers.rag_router import run_rag
@@ -96,6 +97,7 @@ async def create_record(
     patient_id: int,
     file: UploadFile = File(...),
     caregiver_id: int | None = None,
+    actor: Actor = Depends(get_current_actor),
     session: Session = Depends(get_session),
 ):
     """
@@ -114,8 +116,7 @@ async def create_record(
     ⚠️ CLOVA_OCR_API_URL/SECRET_KEY가 .env에 없으면 503으로 실패합니다(의도된 동작).
        키 없이 파이프라인만 테스트하려면 .env에 OCR_PROVIDER=mock 추가하세요.
     """
-    if not session.get(Patient, patient_id):
-        raise HTTPException(404, "해당 환자를 찾을 수 없어요")
+    require_actor_patient_access(patient_id, actor, session)
     if caregiver_id is not None and not session.get(Caregiver, caregiver_id):
         raise HTTPException(404, "해당 보호자를 찾을 수 없어요")
 
@@ -137,15 +138,17 @@ async def create_record(
 
 @router.post("/manual")
 def create_manual_record(
-    patient_id: int, caregiver_id: int | None = None, session: Session = Depends(get_session)
+    patient_id: int,
+    caregiver_id: int | None = None,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
 ):
     """
     [7/9 추가] 처방전 인식 실패(OcrError.tsx) 화면의 "직접 입력하기" — OCR을 거치지 않고
     빈 항목 1개짜리 review_required 기록을 만들어서 PrescriptionReview.tsx에서 그대로
     입력·수정하게 합니다. 이후 흐름(확인 완료 → RAG 가이드 생성)은 기존 확인 화면과 동일합니다.
     """
-    if not session.get(Patient, patient_id):
-        raise HTTPException(404, "해당 환자를 찾을 수 없어요")
+    require_actor_patient_access(patient_id, actor, session)
     if caregiver_id is not None and not session.get(Caregiver, caregiver_id):
         raise HTTPException(404, "해당 보호자를 찾을 수 없어요")
 
@@ -166,7 +169,11 @@ def create_manual_record(
 
 
 @router.post("/{record_id}/medications")
-def add_medication_item(record_id: int, session: Session = Depends(get_session)):
+def add_medication_item(
+    record_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
     """
     [7/9 추가] 처방전확인 화면의 "약물 추가" — 빈 항목을 하나 더 만들어서, 사용자가
     처방전에 있지만 인식되지 않은 약을 직접 추가할 수 있게 합니다.
@@ -174,6 +181,7 @@ def add_medication_item(record_id: int, session: Session = Depends(get_session))
     record = session.get(MedicalRecord, record_id)
     if not record:
         raise HTTPException(404, "해당 기록을 찾을 수 없어요")
+    require_actor_patient_access(record.patient_id, actor, session)
     if record.status != "review_required":
         raise HTTPException(409, "확인이 필요한 상태의 처방전이 아니에요")
 
@@ -184,7 +192,12 @@ def add_medication_item(record_id: int, session: Session = Depends(get_session))
 
 
 @router.delete("/{record_id}/medications/{medication_id}")
-def remove_medication_item(record_id: int, medication_id: int, session: Session = Depends(get_session)):
+def remove_medication_item(
+    record_id: int,
+    medication_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
     """
     [7/9 추가] 처방전확인 화면 — "약물 추가"로 잘못 추가했거나 필요 없는 항목을 지우는 용도.
     최소 1개는 남아 있어야 해서(약이 0개인 처방전은 의미가 없음) 마지막 항목은 못 지웁니다.
@@ -192,6 +205,7 @@ def remove_medication_item(record_id: int, medication_id: int, session: Session 
     record = session.get(MedicalRecord, record_id)
     if not record:
         raise HTTPException(404, "해당 기록을 찾을 수 없어요")
+    require_actor_patient_access(record.patient_id, actor, session)
     if record.status != "review_required":
         raise HTTPException(409, "확인이 필요한 상태의 처방전이 아니에요")
 
@@ -210,11 +224,16 @@ def remove_medication_item(record_id: int, medication_id: int, session: Session 
 
 
 @router.get("")
-def list_records(patient_id: int, session: Session = Depends(get_session)):
+def list_records(
+    patient_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
     """
     환자별 처방전 이력 목록 (RecordsPage '이용 기록' 화면용).
     각 항목은 상세 조회 없이 목록에 필요한 요약 정보만 담습니다.
     """
+    require_actor_patient_access(patient_id, actor, session)
     records = session.exec(
         select(MedicalRecord)
         .where(MedicalRecord.patient_id == patient_id)
@@ -253,7 +272,10 @@ class ConfirmMedicationsPayload(BaseModel):
 
 @router.post("/{record_id}/confirm")
 async def confirm_medications(
-    record_id: int, payload: ConfirmMedicationsPayload, session: Session = Depends(get_session)
+    record_id: int,
+    payload: ConfirmMedicationsPayload,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
 ):
     """
     [7/8 추가] 처방전확인 화면 — review_required(저신뢰) 처방전의 항목을 보호자가 직접
@@ -263,6 +285,7 @@ async def confirm_medications(
     record = session.get(MedicalRecord, record_id)
     if not record:
         raise HTTPException(404, "해당 기록을 찾을 수 없어요")
+    require_actor_patient_access(record.patient_id, actor, session)
     if record.status != "review_required":
         raise HTTPException(409, "확인이 필요한 상태의 처방전이 아니에요")
 
@@ -305,11 +328,16 @@ async def confirm_medications(
 
 
 @router.get("/{record_id}")
-def get_record(record_id: int, session: Session = Depends(get_session)):
+def get_record(
+    record_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
     """새로고침 등으로 결과 화면을 다시 열었을 때 재조회용 (Processing에서 받은 데이터가 없을 때 대비)"""
     record = session.get(MedicalRecord, record_id)
     if not record:
         raise HTTPException(404, "해당 기록을 찾을 수 없어요")
+    require_actor_patient_access(record.patient_id, actor, session)
 
     guide = session.exec(
         select(GuideResult)
