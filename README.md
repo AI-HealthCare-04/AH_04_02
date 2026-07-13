@@ -2,9 +2,9 @@
 
 > AI 헬스케어 4기 파이널 프로젝트 · 2팀 · Uponati(어포나티) 참여기업 주제
 
-[![Python](https://img.shields.io/badge/Python-3.13-blue)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-async-009688)](https://fastapi.tiangolo.com/)
-[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED)](https://www.docker.com/)
+[![Python](https://img.shields.io/badge/Python-3.12+-blue)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-SQLite-009688)](https://fastapi.tiangolo.com/)
+[![React](https://img.shields.io/badge/React-Vite-61DAFB)](https://react.dev/)
 [![License](https://img.shields.io/badge/status-in--progress-yellow)]()
 
 ---
@@ -66,87 +66,64 @@
 | 이름 | 역할 |
 |---|---|
 | 권순현 | OCR·정보추출 (CLOVA OCR 연동, 의료정보 추출 파이프라인) |
-| 김영혜 | RAG·가이드생성 (LangChain, 벡터DB, 복약 가이드 생성) |
-| 조성아 | 챗봇·백엔드 (FastAPI, DB 모델링, 챗봇 API) |
-| 박소정 | 프론트·배포·통합 (화면 구현, Docker Compose, 통합 테스트) |
-| 김현우 | TBD |
+| 김영혜 | RAG·가이드생성·백엔드 통합 (LangChain, 벡터DB, 복약 가이드 생성, 로그인/PII 암호화) |
+| 박소정 | 프론트·백엔드 통합 (화면 구현, FastAPI 라우터, 배포 준비) |
 
-> 역할 분담은 1주차 스프린트 기준이며, 추후 변경 시 업데이트합니다.
+> 조성아님, 김현우님은 초기(1주차) 이후 팀에서 하차하여 현재 3인 체제로 진행 중입니다.
 
 ---
 
 ## 🛠 기술 스택
 
 ### Backend
-`FastAPI` `Uvicorn` `Python 3.13` `uv`
+`FastAPI` `Uvicorn` `Python 3.12+` `SQLModel` `SQLite`
 
 ### AI / LLM
-`LangChain` `OpenAI API` `CLOVA OCR` `sentence-transformers`
+`LangChain` `OpenAI API (gpt-4o-mini)` `CLOVA OCR` `sentence-transformers` `ChromaDB`
 
-### Database & Cache
-`PostgreSQL` `Redis (Stream / Pub-Sub)`
-
-### Infra & Deploy
-`Docker` `Docker Compose` `Nginx` `AWS EC2` `AWS S3`
+### Frontend
+`React` `TypeScript` `Vite`
 
 ### 협업 도구
-`Git / GitHub` `Notion` `Discord` `ZEP`
+`Git / GitHub` `Notion` `Discord`
 
-> 프론트엔드 스택은 팀 논의 후 확정되는 대로 업데이트합니다.
+> 3인 소규모 팀 체제로, 별도 배포 인프라(AWS/Docker/Nginx) 없이 로컬 SQLite 기반 동기 처리로 단순화해 운영 중입니다. 배포는 추후 검토 예정입니다.
 
 ---
 
 ## 🏗 시스템 아키텍처
 
-AI 추론처럼 응답 시간이 긴 작업을 FastAPI가 직접 처리하면 서버가 다른 요청을 받지 못하게 되는 문제를 막기 위해, **Producer–Consumer 패턴**을 적용합니다.
+3인 소규모 팀 체제에 맞춰, 별도 메시지 브로커/워커 없이 **FastAPI 단일 프로세스가 동기 방식으로 처리**하는 단순한 구조로 운영 중입니다. 응답이 느린 외부 호출(CLOVA OCR, OpenAI)은 `asyncio.to_thread`로 감싸 이벤트 루프를 막지 않도록만 처리합니다.
 
 ```
-Client (사용자 / 보호자)
+Client (React + Vite, 사용자 / 보호자)
+       │  HTTP (axios)
+       ▼
+FastAPI (backend/main.py)
+       │
+       ├─ auth_router      로그인(이메일/전화번호+비밀번호), JWT 발급
+       ├─ records_router    처방전 업로드 → OCR 실행 → RAG 가이드 생성까지 한 요청에서 처리
+       ├─ ocr_router        CLOVA OCR 연동 (asyncio.to_thread로 감싼 동기 호출)
+       ├─ rag_router        복약·생활습관 가이드 생성 (rag-prototype 연동, asyncio.to_thread)
+       ├─ chat_router       환자 처방·가이드 컨텍스트 기반 GPT 챗봇
+       ├─ monitoring_router 보호자용 환자 목록·복약 모니터링
+       └─ care_router       보호자-환자 연결, 알림 설정, 돌봄 등급 평가
        │
        ▼
-Nginx (리버스 프록시, SSL 종단, SSE 연결 유지)
-       │
-       ▼
-FastAPI (Producer) ──→ PostgreSQL
-       │  XADD (작업 등록)
-       ▼
-Redis Stream (메시지 브로커)
-       │  XREAD (Consumer Group)
-       ▼
-┌─────────────┬─────────────┬─────────────┐
-│ OCR Worker  │ RAG Worker  │ Chat Worker │
-│ (CLOVA OCR) │ (LangChain  │ (asyncio,   │
-│   ①권순현   │  + FAISS)   │   SSE)      │
-│             │   ②김영혜   │   ③조성아   │
-└─────────────┴─────────────┴─────────────┘
-       │             │             │
-       ▼             ▼             ▼
-    AWS S3      Vector DB      PostgreSQL
-   (이미지)       (FAISS)      (가이드/이력)
-       │             │             │
-       └─────────────┴─────────────┘
-                    │
-            Redis Pub/Sub (결과 발행)
-                    │
-                    ▼
-            FastAPI → SSE → Client
+   SQLite (backend/app.db)
 ```
 
-- **Nginx**: 리버스 프록시, SSL 종단, 정적 파일 처리
-- **FastAPI**: 요청 접수 및 비즈니스 로직 처리, Redis Stream에 작업 등록 후 SSE로 결과 전달
-- **Redis**: 메시지 브로커 및 작업 큐 (Stream), FastAPI-Worker 간 디커플링, Consumer Group으로 수평 확장
-- **OCR / RAG / Chat Worker**: 역할별로 분리된 Consumer. 장애 시 Redis XCLAIM으로 작업 재할당
-- **PostgreSQL**: 사용자, 의료기록, 가이드 결과, 대화 이력 저장 *(MySQL→PostgreSQL 변경 검토 중, 추후 확정 시 업데이트)*
-- **AWS S3**: 처방전 원본 이미지, 모델 파일 저장
-- **FAISS**: 식약처 의약품 데이터 임베딩 기반 벡터 검색
+- **FastAPI**: 요청을 받아 그 자리에서 처리 후 바로 응답 (별도 작업 큐·SSE 스트리밍 없음)
+- **SQLite**: 환자/보호자/처방전/가이드/알림설정 등 전체 데이터 저장 — 설치 없이 파일 하나로 동작
+- **rag-prototype/**: RAG(LangChain + ChromaDB + OpenAI) 로직은 별도 프로토타입 디렉터리에서 개발되어 `backend`가 `RAG_PROVIDER=real`일 때 그대로 import해서 사용
+- **OCR**: CLOVA OCR(`OCR_PROVIDER=clova`) 또는 로컬 목업(`OCR_PROVIDER=mock`)으로 전환 가능
 
 ### 데이터 흐름
 
-1. **업로드** — 사용자/보호자가 처방전 이미지 업로드 → FastAPI가 S3 저장 후 Redis에 작업 등록, 즉시 "접수 완료" 응답
-2. **OCR·정보추출** (①) — OCR Worker가 CLOVA OCR로 약품명/용량/복용법/진단명 추출 → REQ-002 JSON 스키마로 변환, 실패 시 REQ-008 기준 에러 응답
-3. **RAG·가이드생성** (②) — RAG Worker가 FAISS로 식약처 데이터 검색(top-3) → 복약 가이드 및 생활습관 가이드 생성, 출처(source_refs) 명시
-4. **결과 전송** (③) — 완료 시 Redis Pub/Sub으로 신호 → FastAPI가 SSE로 클라이언트에 결과 스트리밍
-5. **챗봇 질의응답** (③) — 추가 질문 시 Chat Worker가 대화 이력(ChatHistory) 기반으로 SSE 스트리밍 응답, 하단 면책 고지 자동 표시
+1. **업로드** — 보호자/환자가 처방전 이미지를 업로드하면 `records_router`가 OCR을 실행하고, 필요 시 RAG 가이드 생성까지 이어서 처리한 뒤 결과를 그대로 응답으로 반환
+2. **OCR 저신뢰 항목 재확인** — OCR 인식 신뢰도가 낮으면 `review_required` 상태로 남기고, 보호자가 화면에서 직접 수정·확정(`confirm`)하면 그 값으로 RAG 가이드를 생성
+3. **RAG·가이드생성** — 식약처 e약은요/HIRA 약가마스터/DUR 데이터를 검색해 복약·생활습관 가이드를 생성하고, 인용 출처(source_refs)와 병용금기·주의사항 경고를 함께 반환
+4. **챗봇 질의응답** — 환자의 최근 처방·가이드 결과를 컨텍스트로 GPT가 답변을 생성, 하단 면책 고지 자동 표시
 
 ---
 
@@ -154,39 +131,29 @@ Redis Stream (메시지 브로커)
 
 ```
 .
-├── ai_worker/              # AI 추론/학습 워커 (Redis Stream Consumer)
-│   ├── core/               # Redis 설정, 워커 옵션
-│   ├── schemas/            # Worker 전용 데이터 스키마
-│   ├── tasks/              # 백그라운드 작업 정의 (inference, training 등)
-│   ├── Dockerfile
-│   └── main.py
-├── app/                    # FastAPI 백엔드 서버 (Redis Stream Producer)
-│   ├── apis/               # API 라우터
-│   ├── core/               # 공통 설정, DB, JWT, 로깅
-│   ├── dependencies/       # 의존성 주입 (인증/인가 등)
-│   ├── dtos/                # 요청/응답 스키마 (Pydantic)
-│   ├── models/              # DB 모델
-│   ├── repositories/        # 데이터 액세스 계층
-│   ├── services/            # 비즈니스 로직
-│   ├── tests/                # 테스트 코드
-│   ├── Dockerfile
-│   └── main.py
-├── docs/                    # 프로젝트 문서
-│   ├── README.md
-│   └── team-rules.md        # 팀 GitHub 협업 규칙
-├── envs/                     # 환경변수 템플릿
-│   ├── example.local.env
-│   └── example.prod.env
-├── infra/                    # 배포 인프라 설정
-│   ├── docker/
-│   └── nginx/
-├── scripts/                  # 자동화 스크립트
-│   ├── ci/
-│   ├── certbot.sh             # SSL 인증서 발급 자동화
-│   └── deployment.sh          # 배포 자동화
-├── docker-compose.yml
-├── pyproject.toml
-└── uv.lock
+├── backend/                 # FastAPI 백엔드 (SQLite)
+│   ├── routers/             # auth/records/ocr/rag/chat/monitoring/care 라우터
+│   ├── data/                # HIRA·DUR 등 대용량 로컬 참고 데이터 (git 미추적)
+│   ├── tests/
+│   ├── models.py            # SQLModel 테이블 정의
+│   ├── security.py          # PII 암호화(Fernet)·해시 유틸
+│   ├── main.py
+│   └── requirements.txt
+├── frontend/                 # React + TypeScript + Vite
+│   ├── src/
+│   │   ├── pages/            # 화면 단위 컴포넌트
+│   │   ├── api/               # 백엔드 API 클라이언트
+│   │   └── components/
+│   └── package.json
+├── rag-prototype/             # RAG 파이프라인 프로토타입 (LangChain + ChromaDB)
+│   ├── rag_prototype/         # 가이드 생성 로직, 식약처/HIRA/DUR 연동
+│   ├── tests/
+│   └── requirements.txt
+├── API명세서/                 # API 명세서 버전별 문서
+├── ERD/                       # ERD 버전별 문서
+├── 요구사항_정의서/            # 요구사항 정의서 버전별 문서
+├── docs/                       # 그 외 프로젝트 문서 (team-rules.md, revision_logs 등)
+└── README.md
 ```
 
 ---
@@ -195,42 +162,41 @@ Redis Stream (메시지 브로커)
 
 ### 사전 요구사항
 
-- Python 3.13+
-- [uv](https://docs.astral.sh/uv/)
-- Docker / Docker Compose
+- Python 3.12+
+- Node.js (frontend)
 
 ### 1. 저장소 클론
 
 ```bash
-git clone https://github.com/pecs0310/Final_medication_guidance_based_on_medical_records.git
-cd Final_medication_guidance_based_on_medical_records
+git clone https://github.com/AI-HealthCare-04/AH_04_02.git
+cd AH_04_02
 ```
 
-### 2. 의존성 설치
+### 2. 백엔드 실행
 
 ```bash
-uv sync --all-groups --frozen
+cd backend
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # 값 채우기 (아래 참고)
+uvicorn main:app --reload
 ```
 
-### 3. 환경변수 설정
+- `.env`는 팀 내 공유된 값(CLOVA/OpenAI/공공데이터포털 키 등)으로 채워주세요. **절대 실제 키 값을 커밋하지 않습니다.**
+- `RAG_PROVIDER=real`, `CHAT_PROVIDER=real`로 켜려면 `rag-prototype/`의 의존성과 `.env`(OpenAI/공공데이터포털 키)도 함께 필요합니다. 미설정 시 흐름 확인용 고정 응답으로 동작합니다.
+
+### 3. 프론트엔드 실행
 
 ```bash
-cp envs/example.local.env envs/.local.env
-ln -s envs/.local.env .env
+cd frontend
+npm install
+npm run dev
 ```
 
-`.env` 파일을 열어 팀 내 공유된 값(DB 계정, API 키 등)으로 채워주세요. **절대 실제 키 값을 커밋하지 않습니다.**
+### 4. 접속 확인
 
-### 4. 서버 실행
-
-```bash
-docker compose up --build -d
-docker ps   # 컨테이너 정상 실행 확인
-```
-
-### 5. 접속 확인
-
-- API 문서(Swagger): http://localhost/api/docs
+- 백엔드 API 문서(Swagger): http://localhost:8000/docs
+- 프론트엔드: http://localhost:5173
 
 ---
 
@@ -238,46 +204,34 @@ docker ps   # 컨테이너 정상 실행 확인
 
 자세한 내용은 [`docs/team-rules.md`](./docs/team-rules.md) 참고.
 
-### 브랜치 전략 — Git Flow
+### 브랜치 전략
 
-```
-main
- └─ develop
-     ├─ release/*    배포 준비
-     ├─ hotfix/*      운영 중 긴급 수정
-     ├─ feat/*         기능 개발
-     ├─ fix/*          버그 수정
-     ├─ refactor/*     리팩토링
-     ├─ docs/*         문서 작업
-     └─ chore/*        설정/환경 작업
-```
+`main` → `dev` → `feature/*`/`fix/*`/`chore/*`/`docs/*` 구조로 단순화해서 운영합니다.
 
-- `main`, `develop`에는 직접 push하지 않습니다.
-- 기능 개발은 `develop`에서 분기한 `feature/기능명` 브랜치에서 진행합니다.
-- 배포 준비는 `develop → release/*` 분기 후 테스트, 완료되면 `main`과 `develop` 양쪽에 병합합니다.
-- 운영 중 긴급 버그는 `main`에서 분기한 `hotfix/*`로 수정 후 `main`, `develop` 양쪽에 병합합니다.
+- `main`, `dev`에는 직접 push하지 않습니다.
+- 기능 개발/버그 수정은 `dev`에서 분기한 `feature/기능명_이름` / `fix/내용_이름` 브랜치에서 진행합니다 (예: `feature/ocr-extraction_sh`).
+- 별도의 `release`/`hotfix` 단계는 두지 않습니다 (3인 소규모 팀 기준 단순화).
 
 ### 커밋 메시지 규칙
 
 ```
-<이모지> <타입>: <변경 내용 요약>
+<타입>: <변경 내용 요약>
 ```
 
 | 타입 | 용도 |
 |---|---|
-| ✨ feat | 새로운 기능 추가 |
-| 🐛 fix | 버그 수정 |
-| ♻️ refactor | 기능 변화 없는 리팩토링 |
-| 📝 docs | 문서 수정 |
-| ✅ test | 테스트 추가/수정 |
-| 💡 chore | 설정/환경/패키지 작업 |
-| 🚑 hotfix | 긴급 수정 |
+| feat | 새로운 기능 추가 |
+| fix | 버그 수정 |
+| refactor | 기능 변화 없는 리팩토링 |
+| docs | 문서 수정 |
+| test | 테스트 추가/수정 |
+| chore | 설정/환경/패키지 작업 |
 
 ### PR 규칙
 
-- base: `develop` (배포 통합 시 `main`)
+- base: `dev` (배포 시점에 `main`)
 - Reviewer 최소 1명 지정, 승인 후 병합
-- 병합 방식: `develop`까지는 Squash and merge, `develop → main`은 일반 Merge
+- merge 전 로컬에서 직접 실행 확인 후 push
 - 병합 완료된 브랜치는 삭제
 
 ### 절대 커밋하지 않는 것
@@ -312,6 +266,8 @@ main
 ### 1주차 스프린트 계획
 
 각 담당자가 도메인별로 Day 단위 목표와 완료 기준을 정해 진행합니다.
+
+> 아래는 1주차 당시 5인 체제 기준 계획의 원본 기록입니다. 조성아님·김현우님은 이후 하차했고, 현재는 3인(권순현·김영혜·박소정) 체제로 진행 중입니다 — 현재 팀 구성은 위 [팀 소개](#-팀-소개) 참고.
 
 <details>
 <summary><b>① OCR·정보추출 — 권순현</b></summary>
@@ -380,23 +336,19 @@ main
 ### 기록 가이드
 
 - 비밀키·개인정보를 실수로 커밋한 경우, 파일 삭제만으로는 부족합니다. 즉시 팀에 공유 → 키 폐기/재발급 → Git 기록 정리 여부 판단까지의 과정을 반드시 기록합니다.
-- `develop` 머지 충돌 해결 과정처럼 협업 중 반복될 수 있는 이슈는 원인과 함께 남겨 다음 충돌 시 참고할 수 있도록 합니다.
+- `dev` 머지 충돌 해결 과정처럼 협업 중 반복될 수 있는 이슈는 원인과 함께 남겨 다음 충돌 시 참고할 수 있도록 합니다.
 - AI 모델/추론 관련 이슈(성능 편차, 추론 실패 케이스 등)는 평가 항목(3-1, 3-3)과도 연결되므로 수치와 함께 기록합니다.
 
 ---
 
 ## ☁️ 배포
 
-- **배포 환경**: AWS EC2 (Ubuntu) + Docker Compose
-- **구성**: Nginx → FastAPI → Redis Stream → AI Worker, PostgreSQL, S3
-- **배포 링크**: _추후 업데이트_
-- **API 문서**: _추후 업데이트_
-
-배포 절차는 [Docker를 활용한 EC2 백엔드 서버 배포 가이드]와 [FastAPI + Docker 자동화 스크립트 가이드]를 참고합니다.
+- 현재 로컬 실행(SQLite + `uvicorn`) 기준으로 개발 중이며, **아직 배포되지 않았습니다.**
+- 배포 환경/절차는 추후 확정되는 대로 이 섹션을 업데이트합니다.
 
 ---
 
 ## 📄 참고 문서
 
 - [팀 협업 규칙 (team-rules.md)](./docs/team-rules.md)
-- 요구사항 정의서 / ERD / API 명세서: `docs/` 폴더 내 추가 예정
+- [요구사항 정의서](./요구사항_정의서/) / [ERD](./ERD/) / [API 명세서](./API명세서/) — 버전별 문서, 변경 이력은 [`docs/revision_logs/`](./docs/revision_logs/) 참고
