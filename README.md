@@ -85,7 +85,7 @@
 `React` `TypeScript` `Vite`
 
 ### 협업 도구
-`Git / GitHub` `Notion` `카카오톡`
+`Git / GitHub` `Notion` `Discord`
 
 > 3인 소규모 팀 체제로, 별도 배포 인프라(AWS/Docker/Nginx) 없이 로컬 SQLite 기반 동기 처리로 단순화해 운영 중입니다. 배포는 추후 검토 예정입니다.
 
