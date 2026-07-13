@@ -24,8 +24,18 @@ export default function Login() {
     setError("");
     setLoading(true);
     try {
-      const { access_token, caregiver_id, name } = await login(identifier.trim(), password);
+      const { access_token, caregiver_id, name, role } = await login(identifier.trim(), password);
       localStorage.setItem("access_token", access_token);
+
+      // 환자 본인 로그인은 "케어하는 환자 목록"이 없어서 보호자 흐름을 못 탄다 —
+      // 자기 자신을 바로 대시보드로 보낸다 (SignUp.tsx의 환자 본인 가입 흐름과 동일).
+      if (role === "patient") {
+        localStorage.setItem("patient_id", String(caregiver_id));
+        localStorage.removeItem("caregiver_id");
+        navigate("/dashboard");
+        return;
+      }
+
       localStorage.setItem("caregiver_id", String(caregiver_id));
       setSelectedCaregiver({ id: caregiver_id, name } as Caregiver);
 
