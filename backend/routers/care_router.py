@@ -234,11 +234,9 @@ def get_notification_settings(
     require_actor_patient_access(patient_id, actor, session)
     setting = session.get(NotificationSetting, patient_id)
     if not setting:
-        # 없으면 기본값으로 하나 만들어서 반환 (첫 방문 시) — patient_id 소유권은 위에서 이미 확인됨
-        setting = NotificationSetting(patient_id=patient_id)
-        session.add(setting)
-        session.commit()
-        session.refresh(setting)
+        # [순현님 수정 반영, 역할분담 26번] GET은 조회 전용 — 저장하지 않고 기본값만 반환.
+        # 실제 저장은 PUT 호출 시 수행 (REST 컨벤션 위반 수정).
+        return NotificationSetting(patient_id=patient_id)
     return setting
 
 
