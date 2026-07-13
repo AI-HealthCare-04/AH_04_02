@@ -25,7 +25,7 @@ import csv
 from functools import lru_cache
 from pathlib import Path
 
-from rag_prototype.schemas import DurCaution, DurTabooInfo
+from rag.schemas import DurCaution, DurTabooInfo
 
 _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "backend" / "data"
 

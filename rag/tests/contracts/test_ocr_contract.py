@@ -13,8 +13,8 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from rag_prototype.rag_chain import generate_guide_from_medication
-from rag_prototype.schemas import GuideResponse, MedicationInput
+from rag.rag_chain import generate_guide_from_medication
+from rag.schemas import GuideResponse, MedicationInput
 
 FIXTURE_PATH = Path(__file__).parent / "ocr_sample_output.json"
 
@@ -47,7 +47,7 @@ def test_ocr_medications_pass_through_adapter_without_error():
         disclaimer="disclaimer",
     )
 
-    with patch("rag_prototype.rag_chain.generate_guide", return_value=fake_guide):
+    with patch("rag.rag_chain.generate_guide", return_value=fake_guide):
         guides = [generate_guide_from_medication(item) for item in sample["medications"]]
 
     assert len(guides) == len(sample["medications"])

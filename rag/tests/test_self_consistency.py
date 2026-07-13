@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from rag_prototype.self_consistency import pick_consistent_answer
+from rag.self_consistency import pick_consistent_answer
 
 
 class _FakeEmbedder:
@@ -17,7 +17,7 @@ def test_pick_consistent_answer_single_candidate():
 
 def test_pick_consistent_answer_prefers_majority_agreement():
     candidates = ["가가가가가", "가가가가나", "완전히 다른 이야기"]
-    with patch("rag_prototype.self_consistency.get_embedding_function", return_value=_FakeEmbedder()):
+    with patch("rag.self_consistency.get_embedding_function", return_value=_FakeEmbedder()):
         idx, score = pick_consistent_answer(candidates)
 
     assert idx in (0, 1)

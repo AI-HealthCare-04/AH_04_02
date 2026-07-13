@@ -2,8 +2,8 @@ import time
 
 import requests
 
-from rag_prototype.config import settings
-from rag_prototype.schemas import DrugInfo
+from rag.config import settings
+from rag.schemas import DrugInfo
 
 
 class MfdsApiError(RuntimeError):
@@ -56,7 +56,7 @@ def fetch_first_match(item_name: str) -> DrugInfo | None:
 
 
 # [2026-07-10 → 7/13] DUR 병용금기는 API(getUsjntTabooInfoList03)로 시도했으나 활용신청
-# 승인 대기(403 Forbidden)라 로컬 CSV 조회로 대체했다 — rag_prototype/dur_master.py의
+# 승인 대기(403 Forbidden)라 로컬 CSV 조회로 대체했다 — rag/dur_master.py의
 # search_usjnt_taboo() 참고. 이 API가 나중에 승인되면 그때 다시 여기에 추가할 수 있다.
 
 

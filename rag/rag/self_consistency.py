@@ -1,6 +1,6 @@
 import numpy as np
 
-from rag_prototype.vectorstore import get_embedding_function
+from rag.vectorstore import get_embedding_function
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:

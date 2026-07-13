@@ -13,9 +13,9 @@ def _no_real_dur_lookups():
     이 fixture 안에서 `with patch(...)`로 필요한 값을 다시 지정해서 덮어쓰면 된다(중첩 patch가 우선).
     """
     with (
-        patch("rag_prototype.rag_chain.search_usjnt_taboo", return_value=[]),
-        patch("rag_prototype.rag_chain.search_elderly_caution", return_value=[]),
-        patch("rag_prototype.rag_chain.search_age_taboo", return_value=[]),
-        patch("rag_prototype.rag_chain.search_pregnancy_taboo", return_value=[]),
+        patch("rag.rag_chain.search_usjnt_taboo", return_value=[]),
+        patch("rag.rag_chain.search_elderly_caution", return_value=[]),
+        patch("rag.rag_chain.search_age_taboo", return_value=[]),
+        patch("rag.rag_chain.search_pregnancy_taboo", return_value=[]),
     ):
         yield

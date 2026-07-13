@@ -1,7 +1,7 @@
 # OCR ↔ RAG 인터페이스 계약
 
 두 파트가 다른 브랜치에서 독립적으로 개발되기 때문에(OCR: `origin/feature/ocr-day1-setup_soonhyun`의
-`AH_04_02_soonhyun/ocr_interface.py`, RAG: 이 브랜치의 `rag-prototype/`), 코드가 서로를 import해서
+`AH_04_02_soonhyun/ocr_interface.py`, RAG: 이 브랜치의 `rag/`), 코드가 서로를 import해서
 타입 체크로 강제할 수 없다. 이 문서가 두 파트가 합의한 필드 의미의 단일 참조다.
 
 > 배경: 2026-07-06, RAG 쪽에서 실제 OCR 산출물(Mock + 실측 CLOVA 샘플)로 통합 테스트를 하다가
@@ -31,14 +31,14 @@
 | 임계값 | 값 | 의미 | 위치 |
 |---|---|---|---|
 | OCR `_apply_review_flag` threshold | 0.80 | `OCRResult.overall_confidence`(처방전 전체 평균)가 이 미만이면 `OCRResult.review_required=True` (REQ-011) | `ocr_interface.py` |
-| RAG `OCR_CONFIDENCE_REVIEW_THRESHOLD` | 0.80 (OCR과 동일 값, 의도적 중복) | `MedicationItem.confidence`(**개별 약** 신뢰도)가 이 미만이면 해당 약의 `GuideResponse.review_required=True` | `rag_prototype/config.py` |
-| RAG `SELF_CONSISTENCY_SIMILARITY_THRESHOLD` | 0.75 | LLM 답변 self-consistency 점수 임계값. **위 두 confidence 임계값과 의미가 완전히 다름** — 혼동 금지 | `rag_prototype/config.py` |
+| RAG `OCR_CONFIDENCE_REVIEW_THRESHOLD` | 0.80 (OCR과 동일 값, 의도적 중복) | `MedicationItem.confidence`(**개별 약** 신뢰도)가 이 미만이면 해당 약의 `GuideResponse.review_required=True` | `rag/config.py` |
+| RAG `SELF_CONSISTENCY_SIMILARITY_THRESHOLD` | 0.75 | LLM 답변 self-consistency 점수 임계값. **위 두 confidence 임계값과 의미가 완전히 다름** — 혼동 금지 | `rag/config.py` |
 
 **왜 RAG가 confidence를 다시 체크하는가**: OCR의 `review_required`는 `overall_confidence`(전체 평균)만
 보기 때문에 개별 약의 저신뢰를 놓칠 수 있다. 실측 사례(Mock provider): 아스피린 0.92 + 로자탄 0.78 →
 평균 0.85 → `OCRResult.review_required=False`. 하지만 로자탄은 OCR 자체 기준(0.80)으로도 검토 대상이다.
 RAG의 개별 confidence 체크는 새 기능이 아니라 **이 판정 한계에 대한 보완 통제(compensating control)**다
-(`rag_prototype/rag_chain.py`의 `_merge_ocr_confidence`).
+(`rag/rag_chain.py`의 `_merge_ocr_confidence`).
 
 **엔진별 특성**:
 - Tesseract 폴백은 신뢰도를 제공하지 않아 모든 항목이 `confidence=0.0`으로 고정된다 → RAG는 이를 "unavailable"로 분류해 항상 검토 대상으로 fail-safe 처리한다 (`review_flags: ["ocr_confidence_unavailable"]`).
@@ -152,9 +152,9 @@ FAQ 형식인 게 e약은요의 시그니처). "진짜 의약품 허가정보"�
 
 | 파일 | 내용 |
 |---|---|
-| `rag_prototype/config.py` | `PERMIT_INFO_BASE_URL` (Base URL + operation 조합) |
-| `rag_prototype/schemas.py` | `DrugPermitInfo` 모델 (위 응답 필드 전부 alias로 매핑, `is_active` 프로퍼티 포함) |
-| `rag_prototype/mfds_client.py` | `search_permit_info(item_name)` / `is_officially_approved(item_name)` |
+| `rag/config.py` | `PERMIT_INFO_BASE_URL` (Base URL + operation 조합) |
+| `rag/schemas.py` | `DrugPermitInfo` 모델 (위 응답 필드 전부 alias로 매핑, `is_active` 프로퍼티 포함) |
+| `rag/mfds_client.py` | `search_permit_info(item_name)` / `is_officially_approved(item_name)` |
 | `tests/test_mfds_client.py` | 위 두 함수에 대한 테스트 6건 (mock 기반) |
 
 재활성화 시 체크할 것: `mfds_client._request()`는 이미 `base_url` 파라미터를 받도록 일반화돼
@@ -197,9 +197,9 @@ git 미추적(`.gitignore`의 `data/*.csv`) — 각자 로컬에 받아서 채�
 
 | 파일 | 내용 |
 |---|---|
-| `rag_prototype/dur_master.py` | `search_usjnt_taboo`(병용금기, 양방향 인덱스), `search_elderly_caution`/`search_age_taboo`/`search_pregnancy_taboo`(단일 약 속성, 공통 로더 `_lookup_single_drug_rows`) — 전부 정확/부분일치 조회 + 브랜드 중복 제거(`_dedupe_cautions`), hira_master.py와 동일한 최초 1회 파싱·프로세스 캐시 패턴 |
-| `rag_prototype/schemas.py` | `DurTabooInfo`/`DurWarning`(병용금기), `DurCaution`(나머지 4개 카테고리 공용), `GuideResponse.dur_warnings`/`dur_cautions` |
-| `rag_prototype/rag_chain.py` | `_check_dur_taboo()`(병용금기 — 처방전에 실제로 함께 있는 약과만 대조), `_check_dur_cautions()`(나머지 4개 카테고리 — 다른 약과 무관, 약 하나만으로 판단) |
+| `rag/dur_master.py` | `search_usjnt_taboo`(병용금기, 양방향 인덱스), `search_elderly_caution`/`search_age_taboo`/`search_pregnancy_taboo`(단일 약 속성, 공통 로더 `_lookup_single_drug_rows`) — 전부 정확/부분일치 조회 + 브랜드 중복 제거(`_dedupe_cautions`), hira_master.py와 동일한 최초 1회 파싱·프로세스 캐시 패턴 |
+| `rag/schemas.py` | `DurTabooInfo`/`DurWarning`(병용금기), `DurCaution`(나머지 4개 카테고리 공용), `GuideResponse.dur_warnings`/`dur_cautions` |
+| `rag/rag_chain.py` | `_check_dur_taboo()`(병용금기 — 처방전에 실제로 함께 있는 약과만 대조), `_check_dur_cautions()`(나머지 4개 카테고리 — 다른 약과 무관, 약 하나만으로 판단) |
 | `backend/routers/rag_router.py` | `dur_warnings`/`dur_cautions`를 `source_refs` 배열에 병합해 프론트로 전달 |
 | `frontend/src/api/records.ts` | `SourceRef.mixture_item_name`/`prohbt_content`(병용금기), `dur_category`/`dur_detail`/`dur_extra`(나머지), `formatSourceRef`가 "⚠️ OO와 병용금기" / "⚠️ 노인주의(...): ..." 형태로 표시 |
 | `tests/test_dur_master.py` | 5개 카테고리 전부 픽스처 기반 테스트 (`tests/fixtures/dur_*_sample.csv`), 실제 CSV로도 e2e 검증 완료 |

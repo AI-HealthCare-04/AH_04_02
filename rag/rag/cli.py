@@ -1,11 +1,11 @@
 import argparse
 import json
 
-from rag_prototype.chunking import drugs_to_documents, lifestyle_guidelines_to_documents
-from rag_prototype.lifestyle_data import load_lifestyle_guidelines
-from rag_prototype.mfds_client import fetch_page, search_by_name
-from rag_prototype.rag_chain import generate_guide
-from rag_prototype.vectorstore import add_documents, add_lifestyle_documents
+from rag.chunking import drugs_to_documents, lifestyle_guidelines_to_documents
+from rag.lifestyle_data import load_lifestyle_guidelines
+from rag.mfds_client import fetch_page, search_by_name
+from rag.rag_chain import generate_guide
+from rag.vectorstore import add_documents, add_lifestyle_documents
 
 
 def cmd_ingest(args: argparse.Namespace) -> None:
@@ -46,7 +46,7 @@ def cmd_query(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="rag_prototype", description="식약처 의약품 데이터 기반 RAG 프로토타입")
+    parser = argparse.ArgumentParser(prog="rag", description="식약처 의약품 데이터 기반 RAG 파이프라인")
     sub = parser.add_subparsers(dest="command", required=True)
 
     ingest_parser = sub.add_parser("ingest", help="식약처 API에서 의약품 데이터를 수집해 벡터DB에 저장")

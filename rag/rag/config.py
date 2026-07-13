@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     # [2026-07-10 → 7/13] 식약처_의약품안전사용서비스(DUR) 병용금기는 원래 API 연동(같은
     # DATA_GO_KR_SERVICE_KEY 재사용)을 시도했으나 403 Forbidden(활용신청 승인 대기중)이라,
-    # 공공데이터포털에서 받은 로컬 CSV 조회로 대체했다 (rag_prototype/dur_master.py,
+    # 공공데이터포털에서 받은 로컬 CSV 조회로 대체했다 (rag/dur_master.py,
     # 경로는 hira_master.py와 동일하게 모듈 상수 DEFAULT_DUR_TABOO_CSV_PATH로 관리 —
     # 여기 Settings에는 별도 URL/경로 설정이 없다). CONTRACT.md §7 참고.
 

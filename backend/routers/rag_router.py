@@ -2,15 +2,15 @@
 rag_router.py — 담당: 김영혜
 
 [7/8] run_rag_stub()을 run_rag()로 바꾸고 async def로 전환했습니다.
-이유: rag-prototype의 실제 파이프라인(LangChain OpenAI 호출·ChromaDB 검색)은 I/O 대기가
+이유: rag의 실제 파이프라인(LangChain OpenAI 호출·ChromaDB 검색)은 I/O 대기가
 있는 동기 코드라, 여러 사용자가 동시에 요청할 때 이벤트 루프를 막지 않으려면 비동기
-경계에서 스레드로 실행해야 합니다 (아래 _generate_via_rag_prototype 참고).
+경계에서 스레드로 실행해야 합니다 (아래 _generate_via_rag 참고).
 
 ⚠️ records_router.py에서 이 함수를 부를 때 반드시 `await run_rag(...)`로 불러야 합니다.
 await 없이 `run_rag(...)`만 호출하면 예외 없이 coroutine 객체만 만들고 실제로는
 실행되지 않는, 조용히 실패하는 버그가 됩니다 (권순현님이 지적해주신 부분).
 
-[7/8 상태] .env에 RAG_PROVIDER=real을 명시적으로 켠 경우에만 rag-prototype 실제
+[7/8 상태] .env에 RAG_PROVIDER=real을 명시적으로 켠 경우에만 rag 실제
 파이프라인을 시도합니다 (OCR_PROVIDER 컨벤션과 동일). 기본값(미설정)은 지금까지와
 동일한 가짜 데이터입니다 — "의존성이 우연히 설치돼 있으면 결과가 조용히 바뀌는" 것을
 막기 위해 일부러 의존성 존재 여부만으로는 자동 전환하지 않습니다. 실제 파이프라인의
@@ -36,25 +36,25 @@ from sqlmodel import Session, select
 
 router = APIRouter(prefix="/rag", tags=["RAG"])
 
-# RAG_PROVIDER=real일 때만 rag-prototype 실제 파이프라인을 시도한다 (OCR_PROVIDER와 동일 패턴).
+# RAG_PROVIDER=real일 때만 rag 실제 파이프라인을 시도한다 (OCR_PROVIDER와 동일 패턴).
 # 기본값은 항상 기존 가짜 데이터 — 의존성이 설치돼 있다는 사실만으로 동작이 바뀌지 않는다.
 _RAG_PROVIDER = os.environ.get("RAG_PROVIDER", "stub")
 
-_RAG_PROTOTYPE_AVAILABLE = False
+_RAG_AVAILABLE = False
 if _RAG_PROVIDER == "real":
-    # rag-prototype/은 별도 프로토타입 디렉터리(자체 .venv·requirements)라 backend가 항상
+    # rag/은 별도 프로토타입 디렉터리(자체 .venv·requirements)라 backend가 항상
     # 그 의존성(langchain/chromadb/sentence-transformers 등)을 갖고 있진 않다. 없으면
     # (ImportError) 또는 import 자체가 실패하면(예: Python 버전 비호환) 폴백으로 내려간다.
-    _RAG_PROTOTYPE_DIR = Path(__file__).resolve().parent.parent.parent / "rag-prototype"
-    if _RAG_PROTOTYPE_DIR.is_dir() and str(_RAG_PROTOTYPE_DIR) not in sys.path:
-        sys.path.insert(0, str(_RAG_PROTOTYPE_DIR))
+    _RAG_DIR = Path(__file__).resolve().parent.parent.parent / "rag"
+    if _RAG_DIR.is_dir() and str(_RAG_DIR) not in sys.path:
+        sys.path.insert(0, str(_RAG_DIR))
 
     try:
-        from rag_prototype.rag_chain import generate_guides_from_medications as _generate_guides
+        from rag.rag_chain import generate_guides_from_medications as _generate_guides
 
-        _RAG_PROTOTYPE_AVAILABLE = True
+        _RAG_AVAILABLE = True
     except Exception:  # noqa: BLE001 — 의존성 미설치/버전 비호환 등 어떤 이유로든 실패하면 폴백
-        _RAG_PROTOTYPE_AVAILABLE = False
+        _RAG_AVAILABLE = False
 
 
 def _fake_guide_payload(ocr_items: list[OcrResult]) -> tuple[dict, dict, list]:
@@ -74,9 +74,9 @@ def _fake_guide_payload(ocr_items: list[OcrResult]) -> tuple[dict, dict, list]:
     return medication_guide, lifestyle_guide, source_refs
 
 
-def _generate_via_rag_prototype(ocr_items: list[OcrResult]) -> tuple[dict, dict, list] | None:
-    """rag-prototype 실제 파이프라인 호출. 실패하거나 사용 불가하면 None(호출부가 폴백 처리)."""
-    if not _RAG_PROTOTYPE_AVAILABLE:
+def _generate_via_rag(ocr_items: list[OcrResult]) -> tuple[dict, dict, list] | None:
+    """rag 실제 파이프라인 호출. 실패하거나 사용 불가하면 None(호출부가 폴백 처리)."""
+    if not _RAG_AVAILABLE:
         return None
 
     medications = [
@@ -166,8 +166,8 @@ async def run_rag(record_id: int, session: Session) -> GuideResult:
     # generate_guides_from_medications는 동기 함수(OpenAI/Chroma 호출)라, 이벤트 루프를
     # 막지 않도록 스레드에서 실행한다. RAG_PROVIDER=real이 아니면 항상 폴백(가짜 데이터).
     result = None
-    if _RAG_PROTOTYPE_AVAILABLE:
-        result = await asyncio.to_thread(_generate_via_rag_prototype, ocr_items)
+    if _RAG_AVAILABLE:
+        result = await asyncio.to_thread(_generate_via_rag, ocr_items)
 
     medication_guide, lifestyle_guide, source_refs = result or _fake_guide_payload(ocr_items)
 
@@ -199,5 +199,5 @@ async def stub_generate_guide(record_id: int, session: Session = Depends(get_ses
 
     return {
         "guide_id": guide.id,
-        "note": "⚠️ 가짜 데이터입니다 — 실제 RAG 연동 전까지만 사용" if not _RAG_PROTOTYPE_AVAILABLE else "실제 RAG 파이프라인 결과입니다",
+        "note": "⚠️ 가짜 데이터입니다 — 실제 RAG 연동 전까지만 사용" if not _RAG_AVAILABLE else "실제 RAG 파이프라인 결과입니다",
     }

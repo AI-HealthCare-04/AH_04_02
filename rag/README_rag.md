@@ -29,11 +29,11 @@ AH04_2조 파이널 프로젝트의 "② RAG·가이드생성" 파트 프로토�
 
 | 단계 | 코드 | 설명 |
 |---|---|---|
-| 수집 | `rag_prototype/mfds_client.py` | `search_by_name()`(품목명 부분검색), `fetch_page()`(전체 목록 페이징). `requests`로 공공데이터포털 API를 직접 호출하고 재시도 로직 포함 |
-| 데이터 모양 | `rag_prototype/schemas.py`의 `DrugInfo` | API가 내려주는 원본 필드(품목명·업체명·효능효과·용법용량·경고·주의사항·상호작용·부작용·보관법)를 그대로 담는 pydantic 모델 |
-| 청킹 | `rag_prototype/chunking.py`의 `drug_to_documents()` | 약 1건을 **필드 단위**로 쪼개 여러 개의 `Document`로 만든다(효능효과 1개, 주의사항 1개, ... 빈 필드는 건너뜀). 필드별로 쪼개는 이유: 나중에 "이 문장이 부작용 항목에서 나왔다"처럼 출처를 정확히 추적하기 위함 |
-| 적재 | `rag_prototype/vectorstore.py`의 `add_documents()` | id = `{item_seq}::{field}` 로 ChromaDB에 upsert (같은 약을 다시 넣어도 중복 저장되지 않음) |
-| 실행 시점 | ① `python -m rag_prototype.cli ingest ...` (배치 수집) 또는 ② 질의 중 벡터DB에 없는 약이면 `rag_chain._live_fetch_and_ingest()`가 **그 자리에서** API를 호출해 즉시 채워 넣음 (OCR이 실시간으로 인식한, 사전 배치에 없던 약 대응) | |
+| 수집 | `rag/mfds_client.py` | `search_by_name()`(품목명 부분검색), `fetch_page()`(전체 목록 페이징). `requests`로 공공데이터포털 API를 직접 호출하고 재시도 로직 포함 |
+| 데이터 모양 | `rag/schemas.py`의 `DrugInfo` | API가 내려주는 원본 필드(품목명·업체명·효능효과·용법용량·경고·주의사항·상호작용·부작용·보관법)를 그대로 담는 pydantic 모델 |
+| 청킹 | `rag/chunking.py`의 `drug_to_documents()` | 약 1건을 **필드 단위**로 쪼개 여러 개의 `Document`로 만든다(효능효과 1개, 주의사항 1개, ... 빈 필드는 건너뜀). 필드별로 쪼개는 이유: 나중에 "이 문장이 부작용 항목에서 나왔다"처럼 출처를 정확히 추적하기 위함 |
+| 적재 | `rag/vectorstore.py`의 `add_documents()` | id = `{item_seq}::{field}` 로 ChromaDB에 upsert (같은 약을 다시 넣어도 중복 저장되지 않음) |
+| 실행 시점 | ① `python -m rag.cli ingest ...` (배치 수집) 또는 ② 질의 중 벡터DB에 없는 약이면 `rag_chain._live_fetch_and_ingest()`가 **그 자리에서** API를 호출해 즉시 채워 넣음 (OCR이 실시간으로 인식한, 사전 배치에 없던 약 대응) | |
 
 > **주의**: 이 API(`DrbEasyDrugInfoService/getDrbEasyDrugList`)는 공공데이터포털의
 > **"식품의약품안전처_의약품개요정보(e약은요)"** 서비스다. OCR 파트(`drug_reference.py`)가
@@ -50,8 +50,8 @@ e약은요와 원천이 다른 **로컬 정적 데이터**. 효능효과 같은 
 | 단계 | 코드 | 설명 |
 |---|---|---|
 | 원본 데이터 | `backend/data/hira_drug_master_20251031.csv` (약 30.5만 행, CP949 인코딩) | 건강보험심사평가원 약가마스터. 한글상품명·업체명·제형·품목기준코드·품목허가일자·표준코드·ATC코드·취소일자 등 |
-| 데이터 모양 | `rag_prototype/schemas.py`의 `HiraDrugMasterEntry` | `is_active` 프로퍼티로 취소일자 없이 정상 등재 상태인지 바로 판단 가능 |
-| 조회 | `rag_prototype/hira_master.py`의 `search_by_product_name()` / `is_registered_and_active()` | 최초 호출 시 CSV 전체를 한글상품명 기준 raw dict 인덱스로 1회 파싱해 프로세스 캐시(약 1.5초), 이후 조회는 즉시 반환. 정확히 일치하는 상품명 우선, 없으면 부분일치로 폴백 |
+| 데이터 모양 | `rag/schemas.py`의 `HiraDrugMasterEntry` | `is_active` 프로퍼티로 취소일자 없이 정상 등재 상태인지 바로 판단 가능 |
+| 조회 | `rag/hira_master.py`의 `search_by_product_name()` / `is_registered_and_active()` | 최초 호출 시 CSV 전체를 한글상품명 기준 raw dict 인덱스로 1회 파싱해 프로세스 캐시(약 1.5초), 이후 조회는 즉시 반환. 정확히 일치하는 상품명 우선, 없으면 부분일치로 폴백 |
 | 벡터DB 적재 | 안 함 | 설명문이 없어 임베딩 대상이 아님, 조회 전용 |
 | 인용 연동 | `rag_chain._build_context`의 `_lookup_hira_entry` | 의약품 `SourceRef` 생성 시 같은 품목명으로 HIRA를 조회해 `hira_standard_code`/`hira_atc_code`/`hira_permit_date`/`hira_active`를 함께 채운다 (아래 "생성 & Hallucination 방어" 참고) |
 
@@ -65,11 +65,11 @@ e약은요와 원천이 다른 **로컬 정적 데이터**. 효능효과 같은 
 | 단계 | 코드 | 설명 |
 |---|---|---|
 | 원본 데이터 | `data/lifestyle_guidelines.json` | 고혈압·당뇨병·이상지질혈증·만성콩팥병 생활수칙 11건. 각 항목에 근거 학회/기관(대한고혈압학회, 대한당뇨병학회, 한국지질·동맥경화학회, 대한신장학회, 질병관리청 심뇌혈관질환 예방관리수칙)을 `source` 필드로 명시. 직접 열어서 텍스트로 확인/수정 가능한 일반 JSON 파일 |
-| 데이터 모양 | `rag_prototype/schemas.py`의 `LifestyleGuideline` | `id`(고유키) / `disease`(한글 질환명) / `disease_code`(영문 코드, 검색용) / `category`(식이요법·운동 등) / `rule`(생활수칙 본문) / `source`(근거 출처) |
-| 로딩 | `rag_prototype/lifestyle_data.py`의 `load_lifestyle_guidelines()` | JSON 파일을 읽어 `LifestyleGuideline` 객체 리스트로 변환 (외부 API 호출 없음, 순수 파일 읽기) |
-| 청킹 | `rag_prototype/chunking.py`의 `lifestyle_guideline_to_document()` | 항목 1개 = `Document` 1개 (이미 한 문장 단위라 추가로 쪼갤 필요 없음). metadata에 `doc_type="lifestyle_guideline"`, `disease_code`, `category`, `source` 등을 태그해둔다 |
-| 적재 | `rag_prototype/vectorstore.py`의 `add_lifestyle_documents()` | id = guideline id(예: `htn-diet-1`)로 같은 컬렉션에 upsert |
-| 실행 시점 | `python -m rag_prototype.cli ingest-lifestyle` (로컬 파일이라 배치 1회 실행이면 충분, 실시간 재조회 로직 없음) | |
+| 데이터 모양 | `rag/schemas.py`의 `LifestyleGuideline` | `id`(고유키) / `disease`(한글 질환명) / `disease_code`(영문 코드, 검색용) / `category`(식이요법·운동 등) / `rule`(생활수칙 본문) / `source`(근거 출처) |
+| 로딩 | `rag/lifestyle_data.py`의 `load_lifestyle_guidelines()` | JSON 파일을 읽어 `LifestyleGuideline` 객체 리스트로 변환 (외부 API 호출 없음, 순수 파일 읽기) |
+| 청킹 | `rag/chunking.py`의 `lifestyle_guideline_to_document()` | 항목 1개 = `Document` 1개 (이미 한 문장 단위라 추가로 쪼갤 필요 없음). metadata에 `doc_type="lifestyle_guideline"`, `disease_code`, `category`, `source` 등을 태그해둔다 |
+| 적재 | `rag/vectorstore.py`의 `add_lifestyle_documents()` | id = guideline id(예: `htn-diet-1`)로 같은 컬렉션에 upsert |
+| 실행 시점 | `python -m rag.cli ingest-lifestyle` (로컬 파일이라 배치 1회 실행이면 충분, 실시간 재조회 로직 없음) | |
 
 > **주의**: `data/lifestyle_guidelines.json`은 각 학회 진료지침 원문이 아니라, AI 챗봇과의 요약 대화에서
 > 정리한 2차 가공 데이터다. 실제 서비스에 반영하기 전에는 각 학회 진료지침 원문과 반드시 대조 검증해야 한다.
@@ -80,7 +80,7 @@ e약은요와 원천이 다른 **로컬 정적 데이터**. 효능효과 같은 
 - 저장소: ChromaDB, 로컬 영속 디렉터리 `./chroma_db`, 컬렉션명 `mfds_drug_info` (`config.py`의 `CHROMA_PERSIST_DIR` / `CHROMA_COLLECTION_NAME`)
 - 의약품 청크와 생활지침 청크가 **같은 컬렉션**에 함께 들어있고, 조회할 때 메타데이터 필터(`item_name` 또는 `disease_code`)로 구분해서 꺼낸다
 
-### 질의 시점 검색 흐름 (`rag_prototype/rag_chain.py`의 `_build_context()`)
+### 질의 시점 검색 흐름 (`rag/rag_chain.py`의 `_build_context()`)
 
 약품명 + 환자 상황 + 진단명이 들어오면, 아래 순서로 "참고자료"를 모은다:
 
@@ -128,15 +128,15 @@ e약은요와 원천이 다른 **로컬 정적 데이터**. 효능효과 같은 
 
 | 파일 | 역할 |
 |---|---|
-| `rag_prototype/schemas.py` | 데이터 모델 전체: `DrugInfo`, `HiraDrugMasterEntry`, `LifestyleGuideline`, `SourceRef`, `LifestyleSourceRef`, `GuideResponse`, OCR 입력 `MedicationInput` (`DrugPermitInfo`는 `[보류]` 주석 처리됨) |
-| `rag_prototype/mfds_client.py` | 식약처 e약은요 API 호출 (검색 / 전체목록 페이지 조회, 재시도). 허가정보 관련 함수는 `[보류]` 주석 처리됨 |
-| `rag_prototype/hira_master.py` | `backend/data/hira_drug_master_20251031.csv`(HIRA 약가마스터) 로컬 조회 — 표준코드/ATC코드/허가·취소 상태 |
-| `rag_prototype/dur_master.py` | `backend/data/dur_*_202606.csv` 5개(DUR 전 카테고리) 로컬 조회 — 병용금기는 양방향 인덱스, 나머지는 품목명 단일 인덱스 |
-| `rag_prototype/lifestyle_data.py` | `data/lifestyle_guidelines.json` 로더 |
-| `rag_prototype/chunking.py` | 의약품/생활지침 데이터 → `Document` 청크 변환 |
-| `rag_prototype/vectorstore.py` | ChromaDB 연결, 적재(`add_documents` / `add_lifestyle_documents`), 조회(`search_by_item_name` / `search_by_disease` / `similarity_search`) |
-| `rag_prototype/rag_chain.py` | 참고자료 컨텍스트 구성, 질환 별칭 매칭, LLM 호출, self-consistency, 최종 `GuideResponse` 조립 |
-| `rag_prototype/cli.py` | `ingest` / `ingest-lifestyle` / `query` 커맨드라인 진입점 |
+| `rag/schemas.py` | 데이터 모델 전체: `DrugInfo`, `HiraDrugMasterEntry`, `LifestyleGuideline`, `SourceRef`, `LifestyleSourceRef`, `GuideResponse`, OCR 입력 `MedicationInput` (`DrugPermitInfo`는 `[보류]` 주석 처리됨) |
+| `rag/mfds_client.py` | 식약처 e약은요 API 호출 (검색 / 전체목록 페이지 조회, 재시도). 허가정보 관련 함수는 `[보류]` 주석 처리됨 |
+| `rag/hira_master.py` | `backend/data/hira_drug_master_20251031.csv`(HIRA 약가마스터) 로컬 조회 — 표준코드/ATC코드/허가·취소 상태 |
+| `rag/dur_master.py` | `backend/data/dur_*_202606.csv` 5개(DUR 전 카테고리) 로컬 조회 — 병용금기는 양방향 인덱스, 나머지는 품목명 단일 인덱스 |
+| `rag/lifestyle_data.py` | `data/lifestyle_guidelines.json` 로더 |
+| `rag/chunking.py` | 의약품/생활지침 데이터 → `Document` 청크 변환 |
+| `rag/vectorstore.py` | ChromaDB 연결, 적재(`add_documents` / `add_lifestyle_documents`), 조회(`search_by_item_name` / `search_by_disease` / `similarity_search`) |
+| `rag/rag_chain.py` | 참고자료 컨텍스트 구성, 질환 별칭 매칭, LLM 호출, self-consistency, 최종 `GuideResponse` 조립 |
+| `rag/cli.py` | `ingest` / `ingest-lifestyle` / `query` 커맨드라인 진입점 |
 | `data/lifestyle_guidelines.json` | 만성질환 생활지침 원본 데이터 (텍스트 에디터로 직접 수정 가능) |
 | `backend/data/hira_drug_master_20251031.csv` | HIRA 약가마스터 원본 (약 30.5만 행, CP949, 54MB). `backend/`에만 실물 1개 두고 여기서 상위 디렉터리 경로로 참조 — 권순현님 `drug_reference.py`와 완전히 동일한 파일(중복 보관 안 함) |
 | `backend/data/dur_*_202606.csv` (5개) | DUR 전 카테고리 원본(병용금기 87만행/250MB·노인주의·노인주의(해열진통소염제)·연령금기·임부금기). git 미추적(`backend/.gitignore`의 `data/*.csv`) — 각자 로컬에 받아서 채워야 함 (CONTRACT.md §7) |
@@ -148,7 +148,7 @@ e약은요와 원천이 다른 **로컬 정적 데이터**. 효능효과 같은 
 ## 설치
 
 ```bash
-cd rag-prototype
+cd rag
 /opt/homebrew/bin/python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -157,7 +157,7 @@ pip install -r requirements.txt
 ### 데이터 파일 준비
 
 > **⚠ `data/` 폴더의 CSV 파일은 용량(52 MB) 문제로 git에서 제외되어 있습니다.**
-> 클론 후 아래 파일을 직접 받아서 `rag-prototype/data/` 에 넣어야 합니다.
+> 클론 후 아래 파일을 직접 받아서 `rag/data/` 에 넣어야 합니다.
 
 | 파일 | 출처 | 비고 |
 |------|------|------|
@@ -167,9 +167,9 @@ pip install -r requirements.txt
 
 ```
 FileNotFoundError: HIRA 약가마스터 CSV가 없습니다.
-  필요 경로: .../rag-prototype/data/hira_drug_master_20251031.csv
+  필요 경로: .../rag/data/hira_drug_master_20251031.csv
   건강보험심사평가원 약가마스터(hira_drug_master_20251031.csv)를
-  rag-prototype/data/ 폴더에 넣고 다시 실행해주세요.
+  rag/data/ 폴더에 넣고 다시 실행해주세요.
   (파일 크기 약 52 MB, CP949 인코딩)
 ```
 
@@ -184,16 +184,16 @@ FileNotFoundError: HIRA 약가마스터 CSV가 없습니다.
 
 ```bash
 # 1. 의약품 데이터 수집 -> 벡터DB 저장
-python -m rag_prototype.cli ingest --item-names "타이레놀,아스피린,노바스크" --per-name 2
+python -m rag.cli ingest --item-names "타이레놀,아스피린,노바스크" --per-name 2
 
 # (선택) 전체 목록에서 대량 샘플 수집
-python -m rag_prototype.cli ingest --pages 3 --num-of-rows 100
+python -m rag.cli ingest --pages 3 --num-of-rows 100
 
 # 1-1. 만성질환 생활지침 데이터 적재 (data/lifestyle_guidelines.json -> 벡터DB, 최초 1회)
-python -m rag_prototype.cli ingest-lifestyle
+python -m rag.cli ingest-lifestyle
 
 # 2. 가이드 생성 (약품명은 정확한 품목명 권장, 진단명을 주면 해당 질환의 생활지침이 함께 인용됨)
-python -m rag_prototype.cli query --drug "타이레놀정500밀리그램" --situation "고령" --diagnosis "고혈압"
+python -m rag.cli query --drug "타이레놀정500밀리그램" --situation "고령" --diagnosis "고혈압"
 
 # 3. 2주차 목요일 완료 기준 데모 (10건 확보 -> top-3 검색 -> 가이드 1건)
 python scripts/demo_e2e.py
