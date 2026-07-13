@@ -2,8 +2,9 @@ import json
 
 from rag_prototype.chunking import drugs_to_documents
 from rag_prototype.config import settings
+from rag_prototype.dur_master import search_usjnt_taboo
 from rag_prototype.hira_master import search_by_product_name as search_hira_by_product_name
-from rag_prototype.mfds_client import search_by_name, search_usjnt_taboo
+from rag_prototype.mfds_client import search_by_name
 from rag_prototype.schemas import (
     DurWarning,
     GuideResponse,
@@ -323,8 +324,9 @@ def _check_dur_taboo(drug_name: str, other_drug_names: list[str]) -> list[DurWar
     중 하나가 DUR이 알려주는 금기 상대(mixture_item_name)와 일치할 때만 경고를 만든다 —
     단순히 "이 약에 금기 상대가 존재한다"만으로는 이 환자에게 실제로 해당하는지 알 수 없다.
 
-    DUR API 호출 실패(활용신청 미승인, 네트워크 오류 등)는 가이드 생성 자체를 막으면 안 되므로
-    조용히 빈 리스트로 넘어간다 (_lookup_hira_entry와 동일한 fail-safe 원칙).
+    [2026-07-13] DUR API는 활용신청 승인 대기라 dur_master.py의 로컬 CSV 조회를 쓴다.
+    CSV 파일 부재(FileNotFoundError) 등 어떤 이유로든 조회가 실패해도 가이드 생성 자체를
+    막으면 안 되므로 조용히 빈 리스트로 넘어간다 (_lookup_hira_entry와 동일한 fail-safe 원칙).
     """
     if not other_drug_names:
         return []
@@ -333,13 +335,27 @@ def _check_dur_taboo(drug_name: str, other_drug_names: list[str]) -> list[DurWar
     except Exception:  # noqa: BLE001 — DUR 조회 실패가 가이드 생성 자체를 막으면 안 됨
         return []
 
+    # DUR CSV는 브랜드(제품) 단위라, 같은 성분의 약이 여러 제조사 제품으로 등재돼 있으면
+    # 같은 경고가 수십~수천 건 중복될 수 있다(예: "메토트렉세이트" 주사제만 제조사별로 여러 종).
+    # 그래서 CSV의 브랜드명이 아니라 "이 처방전에 실제로 적힌 약 이름"으로 경고를 표시하고,
+    # (그 약, 사유) 조합 기준으로 한 번만 보여준다.
+    seen: set[tuple[str, str]] = set()
     warnings: list[DurWarning] = []
     for entry in taboo_entries:
         mixture_name = entry.mixture_item_name
         if not mixture_name:
             continue
-        if any(mixture_name in other or other in mixture_name for other in other_drug_names if other):
-            warnings.append(DurWarning(mixture_item_name=mixture_name, prohbt_content=entry.prohbt_content))
+        matched_other = next(
+            (other for other in other_drug_names if other and (mixture_name in other or other in mixture_name)),
+            None,
+        )
+        if matched_other is None:
+            continue
+        key = (matched_other, entry.prohbt_content or "")
+        if key in seen:
+            continue
+        seen.add(key)
+        warnings.append(DurWarning(mixture_item_name=matched_other, prohbt_content=entry.prohbt_content))
     return warnings
 
 

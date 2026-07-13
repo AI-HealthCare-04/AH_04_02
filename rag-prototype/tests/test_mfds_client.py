@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
 import pytest
-from rag_prototype.mfds_client import MfdsApiError, search_by_name, search_usjnt_taboo
+from rag_prototype.mfds_client import MfdsApiError, search_by_name
 
 # [보류] is_officially_approved/search_permit_info가 mfds_client.py에서 주석 처리돼 있어
 # (schemas.DrugPermitInfo 참고) 이 테스트들도 함께 비활성화. 나중에 풀 때 같이 복원.
@@ -63,46 +63,8 @@ def test_search_by_name_raises_on_error_code():
         with pytest.raises(MfdsApiError):
             search_by_name("활명수")
 
-
-DUR_TABOO_RESPONSE = {
-    "header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE."},
-    "body": {
-        "pageNo": 1,
-        "totalCount": 1,
-        "numOfRows": 1,
-        "items": [
-            {
-                "ITEM_SEQ": "200000001",
-                "ITEM_NAME": "와파린정",
-                "INGR_KOR_NAME": "와파린칼륨",
-                "MIXTURE_ITEM_SEQ": "200000002",
-                "MIXTURE_ITEM_NAME": "아스피린정",
-                "MIXTURE_INGR_KOR_NAME": "아스피린",
-                "PROHBT_CONTENT": "출혈 위험 증가로 병용을 피하십시오.",
-                "NOTIFICATION_DATE": "20200101",
-            }
-        ],
-    },
-}
-
-
-def test_search_usjnt_taboo_parses_items():
-    """[활용신청 승인 전 임시] 실제 서비스키로는 아직 403이 나서(활용신청 필요), 여기선
-    _request()가 정상 응답을 파싱하는지만 mock으로 검증한다 — 승인 후 실제 응답으로 재검증 필요.
-    """
-    with patch("rag_prototype.mfds_client.requests.get", return_value=_FakeResponse(DUR_TABOO_RESPONSE)):
-        results = search_usjnt_taboo("와파린")
-
-    assert len(results) == 1
-    assert results[0].item_name == "와파린정"
-    assert results[0].mixture_item_name == "아스피린정"
-    assert results[0].prohbt_content == "출혈 위험 증가로 병용을 피하십시오."
-
-
-def test_search_usjnt_taboo_raises_on_error_code():
-    with patch("rag_prototype.mfds_client.requests.get", return_value=_FakeResponse(ERROR_RESPONSE)):
-        with pytest.raises(MfdsApiError):
-            search_usjnt_taboo("와파린")
+# DUR 병용금기 관련 테스트는 API가 아니라 로컬 CSV 조회(dur_master.py)로 옮겨졌다 —
+# test_dur_master.py 참고 (CONTRACT.md §7).
 
 
 # [보류] 허가정보 API 테스트 — mfds_client.py의 search_permit_info/is_officially_approved와

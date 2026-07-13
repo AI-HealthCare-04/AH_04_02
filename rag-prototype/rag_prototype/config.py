@@ -18,12 +18,11 @@ class Settings(BaseSettings):
     # search_permit_info()/is_officially_approved()도 같은 이유로 주석 처리해뒀다.
     # PERMIT_INFO_BASE_URL: str = "http://apis.data.go.kr/1471000/DrugPrdtPrmsnInfoService07/getDrugPrdtPrmsnInq07"
 
-    # 식약처_의약품안전사용서비스(DUR) 병용금기 — e약은요와 같은 DATA_GO_KR_SERVICE_KEY를 재사용한다.
-    # [2026-07-10] 이 키로 실제 호출 시도 결과 403 Forbidden 확인됨 — e약은요/의약품제품허가정보와
-    # 달리 DUR은 data.go.kr에서 별도 활용신청 승인이 필요한 것으로 보인다(김영혜가 신청 진행 중).
-    # 승인 전까지 mfds_client.search_usjnt_taboo() 호출은 MfdsApiError로 실패하며,
-    # rag_chain._check_dur_taboo()가 이를 조용히 흡수해 가이드 생성 자체는 막지 않는다.
-    DUR_TABOO_BASE_URL: str = "http://apis.data.go.kr/1471000/DURPrdlstInfoService03/getUsjntTabooInfoList03"
+    # [2026-07-10 → 7/13] 식약처_의약품안전사용서비스(DUR) 병용금기는 원래 API 연동(같은
+    # DATA_GO_KR_SERVICE_KEY 재사용)을 시도했으나 403 Forbidden(활용신청 승인 대기중)이라,
+    # 공공데이터포털에서 받은 로컬 CSV 조회로 대체했다 (rag_prototype/dur_master.py,
+    # 경로는 hira_master.py와 동일하게 모듈 상수 DEFAULT_DUR_TABOO_CSV_PATH로 관리 —
+    # 여기 Settings에는 별도 URL/경로 설정이 없다). CONTRACT.md §7 참고.
 
     OPENAI_API_KEY: str | None = None
     OPENAI_MODEL: str = "gpt-4o-mini"

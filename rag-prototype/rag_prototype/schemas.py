@@ -91,24 +91,17 @@ class HiraDrugMasterEntry(BaseModel):
 
 
 class DurTabooInfo(BaseModel):
-    """식약처 DURPrdlstInfoService03 getUsjntTabooInfoList03(병용금기) 응답 1개 행.
+    """건강보험심사평가원 DUR(의약품안전사용서비스) 병용금기 CSV 1개 관계.
 
-    e약은요(DrugInfo)와 원천이 다른 별도 API — "이 약과 이 약을 같이 먹으면 안 된다"는
-    금기 쌍(item ↔ mixture_item) 정보를 담는다. 응답 필드명은 공공데이터포털 문서에
-    swagger 상세가 없어, 동일 API의 실제 동작 예제(GitHub 공개 구현체)로 확인한
-    필드명을 기준으로 정리했다 — 활용신청 승인 후 실제 응답으로 재검증 필요.
+    [2026-07-13] 원래 식약처 DURPrdlstInfoService03 getUsjntTabooInfoList03 API로
+    연동하려 했으나 활용신청 승인 대기 상태(403 Forbidden)라, 공공데이터포털에서 받은
+    로컬 CSV(dur_master.py)로 대체했다. "이 약(item_name)과 이 약(mixture_item_name)을
+    같이 먹으면 안 된다"는 금기 쌍 하나를 나타낸다.
     """
 
-    item_seq: str = Field(alias="ITEM_SEQ")
-    item_name: str = Field(alias="ITEM_NAME")
-    ingr_kor_name: str | None = Field(default=None, alias="INGR_KOR_NAME")
-    mixture_item_seq: str | None = Field(default=None, alias="MIXTURE_ITEM_SEQ")
-    mixture_item_name: str | None = Field(default=None, alias="MIXTURE_ITEM_NAME")
-    mixture_ingr_kor_name: str | None = Field(default=None, alias="MIXTURE_INGR_KOR_NAME")
-    prohbt_content: str | None = Field(default=None, alias="PROHBT_CONTENT")  # 금기 사유 설명
-    notification_date: str | None = Field(default=None, alias="NOTIFICATION_DATE")
-
-    model_config = {"populate_by_name": True}
+    item_name: str
+    mixture_item_name: str
+    prohbt_content: str | None = None  # 금기 사유 설명 (CSV의 "상세정보" 컬럼)
 
 
 class DurWarning(BaseModel):

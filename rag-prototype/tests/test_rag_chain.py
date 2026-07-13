@@ -282,7 +282,7 @@ def test_batch_isolates_failure():
 
 
 def _dur_entry(**overrides) -> DurTabooInfo:
-    defaults = dict(item_seq="1", item_name="와파린정", mixture_item_name="아스피린정", prohbt_content="출혈 위험 증가")
+    defaults = dict(item_name="와파린정", mixture_item_name="아스피린정", prohbt_content="출혈 위험 증가")
     defaults.update(overrides)
     return DurTabooInfo(**defaults)
 
@@ -295,6 +295,22 @@ def test_check_dur_taboo_warns_when_mixture_partner_is_in_prescription():
     assert len(warnings) == 1
     assert warnings[0].mixture_item_name == "아스피린정"
     assert warnings[0].prohbt_content == "출혈 위험 증가"
+
+
+def test_check_dur_taboo_dedupes_brand_variants_by_reason():
+    """CSV가 브랜드(제품) 단위라 같은 성분의 여러 제조사 제품이 각각 한 행씩 나올 수 있다 —
+    처방전에 적힌 이름(other_drug_names) + 사유 기준으로 한 번만 경고해야 한다."""
+    entries = [
+        _dur_entry(mixture_item_name="유한메토트렉세이트주사액25밀리그람/밀리리터_(50mg/2mL)", prohbt_content="혈액학적 독성"),
+        _dur_entry(mixture_item_name="화이자메토트렉세이트주25mg/mL_(0.5g/20mL)", prohbt_content="혈액학적 독성"),
+        _dur_entry(mixture_item_name="엠티엑스주(메토트렉세이트)_(0.5g/20mL)", prohbt_content="혈액학적 독성"),
+    ]
+    with patch("rag_prototype.rag_chain.search_usjnt_taboo", return_value=entries):
+        warnings = _check_dur_taboo("아스피린", other_drug_names=["메토트렉세이트"])
+
+    assert len(warnings) == 1
+    assert warnings[0].mixture_item_name == "메토트렉세이트"  # 브랜드명이 아니라 처방전에 적힌 이름
+    assert warnings[0].prohbt_content == "혈액학적 독성"
 
 
 def test_check_dur_taboo_silent_when_mixture_partner_not_in_prescription():

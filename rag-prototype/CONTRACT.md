@@ -160,39 +160,46 @@ FAQ 형식인 게 e약은요의 시그니처). "진짜 의약품 허가정보"�
 재활성화 시 체크할 것: `mfds_client._request()`는 이미 `base_url` 파라미터를 받도록 일반화돼
 있어 e약은요 호출부(`search_by_name`/`fetch_page`)는 그대로 두고 permit 함수만 살리면 된다.
 
-## 7. DUR(의약품안전사용서비스) 병용금기 연동 — [2026-07-10] 구현 완료, 활용신청 승인 대기
+## 7. DUR(의약품안전사용서비스) 병용금기 연동 — [2026-07-13] 로컬 CSV 방식으로 전환, 구현 완료
 
-RAG 파트에 병용금기(같은 처방전 안의 두 약이 함께 먹으면 안 되는 조합) 경고를 붙이기로 하고
-구현했다. e약은요와 같은 `DATA_GO_KR_SERVICE_KEY`를 재사용하지만, **실제로 호출해보니
-403 Forbidden**이 나왔다 — e약은요/의약품제품허가정보와 달리 이 API는 data.go.kr에서
-별도 활용신청 승인이 필요한 것으로 보인다(김영혜가 신청 진행 중, [보류] 아님 — 코드는
-활성 상태로 있고 승인만 기다리는 중).
+RAG 파트에 병용금기(같은 처방전 안의 두 약이 함께 먹으면 안 되는 조합) 경고를 붙였다.
+**[2026-07-10] API(`DURPrdlstInfoService03/getUsjntTabooInfoList03`)로 처음 시도했으나
+403 Forbidden(별도 활용신청 필요)**이 나와서, **[2026-07-13] 공공데이터포털에서 받은
+병용금기 CSV(건강보험심사평가원_의약품안전사용서비스(DUR) 의약품 목록_202606)를
+`backend/data/dur_usjnt_taboo_202606.csv`에 두고 로컬 조회로 대체**했다 — HIRA 약가마스터와
+동일한 패턴(API 대신 로컬 파일). API 활용신청이 나중에 승인되면 그때 다시 API 연동을
+검토할 수 있지만, 지금은 이 CSV가 정본이다.
 
-### API 정보
+### 데이터 정보
 
-- **서비스명**: 공공데이터포털 "식품의약품안전처_의약품안전사용서비스(DUR)품목정보"
-- **Base URL + operation**: `http://apis.data.go.kr/1471000/DURPrdlstInfoService03/getUsjntTabooInfoList03`
-- 응답 필드명은 공공데이터포털 페이지 자체에 상세 swagger가 없어, 동일 API의 공개된 실제
-  구현체(GitHub)에서 확인한 필드명 기준으로 스키마(`schemas.DurTabooInfo`)를 작성했다 —
-  **활용신청 승인 후 실제 응답으로 필드명 재검증 필요**.
+- **원본**: 건강보험심사평가원 "의약품안전사용서비스(DUR) 의약품 목록_202606"의
+  "병용금기" CSV (약 87만 행, CP949 인코딩, 약 250MB)
+- **컬럼**: `제품명A`/`제품명B`(품목 쌍), `상세정보`(금기 사유) 등 16개 — HIRA CSV처럼
+  `backend/data/`에 실물 1개만 두고(git 미추적, `.gitignore`의 `data/*.csv`) 각자 로컬에
+  받아서 채워야 한다
+- 같은 폴더에 함께 받은 노인주의/노인주의(해열진통소염제)/연령금기/임부금기 CSV는
+  이번에 다루는 병용금기(getUsjntTabooInfoList 계열)와 다른 DUR 카테고리라 아직 연동 안 함
+  — 필요해지면 `dur_master.py`에 같은 패턴으로 추가하면 됨
 
 ### 코드 위치
 
 | 파일 | 내용 |
 |---|---|
-| `rag_prototype/config.py` | `DUR_TABOO_BASE_URL` |
-| `rag_prototype/schemas.py` | `DurTabooInfo`(API 응답 모델), `DurWarning`(경고 모델), `GuideResponse.dur_warnings` |
-| `rag_prototype/mfds_client.py` | `search_usjnt_taboo(item_name)` |
+| `rag_prototype/dur_master.py` | `search_usjnt_taboo(item_name)` — CSV를 품목명 기준 양방향 인덱스로 파싱(최초 1회, 프로세스 캐시), 정확/부분일치 조회 (hira_master.py와 동일 패턴) |
+| `rag_prototype/schemas.py` | `DurTabooInfo`(CSV 행 모델: item_name/mixture_item_name/prohbt_content), `DurWarning`(경고 모델), `GuideResponse.dur_warnings` |
 | `rag_prototype/rag_chain.py` | `_check_dur_taboo()` — 이 약이 **같은 처방전에 실제로 함께 있는** 다른 약과 금기 관계인지 확인. `generate_guides_from_medications()`가 배치 내 다른 약 이름들을 `other_drug_names`로 넘겨줌 |
 | `backend/routers/rag_router.py` | `dur_warnings`를 `source_refs` 배열에 병합해 프론트로 전달 |
 | `frontend/src/api/records.ts` | `SourceRef.mixture_item_name`/`prohbt_content`, `formatSourceRef`가 "⚠️ OO와 병용금기" 형태로 표시 |
-| `tests/test_mfds_client.py`, `tests/test_rag_chain.py` | mock 기반 테스트 (활용신청 전이라 실제 응답으로는 검증 불가) |
+| `tests/test_dur_master.py` | CSV 조회 테스트 (`tests/fixtures/dur_taboo_sample.csv` 픽스처, 실제 250MB 파일로도 e2e 검증 완료) |
+| `tests/test_rag_chain.py` | `_check_dur_taboo` mock 기반 테스트 (경고 매칭 + 브랜드 중복 제거) |
 
 ### 설계 노트
 
 - DUR 병용금기는 "약 하나의 속성"이 아니라 "두 약 사이의 관계"라, HIRA처럼 `SourceRef`에
   필드를 추가하는 방식 대신 별도 `DurWarning` 모델 + `GuideResponse.dur_warnings`로 분리했다.
-- `_check_dur_taboo()`는 DUR 조회가 실패(403 등)해도 예외를 삼키고 빈 리스트를 반환한다 —
-  활용신청 승인 전에도 나머지 가이드 생성 흐름(HIRA/e약은요 인용, LLM 생성)은 전혀 영향받지
-  않는다. 활용신청이 끝나면 코드 변경 없이 그대로 동작할 것으로 예상되지만, 필드명이 문서
-  추정치라 실제 응답으로 한 번은 재검증해야 한다.
+- `_check_dur_taboo()`는 CSV 조회 실패(파일 부재 등 어떤 이유든)에도 예외를 삼키고 빈 리스트를
+  반환한다 — 나머지 가이드 생성 흐름(HIRA/e약은요 인용, LLM 생성)은 전혀 영향받지 않는다.
+- **브랜드 단위 중복 제거**: CSV는 제품(브랜드) 단위라 같은 성분이 제조사별로 수십~수천 건
+  중복 등재돼 있다(실측: "아스피린"+"메토트렉세이트"만으로 e2e 테스트 시 1728건 발생).
+  `_check_dur_taboo()`는 CSV의 브랜드명 대신 **이 처방전에 실제로 적힌 약 이름**으로 경고를
+  표시하고 (그 약, 사유) 조합 기준으로 한 번만 보여주도록 처리했다 (1728건 → 2건로 확인).
