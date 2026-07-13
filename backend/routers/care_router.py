@@ -216,11 +216,8 @@ def get_notification_settings(patient_id: int, session: Session = Depends(get_se
     if not setting:
         if not session.get(Patient, patient_id):
             raise HTTPException(404, "해당 환자를 찾을 수 없어요")
-        # 없으면 기본값으로 하나 만들어서 반환 (첫 방문 시)
-        setting = NotificationSetting(patient_id=patient_id)
-        session.add(setting)
-        session.commit()
-        session.refresh(setting)
+        # 저장하지 않고 기본값만 반환 — 실제 저장은 PUT 호출 시 수행
+        return NotificationSetting(patient_id=patient_id)
     return setting
 
 
