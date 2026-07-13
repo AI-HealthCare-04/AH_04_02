@@ -10,13 +10,15 @@ Base URL 없음(각 라우터가 자체 prefix 사용, 아래 참고). 데이터
 
 ## ⚠️ 인가(Authorization) — 전 절 공통, 반드시 먼저 읽을 것
 
-**로그인은 구현되어 있지만, 발급된 토큰을 검증하는 엔드포인트가 시스템 전체에 하나도 없다.** `POST /auth/login`이 JWT(`access_token`)를 발급하고 `backend/dependencies.py`에 `get_current_caregiver`/`get_current_patient` 검증 함수도 정의돼 있지만, 7개 라우터 어디에서도 `Depends()`로 실제 사용되지 않는다.
+**[2026-07-13, PR #29 병합] 2·3·7절(monitoring_router/care_router)은 이제 토큰 기반 인가가 적용됐다.** `backend/dependencies.py`의 `get_current_caregiver`(보호자 전용 화면용) / `get_current_actor`(보호자·환자 공유 화면용, 토큰의 role을 보고 `Caregiver`/`Patient` 중 알맞은 본인 레코드를 반환) + `require_patient_access`/`require_actor_patient_access`(그 `patient_id`가 실제로 본인 것이거나 본인이 케어하는 환자인지 검증)를 각 엔드포인트가 `Depends()`로 사용한다.
 
-대신 모든 엔드포인트가 `caregiver_id`/`patient_id`를 쿼리 파라미터·요청 바디 필드로 **그대로 신뢰**한다 — 즉 로그인 여부와 무관하게 그 값만 알면(또는 추측하면) 누구나 다른 사람의 데이터에 접근·수정할 수 있다(IDOR). `GET /monitoring/patients`, `GET /monitoring/caregivers`는 필터조차 없이 전체 목록을 반환한다.
+**4·6절(records_router/ocr_router/rag_router/chat_router)은 여전히 미적용이다** — `patient_id`/`caregiver_id`를 쿼리·바디 파라미터로 그대로 신뢰한다(issue #21 본문에도 "다른 라우터도 점검 필요"로 명시된 범위, PR #29 리뷰에서도 범위 밖으로 재확인됨).
 
-이 문서에서 "인증" 컬럼은 **"로그인이 필요한가"가 아니라 "그 값이 실제로 검증되는가"**를 뜻하며, 현재 전 엔드포인트가 **X(미검증)**이다. 이 갭은 [issue #21](https://github.com/AI-HealthCare-04/AH_04_02/issues/21)로 별도 추적 중이며, 요구사항_정의서의 REQ-031(인증·역할별 인가)이 아직 미구현임을 뜻한다.
+인증이 필요 없는 것은 의도된 예외 3종류뿐이다: **① 회원가입**(`POST /auth/signup`, `POST /monitoring/patients`, `POST /monitoring/caregivers` — 계정이 없어야 호출하는 게 당연함), **② 초대 링크 열람/수락/거절**(`GET /invitations/{token}`, `POST /invitations/{token}/accept`·`/reject` — 초대받은 사람이 아직 계정이 없을 수 있어 토큰 자체가 인가 수단), **③ 로그인/토큰 재발급**(`POST /auth/login`, `GET /auth/token/refresh`).
 
-> **진행 중(2026-07-13 기준 미병합)**: [PR #29](https://github.com/AI-HealthCare-04/AH_04_02/pull/29)가 2·3·7절(monitoring_router/care_router)의 인가를 전부 적용하는 작업을 이미 완료해 리뷰 중이다(`get_current_actor`/`require_actor_patient_access` 도입). 병합되면 이 문서를 v8로 올리며 해당 절의 "인증" 컬럼을 O로 갱신할 것 — 단, `chat_router`/`ocr_router`/`records_router`(4·6절)는 이 PR 범위 밖이라 병합 후에도 X로 남는다. 또한 PR #29 리뷰에서 "보호자가 초대 없이 임의 환자에 자가 연결 가능"한 잔여 IDOR 하나를 발견해 별도 후속 필요.
+이 문서에서 "인증" 컬럼은 **"로그인이 필요한가"가 아니라 "그 값이 실제로 검증되는가"**를 뜻한다. 요구사항_정의서의 REQ-031(인증·역할별 인가)은 2·3·7절 기준으로는 구현 완료, 4·6절 기준으로는 아직 미구현이다.
+
+> **알려진 잔여 이슈**: `POST /monitoring/caregivers/{caregiver_id}/patients/{patient_id}`(보호자-환자 연결)에 "이미 다른 보호자가 연결된 환자면 거부" 체크가 PR #29에서 함께 추가돼, 초대 없이 임의 환자에 자가 연결하는 경로는 막혔다(재현 테스트로 확인 완료). 다만 이 자가연결 자체가 "방금 만든 환자를 최초 연결"하는 용도로 여전히 인증 없이 열려 있는 건 아니고 `Depends(get_current_caregiver)`로 보호되며, `patient_id`가 자동증가 정수라는 점 자체의 근본적 위험은 여전히 존재하므로 회원가입 직후 응답에서 `patient_id`를 노출하는 범위는 계속 최소화할 것.
 
 ## 공통 모델
 
@@ -57,17 +59,17 @@ Base URL 없음(각 라우터가 자체 prefix 사용, 아래 참고). 데이터
 
 | Method | Endpoint | 설명 | 요청 | 응답 | 인증 | 구현 |
 |---|---|---|---|---|---|---|
-| POST | `/invitations` | 보호자 초대 토큰 발급 | `{patient_id, relation_type, invited_phone, inviter_caregiver_id}` | `200 {token, invite_url}` | X | 완료 |
-| GET | `/invitations/{token}` | 초대 링크 정보 조회 | 경로 `token` | `200 {token, status, relation_type, patient_name, inviter_name}` | 토큰 소유만(만료 검증 로직은 없음) | 완료(부분 — 자동 만료 미구현) |
-| POST | `/invitations/{token}/accept` | 초대 수락 → 연결 생성 | `{caregiver_name, caregiver_id?}` | `200 {caregiver_id, patient_id, status:"accepted"}` | X | 완료 |
-| POST | `/invitations/{token}/reject` | 초대 거절 | 경로 `token` | `200 {status:"rejected"}` | X | 완료 |
-| GET | `/patients/{patient_id}/invitations` | 환자의 초대 발송 이력 | 경로 `patient_id` | `200 [Invitation{...}]` (⚠️ `token` 원문·평문 `invited_phone` 포함) | X | 완료 |
-| GET | `/monitoring/caregivers/{caregiver_id}/patients` | 보호자가 연결된 환자 목록 | 경로 `caregiver_id` | `200 [PatientPublic]` | X(경로의 caregiver_id가 실제 로그인 사용자인지 미검증) | 완료 |
-| GET | `/monitoring/patients/{patient_id}/caregivers` | 환자에 연결된 보호자 목록 | 경로 `patient_id` | `200 [CaregiverPublic]` | X | 완료 |
-| POST | `/monitoring/caregivers/{caregiver_id}/patients/{patient_id}` | 보호자-환자 연결 생성 | 경로 둘 다 | `200 {linked/already_linked, caregiver_id, patient_id}` | X(누구나 임의 쌍 연결 가능) | 완료 |
-| DELETE | `/monitoring/caregivers/{caregiver_id}/patients/{patient_id}` | 연결 해제 | 경로 둘 다 | `200 {unlinked:true}` | X | 완료 |
+| POST | `/invitations` | 보호자 초대 토큰 발급 | `{patient_id, relation_type, invited_phone, inviter_caregiver_id}` | `200 {token, invite_url}` | O(`get_current_actor`, 본인/케어 환자만) | 완료 |
+| GET | `/invitations/{token}` | 초대 링크 정보 조회 | 경로 `token` | `200 {token, status, relation_type, patient_name, inviter_name}` | X(의도됨 — 계정 없는 수신자용, 만료 검증 로직은 없음) | 완료(부분 — 자동 만료 미구현) |
+| POST | `/invitations/{token}/accept` | 초대 수락 → 연결 생성 | `{caregiver_name, caregiver_id?}` | `200 {caregiver_id, patient_id, status:"accepted"}` | X(의도됨 — 계정 없는 수신자용) | 완료 |
+| POST | `/invitations/{token}/reject` | 초대 거절 | 경로 `token` | `200 {status:"rejected"}` | X(의도됨) | 완료 |
+| GET | `/patients/{patient_id}/invitations` | 환자의 초대 발송 이력 | 경로 `patient_id` | `200 [Invitation{...}]` (⚠️ `token` 원문·평문 `invited_phone` 포함) | O(`get_current_actor`) | 완료 |
+| GET | `/monitoring/caregivers/{caregiver_id}/patients` | 보호자가 연결된 환자 목록 | 경로 `caregiver_id` | `200 [PatientPublic]` | O(`get_current_caregiver`, 본인만) | 완료 |
+| GET | `/monitoring/patients/{patient_id}/caregivers` | 환자에 연결된 보호자 목록 | 경로 `patient_id` | `200 [CaregiverPublic]` | O(`get_current_actor`) | 완료 |
+| POST | `/monitoring/caregivers/{caregiver_id}/patients/{patient_id}` | 보호자-환자 연결 생성(신규 환자 최초 연결 전용, 2번째부터는 초대 필요) | 경로 둘 다 | `200 {linked/already_linked, caregiver_id, patient_id}` | O(`get_current_caregiver`, 본인 계정만 + 이미 다른 보호자가 있으면 403) | 완료 |
+| DELETE | `/monitoring/caregivers/{caregiver_id}/patients/{patient_id}` | 연결 해제 | 경로 둘 다 | `200 {unlinked:true}` | O(`get_current_actor`, 본인 보호자 또는 본인 환자만) | 완료 |
 
-**보안 주의**: `GET /patients/{patient_id}/invitations` 응답에 초대 링크의 원문 `token`이 그대로 노출된다 — 이 값은 사실상 유일한 인가 수단이므로, 이 목록 조회 API 자체가 노출돼서는 안 되는 값을 돌려주고 있다. `Invitation.invited_phone`은 `patients`/`caregivers`의 phone과 달리 **암호화되지 않고 평문 저장·응답**된다(PII 정책 사각지대).
+**보안 주의**: `GET /patients/{patient_id}/invitations` 응답에 초대 링크의 원문 `token`이 그대로 노출된다 — 이 값은 사실상 유일한 인가 수단이므로, 이 목록 조회 API 자체가 노출돼서는 안 되는 값을 돌려주고 있다(인가는 적용됐지만 응답 필드 자체의 문제라 별개). `Invitation.invited_phone`은 `patients`/`caregivers`의 phone과 달리 **암호화되지 않고 평문 저장·응답**된다(PII 정책 사각지대).
 
 `relation_type`은 `guardian`, `caregiver`, `life_support_worker`, `social_worker`, `organization`을 쓴다(v6의 `admin` 역할은 없음).
 
@@ -80,14 +82,14 @@ Base URL 없음(각 라우터가 자체 prefix 사용, 아래 참고). 데이터
 
 | Method | Endpoint | 설명 | 요청 | 응답 | 인증 | 구현 |
 |---|---|---|---|---|---|---|
-| POST | `/assessments` | 자가진단 결과 저장 + 케어등급 즉시 판정 | `{patient_id, cognitive_level, mobility_level, vision_level, medication_awareness, medication_willingness}` | `200 CareLevelAssessment{id, patient_id, ..., care_level, reason, evaluated_at}` | X | 완료 |
-| GET | `/assessments/latest` | 최신 평가 1건 | 쿼리 `patient_id` | `200 CareLevelAssessment` 또는 `200 null`(없으면) | X | 완료 |
+| POST | `/assessments` | 자가진단 결과 저장 + 케어등급 즉시 판정 | `{patient_id, cognitive_level, mobility_level, vision_level, medication_awareness, medication_willingness}` | O(`get_current_actor`) | 완료 |
+| GET | `/assessments/latest` | 최신 평가 1건 | 쿼리 `patient_id` | `200 CareLevelAssessment` 또는 `200 null`(없으면) | O(`get_current_actor`) | 완료 |
 
 v6은 "상태 저장"과 "평가"를 별개 리소스(`status`/`care_level`)로 분리했지만, 실제로는 `POST /assessments` 하나가 입력·평가·저장을 한 번에 처리한다(트랜잭션 분리 없이 애초에 한 테이블·한 요청).
 
 ### 미구현 항목
 - 평가 이력 목록 조회(`GET .../care-level/history`) — 최신 1건만 조회 가능, 과거 이력 API 없음
-- 본인 자가조회(`/users/me/status` 등) — 인가 체계 자체가 없어 해당 없음
+- `/users/me/status` 같은 전용 자기조회 경로는 없지만, `get_current_actor`가 환자 토큰이면 곧 본인이므로 기존 쿼리 파라미터 방식(`?patient_id=`) 그대로 자기 자신의 `patient_id`를 넘기면 사실상 동일하게 동작한다 — 별도 경로 추가 없이 인가만으로 자연스럽게 해소됨
 - 연결 권유 안내 표시/닫기(REQ-007a, `care-level-notice*`)
 
 ## 4. 진료기록·OCR (REQ-008~011, REQ-023~024, REQ-047(미구현))
@@ -151,17 +153,19 @@ SSE 스트리밍 응답은 없음(동기 응답 한 번에 전체 답변 반환)
 
 | Method | Endpoint | 설명 | 요청 | 응답 | 인증 | 구현 |
 |---|---|---|---|---|---|---|
-| POST | `/monitoring/schedules` | 복약 일정 등록 | `{patient_id, drug_name, time_slot, dose_timing?, caregiver_alert?, memo?}` | `200 MedicationSchedule{...}` | X | 완료 |
-| GET | `/monitoring/schedules` | 일정 조회(환자 생략 시 전체 반환) | 쿼리 `patient_id?`, `active_only?`(기본 true) | `200 [MedicationSchedule]` | X(patient_id 생략 시 전체 환자 일정 노출) | 완료 |
-| PATCH | `/monitoring/schedules/{schedule_id}` | 일정 변경 | 경로 `schedule_id`; 변경 필드 | `200 MedicationSchedule` | X | 완료 |
-| DELETE | `/monitoring/schedules/{schedule_id}` | 일정 및 로그 삭제 | 경로 `schedule_id` | `200 {deleted:id}` | X | 완료 |
-| POST | `/monitoring/schedules/{schedule_id}/check` | 복약 체크(오늘자) | `{status, confirmed_by_caregiver_id?}` | `200 {schedule_id, status}` | X | 완료 |
-| DELETE | `/monitoring/schedules/{schedule_id}/check` | 체크 취소(pending으로 되돌림) | 경로 `schedule_id` | `200 {schedule_id, status:"pending"}` | X | 완료 |
-| GET | `/monitoring/logs` | 최근 N일 복약 로그 | 쿼리 `patient_id`(필수), `days?`(기본 30) | `200 [{id, schedule_id, drug_name, time_slot, status, checked_at, confirmed_by_type, confirmed_by_name}]` | X | 완료 |
-| GET | `/monitoring/today` | 오늘자 통합 조회(대시보드용) | 쿼리 `patient_id`(필수) | `200 [{id, name, time, note, status}]` | X(docstring에 "로그인 없어서 patient_id 필수"라고 명시) | 완료 |
-| GET | `/monitoring/patients/{patient_id}/known-drugs` | 드롭다운용 기존 약물명 목록 | 경로 `patient_id` | `200 [str]` | X | 완료 |
-| GET | `/notification-settings` | 알림 수신 설정 조회(없으면 저장 없이 기본값만 반환) | 쿼리 `patient_id` | `200 NotificationSetting{patient_id, medication_reminder_enabled, care_alert_enabled, all_push_enabled, updated_at}` | X | 완료 |
-| PUT | `/notification-settings` | 알림 수신 설정 변경(최초 변경 시 row 생성) | 쿼리 `patient_id`; 변경 필드 | `200 NotificationSetting` | X | 완료 |
+| POST | `/monitoring/schedules` | 복약 일정 등록 | `{patient_id, drug_name, time_slot, dose_timing?, caregiver_alert?, memo?}` | `200 MedicationSchedule{...}` | O(`get_current_actor`) | 완료 |
+| GET | `/monitoring/schedules` | 일정 조회 | 쿼리 `patient_id`(필수), `active_only?`(기본 true) | `200 [MedicationSchedule]` | O(`get_current_actor`) | 완료 |
+| PATCH | `/monitoring/schedules/{schedule_id}` | 일정 변경 | 경로 `schedule_id`; 변경 필드 | `200 MedicationSchedule` | O(`get_current_actor`, 그 일정의 patient_id 기준) | 완료 |
+| DELETE | `/monitoring/schedules/{schedule_id}` | 일정 및 로그 삭제 | 경로 `schedule_id` | `200 {deleted:id}` | O(`get_current_actor`) | 완료 |
+| POST | `/monitoring/schedules/{schedule_id}/check` | 복약 체크(오늘자) | `{status, confirmed_by_caregiver_id?}` | `200 {schedule_id, status}` | O(`get_current_actor`) | 완료 |
+| DELETE | `/monitoring/schedules/{schedule_id}/check` | 체크 취소(pending으로 되돌림) | 경로 `schedule_id` | `200 {schedule_id, status:"pending"}` | O(`get_current_actor`) | 완료 |
+| GET | `/monitoring/logs` | 최근 N일 복약 로그 | 쿼리 `patient_id`(필수), `days?`(기본 30) | `200 [{id, schedule_id, drug_name, time_slot, status, checked_at, confirmed_by_type, confirmed_by_name}]` | O(`get_current_actor`) | 완료 |
+| GET | `/monitoring/today` | 오늘자 통합 조회(대시보드용) | 쿼리 `patient_id`(필수) | `200 [{id, name, time, note, status}]` | O(`get_current_actor`) | 완료 |
+| GET | `/monitoring/patients/{patient_id}/known-drugs` | 드롭다운용 기존 약물명 목록 | 경로 `patient_id` | `200 [str]` | O(`get_current_actor`) | 완료 |
+| GET | `/notification-settings` | 알림 수신 설정 조회(없으면 저장 없이 기본값만 반환) | 쿼리 `patient_id` | `200 NotificationSetting{patient_id, medication_reminder_enabled, care_alert_enabled, all_push_enabled, updated_at}` | O(`get_current_actor`) | 완료 |
+| PUT | `/notification-settings` | 알림 수신 설정 변경(최초 변경 시 row 생성) | 쿼리 `patient_id`; 변경 필드 | `200 NotificationSetting` | O(`get_current_actor`) | 완료 |
+
+**[2026-07-13, PR #29 병합]** 이 절 전체가 `get_current_actor`/`require_actor_patient_access`로 보호된다(이전엔 `patient_id` 쿼리만 있으면 누구나 호출 가능했고, `GET /monitoring/schedules`는 `patient_id`를 아예 생략하면 전체 환자 일정이 노출됐었다 — 지금은 `patient_id`가 필수 파라미터로 바뀌면서 이 문제도 함께 해소됨).
 
 `medication_reminder_enabled`(복약 알림), `care_alert_enabled`(보호자 돌봄 알림), `all_push_enabled`(전체 푸시 스위치)는 기본값 전부 `true`다. v6과 달리 실제 알림 발송(FCM/SMS 등)은 구현돼 있지 않고, 이 설정값은 저장만 되는 상태다.
 
