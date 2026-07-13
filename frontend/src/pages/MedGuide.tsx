@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import NavBar from "../components/NavBar";
-import { formatSourceRef, getRecord, type RecordResult } from "../api/records";
+import { dedupeSourceRefs, formatSourceRef, getRecord, type RecordResult } from "../api/records";
 import { C } from "../theme";
 
 // ponytail: Figma 원본은 병명 백과사전·시간대별 복약 일정 탭도 있었지만, 백엔드가
@@ -215,24 +215,27 @@ export default function MedGuide() {
           </div>
         )}
 
-        {guide.source_refs.length > 0 && (
-          <p className="text-[12px] mt-6" style={{ color: C.muted }}>
-            출처:{" "}
-            {guide.source_refs.map((s, i) => (
-              <span key={i}>
-                {/* [7/9] url(stub)이 있을 때만 링크로, 실제 파이프라인 인용(url 없음)은 텍스트로만 표시 */}
-                {s.url ? (
-                  <a href={s.url} target="_blank" rel="noreferrer" className="underline" style={{ color: C.muted }}>
-                    {formatSourceRef(s)}
-                  </a>
-                ) : (
-                  formatSourceRef(s)
-                )}
-                {i < guide.source_refs.length - 1 && ", "}
-              </span>
-            ))}
-          </p>
-        )}
+        {guide.source_refs.length > 0 && (() => {
+          const uniqueRefs = dedupeSourceRefs(guide.source_refs);
+          return (
+            <p className="text-[12px] mt-6" style={{ color: C.muted }}>
+              출처:{" "}
+              {uniqueRefs.map((s, i) => (
+                <span key={i}>
+                  {/* [7/9] url(stub)이 있을 때만 링크로, 실제 파이프라인 인용(url 없음)은 텍스트로만 표시 */}
+                  {s.url ? (
+                    <a href={s.url} target="_blank" rel="noreferrer" className="underline" style={{ color: C.muted }}>
+                      {formatSourceRef(s)}
+                    </a>
+                  ) : (
+                    formatSourceRef(s)
+                  )}
+                  {i < uniqueRefs.length - 1 && ", "}
+                </span>
+              ))}
+            </p>
+          );
+        })()}
 
         <button
           onClick={() => navigate("/chat", { state: { diagnosis: guide.lifestyle_guide.diagnosis } })}
