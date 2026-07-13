@@ -42,6 +42,17 @@
 
 **결정**: 표의 "구현" 컬럼에 완료/부분/미구현을 표기하고, 절 끝에 "미구현 항목" 목록을 두어 한눈에 파악할 수 있게 했다(멘토링 요청 2.1항 "구현 여부 및 미구현 여부" 반영). 요구사항_정의서_v8에서 REQ별로 다시 한번 구현여부를 종합 정리할 예정이다.
 
+## 6. (후속 수정) 서브에이전트 2라운드 교차검증으로 발견한 오류 6건
+
+**배경**: 요구사항_정의서_v8의 백로그 오류("개인/단체 회원가입 구분은 설계 미확정" — 실제로는 이미 구현됨)를 계기로 API명세서_v7도 서브에이전트 1라운드 감사 → 2라운드 독립 재검증으로 전수 재검토했다(사용자 지시). 기관가입 관련 서술(39~43행)은 이미 정확했으나, 그 외 다음 6건의 실제 오류를 발견해 정정했다.
+
+1. **"상태 코드" 절 자기모순**: "생성도 `200`으로 통일"이라 적었으나 같은 문서에 `POST /auth/signup`이 스스로 `201`을 명시하고, `auth_router.py`(`status_code=status.HTTP_201_CREATED`)도 실제로 201을 반환한다. "대부분 200, `POST /auth/signup`만 예외로 201"로 정정.
+2. **502/503/504 상태 코드 누락**: `ocr_router.py`가 CLOVA 타임아웃(504)·연결실패(503)·HTTP오류(502)를 실제로 반환하는데 "상태 코드" 절엔 500까지만 있었다. 추가.
+3. **`POST /assessments` 표 행 파손**: 다른 행은 7컬럼인데 이 행만 "응답" 컬럼이 빠져 6컬럼이었다. `care_router.py`의 `response_model=CareLevelAssessment`를 근거로 `200 CareLevelAssessment` 추가.
+4. **문서화 누락 엔드포인트 5종 추가**: `GET /monitoring/patients`, `PATCH /monitoring/patients/{id}`, `DELETE /monitoring/patients/{id}`, `GET /monitoring/caregivers`, `POST /rag/test/{record_id}` — 전부 코드엔 있지만 v7 어디에도 문서화돼 있지 않았다(전체 grep으로 재확인). 1절·5절 표에 추가.
+5. **"미구현 항목"의 `GET /users/me` 서술 정정**: "애초에 '나'를 식별할 인가 수단이 없다"는 이유로 미구현이라 적었으나, PR #29 이후 `get_current_actor`/`get_current_caregiver`가 생겨 `GET /monitoring/patients`·`GET /monitoring/caregivers`가 사실상 그 역할을 한다. 실제 미구현은 "보호자 본인 정보 수정·삭제 엔드포인트 없음"뿐이라고 좁혀 정정.
+6. **면책 고지(REQ-032) 서술 오류**: "매 응답에 disclaimer 고정 문구 포함"이라 적었으나, `rag_router.py`의 `_generate_via_rag_prototype()`이 `rag-prototype`이 생성한 `disclaimer` 필드를 추출하지 않아 API 응답엔 포함되지 않는다 — 실제로는 프론트 하드코딩. `ERD_v8`의 REQ-032 정정과 동일한 사실을 반영.
+
 ## 팀에 설명할 핵심 결정
 
 1. **v6은 폐기하지 않고 "목표 설계 참고 자료"로 남긴다** — v7이 실제 구현 기준이지만, v6의 세분화된 설계(돌봄관계 해제 워크플로, 교육관리 등)는 향후 그 기능을 만들 때 그대로 참고할 수 있다.
