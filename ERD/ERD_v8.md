@@ -49,7 +49,7 @@ erDiagram
         bool sms_enabled "default false"
         bool email_opt_in "default false"
         string org_name "nullable, relation_type=organization일 때만"
-        string org_type "nullable"
+        string org_type "nullable, Figma 가입 UI는 요양원/정부기관/협회/보건소/기타 5개 값만 선택 가능(DB 레벨 enum 제약은 없음)"
         string business_reg_no "nullable"
         string manager_name "nullable, 암호화 대상 아님(계정 본인 PII 아님)"
         string manager_phone "nullable, 암호화 대상 아님"
@@ -154,6 +154,17 @@ erDiagram
         datetime created_at
     }
 ```
+
+## Figma 회원가입 UI 대조 (2026-07-13)
+
+회원가입 화면 Figma 목업(제작 중, 전체 프로젝트 80% 완성) 스크린샷을 `backend/models.py` 스키마와 대조했다. 개인(환자 본인/보호자) 가입과 기관(단체) 가입 두 흐름이 있다.
+
+- **개인 가입**(가입 유형: 환자 본인 / 보호자(가족) 라디오 선택) 입력 필드: 이름, 생년월일(YYYYMMDD), 이메일, 전화번호, 비밀번호, 가입 유형, 알림 수신 설정(Push 필수 · 문자 · 이메일). 이 필드들은 `Patient`/`Caregiver`의 `name_encrypted`·`birth_date`·`email`·`phone_encrypted`·`hashed_password`·`push_enabled`/`sms_enabled`/`email_opt_in`과 1:1로 대응한다.
+  - **주소·특이사항 입력 필드가 UI에 아예 없다.** REQ-045(요구사항_정의서_v8에서 "부분 구현"으로 정정)가 요구하는 `address`/`special_notes`는 코드뿐 아니라 디자인 단계에서도 계획돼 있지 않다는 뜻이라, 다음 버전에서는 "미구현"이 아니라 "요구사항 자체를 재검토" 대상으로 다뤄야 한다.
+  - 가입 유형(환자 본인/보호자) 라디오가 어떤 테이블에 레코드를 만드는지(`Patient` vs `Caregiver(relation_type=guardian)`)는 API 계층 로직이므로 이 ERD의 범위 밖이다.
+- **기관 가입** 입력 필드: 기관명, 기관 유형(드롭다운: 요양원/정부기관/협회/보건소/기타), 사업자등록번호, 담당자 이름, **담당자 이메일**, 담당자 전화번호, 비밀번호, 알림 수신 설정. `org_name`/`org_type`/`business_reg_no`/`manager_name`/`manager_phone`과 대응한다.
+  - **`Caregiver`에 별도 `manager_email` 컬럼은 없지만, 스키마 누락이 아니라 의도된 설계다.** `monitoring_router.py`의 `CaregiverCreate.email` 주석에 "회원가입 '아이디'(개인) / '담당자 이메일'(단체)"라고 명시돼 있다 — 즉 기관 가입의 "담당자 이메일" 입력값은 그대로 `email`(로그인 아이디) 컬럼에 저장된다. UI 필드명과 스키마 컬럼명이 달라 보여 혼동하기 쉬우므로 이 문서에 명확히 남긴다.
+  - 기관 가입 화면에는 개인 가입에 있는 "가입 유형(환자 본인/보호자)" 선택지가 없다 — `relation_type=organization`으로 고정되는 것으로 보이며 이는 스키마와 일치한다.
 
 ## v7 설계 vs v8 실제 — 근본적으로 다른 부분
 
