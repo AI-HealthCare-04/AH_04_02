@@ -256,7 +256,15 @@ def link_caregiver_to_patient(
     caregiver: Caregiver = Depends(get_current_caregiver),
     session: Session = Depends(get_session),
 ):
-    """보호자-환자 연결 추가 (한 환자를 여러 보호자가 같이 볼 때도 이걸로 추가 연결)"""
+    """보호자-환자 연결 추가.
+
+    [7/13] 방금 본인이 만든 환자를 최초로 연결하는 용도로만 허용한다 — patient_id는
+    자동증가 정수라 순차 추측이 가능한데, 이 엔드포인트가 "본인 계정으로 연결하는지"만
+    확인하고 "이 환자에 접근할 권한이 애초에 있는지"는 확인하지 않으면, 누구나 회원가입 후
+    다른 사람의 환자에 자기 자신을 자가 연결해 그 환자의 처방전·복약기록을 그대로 볼 수
+    있었다(issue #21 인가 로직 전체를 무력화하는 구멍). 이미 다른 보호자가 연결된 환자에
+    추가로 연결하려면 반드시 초대 토큰 기반 accept_invitation()을 거쳐야 한다.
+    """
     if caregiver_id != caregiver.id:
         raise HTTPException(403, "본인 계정으로만 환자를 연결할 수 있어요")
     if not session.get(Patient, patient_id):
@@ -269,6 +277,12 @@ def link_caregiver_to_patient(
     ).first()
     if existing:
         return {"already_linked": True}
+
+    has_any_caregiver = session.exec(
+        select(CaregiverPatient).where(CaregiverPatient.patient_id == patient_id)
+    ).first()
+    if has_any_caregiver:
+        raise HTTPException(403, "이미 다른 보호자가 연결된 환자예요. 추가 연결은 초대 링크를 통해서만 가능해요.")
 
     session.add(CaregiverPatient(caregiver_id=caregiver_id, patient_id=patient_id))
     session.commit()
