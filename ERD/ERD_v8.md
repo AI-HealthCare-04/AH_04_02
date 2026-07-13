@@ -123,7 +123,7 @@ erDiagram
         string vision_level "default normal"
         bool medication_awareness "default true"
         bool medication_willingness "default true"
-        string care_level "independent/guardian_check/third_party_needed"
+        string care_level "independent/guardian_check/third_party_needed, default independent"
         string reason "default ''"
         datetime evaluated_at
     }
@@ -165,6 +165,7 @@ erDiagram
 - **기관 가입** 입력 필드: 기관명, 기관 유형(드롭다운: 요양원/정부기관/협회/보건소/기타), 사업자등록번호, 담당자 이름, **담당자 이메일**, 담당자 전화번호, 비밀번호, 알림 수신 설정. `org_name`/`org_type`/`business_reg_no`/`manager_name`/`manager_phone`과 대응한다.
   - **`Caregiver`에 별도 `manager_email` 컬럼은 없지만, 스키마 누락이 아니라 의도된 설계다.** `monitoring_router.py`의 `CaregiverCreate.email` 주석에 "회원가입 '아이디'(개인) / '담당자 이메일'(단체)"라고 명시돼 있다 — 즉 기관 가입의 "담당자 이메일" 입력값은 그대로 `email`(로그인 아이디) 컬럼에 저장된다. UI 필드명과 스키마 컬럼명이 달라 보여 혼동하기 쉬우므로 이 문서에 명확히 남긴다.
   - 기관 가입 화면에는 개인 가입에 있는 "가입 유형(환자 본인/보호자)" 선택지가 없다 — `relation_type=organization`으로 고정되는 것으로 보이며 이는 스키마와 일치한다.
+  - **`backend/models.py:103`의 `org_type` 주석("요양원 / 재가센터 / 협회 / 보건소 / 기타")이 stale하다.** 실제 프론트 `frontend/src/pages/SignUp.tsx:12`의 `ORG_TYPE_OPTIONS`는 "요양원/정부기관/협회/보건소/기타"로, "재가센터"가 아니라 "정부기관"이다(2026-07-13 코드 재검토로 확인). 이 ERD는 Figma·프론트 기준(정부기관)을 따랐다 — `models.py` 코드 주석 수정은 이 문서 변경 범위 밖이라 별도 후속 작업으로 남긴다.
 
 ## v7 설계 vs v8 실제 — 근본적으로 다른 부분
 
@@ -198,6 +199,7 @@ erDiagram
 - `medication_logs.confirmed_by_type`이 `caregiver`면 `confirmed_by_caregiver_id`가 채워진다 — "누가 복약 여부를 대신 확인했는지" 투명성 확보 목적(v7의 `confirmed_by` 단일 FK와 달리 이원화됨).
 - `chat_messages.question_id`는 고정 질문(`q1`/`q2`/`q3`) 또는 자유 텍스트 질문("freeform")을 구분하는 식별자이며, v7의 `role`(user/assistant) 기반 대화 턴 구조가 아니라 "질문 1건 + 답변 1건"이 한 행이다.
 - `medical_records.uploaded_by_caregiver_id`가 `NULL`이면 환자 본인 업로드, 값이 있으면 그 보호자의 대리 업로드다(v7의 `uploaded_by`=`uploaded_for` 항상 동일값 비교 방식과 달리, 아예 nullable 단일 컬럼으로 표현).
+- `guide_results`에는 `disclaimer` 컬럼이 없다. `rag-prototype/rag_prototype/schemas.py`의 `GuideResponse`는 `disclaimer` 필드를 실제로 생성하지만, `backend/routers/rag_router.py`의 `_generate_via_rag_prototype()`이 `medication_guide`/`precautions`/`review_required`/`review_flags`만 추출하고 `disclaimer`는 가져오지 않아 백엔드 저장 단계에서 버려진다 — 사용자에게 보이는 의료 고지 문구는 API 응답이 아니라 프론트엔드(`Result.tsx`/`Dashboard.tsx`/`Processing.tsx`)의 하드코딩 텍스트다(2026-07-13 재검토로 확인, REQ-032 "완료"를 "부분"으로 정정).
 
 ## 요구사항 추적 (실제 구현 기준)
 
@@ -214,12 +216,12 @@ erDiagram
 | REQ-026a~026d | `medication_schedules`, `medication_logs`, `notification_settings` | `/monitoring/schedules*`, `/notification-settings` | 부분(설정 저장까지만, 실제 알림 발송은 미구현) |
 | REQ-028 | 없음(별도 시각 컬럼 없음) | - | 측정 인프라 미구현 |
 | REQ-031 | `dependencies.py`(`get_current_actor` 등) | 전 라우터의 `Depends()` | 2·3·7절(monitoring/care_router) 완료, 4·6절(records/ocr/rag/chat_router) 미구현 |
-| REQ-032 | 없음(응답 필드로만 존재) | 모든 가이드·챗봇 응답의 `disclaimer` | 완료 |
+| REQ-032 | 없음(API 응답 필드 아님) | 모든 가이드·챗봇 응답의 `disclaimer` | 부분(프론트 하드코딩) |
 | REQ-035 | 없음 | 없음 | 미구현(회원 탈퇴 기능 자체 없음) |
 | REQ-036~038 | `medication_schedules`, `medication_logs` | `/monitoring/schedules*`, `/monitoring/logs`, `/monitoring/today` | 완료 |
 | REQ-039 | 없음 | 없음 | 미구현(계정 잠금·임시번호 없음) |
 | REQ-040~044 | 없음 | 없음 | 미구현(교육·추적관리 테이블 자체 없음) |
-| REQ-045 | `patients`/`caregivers`(`birth_date`) | `POST /monitoring/patients`, `POST /monitoring/caregivers` | 완료 |
+| REQ-045 | `patients`/`caregivers`(`birth_date`) | `POST /monitoring/patients`, `POST /monitoring/caregivers` | 부분(`birth_date`만, `address` 없음) |
 | REQ-046 | 없음(가입과 초대가 별개 절차) | - | 미구현 |
 | REQ-047 | 없음 | - | 미구현 |
 | REQ-048 | 없음(챗봇 컨텍스트로 자연스럽게 처리) | `/chat/ask` | 완료(전용 API 아님) |
