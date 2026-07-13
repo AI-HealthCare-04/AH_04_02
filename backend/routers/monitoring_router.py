@@ -4,16 +4,19 @@ monitoring_router.py — 담당: 박소정 (멘토 최우선 지정 기능)
 [7/6 변경] 환자 구분 추가 — 한 보호자가 여러 환자를 케어할 수 있도록
 patients / caregivers / caregiver_patients(다대다)를 도입함.
 
-[7/6 보류] JWT 로그인은 만들어뒀지만(auth.py, dependencies.py, routers/auth_router.py)
-이번 스프린트 스코프에서는 뺐습니다(백엔드 경험 0명 + 남은 시간 대응, schedule_v6 결정).
-그래서 "누가 보고 있는지"는 프론트가 caregiver_id를 들고 있다가
-쿼리 파라미터로 넘겨주는 방식으로 대체함 (Upload.tsx의 localStorage user_id와 같은 패턴).
-나중에 로그인을 붙이게 되면 각 함수 시그니처의 caregiver_id 파라미터를
-`caregiver: Caregiver = Depends(get_current_caregiver)`로 바꾸고 caregiver.id를 쓰면 됩니다.
+[7/10~7/13] issue #21(인가) — 보호자 전용 화면(Login.tsx/PatientManagement.tsx/
+MonitoringDashboard.tsx/MyPage.tsx)에서만 쓰는 엔드포인트는 `Depends(get_current_caregiver)` +
+`require_patient_access`로 보호자 본인 것만 허용합니다.
+
+Dashboard.tsx/Schedule.tsx/Notification.tsx/Records.tsx/Connect.tsx처럼 "보호자 로그인"과
+"환자 본인 로그인"이 같은 화면·API를 공유하는 곳은 `Depends(get_current_actor)` +
+`require_actor_patient_access`로 보호합니다 — 토큰이 보호자 것이면 연결된 환자인지,
+환자 본인 것이면 자기 자신인지 확인합니다 (issue #28: 환자 본인도 가입 직후 로그인해서
+토큰을 받도록 SignUp.tsx를 먼저 고쳤습니다).
 
 기본 흐름:
-1) GET /caregivers  → 보호자 목록 (데모에선 1명, 실제로는 회원가입 대체 화면에서 선택)
-2) GET /caregivers/{id}/patients  → 그 보호자가 케어하는 환자 목록
+1) POST /auth/login → access_token 발급 (보호자·환자 둘 다)
+2) GET /caregivers/{id}/patients  → 그 보호자가 케어하는 환자 목록 (caregiver_id는 토큰의 본인 것만 허용)
 3) 환자 하나를 고르면 그 patient_id로 /monitoring/today?patient_id=... 호출
 """
 from __future__ import annotations
@@ -25,6 +28,13 @@ from sqlmodel import Session, func, select
 
 from auth import hash_password
 from database import get_session
+from dependencies import (
+    Actor,
+    get_current_actor,
+    get_current_caregiver,
+    require_actor_patient_access,
+    require_patient_access,
+)
 from models import (
     Caregiver,
     CaregiverPatient,
@@ -90,12 +100,29 @@ def create_patient(payload: PatientCreate, session: Session = Depends(get_sessio
 
 
 @router.get("/patients", response_model=list[PatientPublic])
-def list_patients(session: Session = Depends(get_session)):
-    return session.exec(select(Patient)).all()
+def list_patients(actor: Actor = Depends(get_current_actor), session: Session = Depends(get_session)):
+    """[7/13] MyPage.tsx가 "본인"을 찾는 데만 쓴다 — 전체 목록이 아니라 토큰의 본인
+    범위로 좁힌다 (환자 본인 로그인이면 자기 자신, 보호자면 케어하는 환자 전체)."""
+    role, subject = actor
+    if role == "patient":
+        return [subject]
+    links = session.exec(
+        select(CaregiverPatient).where(CaregiverPatient.caregiver_id == subject.id)
+    ).all()
+    patient_ids = [link.patient_id for link in links]
+    if not patient_ids:
+        return []
+    return session.exec(select(Patient).where(Patient.id.in_(patient_ids))).all()
 
 
 @router.patch("/patients/{patient_id}", response_model=PatientPublic)
-def update_patient(patient_id: int, payload: PatientUpdate, session: Session = Depends(get_session)):
+def update_patient(
+    patient_id: int,
+    payload: PatientUpdate,
+    caregiver: Caregiver = Depends(get_current_caregiver),
+    session: Session = Depends(get_session),
+):
+    require_patient_access(patient_id, caregiver, session)
     patient = session.get(Patient, patient_id)
     if not patient:
         raise HTTPException(404, "해당 환자를 찾을 수 없어요")
@@ -108,7 +135,12 @@ def update_patient(patient_id: int, payload: PatientUpdate, session: Session = D
 
 
 @router.delete("/patients/{patient_id}")
-def delete_patient(patient_id: int, session: Session = Depends(get_session)):
+def delete_patient(
+    patient_id: int,
+    caregiver: Caregiver = Depends(get_current_caregiver),
+    session: Session = Depends(get_session),
+):
+    require_patient_access(patient_id, caregiver, session)
     patient = session.get(Patient, patient_id)
     if not patient:
         raise HTTPException(404, "해당 환자를 찾을 수 없어요")
@@ -177,16 +209,20 @@ def create_caregiver(payload: CaregiverCreate, session: Session = Depends(get_se
 
 
 @router.get("/caregivers", response_model=list[CaregiverPublic])
-def list_caregivers(session: Session = Depends(get_session)):
-    return session.exec(select(Caregiver)).all()
+def list_caregivers(caregiver: Caregiver = Depends(get_current_caregiver)):
+    """[7/10] 전체 보호자 목록이 아니라 로그인한 본인만 반환 (MyPage.tsx가 본인 조회용으로만 씀, issue #21)."""
+    return [caregiver]
 
 
 @router.get("/caregivers/{caregiver_id}/patients", response_model=list[PatientPublic])
-def list_patients_of_caregiver(caregiver_id: int, session: Session = Depends(get_session)):
+def list_patients_of_caregiver(
+    caregiver_id: int,
+    caregiver: Caregiver = Depends(get_current_caregiver),
+    session: Session = Depends(get_session),
+):
     """핵심 기능: 이 보호자가 케어하는 환자 전체 목록 (여러 명 가능)"""
-    caregiver = session.get(Caregiver, caregiver_id)
-    if not caregiver:
-        raise HTTPException(404, "해당 보호자를 찾을 수 없어요")
+    if caregiver_id != caregiver.id:
+        raise HTTPException(403, "다른 보호자의 환자 목록은 볼 수 없어요")
 
     links = session.exec(
         select(CaregiverPatient).where(CaregiverPatient.caregiver_id == caregiver_id)
@@ -198,10 +234,11 @@ def list_patients_of_caregiver(caregiver_id: int, session: Session = Depends(get
 
 
 @router.get("/patients/{patient_id}/caregivers", response_model=list[CaregiverPublic])
-def list_caregivers_of_patient(patient_id: int, session: Session = Depends(get_session)):
-    """[7/8 추가] 반대 방향 조회 — 이 환자를 케어하는 보호자 전체 목록 (Connect.tsx '연결된 사람' 표에 사용)"""
-    if not session.get(Patient, patient_id):
-        raise HTTPException(404, "해당 환자를 찾을 수 없어요")
+def list_caregivers_of_patient(
+    patient_id: int, actor: Actor = Depends(get_current_actor), session: Session = Depends(get_session)
+):
+    """[7/8 추가] 반대 방향 조회 — 이 환자를 케어하는 보호자 전체 목록 (Connect.tsx '연결된 사람' 표에 사용)."""
+    require_actor_patient_access(patient_id, actor, session)
 
     links = session.exec(
         select(CaregiverPatient).where(CaregiverPatient.patient_id == patient_id)
@@ -214,11 +251,14 @@ def list_caregivers_of_patient(patient_id: int, session: Session = Depends(get_s
 
 @router.post("/caregivers/{caregiver_id}/patients/{patient_id}")
 def link_caregiver_to_patient(
-    caregiver_id: int, patient_id: int, session: Session = Depends(get_session)
+    caregiver_id: int,
+    patient_id: int,
+    caregiver: Caregiver = Depends(get_current_caregiver),
+    session: Session = Depends(get_session),
 ):
     """보호자-환자 연결 추가 (한 환자를 여러 보호자가 같이 볼 때도 이걸로 추가 연결)"""
-    if not session.get(Caregiver, caregiver_id):
-        raise HTTPException(404, "해당 보호자를 찾을 수 없어요")
+    if caregiver_id != caregiver.id:
+        raise HTTPException(403, "본인 계정으로만 환자를 연결할 수 있어요")
     if not session.get(Patient, patient_id):
         raise HTTPException(404, "해당 환자를 찾을 수 없어요")
 
@@ -237,8 +277,15 @@ def link_caregiver_to_patient(
 
 @router.delete("/caregivers/{caregiver_id}/patients/{patient_id}")
 def unlink_caregiver_from_patient(
-    caregiver_id: int, patient_id: int, session: Session = Depends(get_session)
+    caregiver_id: int,
+    patient_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
 ):
+    """Connect.tsx — 보호자 본인이거나 환자 본인이어야 그 연결을 해제할 수 있다."""
+    role, subject = actor
+    if (role == "caregiver" and subject.id != caregiver_id) or (role == "patient" and subject.id != patient_id):
+        raise HTTPException(403, "이 연결을 해제할 권한이 없어요")
     link = session.exec(
         select(CaregiverPatient)
         .where(CaregiverPatient.caregiver_id == caregiver_id)
@@ -279,9 +326,10 @@ class CheckIn(BaseModel):
 
 
 @router.post("/schedules", response_model=MedicationSchedule)
-def create_schedule(payload: ScheduleCreate, session: Session = Depends(get_session)):
-    if not session.get(Patient, payload.patient_id):
-        raise HTTPException(404, "해당 환자를 찾을 수 없어요")
+def create_schedule(
+    payload: ScheduleCreate, actor: Actor = Depends(get_current_actor), session: Session = Depends(get_session)
+):
+    require_actor_patient_access(payload.patient_id, actor, session)
     schedule = MedicationSchedule(**payload.model_dump())
     session.add(schedule)
     session.commit()
@@ -291,11 +339,13 @@ def create_schedule(payload: ScheduleCreate, session: Session = Depends(get_sess
 
 @router.get("/schedules", response_model=list[MedicationSchedule])
 def list_schedules(
-    patient_id: int | None = None, active_only: bool = True, session: Session = Depends(get_session)
+    patient_id: int,
+    active_only: bool = True,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
 ):
-    query = select(MedicationSchedule)
-    if patient_id is not None:
-        query = query.where(MedicationSchedule.patient_id == patient_id)
+    require_actor_patient_access(patient_id, actor, session)
+    query = select(MedicationSchedule).where(MedicationSchedule.patient_id == patient_id)
     if active_only:
         query = query.where(MedicationSchedule.active == True)  # noqa: E712
     return session.exec(query).all()
@@ -303,11 +353,15 @@ def list_schedules(
 
 @router.patch("/schedules/{schedule_id}", response_model=MedicationSchedule)
 def update_schedule(
-    schedule_id: int, payload: ScheduleUpdate, session: Session = Depends(get_session)
+    schedule_id: int,
+    payload: ScheduleUpdate,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
 ):
     schedule = session.get(MedicationSchedule, schedule_id)
     if not schedule:
         raise HTTPException(404, "해당 일정을 찾을 수 없어요")
+    require_actor_patient_access(schedule.patient_id, actor, session)
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(schedule, key, value)
     session.add(schedule)
@@ -317,12 +371,15 @@ def update_schedule(
 
 
 @router.get("/patients/{patient_id}/known-drugs")
-def list_known_drugs(patient_id: int, session: Session = Depends(get_session)):
+def list_known_drugs(
+    patient_id: int, actor: Actor = Depends(get_current_actor), session: Session = Depends(get_session)
+):
     """
     [7/8 추가] '새 일정 추가' 모달의 "약물 선택" 드롭다운용 — 이 환자의 처방전에서
     실제로 OCR로 인식된 약 이름 + 이미 등록된 복약 일정의 약 이름을 합쳐 중복 제거해서 반환.
     가짜 약물 목록이 아니라 이 환자 데이터에 실제로 존재하는 약 이름만 내려줍니다.
     """
+    require_actor_patient_access(patient_id, actor, session)
     record_ids = session.exec(
         select(MedicalRecord.id).where(MedicalRecord.patient_id == patient_id)
     ).all()
@@ -341,10 +398,13 @@ def list_known_drugs(patient_id: int, session: Session = Depends(get_session)):
 
 
 @router.delete("/schedules/{schedule_id}")
-def delete_schedule(schedule_id: int, session: Session = Depends(get_session)):
+def delete_schedule(
+    schedule_id: int, actor: Actor = Depends(get_current_actor), session: Session = Depends(get_session)
+):
     schedule = session.get(MedicationSchedule, schedule_id)
     if not schedule:
         raise HTTPException(404, "해당 일정을 찾을 수 없어요")
+    require_actor_patient_access(schedule.patient_id, actor, session)
     logs = session.exec(
         select(MedicationLog).where(MedicationLog.schedule_id == schedule_id)
     ).all()
@@ -357,10 +417,16 @@ def delete_schedule(schedule_id: int, session: Session = Depends(get_session)):
 
 # ── 오늘 복약 체크 (Dashboard.tsx의 updateStatus에 대응) ──
 @router.post("/schedules/{schedule_id}/check")
-def check_intake(schedule_id: int, payload: CheckIn, session: Session = Depends(get_session)):
+def check_intake(
+    schedule_id: int,
+    payload: CheckIn,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
     schedule = session.get(MedicationSchedule, schedule_id)
     if not schedule:
         raise HTTPException(404, "해당 일정을 찾을 수 없어요")
+    require_actor_patient_access(schedule.patient_id, actor, session)
 
     today_str = date.today().isoformat()
     existing = session.exec(
@@ -393,10 +459,13 @@ def check_intake(schedule_id: int, payload: CheckIn, session: Session = Depends(
 
 # ── [7/6 추가] 오늘자 체크 취소 → pending으로 되돌리기 (Dashboard.tsx "아직이요" 버튼용) ──
 @router.delete("/schedules/{schedule_id}/check")
-def clear_intake(schedule_id: int, session: Session = Depends(get_session)):
+def clear_intake(
+    schedule_id: int, actor: Actor = Depends(get_current_actor), session: Session = Depends(get_session)
+):
     schedule = session.get(MedicationSchedule, schedule_id)
     if not schedule:
         raise HTTPException(404, "해당 일정을 찾을 수 없어요")
+    require_actor_patient_access(schedule.patient_id, actor, session)
 
     today_str = date.today().isoformat()
     existing = session.exec(
@@ -413,14 +482,18 @@ def clear_intake(schedule_id: int, session: Session = Depends(get_session)):
 
 # ── [7/8 추가] 모니터링대시보드(보호자용) 캘린더·이행률 계산용 원본 로그 ──
 @router.get("/logs")
-def list_logs(patient_id: int, days: int = 30, session: Session = Depends(get_session)):
+def list_logs(
+    patient_id: int,
+    days: int = 30,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
     """
     최근 N일간의 복약 체크 기록을 스케줄명과 함께 반환합니다.
     프론트(모니터링대시보드)가 이 원본 로그로 캘린더 점 색상·주간 이행률·최근 기록 표를 직접 계산합니다.
     (별도 집계 테이블 없이 MedicationLog를 그대로 조회하는 방식 — schedule_v6 단순화 원칙과 동일)
     """
-    if not session.get(Patient, patient_id):
-        raise HTTPException(404, "해당 환자를 찾을 수 없어요")
+    require_actor_patient_access(patient_id, actor, session)
 
     schedules = session.exec(
         select(MedicationSchedule).where(MedicationSchedule.patient_id == patient_id)
@@ -463,18 +536,15 @@ def list_logs(patient_id: int, days: int = 30, session: Session = Depends(get_se
 
 # ── Dashboard.tsx가 그대로 쓸 수 있는 오늘자 통합 조회 [7/6: patient_id 필수로 변경] ──
 @router.get("/today")
-def get_today(patient_id: int, session: Session = Depends(get_session)):
+def get_today(
+    patient_id: int, actor: Actor = Depends(get_current_actor), session: Session = Depends(get_session)
+):
     """
     반환 형태 (Dashboard.tsx의 Medication[] 그대로):
     [{ "id": "1", "name": "암로디핀 5mg", "time": "아침", "note": "", "status": "pending" }]
     오늘 체크 기록이 없으면 status는 자동으로 "pending"
-
-    ⚠️ patient_id는 필수 쿼리 파라미터입니다. 로그인이 없으므로 프론트에서
-    "환자 선택" 단계(GET /caregivers/{id}/patients 결과 중 선택) 이후 값을 들고 호출해야 함.
-    데모 시드 데이터의 기본 환자는 patient_id=1.
     """
-    if not session.get(Patient, patient_id):
-        raise HTTPException(404, "해당 환자를 찾을 수 없어요")
+    require_actor_patient_access(patient_id, actor, session)
 
     today_str = date.today().isoformat()
     schedules = session.exec(

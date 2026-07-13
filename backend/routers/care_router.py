@@ -6,8 +6,10 @@ Figma에만 있고 백엔드가 없던 3개 기능을 여기 모았습니다:
 2. 보호자 초대 시스템 — 토큰 발급 → 수락/거절 (CaregiverPage / InvitePage)
 3. 알림 설정 저장 (NotificationPage)
 
-로그인이 없어서 "누가 초대를 보냈는지"는 optional로만 기록하고,
-수락 시점에 caregiver_id를 body로 받아 연결합니다 (기존 보호자 선택 방식과 동일 패턴).
+[7/13] issue #21(인가) — patient_id 기반 엔드포인트는 `Depends(get_current_actor)` +
+`require_actor_patient_access`로 보호합니다(보호자면 연결된 환자인지, 환자 본인이면
+자기 자신인지 확인). 초대 링크 열람/수락/거절(get/accept/reject)만 예외 — 계정이
+없는 사람이 링크만 갖고 처리해야 하는 게 기능의 전제라 인증 없이 그대로 둡니다.
 """
 from __future__ import annotations
 import secrets
@@ -19,6 +21,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from database import get_session
+from dependencies import Actor, get_current_actor, require_actor_patient_access
 from models import (
     CareLevelAssessment,
     Caregiver,
@@ -62,9 +65,14 @@ def _compute_care_level(payload: AssessmentCreate) -> tuple[str, str]:
 
 
 @router.post("/assessments", response_model=CareLevelAssessment)
-def create_assessment(payload: AssessmentCreate, session: Session = Depends(get_session)):
-    if not session.get(Patient, payload.patient_id):
-        raise HTTPException(404, "해당 환자를 찾을 수 없어요")
+def create_assessment(
+    payload: AssessmentCreate,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """[7/13] Check.tsx는 환자 본인 가입 직후(SignUp.tsx가 이제 가입 성공 시 바로
+    로그인해 토큰을 받음, issue #28) 호출되므로 이 시점부터 인증 가능."""
+    require_actor_patient_access(payload.patient_id, actor, session)
 
     care_level, reason = _compute_care_level(payload)
     assessment = CareLevelAssessment(
@@ -79,7 +87,10 @@ def create_assessment(payload: AssessmentCreate, session: Session = Depends(get_
 
 
 @router.get("/assessments/latest", response_model=Optional[CareLevelAssessment])
-def get_latest_assessment(patient_id: int, session: Session = Depends(get_session)):
+def get_latest_assessment(
+    patient_id: int, actor: Actor = Depends(get_current_actor), session: Session = Depends(get_session)
+):
+    require_actor_patient_access(patient_id, actor, session)
     return session.exec(
         select(CareLevelAssessment)
         .where(CareLevelAssessment.patient_id == patient_id)
@@ -103,9 +114,12 @@ class InvitationAccept(BaseModel):
 
 
 @router.post("/invitations")
-def create_invitation(payload: InvitationCreate, session: Session = Depends(get_session)):
-    if not session.get(Patient, payload.patient_id):
-        raise HTTPException(404, "해당 환자를 찾을 수 없어요")
+def create_invitation(
+    payload: InvitationCreate,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    require_actor_patient_access(payload.patient_id, actor, session)
 
     token = secrets.token_urlsafe(8)
     invitation = Invitation(
@@ -192,8 +206,11 @@ def reject_invitation(token: str, session: Session = Depends(get_session)):
 
 
 @router.get("/patients/{patient_id}/invitations")
-def list_invitations(patient_id: int, session: Session = Depends(get_session)):
+def list_invitations(
+    patient_id: int, actor: Actor = Depends(get_current_actor), session: Session = Depends(get_session)
+):
     """CaregiverPage — 환자의 초대 발송 이력 (대기중/승인됨 목록)"""
+    require_actor_patient_access(patient_id, actor, session)
     return session.exec(
         select(Invitation)
         .where(Invitation.patient_id == patient_id)
@@ -211,12 +228,13 @@ class NotificationUpdate(BaseModel):
 
 
 @router.get("/notification-settings", response_model=NotificationSetting)
-def get_notification_settings(patient_id: int, session: Session = Depends(get_session)):
+def get_notification_settings(
+    patient_id: int, actor: Actor = Depends(get_current_actor), session: Session = Depends(get_session)
+):
+    require_actor_patient_access(patient_id, actor, session)
     setting = session.get(NotificationSetting, patient_id)
     if not setting:
-        if not session.get(Patient, patient_id):
-            raise HTTPException(404, "해당 환자를 찾을 수 없어요")
-        # 없으면 기본값으로 하나 만들어서 반환 (첫 방문 시)
+        # 없으면 기본값으로 하나 만들어서 반환 (첫 방문 시) — patient_id 소유권은 위에서 이미 확인됨
         setting = NotificationSetting(patient_id=patient_id)
         session.add(setting)
         session.commit()
@@ -226,8 +244,12 @@ def get_notification_settings(patient_id: int, session: Session = Depends(get_se
 
 @router.put("/notification-settings", response_model=NotificationSetting)
 def update_notification_settings(
-    patient_id: int, payload: NotificationUpdate, session: Session = Depends(get_session)
+    patient_id: int,
+    payload: NotificationUpdate,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
 ):
+    require_actor_patient_access(patient_id, actor, session)
     setting = session.get(NotificationSetting, patient_id)
     if not setting:
         setting = NotificationSetting(patient_id=patient_id)
