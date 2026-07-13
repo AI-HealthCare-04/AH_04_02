@@ -29,6 +29,7 @@ load_dotenv(_ROOT / ".env")
 
 from ocr_interface import get_ocr_provider  # noqa: E402
 from database import get_session
+from dependencies import Actor, get_current_actor, require_actor_patient_access
 from drug_matcher import MATCH_THRESHOLD, match_drug
 from models import MedicalRecord, OcrResult
 from drug_reference import get_drug_info
@@ -193,9 +194,11 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
 async def test_ocr_upload(
     patient_id: int,
     file: UploadFile = File(...),
+    actor: Actor = Depends(get_current_actor),
     session: Session = Depends(get_session),
 ):
     """OCR만 따로 테스트하고 싶을 때 쓰는 엔드포인트 (실제 흐름은 POST /records 사용)"""
+    require_actor_patient_access(patient_id, actor, session)
     record = await run_ocr(patient_id, file, session)
     medications = [
         {
