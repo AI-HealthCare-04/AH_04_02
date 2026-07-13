@@ -20,7 +20,13 @@ from rag.schemas import (
     SourceRef,
 )
 from rag.self_consistency import pick_consistent_answer
-from rag.vectorstore import add_documents, search_by_disease, search_by_item_name, similarity_search
+from rag.vectorstore import (
+    add_documents,
+    search_by_disease,
+    search_by_item_name,
+    search_kdca_health_info,
+    similarity_search,
+)
 
 SYSTEM_PROMPT = """\
 당신은 고령 만성질환 환자와 보호자를 위한 복약·생활습관 가이드를 작성하는 보조자입니다.
@@ -134,8 +140,10 @@ def _build_context(
             }
         )
 
+    lifestyle_found = False
     for disease_code in _resolve_disease_codes(diagnosis):
         for doc in search_by_disease(disease_code):
+            lifestyle_found = True
             context_items.append(
                 {
                     "kind": "lifestyle",
@@ -144,6 +152,25 @@ def _build_context(
                         guideline_id=doc.metadata["guideline_id"],
                         disease=doc.metadata["disease"],
                         category=doc.metadata["category"],
+                        source=doc.metadata["source"],
+                    ),
+                }
+            )
+
+    # data/lifestyle_guidelines.json은 4개 만성질환만 사람이 손으로 정리한 것이라
+    # 그 목록에 없는 진단명은 위 루프가 항상 0건이다. 663건 전체를 알아서 등록할 수는
+    # 없으니(REQ-015~019 범위 확장), 이럴 때만 질병관리청 국가건강정보포털 전체
+    # 수집분(KdcaHealthInfoSection)에서 임베딩 유사도로 보강한다.
+    if not lifestyle_found and diagnosis:
+        for doc in search_kdca_health_info(diagnosis, k=3):
+            context_items.append(
+                {
+                    "kind": "lifestyle",
+                    "text": doc.page_content,
+                    "source_ref": LifestyleSourceRef(
+                        guideline_id=f"kdca-{doc.metadata['cntnts_sn']}-{doc.metadata['section_sn']}-{doc.metadata['index']}",
+                        disease=doc.metadata["title"],
+                        category=doc.metadata["section_name"],
                         source=doc.metadata["source"],
                     ),
                 }

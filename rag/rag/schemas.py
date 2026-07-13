@@ -149,6 +149,24 @@ class LifestyleGuideline(BaseModel):
     source: str
 
 
+class KdcaHealthInfoSection(BaseModel):
+    """질병관리청 국가건강정보포털 Open API(healthInfoNew)에서 수집한 건강정보 1개 항목의
+    섹션 하나. 원본 응답의 cntntsClList 배열을 펼친 것 — 같은 cntnts_sn(질환/주제)에
+    section_sn(개요정의/증상/치료 등)이 여러 개 있고, 같은 section_sn 안에서도 텍스트/이미지
+    블록이 나뉘어 여러 행으로 반복될 수 있어 등장 순서(index)까지 있어야 완전히 유일하다.
+    """
+
+    cntnts_sn: str
+    title: str
+    section_name: str
+    section_sn: str
+    index: int
+    html: str
+    updated_at: str
+    source: str
+    source_url: str
+
+
 class MedicationInput(BaseModel):
     """OCR 파트(AH_04_02_soonhyun/ocr_interface.py)의 MedicationItem과 필드명을 맞춘 입력 스키마.
 

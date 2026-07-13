@@ -136,6 +136,63 @@ def test_build_context_includes_lifestyle_guidelines_when_diagnosis_matches():
     assert lifestyle_item["source_ref"].disease == "고혈압"
 
 
+FAKE_KDCA_DOC = Document(
+    page_content="[관절염 - 개요정의] 관절염은 관절에 염증이 생기는 질환입니다.",
+    metadata={
+        "doc_type": "kdca_health_info",
+        "cntnts_sn": "1234",
+        "title": "관절염",
+        "section_name": "개요정의",
+        "section_sn": "10",
+        "index": 0,
+        "source": "질병관리청 국가건강정보포털",
+        "source_url": "https://health.kdca.go.kr/example",
+    },
+)
+
+
+def test_build_context_falls_back_to_kdca_when_curated_lifestyle_has_no_match():
+    """등록된 4개 질환에 없는 진단명이면 질병관리청 건강정보 전체 수집분에서 유사도 검색으로 보강한다."""
+    with (
+        patch("rag.rag_chain.search_by_item_name", return_value=[FAKE_DOC]),
+        patch("rag.rag_chain.search_by_disease", return_value=[]),
+        patch("rag.rag_chain.search_kdca_health_info", return_value=[FAKE_KDCA_DOC]) as mock_kdca_search,
+        patch("rag.rag_chain.search_hira_by_product_name", return_value=[]),
+    ):
+        context_items = _build_context("암로디핀정5밀리그램", situation=None, diagnosis="관절염")
+
+    mock_kdca_search.assert_called_once_with("관절염", k=3)
+    lifestyle_item = next(item for item in context_items if item["kind"] == "lifestyle")
+    assert lifestyle_item["source_ref"].disease == "관절염"
+    assert lifestyle_item["source_ref"].category == "개요정의"
+    assert "kdca-1234-10-0" == lifestyle_item["source_ref"].guideline_id
+
+
+def test_build_context_skips_kdca_fallback_when_curated_lifestyle_found():
+    """등록된 4개 질환으로 이미 생활지침을 찾았으면 질병관리청 전체 검색은 호출하지 않는다."""
+    with (
+        patch("rag.rag_chain.search_by_item_name", return_value=[FAKE_DOC]),
+        patch("rag.rag_chain.search_by_disease", return_value=[FAKE_LIFESTYLE_DOC]),
+        patch("rag.rag_chain.search_kdca_health_info") as mock_kdca_search,
+        patch("rag.rag_chain.search_hira_by_product_name", return_value=[]),
+    ):
+        _build_context("암로디핀정5밀리그램", situation=None, diagnosis="고혈압 있음")
+
+    mock_kdca_search.assert_not_called()
+
+
+def test_build_context_skips_kdca_fallback_without_diagnosis():
+    with (
+        patch("rag.rag_chain.search_by_item_name", return_value=[FAKE_DOC]),
+        patch("rag.rag_chain.search_by_disease", return_value=[]),
+        patch("rag.rag_chain.search_kdca_health_info") as mock_kdca_search,
+        patch("rag.rag_chain.search_hira_by_product_name", return_value=[]),
+    ):
+        _build_context("암로디핀정5밀리그램", situation=None, diagnosis=None)
+
+    mock_kdca_search.assert_not_called()
+
+
 def test_build_context_skips_lifestyle_search_without_diagnosis():
     with (
         patch("rag.rag_chain.search_by_item_name", return_value=[FAKE_DOC]),

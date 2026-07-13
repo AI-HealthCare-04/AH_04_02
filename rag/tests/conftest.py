@@ -17,5 +17,6 @@ def _no_real_dur_lookups():
         patch("rag.rag_chain.search_elderly_caution", return_value=[]),
         patch("rag.rag_chain.search_age_taboo", return_value=[]),
         patch("rag.rag_chain.search_pregnancy_taboo", return_value=[]),
+        patch("rag.rag_chain.search_kdca_health_info", return_value=[]),
     ):
         yield
