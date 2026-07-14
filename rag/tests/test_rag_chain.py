@@ -9,7 +9,15 @@ from rag.rag_chain import (
     generate_guide_from_medication,
     generate_guides_from_medications,
 )
-from rag.schemas import DrugInfo, DurCaution, DurTabooInfo, GuideResponse, HiraDrugMasterEntry
+from rag.schemas import (
+    DrugInfo,
+    DrugPermitDetail,
+    DrugPermitInfo,
+    DurCaution,
+    DurTabooInfo,
+    GuideResponse,
+    HiraDrugMasterEntry,
+)
 
 FAKE_DOC = Document(
     page_content="[암로디핀정5밀리그램] 효능·효과: 고혈압에 사용합니다.",
@@ -117,6 +125,119 @@ def test_build_context_hira_lookup_failure_does_not_break_citation():
 
     assert len(context_items) == 1
     assert context_items[0]["source_ref"].hira_standard_code is None
+
+
+FAKE_PERMIT_ENTRY = DrugPermitInfo.model_validate(
+    {
+        "ITEM_SEQ": "202106092",
+        "ITEM_NAME": "암로디핀정5밀리그램",
+        "ENTP_NAME": "한미약품",
+        "PERMIT_KIND_CODE": "신고",
+        "CANCEL_DATE": None,
+        "CANCEL_NAME": "정상",
+    }
+)
+
+
+def test_build_context_enriches_source_ref_with_permit_data_when_matched():
+    """[2026-07-14 추가] e약은요 SourceRef에 허가정보(허가/신고 구분, 정상여부)가 함께 채워진다."""
+    with (
+        patch("rag.rag_chain.search_by_item_name", return_value=[FAKE_DOC]),
+        patch("rag.rag_chain.search_hira_by_product_name", return_value=[]),
+        patch("rag.rag_chain.search_permit_info", return_value=[FAKE_PERMIT_ENTRY]) as mock_permit,
+    ):
+        context_items = _build_context("암로디핀정5밀리그램", situation=None)
+
+    mock_permit.assert_called_once_with("암로디핀정5밀리그램", num_of_rows=1)
+    source_ref = context_items[0]["source_ref"]
+    assert source_ref.permit_kind_code == "신고"
+    assert source_ref.permit_active is True
+
+
+def test_build_context_leaves_permit_fields_none_when_not_matched():
+    """허가정보에서 못 찾으면 e약은요 인용 자체는 그대로 두고 허가정보 필드만 None으로 남는다."""
+    with (
+        patch("rag.rag_chain.search_by_item_name", return_value=[FAKE_DOC]),
+        patch("rag.rag_chain.search_hira_by_product_name", return_value=[]),
+        patch("rag.rag_chain.search_permit_info", return_value=[]),
+    ):
+        context_items = _build_context("암로디핀정5밀리그램", situation=None)
+
+    source_ref = context_items[0]["source_ref"]
+    assert source_ref.item_name == "암로디핀정5밀리그램"
+    assert source_ref.permit_kind_code is None
+    assert source_ref.permit_active is None
+
+
+def test_build_context_permit_lookup_failure_does_not_break_citation():
+    """허가정보 조회 자체가 예외를 던져도 e약은요 인용 생성은 막히지 않는다."""
+    with (
+        patch("rag.rag_chain.search_by_item_name", return_value=[FAKE_DOC]),
+        patch("rag.rag_chain.search_hira_by_product_name", return_value=[]),
+        patch("rag.rag_chain.search_permit_info", side_effect=RuntimeError("API 오류")),
+    ):
+        context_items = _build_context("암로디핀정5밀리그램", situation=None)
+
+    assert len(context_items) == 1
+    assert context_items[0]["source_ref"].permit_active is None
+
+
+FAKE_PERMIT_DETAIL = DrugPermitDetail.model_validate(
+    {
+        "ITEM_SEQ": "1",
+        "ITEM_NAME": "암로디핀정5밀리그램",
+        "NB_DOC_DATA": (
+            '<DOC title="사용상의주의사항" type="NB"><SECTION title="">'
+            '<ARTICLE title="1. 경고"><PARAGRAPH tagName="p">과량 복용 시 저혈압이 나타날 수 있습니다.'
+            "</PARAGRAPH></ARTICLE></SECTION></DOC>"
+        ),
+    }
+)
+
+
+def test_build_context_adds_permit_precaution_sections_when_matched():
+    """[2026-07-14 추가] 허가정보 상세(NB_DOC_DATA)의 사용상의주의사항 섹션이 추가 인용으로 붙는다."""
+    with (
+        patch("rag.rag_chain.search_by_item_name", return_value=[FAKE_DOC]),
+        patch("rag.rag_chain.search_hira_by_product_name", return_value=[]),
+        patch("rag.rag_chain.search_permit_info", return_value=[]),
+        patch("rag.rag_chain.search_permit_detail", return_value=[FAKE_PERMIT_DETAIL]) as mock_detail,
+    ):
+        context_items = _build_context("암로디핀정5밀리그램", situation=None)
+
+    mock_detail.assert_called_once_with("암로디핀정5밀리그램", num_of_rows=1)
+    assert len(context_items) == 2
+    precaution_item = context_items[1]
+    assert precaution_item["kind"] == "drug"
+    assert precaution_item["source_ref"].field == "사용상의주의사항 - 1. 경고"
+    assert precaution_item["source_ref"].item_name == "암로디핀정5밀리그램"
+    assert precaution_item["text"] == "과량 복용 시 저혈압이 나타날 수 있습니다."
+
+
+def test_build_context_adds_no_precaution_items_when_detail_not_matched():
+    """상세정보에서 못 찾거나(빈 리스트) NB_DOC_DATA가 없으면 추가 인용 없이 e약은요 인용만 남는다."""
+    with (
+        patch("rag.rag_chain.search_by_item_name", return_value=[FAKE_DOC]),
+        patch("rag.rag_chain.search_hira_by_product_name", return_value=[]),
+        patch("rag.rag_chain.search_permit_info", return_value=[]),
+        patch("rag.rag_chain.search_permit_detail", return_value=[]),
+    ):
+        context_items = _build_context("암로디핀정5밀리그램", situation=None)
+
+    assert len(context_items) == 1
+
+
+def test_build_context_permit_detail_lookup_failure_does_not_break_citation():
+    """상세정보 조회 자체가 예외를 던져도 e약은요 인용 생성은 막히지 않는다."""
+    with (
+        patch("rag.rag_chain.search_by_item_name", return_value=[FAKE_DOC]),
+        patch("rag.rag_chain.search_hira_by_product_name", return_value=[]),
+        patch("rag.rag_chain.search_permit_info", return_value=[]),
+        patch("rag.rag_chain.search_permit_detail", side_effect=RuntimeError("API 오류")),
+    ):
+        context_items = _build_context("암로디핀정5밀리그램", situation=None)
+
+    assert len(context_items) == 1
 
 
 def test_build_context_includes_lifestyle_guidelines_when_diagnosis_matches():

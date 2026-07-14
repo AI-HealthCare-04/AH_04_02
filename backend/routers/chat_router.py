@@ -122,7 +122,12 @@ def _summarize_ocr_items(ocr_items: list[OcrResult]) -> list[str]:
 
 
 def _summarize_medication_guide(medication_guide_json: str) -> list[str]:
-    """RAG_PROVIDER 설정에 따라 모양이 다를 수 있어(스텁 vs 실제 파이프라인) 방어적으로 읽는다."""
+    """RAG_PROVIDER 설정에 따라 모양이 다를 수 있어(스텁 vs 실제 파이프라인) 방어적으로 읽는다.
+
+    [2026-07-14] precautions(주의사항 목록)가 medication_guide 텍스트와 별개의 구조화
+    필드인데 지금까지 빠져 있었다 — "부작용 있으면 어떻게 하나요?" 같은 질문에 챗봇이
+    반드시 참고해야 할 정보라 함께 넣는다.
+    """
     try:
         medication_guide = json.loads(medication_guide_json)
         drugs = medication_guide.get("drugs", [])
@@ -131,9 +136,37 @@ def _summarize_medication_guide(medication_guide_json: str) -> list[str]:
 
     lines = []
     for drug in drugs:
+        drug_name = drug.get("drug_name", "약")
         text = drug.get("medication_guide") or drug.get("caution")
         if text:
-            lines.append(f"[{drug.get('drug_name', '약')} 복약 안내] {text}")
+            lines.append(f"[{drug_name} 복약 안내] {text}")
+        precautions = drug.get("precautions") or []
+        if precautions:
+            lines.append(f"[{drug_name} 주의사항] " + " / ".join(precautions))
+    return lines
+
+
+def _summarize_source_refs(source_refs_json: str) -> list[str]:
+    """[2026-07-14 추가] DUR(의약품안전사용서비스) 병용금기/노인주의/연령금기/임부금기 경고를
+    챗봇 컨텍스트에 추가한다. 지금까지 source_refs(DUR 포함)가 통째로 챗봇 컨텍스트에서
+    빠져 있어, "부작용 있으면?" 같은 질문에 DUR 데이터가 전혀 반영되지 않는 문제가 있었다
+    (복약가이드 화면에는 표시되지만 챗봇은 못 보는 상태). 의약품·생활지침 인용은 이미
+    medication_guide/lifestyle_guide 텍스트에 녹아 있으므로 여기서는 DUR만 추가한다.
+    """
+    try:
+        refs = json.loads(source_refs_json)
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+    lines = []
+    for ref in refs:
+        if ref.get("mixture_item_name"):
+            content = f" ({ref['prohbt_content']})" if ref.get("prohbt_content") else ""
+            lines.append(f"[DUR 병용금기] {ref.get('drug_name', '약')}은(는) {ref['mixture_item_name']}와 병용금기{content}")
+        elif ref.get("dur_category"):
+            detail = f": {ref['dur_detail']}" if ref.get("dur_detail") else ""
+            extra = f" ({ref['dur_extra']})" if ref.get("dur_extra") else ""
+            lines.append(f"[DUR {ref['dur_category']}] {ref.get('drug_name', '약')}{extra}{detail}")
     return lines
 
 
@@ -176,6 +209,7 @@ def _build_patient_context(patient_id: int, session: Session) -> str:
     if guide:
         lines.extend(_summarize_medication_guide(guide.medication_guide))
         lines.extend(_summarize_lifestyle_guide(guide.lifestyle_guide))
+        lines.extend(_summarize_source_refs(guide.source_refs))
 
     return "\n".join(lines) if lines else "아직 등록된 처방전 정보가 없습니다."
 

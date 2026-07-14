@@ -9,8 +9,9 @@ from rag.dur_master import (
     search_usjnt_taboo,
 )
 from rag.hira_master import search_by_product_name as search_hira_by_product_name
-from rag.mfds_client import search_by_name
+from rag.mfds_client import parse_doc_sections, search_by_name, search_permit_detail, search_permit_info
 from rag.schemas import (
+    DrugPermitInfo,
     DurCaution,
     DurWarning,
     GuideResponse,
@@ -104,6 +105,44 @@ def _lookup_hira_entry(item_name: str, cache: dict[str, HiraDrugMasterEntry | No
     return entry
 
 
+def _lookup_permit_entry(item_name: str, cache: dict[str, DrugPermitInfo | None]) -> DrugPermitInfo | None:
+    """e약은요 item_name으로 식약처 의약품제품허가정보를 조회한다 (호출 1회당 품목명별로 1번만 조회).
+
+    [2026-07-14 추가] HIRA(약가 등재 상태)와는 다른 개념 — 이건 제조·판매 허가 자체의
+    취소여부다. API 오류 등 예기치 못한 문제가 생겨도 인용 자체(SourceRef의 e약은요 필드)는
+    막지 않도록, 실패하면 조용히 None으로 넘어간다 (HIRA 조회 실패 처리와 동일한 원칙).
+    """
+    if item_name in cache:
+        return cache[item_name]
+    try:
+        results = search_permit_info(item_name, num_of_rows=1)
+    except Exception:  # noqa: BLE001 — 허가정보 조회 실패가 인용 생성 자체를 막으면 안 됨
+        results = []
+    entry = results[0] if results else None
+    cache[item_name] = entry
+    return entry
+
+
+def _lookup_permit_precautions(
+    item_name: str, cache: dict[str, list[tuple[str, str]]]
+) -> list[tuple[str, str]]:
+    """e약은요 item_name으로 식약처 의약품제품허가정보 상세(NB_DOC_DATA)의 사용상의주의사항을
+    (섹션 제목, 본문) 목록으로 조회한다 (호출 1회당 품목명별로 1번만 조회).
+
+    [2026-07-14 추가] 상세 API 실패·XML 파싱 실패는 조용히 빈 리스트로 넘어가 나머지 인용
+    (e약은요/HIRA/허가정보)은 그대로 유효해야 한다 (HIRA/허가정보 조회 실패 처리와 동일한 원칙).
+    """
+    if item_name in cache:
+        return cache[item_name]
+    try:
+        results = search_permit_detail(item_name, num_of_rows=1)
+    except Exception:  # noqa: BLE001 — 상세정보 조회 실패가 인용 생성 자체를 막으면 안 됨
+        results = []
+    sections = parse_doc_sections(results[0].nb_doc_data) if results else []
+    cache[item_name] = sections
+    return sections
+
+
 def _build_context(
     drug_name: str,
     situation: str | None,
@@ -119,10 +158,15 @@ def _build_context(
         docs = similarity_search(query, k=settings.TOP_K)
 
     hira_cache: dict[str, HiraDrugMasterEntry | None] = {}
+    permit_cache: dict[str, DrugPermitInfo | None] = {}
+    permit_precaution_cache: dict[str, list[tuple[str, str]]] = {}
     context_items = []
+    item_seqs: dict[str, str] = {}
     for doc in docs:
         item_name = doc.metadata["item_name"]
+        item_seqs.setdefault(item_name, doc.metadata["item_seq"])
         hira_entry = _lookup_hira_entry(item_name, hira_cache)
+        permit_entry = _lookup_permit_entry(item_name, permit_cache)
         context_items.append(
             {
                 "kind": "drug",
@@ -136,9 +180,36 @@ def _build_context(
                     hira_atc_code=hira_entry.atc_code if hira_entry else None,
                     hira_permit_date=hira_entry.permit_date if hira_entry else None,
                     hira_active=hira_entry.is_active if hira_entry else None,
+                    permit_kind_code=permit_entry.permit_kind_code if permit_entry else None,
+                    permit_active=permit_entry.is_active if permit_entry else None,
                 ),
             }
         )
+
+    # [2026-07-14 추가] 사용상의주의사항(NB_DOC_DATA) — e약은요 문서 여러 개(효능효과/용법 등)가
+    # 같은 품목명을 공유하므로, 위 루프에서 모은 품목명당 한 번만 상세 API를 호출해 섹션들을
+    # 추가 인용(context_items)으로 붙인다.
+    for item_name, item_seq in item_seqs.items():
+        hira_entry = hira_cache.get(item_name)
+        permit_entry = permit_cache.get(item_name)
+        for section_title, section_text in _lookup_permit_precautions(item_name, permit_precaution_cache):
+            context_items.append(
+                {
+                    "kind": "drug",
+                    "text": section_text,
+                    "source_ref": SourceRef(
+                        item_seq=item_seq,
+                        item_name=item_name,
+                        field=f"사용상의주의사항 - {section_title}",
+                        hira_standard_code=hira_entry.standard_code if hira_entry else None,
+                        hira_atc_code=hira_entry.atc_code if hira_entry else None,
+                        hira_permit_date=hira_entry.permit_date if hira_entry else None,
+                        hira_active=hira_entry.is_active if hira_entry else None,
+                        permit_kind_code=permit_entry.permit_kind_code if permit_entry else None,
+                        permit_active=permit_entry.is_active if permit_entry else None,
+                    ),
+                }
+            )
 
     lifestyle_found = False
     for disease_code in _resolve_disease_codes(diagnosis):

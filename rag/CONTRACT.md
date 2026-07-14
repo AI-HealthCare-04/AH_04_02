@@ -95,13 +95,13 @@ OCR 모듈이 다른 브랜치에 있어 RAG 쪽에서 직접 import해 테스�
   추가/삭제/rename해도 조용히 무시된다. 그래서 `test_medication_input_fields_are_subset_of_ocr_output_keys`가
   "RAG가 필요로 하는 필드 키 집합 ⊆ OCR 산출물의 키 집합"을 별도로 검증한다.
 
-## 6. [보류] 의약품 제품허가정보 API (`DrugPrdtPrmsnInfoService07`)
+## 6. 의약품 제품허가정보 API (`DrugPrdtPrmsnInfoService07`) — [2026-07-14] 활용신청 승인, 재활성화
 
 2026-07-08, "의약품 허가 기반으로 데이터 구축하려던 원래 의도"를 확인하던 중 찾아서 실제
 서비스 키로 테스트까지 마쳤지만, **e약은요 + HIRA 약가마스터만으로 우선 조회하기로 결정**하고
-지금은 코드를 지우지 않고 주석 처리(`[보류]`)만 해뒀다. 나중에 이 API가 다시 필요해지면(예:
-"이 약이 취소·취하되지 않은 정식 허가 의약품인지"를 HIRA 약가마스터보다 더 신뢰도 높게
-검증해야 하는 문제가 생기는 경우) 아래 정보로 바로 복원하면 된다.
+당시엔 코드를 지우지 않고 주석 처리(`[보류]`)만 해뒀었다. **[2026-07-14] 활용신청이
+승인되어(개발계정, 자동승인, DUR과 같은 계정) 재활성화**했다 — e약은요·HIRA와 조율할 필요
+없이 세 번째 인용 소스로 `SourceRef`에 병합했다(`permit_kind_code`/`permit_active` 필드).
 
 ### 왜 찾게 됐나
 
@@ -148,46 +148,96 @@ FAQ 형식인 게 e약은요의 시그니처). "진짜 의약품 허가정보"�
 | `BIZRNO` | 사업자등록번호 |
 | `BIG_PRDT_IMG_URL` | 제품 이미지 URL (없으면 빈 문자열) |
 
-### 코드 위치 (전부 `[보류]` 주석 처리됨 — 검색해서 주석만 풀면 복원)
+### 코드 위치
 
 | 파일 | 내용 |
 |---|---|
-| `rag/config.py` | `PERMIT_INFO_BASE_URL` (Base URL + operation 조합) |
+| `rag/config.py` | `PERMIT_INFO_BASE_URL` (Base URL + operation 조합, HTTP→HTTPS로 정정) |
 | `rag/schemas.py` | `DrugPermitInfo` 모델 (위 응답 필드 전부 alias로 매핑, `is_active` 프로퍼티 포함) |
 | `rag/mfds_client.py` | `search_permit_info(item_name)` / `is_officially_approved(item_name)` |
-| `tests/test_mfds_client.py` | 위 두 함수에 대한 테스트 6건 (mock 기반) |
+| `rag/rag_chain.py` | `_lookup_permit_entry()` — e약은요 item_name으로 조회해 `SourceRef.permit_kind_code`/`permit_active`를 채움(HIRA 조회와 동일한 캐시·fail-safe 패턴) |
+| `rag/schemas.py` | `SourceRef.permit_kind_code`/`permit_active` 필드 추가 — `hira_active`(약가 등재 상태)와는 다른 개념, 이건 제조·판매 허가 자체의 취소여부 |
+| `backend/routers/rag_router.py` | `permit_kind_code`/`permit_active`를 `source_refs` 배열에 병합 |
+| `frontend/src/api/records.ts` | `SourceRef` 인터페이스에 필드 추가(표시 텍스트는 HIRA 필드와 동일하게 화면에 노출하지 않고 데이터로만 보유) |
+| `tests/test_mfds_client.py` | `search_permit_info`/`is_officially_approved` 테스트 6건 (mock 기반, 재활성화) |
+| `tests/test_rag_chain.py` | `_build_context`의 permit 통합 테스트 3건(정상 매칭/미매칭/조회 실패 격리, HIRA 테스트와 동일 패턴) |
+| `tests/conftest.py` | `_no_real_dur_lookups` autouse fixture에 `search_permit_info` 기본값도 빈 리스트로 추가(실제 API 실수 호출 방지) |
 
-재활성화 시 체크할 것: `mfds_client._request()`는 이미 `base_url` 파라미터를 받도록 일반화돼
-있어 e약은요 호출부(`search_by_name`/`fetch_page`)는 그대로 두고 permit 함수만 살리면 된다.
+2026-07-14 실제 API로 e2e 검증 완료: "타이레놀정500밀리그람"으로 `permit_kind_code="신고"`,
+`permit_active=True`가 `source_refs`에 정확히 채워짐을 확인.
 
-## 7. DUR(의약품안전사용서비스) 연동 — [2026-07-13] 로컬 CSV 방식, 5개 카테고리 전부 구현 완료
+### 6-1. 사용상의주의사항 — 상세정보 API (`getDrugPrdtPrmsnDtlInq06`) — [2026-07-14] 추가
+
+"제품허가정보로 사용상의 주의사항도 조회 가능한지" 확인 요청으로 찾음 — 위 목록 조회
+(`getDrugPrdtPrmsnInq07`)에는 효능효과·용법용량·주의사항 같은 설명문이 전혀 없지만, **같은
+서비스의 상세정보 오퍼레이션**에는 있다.
+
+**API 상세** (`item_name=타이레놀정500밀리그람`으로 실제 호출해 검증 완료):
+
+- **Base URL**: `https://apis.data.go.kr/1471000/DrugPrdtPrmsnInfoService07`
+- **Operation**: `getDrugPrdtPrmsnDtlInq06`
+- **파라미터**: 목록 조회와 동일 — `item_name`(snake_case, DUR API의 `itemName`과 다름 주의)
+- **같은 `DATA_GO_KR_SERVICE_KEY` 재사용** — 별도 활용신청 불필요
+
+**응답 필드** (목록 조회에 없는 4개 원문 필드 추가):
+
+| 필드 | 의미 |
+|---|---|
+| `EE_DOC_DATA` | 효능효과 원문 (구조화 XML) |
+| `UD_DOC_DATA` | 용법용량 원문 (구조화 XML) |
+| `NB_DOC_DATA` | 사용상의주의사항 원문 (구조화 XML) — RAG에서 실제로 쓰는 필드 |
+| `PN_DOC_DATA` | 임부·수유부 주의사항 원문 (구조화 XML, 없는 품목 많음) |
+
+각 `XX_DOC_DATA`는 `<DOC title="..." type="..."><SECTION title=""><ARTICLE
+title="1. 경고">...<PARAGRAPH tagName="p">문단 텍스트</PARAGRAPH>...</ARTICLE></SECTION></DOC>`
+형태의 문자열이다. 실제 응답에서 `NB_DOC_DATA`는 "타이레놀정500밀리그람" 기준 6개
+ARTICLE(경고/복용금지대상/상담필요대상/즉시중단상담대상/기타주의사항/저장상의주의사항)을
+가진 걸 실측 확인. PARAGRAPH 문단 안에 표 등 HTML 마크업이 CDATA로 섞여 들어오는 경우가
+있어(`<table><tbody>...` 형태) 태그를 정규식으로 벗겨내야 순수 텍스트가 된다.
+
+### 코드 위치 (6-1)
+
+| 파일 | 내용 |
+|---|---|
+| `rag/config.py` | `PERMIT_DETAIL_BASE_URL` |
+| `rag/schemas.py` | `DrugPermitDetail` 모델 (`EE_DOC_DATA`/`UD_DOC_DATA`/`NB_DOC_DATA`/`PN_DOC_DATA` alias 매핑) |
+| `rag/mfds_client.py` | `search_permit_detail(item_name)` — 상세정보 조회 / `parse_doc_sections(doc_xml)` — `XX_DOC_DATA` 문자열을 `(섹션 제목, 본문)` 목록으로 변환(빈 값·XML 파싱 실패는 예외 없이 빈 리스트) |
+| `rag/rag_chain.py` | `_lookup_permit_precautions()` — e약은요 item_name으로 조회해 `NB_DOC_DATA`를 파싱, 섹션별로 `context_items`에 `field="사용상의주의사항 - {섹션 제목}"`인 추가 인용을 붙임(품목당 상세 API 1회만 호출하도록 `_build_context`에서 문서 루프와 분리된 두 번째 루프로 처리) |
+| `tests/test_mfds_client.py` | `search_permit_detail`/`parse_doc_sections` 테스트(CDATA 내 HTML 마크업 케이스 포함) |
+| `tests/test_rag_chain.py` | `_build_context`의 사용상의주의사항 통합 테스트 3건(정상 매칭/미매칭/조회 실패 격리) |
+| `tests/conftest.py` | `_no_real_dur_lookups` autouse fixture에 `search_permit_detail` 기본값도 빈 리스트로 추가 |
+
+2026-07-14 실제 API로 검증 완료: `search_permit_detail('타이레놀정500밀리그람', num_of_rows=1)` →
+1건, `parse_doc_sections(detail.nb_doc_data)` → 6개 섹션이 실제 한글 주의사항 텍스트와 함께
+정상 추출됨을 확인.
+
+## 7. DUR(의약품안전사용서비스) 연동 — [2026-07-14] 활용신청 승인, API 방식으로 전환
 
 RAG 파트에 DUR(의약품안전사용서비스) 주의/금기 경고를 붙였다.
 **[2026-07-10] API(`DURPrdlstInfoService03/getUsjntTabooInfoList03`, 병용금기만)로 처음
 시도했으나 403 Forbidden(별도 활용신청 필요)**이 나와서, **[2026-07-13] 공공데이터포털에서
 받은 CSV(건강보험심사평가원_의약품안전사용서비스(DUR) 의약품 목록_202606)를
-`backend/data/`에 두고 로컬 조회로 대체**했다 — HIRA 약가마스터와 동일한 패턴(API 대신
-로컬 파일). API 활용신청이 나중에 승인되면 그때 다시 API 연동을 검토할 수 있지만, 지금은
-이 CSV들이 정본이다.
-
-**처음엔 병용금기 카테고리 하나만 연동했다가, 실제로 받은 폴더에 카테고리가 5개 다 있다는
-걸 뒤늦게 인지해서 나머지 4개도 이번에 함께 추가했다** — 아래 표 참고.
+`backend/data/`에 두고 로컬 조회로 임시 대체**했었다. **[2026-07-14] 활용신청이
+승인되어(개발계정, 자동승인) 다시 API 연동으로 전환**했다 — CSV 방식은 폐기.
 
 ### 데이터 정보
 
-건강보험심사평가원 "의약품안전사용서비스(DUR) 의약품 목록_202606" 폴더의 CSV 5개, 전부 연동함:
+승인된 식약처 `DURPrdlstInfoService03` API 중 4개를 연동함(전부 같은 `DATA_GO_KR_SERVICE_KEY` 재사용):
 
-| 카테고리 | 파일 | 행 수 | 관계 종류 |
-|---|---|---|---|
-| 병용금기 | `backend/data/dur_usjnt_taboo_202606.csv` | 약 87만 | **약 두 개 사이의 관계** — 처방전에 상대 약이 실제로 있어야 경고 (`DurWarning`) |
-| 노인주의 | `backend/data/dur_elderly_caution_202606.csv` | 약 558 | 약 하나의 속성 (`DurCaution`) |
-| 노인주의(해열진통소염제) | `backend/data/dur_elderly_caution_nsaid_202606.csv` | 약 1035 | 약 하나의 속성 (`DurCaution`) |
-| 연령금기 | `backend/data/dur_age_taboo_202606.csv` | 약 2867 | 약 하나의 속성 (`DurCaution`) |
-| 임부금기 | `backend/data/dur_pregnancy_taboo_202606.csv` | 약 19521 | 약 하나의 속성 (`DurCaution`) |
+| 카테고리 | 엔드포인트 | 관계 종류 |
+|---|---|---|
+| 병용금기 | `getUsjntTabooInfoList03` | **약 두 개 사이의 관계** — 처방전에 상대 약이 실제로 있어야 경고 (`DurWarning`) |
+| 노인주의 | `getOdsnAtentInfoList03` | 약 하나의 속성 (`DurCaution`) |
+| 연령금기 | `getSpcifyAgrdeTabooInfoList03` | 약 하나의 속성 (`DurCaution`) |
+| 임부금기 | `getPwnmTabooInfoList03` | 약 하나의 속성 (`DurCaution`) |
 
-전부 CP949 인코딩, 컬럼명은 카테고리마다 다르지만 품목명 컬럼은 공통으로 `제품명`이다
-(병용금기만 `제품명A`/`제품명B` 쌍). HIRA CSV처럼 `backend/data/`에 실물만 두고
-git 미추적(`.gitignore`의 `data/*.csv`) — 각자 로컬에 받아서 채워야 한다.
+**CSV 방식과 달라진 점 2가지**(실제 API 응답을 직접 호출해 확인, 2026-07-14):
+1. "노인주의(해열진통소염제)" 세부 분류가 승인된 API 목록엔 별도 엔드포인트가 없다 —
+   `getOdsnAtentInfoList03` 하나가 전체 노인주의 항목을 반환하므로, 이번 전환부터는
+   전부 "노인주의" 하나로 통합했다(하위분류 정보 손실).
+2. CSV의 "연령금기" extra(특정연령/특정연령단위/연령처리조건)와 "임부금기" extra(금기등급)에
+   대응하는 별도 필드가 API 응답엔 없다 — 해당 조건은 `PROHBT_CONTENT`(상세설명) 텍스트
+   안에 자연어로 포함돼 있다. 이번 전환부터 두 카테고리의 `extra`는 항상 `None`이다.
 
 노인주의/연령금기/임부금기는 "이 환자에게 실제로 해당하는지"(나이·임신 여부)를 이 시스템이
 알 방법이 없어서, 조건 판단 없이 "이 약에 이런 조건부 주의사항이 있다"는 사실만 정보성으로
@@ -197,24 +247,33 @@ git 미추적(`.gitignore`의 `data/*.csv`) — 각자 로컬에 받아서 채�
 
 | 파일 | 내용 |
 |---|---|
-| `rag/dur_master.py` | `search_usjnt_taboo`(병용금기, 양방향 인덱스), `search_elderly_caution`/`search_age_taboo`/`search_pregnancy_taboo`(단일 약 속성, 공통 로더 `_lookup_single_drug_rows`) — 전부 정확/부분일치 조회 + 브랜드 중복 제거(`_dedupe_cautions`), hira_master.py와 동일한 최초 1회 파싱·프로세스 캐시 패턴 |
-| `rag/schemas.py` | `DurTabooInfo`/`DurWarning`(병용금기), `DurCaution`(나머지 4개 카테고리 공용), `GuideResponse.dur_warnings`/`dur_cautions` |
-| `rag/rag_chain.py` | `_check_dur_taboo()`(병용금기 — 처방전에 실제로 함께 있는 약과만 대조), `_check_dur_cautions()`(나머지 4개 카테고리 — 다른 약과 무관, 약 하나만으로 판단) |
+| `rag/dur_master.py` | `search_usjnt_taboo`(병용금기), `search_elderly_caution`/`search_age_taboo`/`search_pregnancy_taboo`(단일 약 속성) — 전부 `mfds_client._request`로 API 호출 + 브랜드 중복 제거(`_dedupe_taboo`/`_dedupe_cautions`) |
+| `rag/config.py` | `DUR_USJNT_TABOO_BASE_URL`/`DUR_ODSN_ATENT_BASE_URL`/`DUR_AGE_TABOO_BASE_URL`/`DUR_PREGNANCY_TABOO_BASE_URL` |
+| `rag/schemas.py` | `DurTabooInfo`/`DurWarning`(병용금기), `DurCaution`(나머지 3개 카테고리 공용), `GuideResponse.dur_warnings`/`dur_cautions` |
+| `rag/rag_chain.py` | `_check_dur_taboo()`(병용금기 — 처방전에 실제로 함께 있는 약과만 대조), `_check_dur_cautions()`(나머지 3개 카테고리 — 다른 약과 무관, 약 하나만으로 판단) |
 | `backend/routers/rag_router.py` | `dur_warnings`/`dur_cautions`를 `source_refs` 배열에 병합해 프론트로 전달 |
+| `backend/routers/chat_router.py` | [2026-07-14 추가] `_summarize_source_refs()`가 `source_refs`의 DUR 항목을 챗봇 컨텍스트에도 포함시킨다 — 이전엔 복약가이드 화면에만 표시되고 챗봇은 DUR 정보를 전혀 못 봤음(부작용 질문에 반영 안 됨, 아래 "발견된 버그" 참고) |
 | `frontend/src/api/records.ts` | `SourceRef.mixture_item_name`/`prohbt_content`(병용금기), `dur_category`/`dur_detail`/`dur_extra`(나머지), `formatSourceRef`가 "⚠️ OO와 병용금기" / "⚠️ 노인주의(...): ..." 형태로 표시 |
-| `tests/test_dur_master.py` | 5개 카테고리 전부 픽스처 기반 테스트 (`tests/fixtures/dur_*_sample.csv`), 실제 CSV로도 e2e 검증 완료 |
-| `tests/test_rag_chain.py` | `_check_dur_taboo`/`_check_dur_cautions` mock 기반 테스트 (경고 매칭, 브랜드 중복 제거, 조회 실패 격리) |
-| `tests/conftest.py` | `_no_real_dur_lookups` autouse fixture — DUR 조회 함수 기본값을 빈 리스트로 고정해, DUR과 무관한 테스트가 로컬에 실제 대용량 CSV가 있는지 여부에 따라 결과가 갈리지 않게 함 |
+| `tests/test_dur_master.py` | API mock 기반 테스트로 전면 재작성(`patch("rag.mfds_client.requests.get", ...)`, `test_mfds_client.py`와 동일 패턴) |
+| `tests/test_chat_router_context.py` | [2026-07-14 신규] `_summarize_source_refs`/`_summarize_medication_guide`(precautions 포함) 회귀 테스트 |
+| `tests/conftest.py` | `_no_real_dur_lookups` autouse fixture — DUR 조회 함수 기본값을 빈 리스트로 고정(이제는 "로컬 CSV 유무"가 아니라 "실제 API를 실수로 호출하지 않도록" 막는 용도) |
 
 ### 설계 노트
 
-- 병용금기는 "약 하나의 속성"이 아니라 "두 약 사이의 관계"라 `DurWarning`으로, 나머지 4개
+- 병용금기는 "약 하나의 속성"이 아니라 "두 약 사이의 관계"라 `DurWarning`으로, 나머지 3개
   카테고리는 "약 하나"의 속성이라 공용 `DurCaution`으로 분리했다 (HIRA처럼 `SourceRef`에
   필드를 추가하는 방식은 쓰지 않음).
-- 모든 DUR 조회 함수는 실패(CSV 파일 부재 등 어떤 이유든)해도 예외를 삼키고 빈 리스트를
+- 모든 DUR 조회 함수는 실패(API 오류 등 어떤 이유든)해도 예외를 삼키고 빈 리스트를
   반환한다 — 나머지 가이드 생성 흐름(HIRA/e약은요 인용, LLM 생성)은 전혀 영향받지 않는다.
-- **브랜드 단위 중복 제거**: CSV는 전부 제품(브랜드) 단위라 같은 성분이 제조사별로
-  수십~수천 건 중복 등재돼 있다(실측: 병용금기는 "아스피린"+"메토트렉세이트"만으로 1728건,
-  노인주의는 "아스피린" 하나로 47건 발생). 병용금기는 CSV의 브랜드명 대신 **처방전에 실제로
-  적힌 약 이름**으로, 나머지는 **(카테고리, 사유, 부가정보) 조합**으로 한 번씩만 보여주도록
-  전부 중복 제거 처리했다 (1728건 → 2건, 47건 → 2건으로 확인).
+- **브랜드 단위 중복 제거**: API 응답도 CSV와 마찬가지로 제품(브랜드) 단위라 같은 성분이
+  제조사별로 수십 건씩 중복 등재돼 있다(실측: "한미아스피린장용정100밀리그램" 하나로
+  병용금기 상대만 42건). 병용금기는 (mixture_item_name, prohbt_content) 조합으로, 나머지는
+  (카테고리, 사유, 부가정보) 조합으로 한 번씩만 보여주도록 중복 제거 처리했다.
+- **발견된 버그(2026-07-14)**: DUR API를 실제로 연결해 e2e 테스트하는 과정에서,
+  `chat_router.py`의 `_build_patient_context()`가 `GuideResult.source_refs`를 전혀 읽지
+  않아 챗봇이 DUR 경고(병용금기/노인주의/연령금기/임부금기)를 하나도 참고하지 못하고
+  있었음을 발견했다 — "이 약 부작용 있으면 어떻게 하나요?" 같은 질문에도 원래 가이드
+  생성 시점의 `medication_guide` 프로즈에 우연히 포함된 내용에만 의존하고 있었다.
+  `_summarize_source_refs()`를 추가해 DUR 항목만 챗봇 컨텍스트에 포함시키도록 고쳤다
+  (의약품/생활지침 인용은 이미 medication_guide/lifestyle_guide 텍스트에 있어 중복 추가하지
+  않음). 실제 임부금기 사례(아스피린, "임신 3기…")로 답변이 구체적으로 개선됨을 확인.

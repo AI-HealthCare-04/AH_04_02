@@ -12,17 +12,24 @@ class Settings(BaseSettings):
     # 식약처_의약품개요정보(e약은요) — 효능효과/용법용량/주의사항 등 환자용 설명문 텍스트 (가이드 생성 인용용)
     MFDS_BASE_URL: str = "http://apis.data.go.kr/1471000/DrbEasyDrugInfoService/getDrbEasyDrugList"
 
-    # [보류] 식약처_의약품제품허가정보 — e약은요·약가마스터만으로 우선 조회하기로 하고 비활성화.
-    # 정보량이 방대하고 순현님 쪽 연동(HIRA 약가마스터)과 조율이 더 필요해서, 나중에 정말
-    # 경로를 바꿔야 하는 문제가 생기면 그때 주석을 풀어 쓴다. mfds_client.py의
-    # search_permit_info()/is_officially_approved()도 같은 이유로 주석 처리해뒀다.
-    # PERMIT_INFO_BASE_URL: str = "http://apis.data.go.kr/1471000/DrugPrdtPrmsnInfoService07/getDrugPrdtPrmsnInq07"
+    # [2026-07-14] 식약처_의약품제품허가정보 활용신청 승인되어 재활성화. 같은
+    # DATA_GO_KR_SERVICE_KEY를 재사용한다. mfds_client.py의 search_permit_info()/
+    # is_officially_approved()도 함께 복원.
+    PERMIT_INFO_BASE_URL: str = "https://apis.data.go.kr/1471000/DrugPrdtPrmsnInfoService07/getDrugPrdtPrmsnInq07"
+    # [2026-07-14 추가] 목록 조회와 별개 엔드포인트 — 사용상의주의사항(NB_DOC_DATA) 등 원문 텍스트 제공.
+    PERMIT_DETAIL_BASE_URL: str = (
+        "https://apis.data.go.kr/1471000/DrugPrdtPrmsnInfoService07/getDrugPrdtPrmsnDtlInq06"
+    )
 
-    # [2026-07-10 → 7/13] 식약처_의약품안전사용서비스(DUR) 병용금기는 원래 API 연동(같은
-    # DATA_GO_KR_SERVICE_KEY 재사용)을 시도했으나 403 Forbidden(활용신청 승인 대기중)이라,
-    # 공공데이터포털에서 받은 로컬 CSV 조회로 대체했다 (rag/dur_master.py,
-    # 경로는 hira_master.py와 동일하게 모듈 상수 DEFAULT_DUR_TABOO_CSV_PATH로 관리 —
-    # 여기 Settings에는 별도 URL/경로 설정이 없다). CONTRACT.md §7 참고.
+    # [2026-07-14] 식약처_의약품안전사용서비스(DUR) 활용신청이 승인되어(신청유형: 개발계정,
+    # 처리상태: 승인) 로컬 CSV 조회를 폐기하고 다시 API 연동으로 전환했다. 같은
+    # DATA_GO_KR_SERVICE_KEY를 재사용한다. CONTRACT.md §7 참고.
+    DUR_USJNT_TABOO_BASE_URL: str = "https://apis.data.go.kr/1471000/DURPrdlstInfoService03/getUsjntTabooInfoList03"
+    DUR_ODSN_ATENT_BASE_URL: str = "https://apis.data.go.kr/1471000/DURPrdlstInfoService03/getOdsnAtentInfoList03"
+    DUR_AGE_TABOO_BASE_URL: str = (
+        "https://apis.data.go.kr/1471000/DURPrdlstInfoService03/getSpcifyAgrdeTabooInfoList03"
+    )
+    DUR_PREGNANCY_TABOO_BASE_URL: str = "https://apis.data.go.kr/1471000/DURPrdlstInfoService03/getPwnmTabooInfoList03"
 
     OPENAI_API_KEY: str | None = None
     OPENAI_MODEL: str = "gpt-4o-mini"
