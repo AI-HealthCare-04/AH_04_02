@@ -15,6 +15,13 @@ export function getCurrentCaregiverId(): number | null {
   return value ? Number(value) : null;
 }
 
+/** [7/14] access_token 존재 여부로 로그인 상태를 판단 — monitoringClient.ts의 401
+ * 인터셉터가 이 토큰을 검사하는 것과 동일한 기준. 비로그인 상태에서 인증 필요한
+ * API를 호출하면 401 → 강제로 /login 리다이렉트되는 걸 막을 때 이걸로 먼저 가드한다. */
+export function isLoggedIn(): boolean {
+  return !!localStorage.getItem("access_token");
+}
+
 /**
  * [7/14] Dashboard/Schedule/Notification/Connect/Check처럼 "환자 본인 로그인"과
  * "보호자 로그인"이 화면을 공유하는 곳에서, 보호자가 localStorage에 남은 옛/잘못된
