@@ -9,6 +9,7 @@ import {
   type IntakeStatus,
 } from "../api/monitoring";
 import { listRecords, type RecordSummary } from "../api/records";
+import { getCurrentCaregiverId } from "../lib/session";
 import { C } from "../theme";
 
 // 로그인이 아직 없어서 patient_id를 localStorage에서 관리
@@ -22,7 +23,11 @@ export default function Dashboard() {
   const [meds, setMeds] = useState<Medication[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [showBanner, setShowBanner] = useState(true);
+  // [수정] "보호자를 연결해보세요" 배너는 환자 본인이 아직 아무 보호자와도 연결 안 됐을 때
+  // 초대를 유도하려는 것 — 이미 보호자로 로그인해서 이 환자를 보고 있는 사람에게는
+  // (본인이 이미 연결된 보호자이므로) 의미가 없고, 눌러도 환자용 초대 화면(Connect.tsx)이
+  // 떠서 혼란만 준다. 환자 본인 로그인(caregiver_id 없음)일 때만 보여준다.
+  const [showBanner, setShowBanner] = useState(!getCurrentCaregiverId());
   const [recentRecords, setRecentRecords] = useState<RecordSummary[]>([]);
 
   useEffect(() => {

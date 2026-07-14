@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AlertCircle, Check } from "lucide-react";
 import NavBar from "../components/NavBar";
@@ -78,6 +78,9 @@ export default function PrescriptionReview() {
   const [showFinalModal, setShowFinalModal] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
+  // 항목별 입력칸을 감싸는 컨테이너 — blur 시 포커스가 "같은 항목의 다른 칸"으로
+  // 이동하는 중인지 판별해서, 그 경우엔 아직 확인 완료 처리하지 않기 위함
+  const itemContainerRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
   useEffect(() => {
     if (!recordId) return;
@@ -121,10 +124,13 @@ export default function PrescriptionReview() {
   const fieldIssues = (item: OcrMedication): FieldIssue[] =>
     computeIssues(edited[item.id] ?? item, drugNameOk[item.id]);
 
-  // 항목의 모든 칸을 채운 채로 다른 칸으로 이동하면(blur) 자동으로 "확인 완료" 처리합니다.
+  // 항목의 모든 칸을 채운 채로 "그 항목을 완전히 벗어나면"(blur) 자동으로 "확인 완료" 처리합니다.
   // 약품명은 다시 입력했으면 e약은요/HIRA 재조회로 실제 존재하는 약인지 확인하고,
   // 용량은 단위 포함 형식인지 확인한 뒤에야 완료 처리합니다.
-  const handleBlur = async (id: number, field: keyof OcrMedication) => {
+  // [수정] relatedTarget(다음에 포커스를 받을 요소)이 같은 항목 컨테이너 안에 있으면
+  // — 즉 사용자가 같은 항목의 다음 칸으로 탭/클릭 이동 중이면 — 아직 다 안 봤으니
+  // 확인 완료로 잠그지 않고 계속 입력 가능한 상태로 둔다.
+  const handleBlur = async (id: number, field: keyof OcrMedication, relatedTarget: EventTarget | null) => {
     const m = edited[id];
     if (!m) return;
 
@@ -138,6 +144,9 @@ export default function PrescriptionReview() {
         // 조회 실패(네트워크 등) 시엔 기존 상태를 유지 — 오류로 단정하지 않음
       }
     }
+
+    const container = itemContainerRefs.current[id];
+    if (relatedTarget instanceof Node && container?.contains(relatedTarget)) return;
 
     const current = edited[id];
     if (computeIssues(current, nameOk).length === 0) {
@@ -473,7 +482,10 @@ export default function PrescriptionReview() {
                         </div>
                       )}
 
-                      <div className="p-6 grid grid-cols-2 gap-4">
+                      <div
+                        ref={(el) => { itemContainerRefs.current[item.id] = el; }}
+                        className="p-6 grid grid-cols-2 gap-4"
+                      >
                         {FIELDS.map(({ key, label }) => {
                           const hasIssue = !isDone && issues.some((iss) => iss.field === key);
                           return (
@@ -503,7 +515,7 @@ export default function PrescriptionReview() {
                                 <input
                                   value={String(edited[item.id]?.[key] ?? "")}
                                   onChange={(e) => update(item.id, key, e.target.value)}
-                                  onBlur={() => handleBlur(item.id, key)}
+                                  onBlur={(e) => handleBlur(item.id, key, e.relatedTarget)}
                                   className="w-full px-4 py-2.5 rounded-xl border text-[14px] outline-none transition-all"
                                   style={{
                                     borderColor: hasIssue ? "#D94F4F" : `${C.terracottaLight}60`,
