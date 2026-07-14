@@ -271,8 +271,8 @@ export default function SignUp() {
     }
   };
 
-  const nextRoute = memberType === "personal" && pRole === "patient" ? "/check" : "/patients";
-  const nextLabel = memberType === "personal" && pRole === "patient" ? "자가진단 시작하기" : "환자 등록하러 가기";
+  const nextRoute = memberType === "personal" && pRole === "patient" ? "/dashboard" : "/patients";
+  const nextLabel = memberType === "personal" && pRole === "patient" ? "시작하기" : "환자 등록하러 가기";
   const mm = String(Math.floor(timer / 60)).padStart(2, "0");
   const ss = String(timer % 60).padStart(2, "0");
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import NavBar from "../components/NavBar";
 import { createRecord } from "../api/records";
+import { C } from "../theme";
 
 const steps = [
   { id: 1, label: "OCR 인식 중", desc: "처방전에서 약품 정보를 읽고 있어요" },
@@ -102,25 +103,25 @@ export default function Processing() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  page: { minHeight: "100vh", background: "#FAF6F1", fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" },
+  page: { minHeight: "100vh", background: C.ivory, fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" },
   main: { maxWidth: 600, margin: "0 auto", padding: "80px 24px", display: "flex", flexDirection: "column" as const, alignItems: "center" },
-  card: { width: "100%", background: "#FFFFFF", border: "1px solid #EEE6DC", borderRadius: 20, padding: "48px 40px", textAlign: "center" as const },
+  card: { width: "100%", background: C.white, border: "1px solid rgba(30,26,23,0.12)", borderRadius: 20, padding: "48px 40px", textAlign: "center" as const },
   spinner: { fontSize: 48, marginBottom: 20 },
-  title: { fontSize: 26, fontWeight: 700, color: "#2A2A2A", marginBottom: 10 },
-  subtitle: { fontSize: 15, color: "#888888", marginBottom: 40 },
+  title: { fontSize: 26, fontWeight: 700, color: C.dark, marginBottom: 10 },
+  subtitle: { fontSize: 15, color: C.muted, marginBottom: 40 },
   steps: { display: "flex", flexDirection: "column" as const, gap: 16, textAlign: "left" as const, marginBottom: 36 },
-  stepRow: { display: "flex", alignItems: "flex-start", gap: 16, padding: "14px 16px", background: "#FAF6F1", borderRadius: 12 },
-  stepDot: { width: 32, height: 32, borderRadius: "50%", background: "#EEE6DC", color: "#AAAAAA", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, flexShrink: 0 },
-  stepDone: { background: "#4CAF50", color: "#FFFFFF" },
-  stepActive: { background: "#C16A45", color: "#FFFFFF" },
+  stepRow: { display: "flex", alignItems: "flex-start", gap: 16, padding: "14px 16px", background: C.ivory, borderRadius: 12 },
+  stepDot: { width: 32, height: 32, borderRadius: "50%", background: C.bubbleBg, color: C.muted, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, flexShrink: 0 },
+  stepDone: { background: C.success, color: C.white },
+  stepActive: { background: C.terracotta, color: C.white },
   stepContent: { flex: 1 },
-  stepLabel: { fontSize: 15, fontWeight: 600, color: "#888888", marginBottom: 2 },
-  stepLabelActive: { color: "#2A2A2A" },
-  stepDesc: { fontSize: 13, color: "#888888", marginTop: 4 },
+  stepLabel: { fontSize: 15, fontWeight: 600, color: C.muted, marginBottom: 2 },
+  stepLabelActive: { color: C.dark },
+  stepDesc: { fontSize: 13, color: C.muted, marginTop: 4 },
   stepStatus: { flexShrink: 0 },
-  statusDone: { fontSize: 12, color: "#4CAF50", fontWeight: 600 },
-  statusActive: { fontSize: 12, color: "#C16A45", fontWeight: 600 },
-  statusWait: { fontSize: 12, color: "#CCCCCC" },
-  disclaimer: { background: "#FFF8F4", border: "1px solid #F0E5D8", borderRadius: 10, padding: "12px 16px" },
-  disclaimerText: { fontSize: 13, color: "#C16A45", lineHeight: 1.6 },
+  statusDone: { fontSize: 12, color: C.successText, fontWeight: 600 },
+  statusActive: { fontSize: 12, color: C.terracotta, fontWeight: 600 },
+  statusWait: { fontSize: 12, color: C.muted },
+  disclaimer: { background: `${C.terracotta}10`, border: `1px solid ${C.terracotta}25`, borderRadius: 10, padding: "12px 16px" },
+  disclaimerText: { fontSize: 13, color: C.terracotta, lineHeight: 1.6 },
 };

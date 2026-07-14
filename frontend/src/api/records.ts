@@ -83,7 +83,7 @@ export function formatSourceRef(ref: SourceRef): string {
 }
 
 /** source_refs를 표시용 문자열로 변환하되, 같은 출처 텍스트가 반복되면 한 번만 남긴다
- * (생활지침 여러 항목이 같은 학회 지침을 공유하는 경우가 많음). */
+ * (여러 약이 같은 학회 지침·같은 DUR 주의를 각자 인용하는 경우가 많음). */
 export function formatUniqueSourceRefs(refs: SourceRef[]): { text: string; url?: string }[] {
   const seen = new Set<string>();
   const result: { text: string; url?: string }[] = [];

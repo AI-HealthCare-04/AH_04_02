@@ -14,6 +14,8 @@ export const C = {
   muted: "#8A7E75",
   bubbleBg: "#F4F0EA",
   success: "#8FAE8B",
+  successText: "#4A7A47", // success(#8FAE8B)는 작은 텍스트엔 대비가 약해서, 흰 배경 위 텍스트는 이 진한 초록을 씀
+  danger: "#D94F4F",
   warningBg: "rgba(224, 138, 91, 0.10)",
   warningBorder: "rgba(224, 138, 91, 0.25)",
   warningText: "#7A4B28",

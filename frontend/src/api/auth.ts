@@ -5,6 +5,7 @@ export interface LoginResponse {
   token_type: string;
   caregiver_id: number;
   name: string;
+  role: "caregiver" | "patient";
 }
 
 export async function login(identifier: string, password: string) {

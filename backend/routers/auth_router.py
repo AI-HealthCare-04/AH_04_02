@@ -13,7 +13,7 @@ from __future__ import annotations
 import jwt
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from pydantic import BaseModel, EmailStr
-from sqlmodel import Session, select
+from sqlmodel import Session, func, select
 
 from auth import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
 from database import get_session
@@ -40,12 +40,16 @@ class LoginResponse(BaseModel):
     token_type: str = "bearer"
     caregiver_id: int
     name: str
+    role: str  # "caregiver" / "patient" — 프론트가 로그인 후 흐름(보호자용/환자 본인용)을 분기하는 데 씀
 
 
 def _find_by_identifier(session: Session, model, identifier: str):
-    """identifier가 이메일 형식이면 email로, 아니면 전화번호로 보고 phone_hash로 조회."""
+    """identifier가 이메일 형식이면 email로, 아니면 전화번호로 보고 phone_hash로 조회.
+    이메일은 대소문자·좌우공백 차이(모바일 자동대문자화 등)로 가입 때와 다르게
+    입력돼도 같은 계정으로 찾도록 대소문자 무시 비교한다."""
     if "@" in identifier:
-        return session.exec(select(model).where(model.email == identifier)).first()
+        norm = identifier.strip().lower()
+        return session.exec(select(model).where(func.lower(model.email) == norm)).first()
     return session.exec(select(model).where(model.phone_hash == hash_phone(identifier))).first()
 
 
@@ -85,7 +89,7 @@ def _issue_login_response(response: Response, subject_id: int, role: str, name: 
     access_token = create_access_token(subject_id, role)
     refresh_token = create_refresh_token(subject_id, role)
     response.set_cookie(key="refresh_token", value=refresh_token, httponly=True)
-    return LoginResponse(access_token=access_token, caregiver_id=subject_id, name=name)
+    return LoginResponse(access_token=access_token, caregiver_id=subject_id, name=name, role=role)
 
 
 @router.get("/token/refresh", response_model=LoginResponse)
@@ -102,4 +106,4 @@ def refresh_token(refresh_token: str | None = Cookie(default=None), session: Ses
     subject = session.get(model, subject_id)
     if not subject:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "인증에 실패했습니다.")
-    return LoginResponse(access_token=create_access_token(subject_id, role), caregiver_id=subject_id, name=subject.name)
+    return LoginResponse(access_token=create_access_token(subject_id, role), caregiver_id=subject_id, name=subject.name, role=role)

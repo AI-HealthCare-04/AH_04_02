@@ -143,7 +143,13 @@ export default function PatientManagement() {
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <button
-                    onClick={() => navigate(`/records?patient_id=${p.id}`)}
+                    onClick={() => {
+                      // [7/14] 다른 화면(Dashboard/Schedule/Notification/Connect/Check)은
+                      // ?patient_id= 쿼리를 안 읽고 localStorage만 보므로, 여기서 고른
+                      // 환자가 그 화면들에도 이어지도록 같이 저장해둔다.
+                      localStorage.setItem("patient_id", String(p.id));
+                      navigate(`/records?patient_id=${p.id}`);
+                    }}
                     className="px-4 py-2 rounded-full text-[13px] font-bold"
                     style={{ background: `${C.terracotta}12`, color: C.terracotta }}
                   >

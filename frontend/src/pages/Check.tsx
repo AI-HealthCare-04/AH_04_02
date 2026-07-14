@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import NavBar from "../components/NavBar";
 import { createAssessment, type CareLevel, type Level } from "../api/care";
-import { getCurrentPatientId } from "../lib/session";
+import { useGuardedPatientId } from "../lib/session";
 
 const CARE_LEVEL_LABEL: Record<CareLevel, string> = {
   independent: "자가관리 가능",
@@ -24,12 +24,13 @@ const LEVELS: { key: Level; label: string }[] = [
 
 function pillClass(active: boolean) {
   return `px-5 py-2 rounded-full text-[14px] font-bold border-2 transition-all ${
-    active ? "bg-[#7C8B5D] border-[#7C8B5D] text-white" : "bg-[#F5F0EA] border-[#D9CFC7] text-[#888888]"
+    active ? "bg-[#C1653D] border-[#C1653D] text-white" : "bg-[#F4F0EA] border-[rgba(30,26,23,0.12)] text-[#8A7E75]"
   }`;
 }
 
 export default function Check() {
   const navigate = useNavigate();
+  const patientId = useGuardedPatientId();
   const [cognitive, setCognitive] = useState<Level>("normal");
   const [mobility, setMobility] = useState<Level>("normal");
   const [vision, setVision] = useState<Level>("normal");
@@ -40,11 +41,12 @@ export default function Check() {
   const [error, setError] = useState("");
 
   const handleSubmit = async () => {
+    if (patientId == null) return;
     setSubmitting(true);
     setError("");
     try {
       const saved = await createAssessment({
-        patient_id: getCurrentPatientId(),
+        patient_id: patientId,
         cognitive_level: cognitive,
         mobility_level: mobility,
         vision_level: vision,
@@ -63,16 +65,16 @@ export default function Check() {
     <div className="min-h-screen bg-[#FAF6F1]">
       <NavBar isLoggedIn userName="김건강" />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
-        <h1 className="text-[26px] font-black text-[#2A2A2A] mb-2">자가진단 체크리스트</h1>
-        <p className="text-[14px] text-[#888888] mb-7">
+        <h1 className="text-[26px] font-black text-[#1E1A17] mb-2">자가진단 체크리스트</h1>
+        <p className="text-[14px] text-[#8A7E75] mb-7">
           대상자의 현재 상태를 입력하면 적합한 도움 수준을 판정합니다.
         </p>
 
-        <div className="bg-white border border-[#EEE6DC] rounded-2xl p-6 mb-5">
-          <p className="text-[13px] font-bold text-[#888888] mb-4">기능 수준 평가</p>
+        <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-5">
+          <p className="text-[13px] font-bold text-[#8A7E75] mb-4">기능 수준 평가</p>
 
-          <div className="flex items-center justify-between py-3.5 border-b border-[#F5F0EA] flex-wrap gap-2">
-            <span className="text-[15px] font-medium text-[#2A2A2A]">인지 수준</span>
+          <div className="flex items-center justify-between py-3.5 border-b border-[#F4F0EA] flex-wrap gap-2">
+            <span className="text-[15px] font-medium text-[#1E1A17]">인지 수준</span>
             <div className="flex gap-2">
               {LEVELS.map((l) => (
                 <button key={l.key} onClick={() => setCognitive(l.key)} className={pillClass(cognitive === l.key)}>
@@ -82,8 +84,8 @@ export default function Check() {
             </div>
           </div>
 
-          <div className="flex items-center justify-between py-3.5 border-b border-[#F5F0EA] flex-wrap gap-2">
-            <span className="text-[15px] font-medium text-[#2A2A2A]">거동 수준</span>
+          <div className="flex items-center justify-between py-3.5 border-b border-[#F4F0EA] flex-wrap gap-2">
+            <span className="text-[15px] font-medium text-[#1E1A17]">거동 수준</span>
             <div className="flex gap-2">
               {LEVELS.map((l) => (
                 <button key={l.key} onClick={() => setMobility(l.key)} className={pillClass(mobility === l.key)}>
@@ -94,7 +96,7 @@ export default function Check() {
           </div>
 
           <div className="flex items-center justify-between py-3.5 flex-wrap gap-2">
-            <span className="text-[15px] font-medium text-[#2A2A2A]">시력 수준</span>
+            <span className="text-[15px] font-medium text-[#1E1A17]">시력 수준</span>
             <div className="flex gap-2">
               {LEVELS.map((l) => (
                 <button key={l.key} onClick={() => setVision(l.key)} className={pillClass(vision === l.key)}>
@@ -105,11 +107,11 @@ export default function Check() {
           </div>
         </div>
 
-        <div className="bg-white border border-[#EEE6DC] rounded-2xl p-6 mb-7">
-          <p className="text-[13px] font-bold text-[#888888] mb-4">복약 인식 및 의지</p>
+        <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-7">
+          <p className="text-[13px] font-bold text-[#8A7E75] mb-4">복약 인식 및 의지</p>
 
-          <div className="flex items-center justify-between py-3.5 border-b border-[#F5F0EA] flex-wrap gap-2">
-            <span className="text-[15px] font-medium text-[#2A2A2A]">복용해야 함을 인지하는가</span>
+          <div className="flex items-center justify-between py-3.5 border-b border-[#F4F0EA] flex-wrap gap-2">
+            <span className="text-[15px] font-medium text-[#1E1A17]">복용해야 함을 인지하는가</span>
             <div className="flex gap-2">
               <button onClick={() => setAwareness(true)} className={pillClass(awareness)}>예</button>
               <button onClick={() => setAwareness(false)} className={pillClass(!awareness)}>아니오</button>
@@ -117,7 +119,7 @@ export default function Check() {
           </div>
 
           <div className="flex items-center justify-between py-3.5 flex-wrap gap-2">
-            <span className="text-[15px] font-medium text-[#2A2A2A]">복용 의지가 있는가</span>
+            <span className="text-[15px] font-medium text-[#1E1A17]">복용 의지가 있는가</span>
             <div className="flex gap-2">
               <button onClick={() => setWillingness(true)} className={pillClass(willingness)}>예</button>
               <button onClick={() => setWillingness(false)} className={pillClass(!willingness)}>아니오</button>
@@ -129,7 +131,7 @@ export default function Check() {
 
         <button
           onClick={handleSubmit}
-          disabled={submitting}
+          disabled={submitting || patientId == null}
           className="w-full py-4 rounded-xl bg-[#C1653D] text-white font-bold text-[16px] disabled:opacity-60"
         >
           {submitting ? "저장 중..." : "저장 및 평가하기"}
@@ -138,10 +140,10 @@ export default function Check() {
         {result && (
           <div className={`mt-6 rounded-2xl p-6 border-2 ${CARE_LEVEL_STYLE[result.care_level]}`}>
             <p className="text-[12px] font-bold uppercase tracking-widest mb-2">평가 결과</p>
-            <p className="text-[24px] font-black text-[#2A2A2A] mb-2">
+            <p className="text-[24px] font-black text-[#1E1A17] mb-2">
               {CARE_LEVEL_LABEL[result.care_level]}
             </p>
-            <p className="text-[14px] text-[#888888] leading-relaxed mb-5">{result.reason}</p>
+            <p className="text-[14px] text-[#8A7E75] leading-relaxed mb-5">{result.reason}</p>
             <button
               onClick={() => navigate("/select")}
               className="px-6 py-3 rounded-full bg-[#C1653D] text-white font-bold text-[14px]"
