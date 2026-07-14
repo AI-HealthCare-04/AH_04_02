@@ -13,6 +13,10 @@ CHAT_PROVIDER=real (OCR_PROVIDER/RAG_PROVIDER와 동일 컨벤션)을 .env에 �
 시도합니다. 기본값(미설정)이거나, rag 의존성이 없거나, LLM 호출이 실패하면
 고정 질문은 PRESET_QUESTIONS 답변으로, 자유 질문은 "지금은 어렵다"는 안내로 조용히
 폴백합니다 — 챗봇 자체가 죽는 것보단 뭐라도 답이 나가는 게 낫다는 판단.
+
+[7/14] POST /ask, GET /history가 patient_id를 검증 없이 그대로 신뢰하던 IDOR을
+monitoring_router.py/care_router.py와 동일한 `get_current_actor`/
+`require_actor_patient_access` 패턴으로 막았습니다(issue #21 잔여 범위).
 """
 from __future__ import annotations
 
@@ -22,6 +26,7 @@ import sys
 from pathlib import Path
 
 from database import get_session
+from dependencies import Actor, get_current_actor, require_actor_patient_access
 from fastapi import APIRouter, Depends, HTTPException
 from models import ChatMessage, GuideResult, MedicalRecord, OcrResult, Patient
 from pydantic import BaseModel
@@ -208,11 +213,12 @@ class ChatAsk(BaseModel):
 
 
 @router.post("/ask")
-def ask(payload: ChatAsk, session: Session = Depends(get_session)):
+def ask(payload: ChatAsk, actor: Actor = Depends(get_current_actor), session: Session = Depends(get_session)):
     """고정 질문(question_id) 또는 자유 텍스트(question) 중 하나로 묻는다.
     CHAT_PROVIDER=real이면 그 환자의 최근 처방전을 참고해 GPT가 답변을 생성하고,
     아니거나 실패하면 고정 질문은 PRESET_QUESTIONS 답변으로, 자유 질문은 안내 문구로 나간다.
     """
+    require_actor_patient_access(payload.patient_id, actor, session)
     if not session.get(Patient, payload.patient_id):
         raise HTTPException(404, "해당 환자를 찾을 수 없어요")
 
@@ -258,8 +264,9 @@ def ask(payload: ChatAsk, session: Session = Depends(get_session)):
 
 
 @router.get("/history")
-def history(patient_id: int, session: Session = Depends(get_session)):
+def history(patient_id: int, actor: Actor = Depends(get_current_actor), session: Session = Depends(get_session)):
     """지난 대화 이력 (마이페이지 등에서 참고용으로 쓸 수 있음)"""
+    require_actor_patient_access(patient_id, actor, session)
     return session.exec(
         select(ChatMessage)
         .where(ChatMessage.patient_id == patient_id)
