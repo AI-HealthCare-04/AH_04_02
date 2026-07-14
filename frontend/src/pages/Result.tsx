@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import NavBar from "../components/NavBar";
-import { formatSourceRef, type RecordResult } from "../api/records";
+import { formatUniqueSourceRefs, type RecordResult } from "../api/records";
 
 const STATIC_DISCLAIMER =
   "이 정보는 AI가 생성한 참고용 안내입니다. 정확한 복약 지도는 담당 의사 또는 약사에게 확인하세요.";
@@ -165,7 +165,7 @@ export default function Result() {
               {guide.source_refs.length > 0 && (
                 <div style={styles.sources}>
                   <p style={styles.sourcesText}>
-                    출처: {guide.source_refs.map(formatSourceRef).join(", ")}
+                    출처: {formatUniqueSourceRefs(guide.source_refs).map((s) => s.text).join(", ")}
                   </p>
                 </div>
               )}
