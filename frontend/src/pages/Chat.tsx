@@ -20,6 +20,16 @@ function withObjectParticle(word: string): string {
   return `${word}를`;
 }
 
+// 백엔드가 내려주는 answer_source는 개발용 원문 그대로임("llm"/"preset"/"unsupported"/
+// "preset_fallback (TimeoutError)" 등) — 사용자에게는 "출처: ..." 형태의 한글 안내로 바꿔 보여준다.
+function formatAnswerSource(source: string): string {
+  // 백엔드가 "llm (gpt-4o-mini)"처럼 모델명을 괄호로 붙여 보낸다 — 그대로 옮겨 붙인다.
+  if (source.startsWith("llm")) return `출처: AI 실시간 답변${source.slice(3)}`;
+  if (source === "preset") return "출처: 자주 묻는 질문 답변";
+  if (source.includes("fallback")) return "출처: 사전 등록된 답변";
+  return "출처: 일반 안내";
+}
+
 function buildGreeting(context: ChatContext | null): string {
   if (context?.drugName) {
     return `${withObjectParticle(context.drugName)} 드시고 계시군요. 관련해서 무엇을 도와드릴까요?`;
@@ -130,7 +140,7 @@ export default function Chat() {
                     {m.text}
                   </div>
                   {m.source && (
-                    <p className="text-[11px] mt-1.5 px-1" style={{ color: C.muted }}>{m.source}</p>
+                    <p className="text-[11px] mt-1.5 px-1" style={{ color: C.muted }}>{formatAnswerSource(m.source)}</p>
                   )}
                 </div>
               </div>

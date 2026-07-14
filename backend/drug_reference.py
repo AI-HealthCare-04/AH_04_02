@@ -497,8 +497,9 @@ def get_drug_info(drug_name: str, drug_code: str = "") -> dict:
     cls = _class_from_atc_pattern(drug_name)
     if cls:
         return {"drug_name": drug_name, "drug_class": cls, "efficacy": "",
-                "match_source": "atc_pattern", "matched_item": "", "atc_code": ""}
+                "match_source": "atc_pattern", "matched_item": drug_name, "atc_code": ""}
 
     cls = _class_from_fallback(drug_name)
     return {"drug_name": drug_name, "drug_class": cls, "efficacy": "",
-            "match_source": "fallback" if cls else "unknown", "matched_item": "", "atc_code": ""}
+            "match_source": "fallback" if cls else "unknown",
+            "matched_item": drug_name if cls else "", "atc_code": ""}

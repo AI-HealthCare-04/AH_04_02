@@ -9,23 +9,24 @@ import {
   type IntakeStatus,
 } from "../api/monitoring";
 import { listRecords, type RecordSummary } from "../api/records";
-
-// 로그인이 아직 없어서 patient_id를 localStorage에서 관리
-// (환자가 여러 명이 되면 "환자 선택" 화면에서 이 값을 설정하도록 확장)
-function getCurrentPatientId(): number {
-  return Number(localStorage.getItem("patient_id") ?? 1);
-}
+import { getCurrentCaregiverId, useGuardedPatientId } from "../lib/session";
+import { C } from "../theme";
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const patientId = useGuardedPatientId();
   const [meds, setMeds] = useState<Medication[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [showBanner, setShowBanner] = useState(true);
+  // [수정] "보호자를 연결해보세요" 배너는 환자 본인이 아직 아무 보호자와도 연결 안 됐을 때
+  // 초대를 유도하려는 것 — 이미 보호자로 로그인해서 이 환자를 보고 있는 사람에게는
+  // (본인이 이미 연결된 보호자이므로) 의미가 없고, 눌러도 환자용 초대 화면(Connect.tsx)이
+  // 떠서 혼란만 준다. 환자 본인 로그인(caregiver_id 없음)일 때만 보여준다.
+  const [showBanner, setShowBanner] = useState(!getCurrentCaregiverId());
   const [recentRecords, setRecentRecords] = useState<RecordSummary[]>([]);
 
   useEffect(() => {
-    const patientId = getCurrentPatientId();
+    if (patientId == null) return;
     getTodayMedications(patientId)
       .then(setMeds)
       .catch(() => setError("복약 목록을 불러오지 못했어요."))
@@ -33,7 +34,7 @@ export default function Dashboard() {
     listRecords(patientId)
       .then((list) => setRecentRecords(list.filter((r) => r.status === "completed").slice(0, 2)))
       .catch(() => {});
-  }, []);
+  }, [patientId]);
 
   const updateStatus = async (id: string, status: IntakeStatus) => {
     // 먼저 화면부터 낙관적으로 바꾸고, 실패하면 되돌림 (버튼 반응성 위해)
@@ -82,7 +83,7 @@ export default function Dashboard() {
         <h2 style={styles.sectionTitle}>오늘의 복약</h2>
 
         {loading && <p style={styles.stateText}>불러오는 중이에요...</p>}
-        {!loading && error && <p style={{ ...styles.stateText, color: "#D94F4F" }}>{error}</p>}
+        {!loading && error && <p style={{ ...styles.stateText, color: C.danger }}>{error}</p>}
         {!loading && !error && meds.length === 0 && (
           <p style={styles.stateText}>등록된 복약 일정이 없어요.</p>
         )}
@@ -97,8 +98,8 @@ export default function Dashboard() {
                 </div>
                 <span style={{
                   ...styles.statusBadge,
-                  ...(med.status === "taken" ? { background: "#E8EFE2", color: "#5C7A4A" } :
-                      med.status === "skipped" ? { background: "#F0EBE3", color: "#8A7A6A" } : {})
+                  ...(med.status === "taken" ? { background: `${C.success}30`, color: C.successText } :
+                      med.status === "skipped" ? { background: C.bubbleBg, color: C.muted } : {})
                 }}>
                   {med.status === "taken" ? "복용완료" : med.status === "skipped" ? "건너뜀" : "미복용"}
                 </span>
@@ -118,9 +119,9 @@ export default function Dashboard() {
                         borderRadius: 24,
                         borderWidth: 1.5,
                         borderStyle: "solid",
-                        borderColor: isActive ? "#C16A45" : "#E0D3C4",
-                        background: isActive && s === "pending" ? "#C16A45" : isActive ? "#F5EDE4" : "#FFFFFF",
-                        color: isActive && s === "pending" ? "#FFFFFF" : isActive ? "#C16A45" : "#666666",
+                        borderColor: isActive ? C.terracotta : "rgba(30,26,23,0.12)",
+                        background: isActive && s === "pending" ? C.terracotta : isActive ? C.bubbleBg : C.white,
+                        color: isActive && s === "pending" ? C.white : isActive ? C.terracotta : C.muted,
                         fontWeight: 600,
                         cursor: "pointer",
                         fontSize: 14,
@@ -178,38 +179,38 @@ export default function Dashboard() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  page: { minHeight: "100vh", background: "#FAF6F1", fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" },
+  page: { minHeight: "100vh", background: C.ivory, fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" },
   main: { maxWidth: 700, margin: "0 auto", padding: "32px 20px 60px" },
   headerRow: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 },
-  todayLabel: { fontSize: 13, color: "#888888", marginBottom: 4 },
-  dateTitle: { fontSize: 28, fontWeight: 800, color: "#2A2A2A" },
-  careBadge: { fontSize: 13, fontWeight: 700, color: "#C16A45", background: "#F5EDE4", border: "1px solid #E8CDB8", borderRadius: 20, padding: "8px 16px" },
-  banner: { background: "#F3E3D2", borderRadius: 16, padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 32, flexWrap: "wrap" as const, gap: 12 },
-  bannerTitle: { fontSize: 15, fontWeight: 700, color: "#2A2A2A", marginBottom: 4 },
-  bannerDesc: { fontSize: 13, color: "#8A7A6A" },
+  todayLabel: { fontSize: 13, color: C.muted, marginBottom: 4 },
+  dateTitle: { fontSize: 28, fontWeight: 800, color: C.dark },
+  careBadge: { fontSize: 13, fontWeight: 700, color: C.terracotta, background: C.bubbleBg, border: `1px solid ${C.terracotta}40`, borderRadius: 20, padding: "8px 16px" },
+  banner: { background: `${C.terracotta}18`, borderRadius: 16, padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 32, flexWrap: "wrap" as const, gap: 12 },
+  bannerTitle: { fontSize: 15, fontWeight: 700, color: C.dark, marginBottom: 4 },
+  bannerDesc: { fontSize: 13, color: C.muted },
   bannerActions: { display: "flex", alignItems: "center", gap: 8 },
-  bannerBtn: { padding: "10px 20px", background: "#C16A45", color: "#FFFFFF", border: "none", borderRadius: 24, fontWeight: 700, cursor: "pointer", fontSize: 13, outline: "none" },
-  closeBtn: { width: 32, height: 32, borderRadius: "50%", border: "none", background: "#E5D5C4", cursor: "pointer", fontSize: 16, color: "#8A7A6A", outline: "none" },
-  sectionTitle: { fontSize: 18, fontWeight: 800, color: "#2A2A2A", marginBottom: 16 },
-  stateText: { fontSize: 14, color: "#888888", marginBottom: 16 },
+  bannerBtn: { padding: "10px 20px", background: C.terracotta, color: C.white, border: "none", borderRadius: 24, fontWeight: 700, cursor: "pointer", fontSize: 13, outline: "none" },
+  closeBtn: { width: 32, height: 32, borderRadius: "50%", border: "none", background: `${C.terracotta}30`, cursor: "pointer", fontSize: 16, color: C.muted, outline: "none" },
+  sectionTitle: { fontSize: 18, fontWeight: 800, color: C.dark, marginBottom: 16 },
+  stateText: { fontSize: 14, color: C.muted, marginBottom: 16 },
   medList: { display: "flex", flexDirection: "column" as const, gap: 16, marginBottom: 32 },
-  medCard: { background: "#FFFFFF", borderRadius: 16, padding: "20px 24px", border: "1px solid #EEE6DC" },
+  medCard: { background: C.white, borderRadius: 16, padding: "20px 24px", border: "1px solid rgba(30,26,23,0.12)" },
   medHeader: { display: "flex", justifyContent: "space-between", marginBottom: 16 },
-  medName: { fontSize: 17, fontWeight: 700, color: "#2A2A2A", marginBottom: 4 },
-  medMeta: { fontSize: 13, color: "#888888" },
-  statusBadge: { fontSize: 12, fontWeight: 700, color: "#C16A45", background: "#F5EDE4", borderRadius: 12, padding: "4px 10px", height: "fit-content" },
+  medName: { fontSize: 17, fontWeight: 700, color: C.dark, marginBottom: 4 },
+  medMeta: { fontSize: 13, color: C.muted },
+  statusBadge: { fontSize: 12, fontWeight: 700, color: C.terracotta, background: C.bubbleBg, borderRadius: 12, padding: "4px 10px", height: "fit-content" },
   medActions: { display: "flex", gap: 8 },
-  uploadCta: { background: "#2A211B", borderRadius: 16, padding: "20px 24px", display: "flex", alignItems: "center", gap: 16, cursor: "pointer", marginBottom: 32 },
-  uploadIcon: { width: 40, height: 40, borderRadius: 12, background: "#3D3128", color: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 },
-  uploadTitle: { color: "#FFFFFF", fontWeight: 700, fontSize: 15, marginBottom: 4 },
-  uploadDesc: { color: "#A99C8D", fontSize: 13 },
-  chevron: { marginLeft: "auto", color: "#A99C8D", fontSize: 20 },
+  uploadCta: { background: C.dark, borderRadius: 16, padding: "20px 24px", display: "flex", alignItems: "center", gap: 16, cursor: "pointer", marginBottom: 32 },
+  uploadIcon: { width: 40, height: 40, borderRadius: 12, background: "rgba(255,255,255,0.12)", color: C.white, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 },
+  uploadTitle: { color: C.white, fontWeight: 700, fontSize: 15, marginBottom: 4 },
+  uploadDesc: { color: "rgba(255,255,255,0.65)", fontSize: 13 },
+  chevron: { marginLeft: "auto", color: "rgba(255,255,255,0.65)", fontSize: 20 },
   guideGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 32 },
-  guideCard: { background: "#FFFFFF", borderRadius: 16, padding: 20, border: "1px solid #EEE6DC" },
+  guideCard: { background: C.white, borderRadius: 16, padding: 20, border: "1px solid rgba(30,26,23,0.12)" },
   guideIcon: { fontSize: 20, marginBottom: 12 },
-  guideTitle: { fontSize: 14, fontWeight: 700, color: "#2A2A2A", marginBottom: 20, minHeight: 40 },
+  guideTitle: { fontSize: 14, fontWeight: 700, color: C.dark, marginBottom: 20, minHeight: 40 },
   guideFooter: { display: "flex", justifyContent: "space-between", alignItems: "center" },
-  guideDate: { fontSize: 12, color: "#888888" },
-  guideBtn: { fontSize: 12, fontWeight: 700, color: "#C16A45", background: "#F5EDE4", border: "none", borderRadius: 14, padding: "6px 12px", cursor: "pointer", outline: "none" },
-  disclaimer: { textAlign: "center" as const, fontSize: 12, color: "#AAAAAA" },
+  guideDate: { fontSize: 12, color: C.muted },
+  guideBtn: { fontSize: 12, fontWeight: 700, color: C.terracotta, background: C.bubbleBg, border: "none", borderRadius: 14, padding: "6px 12px", cursor: "pointer", outline: "none" },
+  disclaimer: { textAlign: "center" as const, fontSize: 12, color: C.muted },
 };

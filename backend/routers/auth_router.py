@@ -42,13 +42,17 @@ class LoginResponse(BaseModel):
     token_type: str = "bearer"
     caregiver_id: int
     name: str
+    role: str  # "caregiver" / "patient" — 프론트가 로그인 후 흐름(보호자용/환자 본인용)을 분기하는 데 씀
 
 
 def _find_by_identifier(session: Session, model, identifier: str):
     """identifier가 이메일 형식이면 email로, 아니면 전화번호로 보고 phone_hash로 조회.
 
-    [2026-07-14] 이메일 쪽도 가입 시와 동일하게 정규화(공백 제거+소문자)해서 비교해야
-    " Test@x.com "으로 가입한 계정이 "test@x.com"으로 로그인 시도할 때 못 찾는 문제가 없다.
+    [2026-07-14] 이메일은 대소문자·좌우공백 차이(모바일 자동대문자화 등)로 가입 때와
+    다르게 입력돼도 같은 계정으로 찾아야 한다. 가입 시(monitoring_router.py)부터
+    normalize_email()로 정규화해서 저장하므로, 조회할 때도 같은 정규화 함수로 비교한다
+    — DB의 `func.lower()` 비교는 가입 시 저장값 자체가 정규화돼 있지 않으면 여전히
+    " Test@x.com "과 "test@x.com"이 별개 계정으로 남는 문제를 못 막아서 채택하지 않았다.
     """
     if "@" in identifier:
         return session.exec(select(model).where(model.email == normalize_email(identifier))).first()
@@ -87,7 +91,7 @@ def _issue_login_response(response: Response, subject_id: int, role: str, name: 
     access_token = create_access_token(subject_id, role)
     refresh_token = create_refresh_token(subject_id, role)
     response.set_cookie(key="refresh_token", value=refresh_token, httponly=True)
-    return LoginResponse(access_token=access_token, caregiver_id=subject_id, name=name)
+    return LoginResponse(access_token=access_token, caregiver_id=subject_id, name=name, role=role)
 
 
 @router.get("/token/refresh", response_model=LoginResponse)
@@ -104,4 +108,4 @@ def refresh_token(refresh_token: str | None = Cookie(default=None), session: Ses
     subject = session.get(model, subject_id)
     if not subject:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "인증에 실패했습니다.")
-    return LoginResponse(access_token=create_access_token(subject_id, role), caregiver_id=subject_id, name=subject.name)
+    return LoginResponse(access_token=create_access_token(subject_id, role), caregiver_id=subject_id, name=subject.name, role=role)

@@ -1,3 +1,7 @@
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { getCaregiverPatients } from "../api/monitoring";
+
 /**
  * 로그인이 없어서 "지금 보고 있는 환자/보호자가 누구인지"를 localStorage로 관리합니다.
  * Login.tsx에서 보호자·환자 선택 시 이 값들을 저장합니다.
@@ -9,4 +13,62 @@ export function getCurrentPatientId(): number {
 export function getCurrentCaregiverId(): number | null {
   const value = localStorage.getItem("caregiver_id");
   return value ? Number(value) : null;
+}
+
+/** [7/14] access_token 존재 여부로 로그인 상태를 판단 — monitoringClient.ts의 401
+ * 인터셉터가 이 토큰을 검사하는 것과 동일한 기준. 비로그인 상태에서 인증 필요한
+ * API를 호출하면 401 → 강제로 /login 리다이렉트되는 걸 막을 때 이걸로 먼저 가드한다. */
+export function isLoggedIn(): boolean {
+  return !!localStorage.getItem("access_token");
+}
+
+/**
+ * [7/14] Dashboard/Schedule/Notification/Connect/Check처럼 "환자 본인 로그인"과
+ * "보호자 로그인"이 화면을 공유하는 곳에서, 보호자가 localStorage에 남은 옛/잘못된
+ * patient_id로 엉뚱한 환자 화면에 들어가는 걸 막는다.
+ * - 환자 본인 로그인이면 검증 없이 자기 자신의 id를 그대로 씀.
+ * - 보호자인데 케어하는 환자가 없으면 → /patients(환자 등록)로 보냄.
+ * - 케어하는 환자가 1명뿐이면 자동으로 그 환자로 진행(선택 화면 없이 바로 진입).
+ * - 2명 이상인데 localStorage의 patient_id가 그중 하나가 아니면(=아직 명시적으로
+ *   고른 적 없음) → /patients(환자 선택)로 보내 반드시 먼저 고르게 한다.
+ * 반환값이 null이면 아직 검증 중(보호자 케이스)이거나 리다이렉트된 것 — 화면은
+ * 데이터를 가져오기 전에 이 값이 채워질 때까지 기다려야 한다.
+ */
+export function useGuardedPatientId(): number | null {
+  const navigate = useNavigate();
+  const caregiverId = getCurrentCaregiverId();
+  const [patientId, setPatientId] = useState<number | null>(caregiverId ? null : getCurrentPatientId());
+
+  useEffect(() => {
+    if (!caregiverId) return;
+    let cancelled = false;
+    getCaregiverPatients(caregiverId)
+      .then((patients) => {
+        if (cancelled) return;
+        if (patients.length === 0) {
+          navigate("/patients", { replace: true });
+          return;
+        }
+        // [주의] getCurrentPatientId()는 값이 없으면 1로 폴백하는데, 그 1이 우연히
+        // 이 보호자의 진짜 환자 목록에 있으면 "이미 명시적으로 골랐다"고 오판하게
+        // 된다 — 그래서 여기서는 폴백 없이 localStorage 원값만 그대로 확인한다.
+        const stored = localStorage.getItem("patient_id");
+        const current = stored ? Number(stored) : null;
+        if (current !== null && patients.some((p) => p.id === current)) {
+          setPatientId(current);
+        } else if (patients.length === 1) {
+          localStorage.setItem("patient_id", String(patients[0].id));
+          setPatientId(patients[0].id);
+        } else {
+          navigate("/patients", { replace: true });
+        }
+      })
+      .catch(() => navigate("/patients", { replace: true }));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [caregiverId]);
+
+  return patientId;
 }

@@ -7,14 +7,15 @@ import {
   type NotificationSettings,
 } from "../api/care";
 import { getPatientCaregivers } from "../api/monitoring";
-import { getCurrentPatientId } from "../lib/session";
+import { useGuardedPatientId } from "../lib/session";
+import { C } from "../theme";
 
 function Toggle({ on, onChange, disabled = false }: { on: boolean; onChange: () => void; disabled?: boolean }) {
   return (
     <button
       onClick={!disabled ? onChange : undefined}
       className="relative w-12 h-6 rounded-full shrink-0 transition-all"
-      style={{ background: on ? (disabled ? "#9CC49A" : "#C1653D") : "#D4C9BC", cursor: disabled ? "not-allowed" : "pointer" }}
+      style={{ background: on ? (disabled ? `${C.success}99` : C.terracotta) : "rgba(30,26,23,0.15)", cursor: disabled ? "not-allowed" : "pointer" }}
     >
       <div
         className="absolute top-1 w-4 h-4 bg-white rounded-full transition-all"
@@ -25,13 +26,14 @@ function Toggle({ on, onChange, disabled = false }: { on: boolean; onChange: () 
 }
 
 export default function Notification() {
-  const patientId = getCurrentPatientId();
+  const patientId = useGuardedPatientId();
   const [settings, setSettings] = useState<NotificationSettings | null>(null);
   const [careLocked, setCareLocked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (patientId == null) return;
     Promise.all([
       getNotificationSettings(patientId),
       getLatestAssessment(patientId),
@@ -45,10 +47,10 @@ export default function Notification() {
       .catch(() => setError("설정을 불러오지 못했어요."))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [patientId]);
 
   const toggle = async (key: keyof Pick<NotificationSettings, "medication_reminder_enabled" | "care_alert_enabled" | "all_push_enabled">) => {
-    if (!settings) return;
+    if (!settings || patientId == null) return;
     if (key === "care_alert_enabled" && careLocked) return;
 
     const next = { ...settings, [key]: !settings[key] };
@@ -71,19 +73,19 @@ export default function Notification() {
     <div className="min-h-screen bg-[#FAF6F1]">
       <NavBar isLoggedIn userName="김건강" />
       <main className="max-w-xl mx-auto px-6 sm:px-8 py-10">
-        <h1 className="text-[26px] font-black text-[#2A2A2A] mb-1">알림 설정</h1>
-        <p className="text-[14px] text-[#888888] mb-7">받고 싶은 알림을 선택하세요.</p>
+        <h1 className="text-[26px] font-black text-[#1E1A17] mb-1">알림 설정</h1>
+        <p className="text-[14px] text-[#8A7E75] mb-7">받고 싶은 알림을 선택하세요.</p>
 
-        {loading && <p className="text-[14px] text-[#888888]">불러오는 중이에요...</p>}
+        {loading && <p className="text-[14px] text-[#8A7E75]">불러오는 중이에요...</p>}
         {error && <p className="text-[13px] text-[#D94F4F] mb-4">{error}</p>}
 
         {settings && (
-          <div className="bg-white border border-[#EEE6DC] rounded-2xl p-6">
+          <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl p-6">
             {rows.map(({ key, label, desc, locked }) => (
-              <div key={key} className="flex items-start justify-between py-5 border-b border-[#F5F0EA] last:border-0">
+              <div key={key} className="flex items-start justify-between py-5 border-b border-[#F4F0EA] last:border-0">
                 <div className="flex-1 pr-4">
-                  <p className="text-[16px] font-bold text-[#2A2A2A] mb-1">{label}</p>
-                  <p className="text-[14px] text-[#888888]">{desc}</p>
+                  <p className="text-[16px] font-bold text-[#1E1A17] mb-1">{label}</p>
+                  <p className="text-[14px] text-[#8A7E75]">{desc}</p>
                   {locked && (
                     <p className="text-[12px] font-semibold text-[#8FAE8B] mt-2">
                       ✓ 제3자 도움이 필요한 상태라 이 알림은 최소 1명에게 유지돼요

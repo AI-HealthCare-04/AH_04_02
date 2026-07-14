@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import NavBar from "../components/NavBar";
 import { formatUniqueSourceRefs, type RecordResult } from "../api/records";
+import { C } from "../theme";
 
 const STATIC_DISCLAIMER =
   "이 정보는 AI가 생성한 참고용 안내입니다. 정확한 복약 지도는 담당 의사 또는 약사에게 확인하세요.";
@@ -25,7 +26,7 @@ export default function Result() {
       <div style={styles.page}>
         <NavBar isLoggedIn userName="김건강" />
         <main style={{ ...styles.main, textAlign: "center" as const, padding: "120px 24px" }}>
-          <p style={{ fontSize: 15, color: "#D98A2B", marginBottom: 20 }}>
+          <p style={{ fontSize: 15, color: C.warningText, marginBottom: 20 }}>
             일부 항목의 인식 정확도가 낮아 확인이 필요해요.
           </p>
           <button style={styles.chatBtn} onClick={() => navigate(`/records/${result.record_id}/review`)}>
@@ -41,7 +42,7 @@ export default function Result() {
       <div style={styles.page}>
         <NavBar isLoggedIn userName="김건강" />
         <main style={{ ...styles.main, textAlign: "center" as const, padding: "120px 24px" }}>
-          <p style={{ fontSize: 15, color: "#D94F4F", marginBottom: 20 }}>
+          <p style={{ fontSize: 15, color: C.danger, marginBottom: 20 }}>
             {result.failure_reason || "결과를 생성하지 못했어요."}
           </p>
           <button style={styles.chatBtn} onClick={() => navigate("/upload")}>
@@ -84,7 +85,7 @@ export default function Result() {
                     <p style={styles.medName}>{med.drug_name}</p>
                     <p style={styles.medDosage}>{med.dosage} · {med.frequency}</p>
                     {med.review_required && (
-                      <p style={{ fontSize: 11, color: "#D98A2B", marginTop: 2 }}>
+                      <p style={{ fontSize: 11, color: C.warningText, marginTop: 2 }}>
                         확인 필요 (인식 정확도 {Math.round(med.confidence * 100)}%)
                       </p>
                     )}
@@ -115,12 +116,12 @@ export default function Result() {
                     <p style={styles.guideLabel}>💊 {drug.drug_name}</p>
                     <p style={styles.guideText}>{guideText}</p>
                     {cautionText && (
-                      <p style={{ ...styles.guideText, color: "#C16A45", marginTop: 4 }}>
+                      <p style={{ ...styles.guideText, color: C.terracotta, marginTop: 4 }}>
                         ⚠️ {cautionText}
                       </p>
                     )}
                     {drug.review_required && (
-                      <p style={{ fontSize: 11, color: "#D98A2B", marginTop: 4 }}>
+                      <p style={{ fontSize: 11, color: C.warningText, marginTop: 4 }}>
                         AI 검토 필요 — 참고자료 인용이 부족하거나 OCR 인식 신뢰도가 낮아요.
                       </p>
                     )}
@@ -188,32 +189,32 @@ export default function Result() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  page: { minHeight: "100vh", background: "#FAF6F1", fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" },
+  page: { minHeight: "100vh", background: C.ivory, fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" },
   main: { maxWidth: 1100, margin: "0 auto", padding: "40px 24px 80px" },
   header: { marginBottom: 20 },
   headerTop: { display: "flex", alignItems: "center", gap: 12, marginBottom: 6 },
-  title: { fontSize: 24, fontWeight: 700, color: "#2A2A2A" },
-  badge: { background: "#E8F5E9", color: "#388E3C", fontSize: 13, fontWeight: 600, padding: "4px 12px", borderRadius: 99 },
-  disclaimer: { background: "#FFF8F4", border: "1px solid #F0E5D8", borderRadius: 10, padding: "12px 16px", marginBottom: 24 },
-  disclaimerText: { fontSize: 13, color: "#C16A45", lineHeight: 1.6 },
+  title: { fontSize: 24, fontWeight: 700, color: C.dark },
+  badge: { background: `${C.success}25`, color: C.successText, fontSize: 13, fontWeight: 600, padding: "4px 12px", borderRadius: 99 },
+  disclaimer: { background: `${C.terracotta}10`, border: `1px solid ${C.terracotta}25`, borderRadius: 10, padding: "12px 16px", marginBottom: 24 },
+  disclaimerText: { fontSize: 13, color: C.terracotta, lineHeight: 1.6 },
   grid: { display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 20, marginBottom: 24 },
   colLeft: { display: "flex", flexDirection: "column" as const, gap: 16 },
   colRight: { display: "flex", flexDirection: "column" as const, gap: 16 },
-  card: { background: "#FFFFFF", border: "1px solid #EEE6DC", borderRadius: 14, padding: "20px" },
-  statusCard: { background: "#FFF8F4", border: "1px solid #F0E5D8" },
-  cardTitle: { fontSize: 15, fontWeight: 700, color: "#2A2A2A", marginBottom: 16, display: "flex", alignItems: "center", gap: 6 },
-  medItem: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "10px 0", borderTop: "1px solid #F5F0EB" },
+  card: { background: C.white, border: "1px solid rgba(30,26,23,0.12)", borderRadius: 14, padding: "20px" },
+  statusCard: { background: `${C.terracotta}10`, border: `1px solid ${C.terracotta}25` },
+  cardTitle: { fontSize: 15, fontWeight: 700, color: C.dark, marginBottom: 16, display: "flex", alignItems: "center", gap: 6 },
+  medItem: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "10px 0", borderTop: "1px solid " + C.bubbleBg },
   medInfo: {},
-  medName: { fontSize: 14, fontWeight: 600, color: "#2A2A2A", marginBottom: 3 },
-  medDosage: { fontSize: 12, color: "#888888" },
-  medBadge: { fontSize: 11, background: "#F0E5D8", color: "#C16A45", padding: "3px 8px", borderRadius: 99, whiteSpace: "nowrap" as const },
-  statusText: { fontSize: 16, fontWeight: 700, color: "#C16A45", marginBottom: 6 },
-  statusNote: { fontSize: 12, color: "#AAAAAA" },
-  guideItem: { padding: "10px 0", borderTop: "1px solid #F5F0EB" },
-  guideLabel: { fontSize: 13, fontWeight: 600, color: "#4A4A4A", marginBottom: 4 },
-  guideText: { fontSize: 13, color: "#555555", lineHeight: 1.6 },
-  sources: { marginTop: 12, paddingTop: 10, borderTop: "1px solid #F5F0EB" },
-  sourcesText: { fontSize: 12, color: "#AAAAAA" },
-  guideCtaBtn: { width: "100%", padding: "16px", fontSize: 15, fontWeight: 700, background: "#2A211B", color: "#FFFFFF", border: "none", borderRadius: 12, cursor: "pointer", marginBottom: 12 },
-  chatBtn: { width: "100%", padding: "16px", fontSize: 15, fontWeight: 600, background: "#C16A45", color: "#FFFFFF", border: "none", borderRadius: 12, cursor: "pointer" },
+  medName: { fontSize: 14, fontWeight: 600, color: C.dark, marginBottom: 3 },
+  medDosage: { fontSize: 12, color: C.muted },
+  medBadge: { fontSize: 11, background: C.bubbleBg, color: C.terracotta, padding: "3px 8px", borderRadius: 99, whiteSpace: "nowrap" as const },
+  statusText: { fontSize: 16, fontWeight: 700, color: C.terracotta, marginBottom: 6 },
+  statusNote: { fontSize: 12, color: C.muted },
+  guideItem: { padding: "10px 0", borderTop: "1px solid " + C.bubbleBg },
+  guideLabel: { fontSize: 13, fontWeight: 600, color: C.dark, marginBottom: 4 },
+  guideText: { fontSize: 13, color: C.dark, lineHeight: 1.6 },
+  sources: { marginTop: 12, paddingTop: 10, borderTop: "1px solid " + C.bubbleBg },
+  sourcesText: { fontSize: 12, color: C.muted },
+  guideCtaBtn: { width: "100%", padding: "16px", fontSize: 15, fontWeight: 700, background: C.dark, color: C.white, border: "none", borderRadius: 12, cursor: "pointer", marginBottom: 12 },
+  chatBtn: { width: "100%", padding: "16px", fontSize: 15, fontWeight: 600, background: C.terracotta, color: C.white, border: "none", borderRadius: 12, cursor: "pointer" },
 };

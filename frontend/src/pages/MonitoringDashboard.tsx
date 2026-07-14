@@ -47,6 +47,7 @@ export default function MonitoringDashboard() {
       .then((list) => {
         setPatients(list);
         if (list.length > 0 && !list.some((p) => p.id === patientId)) {
+          localStorage.setItem("patient_id", String(list[0].id));
           setPatientId(list[0].id);
         }
       })
@@ -127,7 +128,13 @@ export default function MonitoringDashboard() {
             <label className="text-[14px] font-bold" style={{ color: C.muted }}>대상자 선택</label>
             <select
               value={patientId}
-              onChange={(e) => setPatientId(Number(e.target.value))}
+              onChange={(e) => {
+                const next = Number(e.target.value);
+                // [7/14] 다른 화면(Dashboard/Schedule/Notification/Connect/Check)도
+                // 이 선택을 이어받도록 localStorage에도 반영
+                localStorage.setItem("patient_id", String(next));
+                setPatientId(next);
+              }}
               className="px-4 py-2.5 rounded-xl border text-[14px] outline-none bg-white"
               style={{ borderColor: "rgba(30,26,23,0.15)", minWidth: 200 }}
             >
