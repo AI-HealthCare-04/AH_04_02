@@ -10,8 +10,8 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlmodel import Session, select
 
-from auth import decode_token
-from database import get_session
+from core.auth import decode_token
+from core.database import get_session
 from models import Caregiver, CaregiverPatient, Patient
 
 security = HTTPBearer()

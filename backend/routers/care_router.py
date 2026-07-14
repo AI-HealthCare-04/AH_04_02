@@ -20,8 +20,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from database import get_session
-from dependencies import Actor, get_current_actor, require_actor_patient_access
+from core.database import get_session
+from core.dependencies import Actor, get_current_actor, require_actor_patient_access
 from models import (
     CareLevelAssessment,
     Caregiver,

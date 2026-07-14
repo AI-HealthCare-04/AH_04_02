@@ -25,8 +25,8 @@ import os
 import sys
 from pathlib import Path
 
-from database import get_session
-from dependencies import Actor, get_current_actor, require_actor_patient_access
+from core.database import get_session
+from core.dependencies import Actor, get_current_actor, require_actor_patient_access
 from fastapi import APIRouter, Depends, HTTPException
 from models import ChatMessage, GuideResult, MedicalRecord, NotificationSetting, OcrResult, Patient
 from pydantic import BaseModel

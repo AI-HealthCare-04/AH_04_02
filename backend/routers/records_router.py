@@ -17,8 +17,8 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from database import get_session
-from dependencies import Actor, get_current_actor, require_actor_patient_access
+from core.database import get_session
+from core.dependencies import Actor, get_current_actor, require_actor_patient_access
 from models import Caregiver, GuideResult, MedicalRecord, MedicationSchedule, OcrResult, Patient
 from routers.ocr_router import run_ocr
 from routers.rag_router import run_rag

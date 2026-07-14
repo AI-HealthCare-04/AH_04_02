@@ -27,12 +27,12 @@ _ROOT = Path(__file__).parent.parent
 from dotenv import load_dotenv
 load_dotenv(_ROOT / ".env")
 
-from ocr_interface import get_ocr_provider  # noqa: E402
-from database import get_session
-from dependencies import Actor, get_current_actor, require_actor_patient_access
-from drug_matcher import MATCH_THRESHOLD, match_drug
+from services.ocr_interface import get_ocr_provider  # noqa: E402
+from core.database import get_session
+from core.dependencies import Actor, get_current_actor, require_actor_patient_access
+from services.drug_matcher import MATCH_THRESHOLD, match_drug
 from models import MedicalRecord, OcrResult
-from drug_reference import get_drug_info
+from services.drug_reference import get_drug_info
 
 router = APIRouter(prefix="/ocr", tags=["OCR"])
 

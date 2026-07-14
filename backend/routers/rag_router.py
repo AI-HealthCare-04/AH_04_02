@@ -29,7 +29,7 @@ import os
 import sys
 from pathlib import Path
 
-from database import get_session
+from core.database import get_session
 from fastapi import APIRouter, Depends, HTTPException
 from models import GuideResult, OcrResult
 from sqlmodel import Session, select

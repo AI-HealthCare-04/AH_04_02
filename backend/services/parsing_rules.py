@@ -175,7 +175,7 @@ def _load_herb_names() -> set[str]:
     if _herb_name_set is not None:
         return _herb_name_set
     try:
-        csv_path = Path(__file__).parent / "herb_reference.csv"
+        csv_path = Path(__file__).parent.parent / "herb_reference.csv"
         names: set[str] = set()
         with open(csv_path, encoding="utf-8-sig", newline="") as f:
             for row in csv.DictReader(f):

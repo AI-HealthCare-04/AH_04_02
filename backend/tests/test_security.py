@@ -1,7 +1,7 @@
 """security.py 단위 테스트 — encrypt_pii/decrypt_pii, normalize_phone, hash_phone (담당: 김영혜)"""
 import pytest
 
-from security import decrypt_pii, encrypt_pii, hash_phone, normalize_phone
+from core.security import decrypt_pii, encrypt_pii, hash_phone, normalize_phone
 
 
 def test_encrypt_decrypt_round_trip():

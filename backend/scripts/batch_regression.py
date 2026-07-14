@@ -15,8 +15,8 @@ from pathlib import Path
 BACKEND = Path("/Users/admin/backend")
 sys.path.insert(0, str(BACKEND))
 
-from parsing_rules import parse_prescription, _detect_format
-from drug_reference import get_drug_class
+from services.parsing_rules import parse_prescription, _detect_format
+from services.drug_reference import get_drug_class
 
 # parse_prescription()이 반환하는 drug_class는 parsing_rules.DRUG_CLASS_DICTIONARY(9종)
 # 기반의 lookup_drug_class()만 사용한다.

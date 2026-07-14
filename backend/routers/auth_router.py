@@ -15,10 +15,10 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from pydantic import BaseModel, EmailStr
 from sqlmodel import Session, func, select
 
-from auth import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
-from database import get_session
+from core.auth import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
+from core.database import get_session
 from models import Caregiver, Patient
-from security import hash_phone
+from core.security import hash_phone
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 

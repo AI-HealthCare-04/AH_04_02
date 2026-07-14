@@ -37,7 +37,7 @@ from typing import Optional
 
 from sqlmodel import Field, SQLModel
 
-from security import decrypt_pii, encrypt_pii, hash_phone
+from core.security import decrypt_pii, encrypt_pii, hash_phone
 
 
 # ── 환자 [7/6 추가, 7/9 로그인 대상으로 전환 + PII 암호화] ──
