@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Activity, Bell, Bookmark, Check, ChevronRight, Heart, Pill } from "lucide-react";
 import NavBar from "../components/NavBar";
-import { checkIntake, getTodayMedications, type Medication } from "../api/monitoring";
+import { checkIntake, getLogs, getTodayMedications, type Medication, type MedicationLogEntry } from "../api/monitoring";
+import { getNotificationSettings, type NotificationSettings } from "../api/care";
 import { getCurrentPatientId } from "../lib/session";
 
 const unsplash = (id: string, w: number, h: number) =>
@@ -27,13 +28,14 @@ const DONUT_R = 36;
 const DONUT_CX = 40;
 const DONUT_CY = 40;
 const DONUT_CIRC = 2 * Math.PI * DONUT_R;
-const DONUT_DASH = 0.5 * DONUT_CIRC;
 
 export default function Landing() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [tab, setTab] = useState(0);
   const [meds, setMeds] = useState<Medication[]>([]);
+  const [logs, setLogs] = useState<MedicationLogEntry[]>([]);
+  const [notifSettings, setNotifSettings] = useState<NotificationSettings | null>(null);
 
   // [7/14] "최신 안내" 섹션을 처방전 등록으로 실제 등록된 약품·알림 일정(오늘자)과 연결 —
   // 더 이상 Figma의 예시 텍스트가 아니라 로그인한 환자의 실제 /monitoring/today 데이터.
@@ -43,7 +45,31 @@ export default function Landing() {
       .catch(() => {});
   }, []);
 
+  // [7/14] "대시보드 요약"의 생활 습관·알림 설정 카드도 모니터링 페이지와 같은 실제
+  // 데이터로 연결 — 최근 7일 복약 순응률(getLogs, MonitoringDashboard.tsx와 동일 계산식)과
+  // 실제 알림 켜짐/꺼짐 상태(getNotificationSettings). "건강 점수"·"다음 병원 방문"은
+  // 앱에 그런 데이터 자체가 없어서 실제로 존재하는 이 두 값으로 대체한다.
+  useEffect(() => {
+    const patientId = getCurrentPatientId();
+    getLogs(patientId, 7)
+      .then(setLogs)
+      .catch(() => {});
+    getNotificationSettings(patientId)
+      .then(setNotifSettings)
+      .catch(() => {});
+  }, []);
+
   const takenCount = meds.filter((m) => m.status === "taken").length;
+  const medsDonutPct = meds.length > 0 ? takenCount / meds.length : 0;
+  const medsDonutDash = medsDonutPct * DONUT_CIRC;
+
+  const last7Logs = logs.filter(
+    (l) => Date.now() - new Date(l.checked_at).getTime() <= 7 * 24 * 60 * 60 * 1000
+  );
+  const adherence =
+    last7Logs.length > 0
+      ? Math.round((last7Logs.filter((l) => l.status === "taken").length / last7Logs.length) * 100)
+      : null;
   // [7/14] 두 번째·세 번째 카드를 임의의 약 2개가 아니라 오전/오후로 나눠 보여준다.
   const morningMeds = meds.filter((m) => Number(m.time.slice(0, 2)) < 12);
   const afternoonMeds = meds.filter((m) => Number(m.time.slice(0, 2)) >= 12);
@@ -229,20 +255,20 @@ export default function Landing() {
               <div style={styles.dashDonutRow}>
                 <div>
                   <p style={styles.dashDonutLabel}>오늘 복용 완료</p>
-                  <p style={styles.dashDonutValue}>2 / 4</p>
+                  <p style={styles.dashDonutValue}>{takenCount} / {meds.length}</p>
                 </div>
                 <svg width="72" height="72" viewBox="0 0 80 80">
                   <circle cx={DONUT_CX} cy={DONUT_CY} r={DONUT_R} fill="none" stroke="#EDE8DF" strokeWidth="8" />
                   <circle
                     cx={DONUT_CX} cy={DONUT_CY} r={DONUT_R} fill="none" stroke="#C16A45" strokeWidth="8"
-                    strokeDasharray={`${DONUT_DASH} ${DONUT_CIRC - DONUT_DASH}`} strokeLinecap="round"
+                    strokeDasharray={`${medsDonutDash} ${DONUT_CIRC - medsDonutDash}`} strokeLinecap="round"
                     transform="rotate(-90 40 40)"
                   />
-                  <text x="40" y="45" textAnchor="middle" fontSize="13" fontWeight="700" fill="#2A2A2A">50%</text>
+                  <text x="40" y="45" textAnchor="middle" fontSize="13" fontWeight="700" fill="#2A2A2A">{Math.round(medsDonutPct * 100)}%</text>
                 </svg>
               </div>
               <div style={styles.dashProgressTrack}>
-                <div style={styles.dashProgressFill} />
+                <div style={{ ...styles.dashProgressFill, width: `${Math.round(medsDonutPct * 100)}%` }} />
               </div>
             </div>
           </div>
@@ -252,13 +278,14 @@ export default function Landing() {
             <div style={styles.dashCardBody}>
               <p style={styles.dashCardTag}>생활 습관</p>
               <div style={styles.dashScoreRow}>
-                <span style={styles.dashScoreValue}>82</span>
-                <span style={styles.dashScoreBadge}>다음</span>
+                <span style={styles.dashScoreValue}>{adherence ?? "-"}{adherence != null && "%"}</span>
               </div>
-              <p style={styles.dashScoreLabel}>건강 점수</p>
+              <p style={styles.dashScoreLabel}>최근 7일 복약 순응률</p>
               <div style={styles.dashStreakRow}>
                 <Activity className="w-4 h-4" style={{ color: "#8FAE8B" }} />
-                <span style={styles.dashStreakText}>12일 연속 기록</span>
+                <span style={styles.dashStreakText}>
+                  {last7Logs.length > 0 ? `최근 7일 기록 ${last7Logs.length}건` : "최근 기록 없음"}
+                </span>
               </div>
             </div>
           </div>
@@ -267,10 +294,12 @@ export default function Landing() {
             <img src={unsplash("photo-1512941937669-90a1b58e7e9c", 400, 200)} alt="스마트폰" style={styles.dashCardPhoto} />
             <div style={styles.dashCardBody}>
               <p style={styles.dashCardTag}>알림 설정</p>
-              <p style={styles.dashVisitLabel}>다음 병원 방문</p>
-              <p style={styles.dashVisitName}>서울대학교병원</p>
-              <p style={styles.dashVisitMeta}>내과 · 2026-07-05</p>
-              <button style={styles.dashVisitBtn}>알림 관리하기</button>
+              <p style={styles.dashVisitLabel}>복약 알림</p>
+              <p style={styles.dashVisitName}>{notifSettings?.medication_reminder_enabled ? "켜짐" : "꺼짐"}</p>
+              <p style={styles.dashVisitMeta}>
+                전체 푸시 수신 {notifSettings?.all_push_enabled ? "켜짐" : "꺼짐"}
+              </p>
+              <button style={styles.dashVisitBtn} onClick={() => navigate("/notification")}>알림 관리하기</button>
             </div>
           </div>
         </div>
@@ -384,7 +413,6 @@ const styles: Record<string, React.CSSProperties> = {
   dashProgressFill: { height: "100%", width: "50%", borderRadius: 999, background: "#C16A45" },
   dashScoreRow: { display: "flex", alignItems: "baseline", gap: 8, marginBottom: 2 },
   dashScoreValue: { fontSize: 32, fontWeight: 800, color: "#2A2A2A" },
-  dashScoreBadge: { padding: "2px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, background: "rgba(143,174,139,0.15)", color: "#8FAE8B" },
   dashScoreLabel: { fontSize: 12, color: "#8A7A6A", marginBottom: 12 },
   dashStreakRow: { display: "flex", alignItems: "center", gap: 6 },
   dashStreakText: { fontSize: 13, color: "#2A2A2A" },
