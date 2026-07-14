@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import NavBar from "../components/NavBar";
 import { createAssessment, type CareLevel, type Level } from "../api/care";
-import { getCurrentPatientId } from "../lib/session";
+import { useGuardedPatientId } from "../lib/session";
 
 const CARE_LEVEL_LABEL: Record<CareLevel, string> = {
   independent: "자가관리 가능",
@@ -30,6 +30,7 @@ function pillClass(active: boolean) {
 
 export default function Check() {
   const navigate = useNavigate();
+  const patientId = useGuardedPatientId();
   const [cognitive, setCognitive] = useState<Level>("normal");
   const [mobility, setMobility] = useState<Level>("normal");
   const [vision, setVision] = useState<Level>("normal");
@@ -40,11 +41,12 @@ export default function Check() {
   const [error, setError] = useState("");
 
   const handleSubmit = async () => {
+    if (patientId == null) return;
     setSubmitting(true);
     setError("");
     try {
       const saved = await createAssessment({
-        patient_id: getCurrentPatientId(),
+        patient_id: patientId,
         cognitive_level: cognitive,
         mobility_level: mobility,
         vision_level: vision,
@@ -129,7 +131,7 @@ export default function Check() {
 
         <button
           onClick={handleSubmit}
-          disabled={submitting}
+          disabled={submitting || patientId == null}
           className="w-full py-4 rounded-xl bg-[#C1653D] text-white font-bold text-[16px] disabled:opacity-60"
         >
           {submitting ? "저장 중..." : "저장 및 평가하기"}

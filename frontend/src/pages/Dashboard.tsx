@@ -9,17 +9,12 @@ import {
   type IntakeStatus,
 } from "../api/monitoring";
 import { listRecords, type RecordSummary } from "../api/records";
-import { getCurrentCaregiverId } from "../lib/session";
+import { getCurrentCaregiverId, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
-
-// 로그인이 아직 없어서 patient_id를 localStorage에서 관리
-// (환자가 여러 명이 되면 "환자 선택" 화면에서 이 값을 설정하도록 확장)
-function getCurrentPatientId(): number {
-  return Number(localStorage.getItem("patient_id") ?? 1);
-}
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const patientId = useGuardedPatientId();
   const [meds, setMeds] = useState<Medication[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -31,7 +26,7 @@ export default function Dashboard() {
   const [recentRecords, setRecentRecords] = useState<RecordSummary[]>([]);
 
   useEffect(() => {
-    const patientId = getCurrentPatientId();
+    if (patientId == null) return;
     getTodayMedications(patientId)
       .then(setMeds)
       .catch(() => setError("복약 목록을 불러오지 못했어요."))
@@ -39,7 +34,7 @@ export default function Dashboard() {
     listRecords(patientId)
       .then((list) => setRecentRecords(list.filter((r) => r.status === "completed").slice(0, 2)))
       .catch(() => {});
-  }, []);
+  }, [patientId]);
 
   const updateStatus = async (id: string, status: IntakeStatus) => {
     // 먼저 화면부터 낙관적으로 바꾸고, 실패하면 되돌림 (버튼 반응성 위해)

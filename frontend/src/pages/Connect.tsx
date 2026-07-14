@@ -7,7 +7,7 @@ import {
   type InvitationSummary,
 } from "../api/care";
 import { getPatientCaregivers, unlinkCaregiverPatient, type Caregiver } from "../api/monitoring";
-import { getCurrentPatientId } from "../lib/session";
+import { useGuardedPatientId } from "../lib/session";
 
 type RelationType = "guardian" | "caregiver" | "life_support_worker" | "social_worker";
 
@@ -34,7 +34,7 @@ function FakeQR() {
 }
 
 export default function Connect() {
-  const patientId = getCurrentPatientId();
+  const patientId = useGuardedPatientId();
 
   const [phone, setPhone] = useState("");
   const [relationType, setRelationType] = useState<RelationType>("guardian");
@@ -48,11 +48,11 @@ export default function Connect() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const loadConnections = async () => {
+  const loadConnections = async (pid: number) => {
     try {
       const [caregiverList, invitationList] = await Promise.all([
-        getPatientCaregivers(patientId),
-        listInvitations(patientId),
+        getPatientCaregivers(pid),
+        listInvitations(pid),
       ]);
       setCaregivers(caregiverList);
       setInvitations(invitationList.filter((inv) => inv.status === "pending"));
@@ -64,11 +64,13 @@ export default function Connect() {
   };
 
   useEffect(() => {
-    loadConnections();
+    if (patientId == null) return;
+    loadConnections(patientId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [patientId]);
 
   const handleInvite = async () => {
+    if (patientId == null) return;
     setSending(true);
     setError("");
     try {
@@ -79,7 +81,7 @@ export default function Connect() {
       });
       setInviteUrl(window.location.origin + created.invite_url);
       setPhone("");
-      await loadConnections();
+      await loadConnections(patientId);
     } catch {
       setError("초대를 보내지 못했어요.");
     } finally {
@@ -88,9 +90,10 @@ export default function Connect() {
   };
 
   const handleUnlink = async (caregiverId: number) => {
+    if (patientId == null) return;
     try {
       await unlinkCaregiverPatient(caregiverId, patientId);
-      await loadConnections();
+      await loadConnections(patientId);
     } catch {
       setError("연결 해제에 실패했어요.");
     }

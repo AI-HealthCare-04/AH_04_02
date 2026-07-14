@@ -11,7 +11,7 @@ import {
   updateSchedule,
   type Schedule,
 } from "../api/monitoring";
-import { getCurrentPatientId } from "../lib/session";
+import { useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
 
 // [7/8 변경] 피그마 디자인 반영 — 시간대(아침/점심/저녁) 대신 "복용 상태" 6종 + 실제 시각 입력
@@ -159,7 +159,7 @@ let keySeed = 0;
 const nextKey = () => ++keySeed;
 
 export default function SchedulePage() {
-  const patientId = getCurrentPatientId();
+  const patientId = useGuardedPatientId();
   const navigate = useNavigate();
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [knownDrugs, setKnownDrugs] = useState<string[]>([]);
@@ -178,18 +178,18 @@ export default function SchedulePage() {
   const [saving, setSaving] = useState(false);
   const [modalError, setModalError] = useState("");
 
-  const load = async () => {
+  const load = async (pid: number) => {
     try {
       const [scheduleData, drugData, patients] = await Promise.all([
-        getSchedules(patientId),
-        getKnownDrugs(patientId),
+        getSchedules(pid),
+        getKnownDrugs(pid),
         getPatients(),
       ]);
       setSchedules(scheduleData);
       setKnownDrugs(drugData);
       // [7/8 추가] 저장이 조용히 404로 실패하는 원인 방지 — patient_id가 이제 존재하지 않는
       // (예: app.db를 지운 뒤 옛 로그인 정보가 남아있는) 경우를 목록 조회 시점에 미리 알려줌
-      setPatientValid(patients.some((p) => p.id === patientId));
+      setPatientValid(patients.some((p) => p.id === pid));
       setError("");
     } catch (e) {
       setError(describeError(e, "일정을 불러오지 못했어요."));
@@ -205,9 +205,10 @@ export default function SchedulePage() {
   };
 
   useEffect(() => {
-    load();
+    if (patientId == null) return;
+    load(patientId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [patientId]);
 
   const groups = useMemo<DrugGroup[]>(() => {
     const map = new Map<string, DrugGroup>();
@@ -264,7 +265,7 @@ export default function SchedulePage() {
       await Promise.all(group.ids.map((id) => updateSchedule(id, { active: next })));
     } catch (e) {
       setError(describeError(e, "변경하지 못했어요."));
-      await load();
+      if (patientId != null) await load(patientId);
     }
   };
 
@@ -277,7 +278,7 @@ export default function SchedulePage() {
       await Promise.all(group.ids.map((id) => updateSchedule(id, { caregiver_alert: next })));
     } catch (e) {
       setError(describeError(e, "변경하지 못했어요."));
-      await load();
+      if (patientId != null) await load(patientId);
     }
   };
 
@@ -292,6 +293,7 @@ export default function SchedulePage() {
   };
 
   const save = async () => {
+    if (patientId == null) return;
     const name = drugName.trim();
     if (!name) {
       setModalError("약물을 선택하거나 입력해주세요.");
@@ -320,7 +322,7 @@ export default function SchedulePage() {
         )
       );
       setModalOpen(false);
-      await load();
+      await load(patientId);
     } catch (e) {
       console.error("[Schedule] 저장 실패", e);
       setModalError(describeError(e, "저장하지 못했어요."));

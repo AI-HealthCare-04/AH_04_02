@@ -7,7 +7,7 @@ import {
   type NotificationSettings,
 } from "../api/care";
 import { getPatientCaregivers } from "../api/monitoring";
-import { getCurrentPatientId } from "../lib/session";
+import { useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
 
 function Toggle({ on, onChange, disabled = false }: { on: boolean; onChange: () => void; disabled?: boolean }) {
@@ -26,13 +26,14 @@ function Toggle({ on, onChange, disabled = false }: { on: boolean; onChange: () 
 }
 
 export default function Notification() {
-  const patientId = getCurrentPatientId();
+  const patientId = useGuardedPatientId();
   const [settings, setSettings] = useState<NotificationSettings | null>(null);
   const [careLocked, setCareLocked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (patientId == null) return;
     Promise.all([
       getNotificationSettings(patientId),
       getLatestAssessment(patientId),
@@ -46,10 +47,10 @@ export default function Notification() {
       .catch(() => setError("설정을 불러오지 못했어요."))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [patientId]);
 
   const toggle = async (key: keyof Pick<NotificationSettings, "medication_reminder_enabled" | "care_alert_enabled" | "all_push_enabled">) => {
-    if (!settings) return;
+    if (!settings || patientId == null) return;
     if (key === "care_alert_enabled" && careLocked) return;
 
     const next = { ...settings, [key]: !settings[key] };
