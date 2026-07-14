@@ -54,11 +54,19 @@ e약은요와 원천이 다른 **로컬 정적 데이터**. 효능효과 같은 
 | 조회 | `rag/hira_master.py`의 `search_by_product_name()` / `is_registered_and_active()` | 최초 호출 시 CSV 전체를 한글상품명 기준 raw dict 인덱스로 1회 파싱해 프로세스 캐시(약 1.5초), 이후 조회는 즉시 반환. 정확히 일치하는 상품명 우선, 없으면 부분일치로 폴백 |
 | 벡터DB 적재 | 안 함 | 설명문이 없어 임베딩 대상이 아님, 조회 전용 |
 | 인용 연동 | `rag_chain._build_context`의 `_lookup_hira_entry` | 의약품 `SourceRef` 생성 시 같은 품목명으로 HIRA를 조회해 `hira_standard_code`/`hira_atc_code`/`hira_permit_date`/`hira_active`를 함께 채운다 (아래 "생성 & Hallucination 방어" 참고) |
+| 인용 연동(허가정보) | `rag_chain._build_context`의 `_lookup_permit_entry` | 같은 품목명으로 의약품제품허가정보를 조회해 `permit_kind_code`/`permit_active`를 함께 채운다 — HIRA와 별개 소스, 별개 fail-safe (CONTRACT.md §6) |
+| 인용 연동(사용상의주의사항) | `rag_chain._build_context`의 `_lookup_permit_precautions` | 같은 품목명으로 허가정보 상세(`getDrugPrdtPrmsnDtlInq06`)의 `NB_DOC_DATA`를 조회·파싱해, 섹션별로 별도 `context_items`(`field="사용상의주의사항 - {섹션 제목}"`)를 추가한다 — 품목당 상세 API는 1회만 호출 (CONTRACT.md §6) |
 
-> **[보류] 의약품 허가정보 API**(`DrugPrdtPrmsnInfoService07`)는 e약은요·약가마스터만으로
-> 우선 조회하기로 하고 코드에 주석 처리해서 남겨뒀다 (`config.py`/`schemas.py`/`mfds_client.py`
-> 및 관련 테스트에 `[보류]` 표시). 정보량이 방대하고 팀원 연동(HIRA 약가마스터) 조율이 더
-> 필요해서 보류했고, 나중에 정말 경로를 바꿔야 하는 문제가 생기면 주석을 풀어 쓴다.
+> **의약품 허가정보 API**(`DrugPrdtPrmsnInfoService07`)는 [2026-07-14] 활용신청이 승인되어
+> 재활성화했다 — e약은요 item_name으로 조회해 `SourceRef.permit_kind_code`(허가/신고
+> 구분)·`permit_active`(취소·취하 여부)를 함께 채운다. HIRA의 `hira_active`(약가 등재 상태)와는
+> 다른 개념 — 이건 제조·판매 허가 자체의 취소여부다(CONTRACT.md §6 참고).
+>
+> **사용상의주의사항**은 같은 API의 목록 조회(`getDrugPrdtPrmsnInq07`)에는 없고 상세정보
+> (`getDrugPrdtPrmsnDtlInq06`)에만 있다 — `NB_DOC_DATA` 필드가 `<DOC><SECTION><ARTICLE
+> title="...">문단들</ARTICLE></SECTION></DOC>` 구조의 XML이라 `mfds_client.parse_doc_sections()`로
+> (섹션 제목, 본문) 목록으로 변환한 뒤 인용에 붙인다. 상세 API 호출·XML 파싱 실패는 조용히
+> 빈 리스트로 처리해 나머지 인용(e약은요/HIRA/허가정보)을 막지 않는다.
 
 ### 출처 2 — 만성질환 생활지침 (사람이 정리한 참고자료 파일)
 
@@ -151,8 +159,8 @@ e약은요와 원천이 다른 **로컬 정적 데이터**. 효능효과 같은 
 
 | 파일 | 역할 |
 |---|---|
-| `rag/schemas.py` | 데이터 모델 전체: `DrugInfo`, `HiraDrugMasterEntry`, `LifestyleGuideline`, `SourceRef`, `LifestyleSourceRef`, `GuideResponse`, OCR 입력 `MedicationInput` (`DrugPermitInfo`는 `[보류]` 주석 처리됨) |
-| `rag/mfds_client.py` | 식약처 e약은요 API 호출 (검색 / 전체목록 페이지 조회, 재시도). 허가정보 관련 함수는 `[보류]` 주석 처리됨 |
+| `rag/schemas.py` | 데이터 모델 전체: `DrugInfo`, `HiraDrugMasterEntry`, `DrugPermitInfo`, `DrugPermitDetail`, `LifestyleGuideline`, `SourceRef`, `LifestyleSourceRef`, `GuideResponse`, OCR 입력 `MedicationInput` |
+| `rag/mfds_client.py` | 식약처 e약은요 API 호출(검색/전체목록 페이지 조회, 재시도) + 의약품제품허가정보 API 호출(`search_permit_info`/`is_officially_approved`/`search_permit_detail`/`parse_doc_sections`) |
 | `rag/hira_master.py` | `backend/data/hira_drug_master_20251031.csv`(HIRA 약가마스터) 로컬 조회 — 표준코드/ATC코드/허가·취소 상태 |
 | `rag/dur_master.py` | 식약처 DUR API 4개(병용금기/노인주의/연령금기/임부금기) 호출 — `mfds_client._request` 재사용, 브랜드 중복 dedup 포함 |
 | `rag/lifestyle_data.py` | `data/lifestyle_guidelines.json` 로더 |

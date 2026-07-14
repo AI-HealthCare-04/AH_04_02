@@ -117,6 +117,8 @@ def _generate_via_rag(ocr_items: list[OcrResult]) -> tuple[dict, dict, list] | N
             "hira_atc_code": ref.hira_atc_code,
             "hira_permit_date": ref.hira_permit_date,
             "hira_active": ref.hira_active,
+            "permit_kind_code": ref.permit_kind_code,
+            "permit_active": ref.permit_active,
         }
         for g in guides
         for ref in g.source_refs
