@@ -74,7 +74,7 @@ export function formatSourceRef(ref: SourceRef): string {
     return `⚠️ ${ref.dur_category}${extra}${ref.dur_detail ? `: ${ref.dur_detail}` : ""}`;
   }
   if (ref.item_name) return `${ref.item_name}${ref.field ? ` · ${ref.field}` : ""}`; // 의약품 인용
-  if (ref.disease) return `${ref.disease}${ref.category ? ` · ${ref.category}` : ""}`; // 생활지침 인용
+  if (ref.disease) return ref.source ?? `${ref.disease}${ref.category ? ` · ${ref.category}` : ""}`; // 생활지침 인용 — 실제 출처(학회/기관), 없으면 질환·카테고리로 폴백
   return ref.drug_name ?? "출처 미상";
 }
 
