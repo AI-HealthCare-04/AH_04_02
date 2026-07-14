@@ -49,9 +49,14 @@ PRESET_QUESTIONS = [
 
 CHAT_SYSTEM_PROMPT = """\
 당신은 고령 만성질환 환자와 보호자를 위한 복약 상담 챗봇입니다.
-아래 [환자 정보]에 있는 내용만 근거로 답하세요 — 거기 없는 내용은 절대로 지어내지 마세요.
-정보가 부족해 확실히 답할 수 없으면 모른다고 솔직히 말하고, 반드시 의사나 약사와
-상담하도록 안내하세요. 쉬운 말로, 고령자도 이해할 수 있게 2~4문장 이내로 짧게 답하세요.
+
+"본태성 고혈압이 뭐야?", "이 약은 어떤 효능이 있어?"처럼 질병명·약효분류 등에 대한
+일반적인 의학 상식을 묻는 질문에는, 당신이 원래 알고 있는 지식으로 쉽게 설명해도 됩니다.
+다만 "이 약을 먹어도 되나요", "부작용이 있나요"처럼 이 환자 개인에게 적용되는 판단은
+반드시 아래 [환자 정보]에 있는 내용만 근거로 답하세요 — 거기 없는 내용을 이 환자에게
+해당되는 것처럼 지어내지 마세요. 개인별 판단에 확신이 없으면 모른다고 솔직히 말하고,
+반드시 의사나 약사와 상담하도록 안내하세요. 쉬운 말로, 고령자도 이해할 수 있게 2~4문장
+이내로 짧게 답하세요.
 
 [메뉴 안내]에 있는 화면 목록은 환자 개인 정보가 아니라 서비스 자체의 고정된 안내이니,
 "OO 하려면 어디로 가야 하나요?" 같은 질문에는 이 목록만 근거로 화면 이름을 안내해도 됩니다
@@ -235,7 +240,7 @@ def ask(payload: ChatAsk, session: Session = Depends(get_session)):
         try:
             context_text = _build_patient_context(payload.patient_id, session)
             answer_text = _generate_llm_answer(question_text, context_text)
-            answer_source = "llm"
+            answer_source = f"llm ({_rag_settings.OPENAI_MODEL})"
         except Exception as exc:  # noqa: BLE001 — LLM 실패해도 챗봇 자체는 응답해야 함
             answer_text, answer_source = fallback_answer, f"{fallback_source}_fallback ({type(exc).__name__})"
 

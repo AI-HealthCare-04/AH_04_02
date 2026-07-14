@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ChevronRight, Menu, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Menu, X } from "lucide-react";
 import { C } from "../theme";
 
 interface NavBarProps {
@@ -16,6 +16,37 @@ const NAV_ITEMS = [
   { label: "복약기록", to: "/monitoring" },
 ];
 
+// [7/14] 풋터에 있던 3개 카테고리를 그대로 옮겨온 것 — 매 페이지 하단까지 스크롤해야
+// 보이던 메뉴를 상단 드롭다운에서 바로 접근하게 함. 항목·중복 여부는 풋터와 동일하게 유지.
+const MENU_GROUPS: { title: string; items: { label: string; to: string }[] }[] = [
+  {
+    title: "복약 안내",
+    items: [
+      { label: "오늘의 복약", to: "/dashboard" },
+      { label: "복용 기록", to: "/monitoring" },
+      { label: "약품 정보", to: "/records" },
+      { label: "복약 알림", to: "/notification" },
+    ],
+  },
+  {
+    title: "생활 습관",
+    items: [
+      { label: "운동 가이드", to: "/records" },
+      { label: "식단 관리", to: "/records" },
+      { label: "수면 개선", to: "/records" },
+      { label: "정신 건강", to: "/records" },
+    ],
+  },
+  {
+    title: "알림 설정",
+    items: [
+      { label: "알림 관리", to: "/notification" },
+      { label: "알림 내역", to: "/notification" },
+      { label: "시간 설정", to: "/schedule" },
+    ],
+  },
+];
+
 /**
  * [7/8 업그레이드] 기존엔 로고만 있고 메뉴 링크는 실제로 동작하지 않았음.
  * Figma 원본 Navbar 디자인 + react-router 실제 이동으로 교체.
@@ -27,10 +58,15 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
   const dark = variant === "dark";
   const textColor = dark ? C.white : C.dark;
   const [isOpen, setIsOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setIsOpen(false);
+      if (e.key === "Escape") {
+        setIsOpen(false);
+        setMenuOpen(false);
+      }
     };
     document.addEventListener("keydown", onKey);
     document.body.style.overflow = isOpen ? "hidden" : "";
@@ -47,6 +83,16 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  // 드롭다운 바깥 클릭 시 닫기
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [menuOpen]);
 
   return (
     <>
@@ -74,6 +120,46 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
                   {item.label}
                 </Link>
               ))}
+
+              <div className="relative" ref={menuRef}>
+                <button
+                  onClick={() => setMenuOpen((v) => !v)}
+                  aria-expanded={menuOpen}
+                  className="flex items-center gap-1 text-[15px] font-medium whitespace-nowrap transition-opacity hover:opacity-60"
+                  style={{ color: textColor }}
+                >
+                  전체메뉴
+                  <ChevronDown className={`w-4 h-4 transition-transform ${menuOpen ? "rotate-180" : ""}`} />
+                </button>
+
+                {menuOpen && (
+                  <div
+                    className="absolute top-full left-1/2 -translate-x-1/2 mt-3 rounded-2xl p-6 flex gap-10 shadow-lg"
+                    style={{ background: C.white, border: "1px solid rgba(30,26,23,0.10)" }}
+                  >
+                    {MENU_GROUPS.map((group) => (
+                      <div key={group.title} className="min-w-[120px]">
+                        <p className="text-[12px] font-bold mb-3 whitespace-nowrap" style={{ color: C.muted }}>
+                          {group.title}
+                        </p>
+                        <div className="flex flex-col gap-2.5">
+                          {group.items.map((item) => (
+                            <Link
+                              key={item.label}
+                              to={item.to}
+                              onClick={() => setMenuOpen(false)}
+                              className="text-[14px] font-medium whitespace-nowrap transition-opacity hover:opacity-60"
+                              style={{ color: C.dark }}
+                            >
+                              {item.label}
+                            </Link>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </nav>
           )}
 
@@ -130,7 +216,7 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
           />
           {/* 드로어 패널 — 헤더(h-16) 바로 아래, 데스크톱에선 숨김 */}
           <nav
-            className="fixed top-16 left-0 right-0 z-40 lg:hidden border-b backdrop-blur-sm px-6 py-2 flex flex-col"
+            className="fixed top-16 left-0 right-0 z-40 lg:hidden border-b backdrop-blur-sm px-6 py-2 flex flex-col max-h-[calc(100vh-4rem)] overflow-y-auto"
             style={{ background: "rgba(255,255,255,0.97)", borderColor: "rgba(30,26,23,0.10)" }}
           >
             {NAV_ITEMS.map((item) => (
@@ -143,6 +229,25 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
               >
                 {item.label}
               </Link>
+            ))}
+
+            {MENU_GROUPS.map((group) => (
+              <div key={group.title} className="py-3 border-b" style={{ borderColor: "rgba(30,26,23,0.08)" }}>
+                <p className="text-[12px] font-bold mb-2" style={{ color: C.muted }}>{group.title}</p>
+                <div className="flex flex-col gap-2">
+                  {group.items.map((item) => (
+                    <Link
+                      key={item.label}
+                      to={item.to}
+                      className="text-[15px] font-medium whitespace-nowrap transition-opacity hover:opacity-60"
+                      style={{ color: C.dark }}
+                      onClick={() => setIsOpen(false)}
+                    >
+                      {item.label}
+                    </Link>
+                  ))}
+                </div>
+              </div>
             ))}
           </nav>
         </>
