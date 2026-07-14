@@ -8,7 +8,7 @@ AH04_2조 파이널 프로젝트의 "② RAG·가이드생성" 파트 프로토�
 ## 구성 (요약)
 
 - 검색: 식약처 `DrbEasyDrugInfoService/getDrbEasyDrugList`(e약은요, 품목명 부분검색/전체 목록 페이징) + `backend/data/hira_drug_master_20251031.csv`(HIRA 약가마스터, 표준코드·ATC코드·허가/취소 상태 로컬 조회 — OCR 파트 `drug_reference.py`와 파일 공유, 아래 참고)
-- DUR(의약품안전사용서비스): `backend/data/dur_*_202606.csv` 5개(병용금기/노인주의/노인주의(해열진통소염제)/연령금기/임부금기), 전부 로컬 조회 — API는 활용신청 승인 대기라 CSV로 대체. 병용금기는 같은 처방전의 다른 약과 금기 관계일 때만 `dur_warnings`로, 나머지 4개는 약 하나만으로 `dur_cautions`로 경고 (CONTRACT.md §7 참고)
+- DUR(의약품안전사용서비스): [2026-07-14] 활용신청 승인 완료 — 식약처 `DURPrdlstInfoService03` API 4개(병용금기/노인주의/연령금기/임부금기)를 직접 호출한다(`rag/dur_master.py`). 로컬 CSV(`backend/data/dur_*.csv`)는 더 이상 쓰지 않는다. 병용금기는 같은 처방전의 다른 약과 금기 관계일 때만 `dur_warnings`로, 나머지 3개는 약 하나만으로 `dur_cautions`로 경고 (CONTRACT.md §7 참고)
 - 만성질환 생활지침: `data/lifestyle_guidelines.json` (고혈압·당뇨병·이상지질혈증·만성콩팥병, 학회/질병관리청 출처)
 - 임베딩: `sentence-transformers` 로컬 모델 (`jhgan/ko-sroberta-multitask`) — **OpenAI 키 없이 동작**
 - 벡터DB: ChromaDB (로컬 영속 저장, `./chroma_db`), 의약품·생활지침이 같은 컬렉션에 공존
@@ -154,7 +154,7 @@ e약은요와 원천이 다른 **로컬 정적 데이터**. 효능효과 같은 
 | `rag/schemas.py` | 데이터 모델 전체: `DrugInfo`, `HiraDrugMasterEntry`, `LifestyleGuideline`, `SourceRef`, `LifestyleSourceRef`, `GuideResponse`, OCR 입력 `MedicationInput` (`DrugPermitInfo`는 `[보류]` 주석 처리됨) |
 | `rag/mfds_client.py` | 식약처 e약은요 API 호출 (검색 / 전체목록 페이지 조회, 재시도). 허가정보 관련 함수는 `[보류]` 주석 처리됨 |
 | `rag/hira_master.py` | `backend/data/hira_drug_master_20251031.csv`(HIRA 약가마스터) 로컬 조회 — 표준코드/ATC코드/허가·취소 상태 |
-| `rag/dur_master.py` | `backend/data/dur_*_202606.csv` 5개(DUR 전 카테고리) 로컬 조회 — 병용금기는 양방향 인덱스, 나머지는 품목명 단일 인덱스 |
+| `rag/dur_master.py` | 식약처 DUR API 4개(병용금기/노인주의/연령금기/임부금기) 호출 — `mfds_client._request` 재사용, 브랜드 중복 dedup 포함 |
 | `rag/lifestyle_data.py` | `data/lifestyle_guidelines.json` 로더 |
 | `rag/kdca_health_info_data.py` | `data/kdca_healthinfo_content.jsonl`(질병관리청 건강정보) 로더 — 섹션 단위로 펼침 |
 | `rag/chunking.py` | 의약품/생활지침/건강정보 데이터 → `Document` 청크 변환 |
@@ -164,7 +164,6 @@ e약은요와 원천이 다른 **로컬 정적 데이터**. 효능효과 같은 
 | `data/lifestyle_guidelines.json` | 만성질환 생활지침 원본 데이터 (텍스트 에디터로 직접 수정 가능) |
 | `scripts/kdca_crawl_list.py` / `kdca_crawl_content.py` | 질병관리청 국가건강정보포털 Open API 목록·본문 수집 스크립트(재현용, `data/kdca_healthinfo_*`는 git 미추적) |
 | `backend/data/hira_drug_master_20251031.csv` | HIRA 약가마스터 원본 (약 30.5만 행, CP949, 54MB). `backend/`에만 실물 1개 두고 여기서 상위 디렉터리 경로로 참조 — 권순현님 `drug_reference.py`와 완전히 동일한 파일(중복 보관 안 함) |
-| `backend/data/dur_*_202606.csv` (5개) | DUR 전 카테고리 원본(병용금기 87만행/250MB·노인주의·노인주의(해열진통소염제)·연령금기·임부금기). git 미추적(`backend/.gitignore`의 `data/*.csv`) — 각자 로컬에 받아서 채워야 함 (CONTRACT.md §7) |
 | `scripts/demo_e2e.py` | 배치 수집 → 검색 → 가이드 생성 데모 |
 | `CONTRACT.md` | OCR ↔ RAG 필드 매핑, confidence 임계값, `review_required` 명명 규칙, 생활지침 커버리지 문서 |
 | `tests/contracts/` | OCR 실제 산출물 픽스처 기반 계약 테스트 (필드 누락/rename 감지) |

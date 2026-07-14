@@ -1,4 +1,4 @@
-from pathlib import Path
+from unittest.mock import patch
 
 from rag.dur_master import (
     search_age_taboo,
@@ -7,84 +7,110 @@ from rag.dur_master import (
     search_usjnt_taboo,
 )
 
-FIXTURE_PATH = Path(__file__).parent / "fixtures" / "dur_taboo_sample.csv"
-ELDERLY_FIXTURE = Path(__file__).parent / "fixtures" / "dur_elderly_caution_sample.csv"
-ELDERLY_NSAID_FIXTURE = Path(__file__).parent / "fixtures" / "dur_elderly_caution_nsaid_sample.csv"
-AGE_TABOO_FIXTURE = Path(__file__).parent / "fixtures" / "dur_age_taboo_sample.csv"
-PREGNANCY_TABOO_FIXTURE = Path(__file__).parent / "fixtures" / "dur_pregnancy_taboo_sample.csv"
+
+class _FakeResponse:
+    def __init__(self, payload: dict):
+        self._payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
 
 
-def test_search_usjnt_taboo_exact_match_returns_mixture_partner():
-    results = search_usjnt_taboo("와파린정", path=FIXTURE_PATH)
+def _ok(items: list[dict]) -> dict:
+    return {
+        "header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE."},
+        "body": {"pageNo": 1, "totalCount": len(items), "numOfRows": len(items), "items": items},
+    }
 
-    assert len(results) == 1
-    assert results[0].item_name == "와파린정"
+
+USJNT_TABOO_RESPONSE = _ok(
+    [
+        {
+            "ITEM_NAME": "와파린정",
+            "MIXTURE_ITEM_NAME": "아스피린정",
+            "PROHBT_CONTENT": "출혈 위험 증가로 병용을 피하십시오.",
+        },
+        # 제조사만 다른 중복 브랜드 — dedup 대상
+        {
+            "ITEM_NAME": "와파린정(제네릭)",
+            "MIXTURE_ITEM_NAME": "아스피린정",
+            "PROHBT_CONTENT": "출혈 위험 증가로 병용을 피하십시오.",
+        },
+    ]
+)
+
+ELDERLY_RESPONSE = _ok(
+    [
+        {"ITEM_NAME": "요시케어정5밀리그램(솔리페나신숙신산염)", "PROHBT_CONTENT": "항콜린 작용으로 노인에서 주의가 필요."},
+    ]
+)
+
+AGE_TABOO_RESPONSE = _ok(
+    [
+        {
+            "ITEM_NAME": "마도파에취비에스캅셀125",
+            "PROHBT_CONTENT": "25세 미만에서 안전성이 확립되지 않았습니다.",
+        },
+    ]
+)
+
+PREGNANCY_TABOO_RESPONSE = _ok(
+    [
+        {"ITEM_NAME": "씨앤유캡슐", "PROHBT_CONTENT": "임부 투여금기(금기등급 1)."},
+    ]
+)
+
+EMPTY_RESPONSE = _ok([])
+
+
+def test_search_usjnt_taboo_parses_and_dedupes():
+    with patch("rag.mfds_client.requests.get", return_value=_FakeResponse(USJNT_TABOO_RESPONSE)):
+        results = search_usjnt_taboo("와파린정")
+
+    assert len(results) == 1  # 브랜드 중복 제거됨
     assert results[0].mixture_item_name == "아스피린정"
     assert results[0].prohbt_content == "출혈 위험 증가로 병용을 피하십시오."
 
 
-def test_search_usjnt_taboo_is_bidirectional():
-    """제품명B로 조회해도 제품명A가 상대로 나온다 (관계에 방향이 없음)."""
-    results = search_usjnt_taboo("아스피린정", path=FIXTURE_PATH)
-
-    assert len(results) == 1
-    assert results[0].mixture_item_name == "와파린정"
-
-
-def test_search_usjnt_taboo_falls_back_to_partial_match():
-    results = search_usjnt_taboo("로자탄", path=FIXTURE_PATH)
-
-    assert len(results) == 1
-    assert results[0].mixture_item_name == "스피로노락톤정"
-
-
 def test_search_usjnt_taboo_no_match_returns_empty():
-    assert search_usjnt_taboo("존재하지않는약", path=FIXTURE_PATH) == []
+    with patch("rag.mfds_client.requests.get", return_value=_FakeResponse(EMPTY_RESPONSE)):
+        assert search_usjnt_taboo("존재하지않는약") == []
 
 
-def test_search_usjnt_taboo_missing_file_raises():
-    import pytest
-
-    with pytest.raises(FileNotFoundError):
-        search_usjnt_taboo("와파린정", path=Path("/no/such/file.csv"))
-
-
-def test_search_elderly_caution_combines_both_lists():
-    """일반 노인주의 + 해열진통소염제 전용 노인주의 목록을 둘 다 조회해서 합친다."""
-    results = search_elderly_caution(
-        "요시케어정5밀리그램(솔리페나신숙신산염)", elderly_path=ELDERLY_FIXTURE, nsaid_path=ELDERLY_NSAID_FIXTURE
-    )
+def test_search_elderly_caution_maps_category():
+    """[2026-07-14] API 전환 이후 노인주의(해열진통소염제) 세부 분류는 통합돼 "노인주의" 하나로만 나온다."""
+    with patch("rag.mfds_client.requests.get", return_value=_FakeResponse(ELDERLY_RESPONSE)):
+        results = search_elderly_caution("요시케어정5밀리그램(솔리페나신숙신산염)")
 
     assert len(results) == 1
     assert results[0].category == "노인주의"
     assert "항콜린" in results[0].detail
 
 
-def test_search_elderly_caution_nsaid_list():
-    results = search_elderly_caution("에이서캡슐(아세클로페낙)", elderly_path=ELDERLY_FIXTURE, nsaid_path=ELDERLY_NSAID_FIXTURE)
-
-    assert len(results) == 1
-    assert results[0].category == "노인주의(해열진통소염제)"
-    assert "위장관계" in results[0].detail
-
-
-def test_search_elderly_caution_no_match_returns_empty():
-    assert search_elderly_caution("존재하지않는약", elderly_path=ELDERLY_FIXTURE, nsaid_path=ELDERLY_NSAID_FIXTURE) == []
-
-
-def test_search_age_taboo_includes_age_condition_in_extra():
-    results = search_age_taboo("마도파에취비에스캅셀125", path=AGE_TABOO_FIXTURE)
+def test_search_age_taboo_detail_includes_condition_text():
+    """API에는 별도 extra 필드가 없어 연령 조건이 detail(자연어) 안에 포함된다."""
+    with patch("rag.mfds_client.requests.get", return_value=_FakeResponse(AGE_TABOO_RESPONSE)):
+        results = search_age_taboo("마도파에취비에스캅셀125")
 
     assert len(results) == 1
     assert results[0].category == "연령금기"
-    assert results[0].extra == "25세 미만"
-    assert "안전성" in results[0].detail
+    assert results[0].extra is None
+    assert "25세 미만" in results[0].detail
 
 
-def test_search_pregnancy_taboo_includes_grade_in_extra():
-    results = search_pregnancy_taboo("씨앤유캡슐", path=PREGNANCY_TABOO_FIXTURE)
+def test_search_pregnancy_taboo_detail_includes_grade_text():
+    with patch("rag.mfds_client.requests.get", return_value=_FakeResponse(PREGNANCY_TABOO_RESPONSE)):
+        results = search_pregnancy_taboo("씨앤유캡슐")
 
     assert len(results) == 1
     assert results[0].category == "임부금기"
-    assert results[0].extra == "금기등급 1"
-    assert "임부 투여금기" in results[0].detail
+    assert results[0].extra is None
+    assert "금기등급 1" in results[0].detail
+
+
+def test_search_elderly_caution_no_match_returns_empty():
+    with patch("rag.mfds_client.requests.get", return_value=_FakeResponse(EMPTY_RESPONSE)):
+        assert search_elderly_caution("존재하지않는약") == []
