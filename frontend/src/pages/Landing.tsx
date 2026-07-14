@@ -4,7 +4,7 @@ import { Activity, Bell, Bookmark, Check, ChevronRight, Heart, Pill } from "luci
 import NavBar from "../components/NavBar";
 import { checkIntake, getLogs, getTodayMedications, type Medication, type MedicationLogEntry } from "../api/monitoring";
 import { getNotificationSettings, type NotificationSettings } from "../api/care";
-import { getCurrentPatientId } from "../lib/session";
+import { getCurrentPatientId, isLoggedIn } from "../lib/session";
 
 const unsplash = (id: string, w: number, h: number) =>
   `https://images.unsplash.com/${id}?w=${w}&h=${h}&fit=crop&auto=format`;
@@ -36,20 +36,27 @@ export default function Landing() {
   const [meds, setMeds] = useState<Medication[]>([]);
   const [logs, setLogs] = useState<MedicationLogEntry[]>([]);
   const [notifSettings, setNotifSettings] = useState<NotificationSettings | null>(null);
+  const loggedIn = isLoggedIn();
 
   // [7/14] "최신 안내" 섹션을 처방전 등록으로 실제 등록된 약품·알림 일정(오늘자)과 연결 —
   // 더 이상 Figma의 예시 텍스트가 아니라 로그인한 환자의 실제 /monitoring/today 데이터.
+  // [수정] 비로그인 방문자는 이 API들이 전부 인증이 필요해서(get_current_actor) 401이
+  // 나고, monitoringClient의 인터셉터가 그걸 보고 /login으로 강제 이동시켜버린다 —
+  // 로그인 상태일 때만 호출하고, 아니면 빈 상태 그대로 둬서 아래 "등록된 일정이
+  // 없어요" 안내를 자연스러운 비로그인 미리보기로 쓴다.
   useEffect(() => {
+    if (!loggedIn) return;
     getTodayMedications(getCurrentPatientId())
       .then(setMeds)
       .catch(() => {});
-  }, []);
+  }, [loggedIn]);
 
   // [7/14] "대시보드 요약"의 생활 습관·알림 설정 카드도 모니터링 페이지와 같은 실제
   // 데이터로 연결 — 최근 7일 복약 순응률(getLogs, MonitoringDashboard.tsx와 동일 계산식)과
   // 실제 알림 켜짐/꺼짐 상태(getNotificationSettings). "건강 점수"·"다음 병원 방문"은
   // 앱에 그런 데이터 자체가 없어서 실제로 존재하는 이 두 값으로 대체한다.
   useEffect(() => {
+    if (!loggedIn) return;
     const patientId = getCurrentPatientId();
     getLogs(patientId, 7)
       .then(setLogs)
@@ -57,7 +64,7 @@ export default function Landing() {
     getNotificationSettings(patientId)
       .then(setNotifSettings)
       .catch(() => {});
-  }, []);
+  }, [loggedIn]);
 
   const takenCount = meds.filter((m) => m.status === "taken").length;
   const medsDonutPct = meds.length > 0 ? takenCount / meds.length : 0;
@@ -124,7 +131,7 @@ export default function Landing() {
   return (
     <div style={styles.page}>
       <div style={styles.heroSection}>
-        <NavBar isLoggedIn userName="김건강" variant="dark" />
+        <NavBar isLoggedIn={loggedIn} userName="김건강" variant="dark" />
         <div style={styles.heroBadges}>
           <span style={styles.badge}>수도권 독거노인 맞춤 건강 관리</span>
           <span style={styles.badge}>독거노인 및 거동 불편 사용자를 위한 안전한 서비스</span>
