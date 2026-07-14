@@ -78,8 +78,22 @@ export function formatSourceRef(ref: SourceRef): string {
     return `⚠️ ${ref.dur_category}${extra}${ref.dur_detail ? `: ${ref.dur_detail}` : ""}`;
   }
   if (ref.item_name) return `${ref.item_name}${ref.field ? ` · ${ref.field}` : ""}`; // 의약품 인용
-  if (ref.disease) return `${ref.disease}${ref.category ? ` · ${ref.category}` : ""}`; // 생활지침 인용
+  if (ref.disease) return ref.source ?? `${ref.disease}${ref.category ? ` · ${ref.category}` : ""}`; // 생활지침 인용 — 실제 출처(학회/기관), 없으면 질환·카테고리로 폴백
   return ref.drug_name ?? "출처 미상";
+}
+
+/** source_refs를 표시용 문자열로 변환하되, 같은 출처 텍스트가 반복되면 한 번만 남긴다
+ * (생활지침 여러 항목이 같은 학회 지침을 공유하는 경우가 많음). */
+export function formatUniqueSourceRefs(refs: SourceRef[]): { text: string; url?: string }[] {
+  const seen = new Set<string>();
+  const result: { text: string; url?: string }[] = [];
+  for (const ref of refs) {
+    const text = formatSourceRef(ref);
+    if (seen.has(text)) continue;
+    seen.add(text);
+    result.push({ text, url: ref.url });
+  }
+  return result;
 }
 
 export interface RecordResult {
