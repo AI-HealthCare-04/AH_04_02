@@ -1,7 +1,14 @@
 from unittest.mock import patch
 
 import pytest
-from rag.mfds_client import MfdsApiError, is_officially_approved, search_by_name, search_permit_info
+from rag.mfds_client import (
+    MfdsApiError,
+    is_officially_approved,
+    parse_doc_sections,
+    search_by_name,
+    search_permit_detail,
+    search_permit_info,
+)
 
 SAMPLE_RESPONSE = {
     "header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE."},
@@ -136,3 +143,78 @@ def test_is_officially_approved_false_when_cancelled():
 def test_is_officially_approved_none_when_not_found():
     with patch("rag.mfds_client.requests.get", return_value=_FakeResponse(PERMIT_RESPONSE_EMPTY)):
         assert is_officially_approved("존재하지않는약") is None
+
+
+# [2026-07-14 추가] 상세정보(getDrugPrdtPrmsnDtlInq06) — NB_DOC_DATA(사용상의주의사항)는
+# 실제 API 응답과 동일하게 <DOC><SECTION><ARTICLE>...</ARTICLE></SECTION></DOC> 구조이며,
+# PARAGRAPH 안에 표 마크업(CDATA로 온 HTML)이 섞여 있는 경우까지 재현한다.
+NB_DOC_DATA_SAMPLE = """<DOC title="사용상의주의사항" type="NB">
+<SECTION title="">
+<ARTICLE title="1. 경고">
+<PARAGRAPH tagName="p">간손상을 일으킬 수 있으므로 정해진 용법·용량을 지키십시오.</PARAGRAPH>
+</ARTICLE>
+<ARTICLE title="2. 다음 환자에는 투여하지 말 것">
+<PARAGRAPH tagName="p"><![CDATA[이 약 또는 이 약의 구성성분에 과민증 환자<table><tbody><tr><td>구분</td></tr></tbody></table>]]></PARAGRAPH>
+</ARTICLE>
+</SECTION>
+</DOC>"""
+
+PERMIT_DETAIL_RESPONSE = {
+    "header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE."},
+    "body": {
+        "pageNo": 1,
+        "totalCount": 1,
+        "numOfRows": 1,
+        "items": [
+            {
+                "ITEM_SEQ": "202106092",
+                "ITEM_NAME": "타이레놀정500밀리그람(아세트아미노펜)",
+                "ENTP_NAME": "켄뷰코리아판매유한회사",
+                "NB_DOC_DATA": NB_DOC_DATA_SAMPLE,
+            }
+        ],
+    },
+}
+
+PERMIT_DETAIL_RESPONSE_NO_PRECAUTIONS = {
+    "header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE."},
+    "body": {
+        "pageNo": 1,
+        "totalCount": 1,
+        "numOfRows": 1,
+        "items": [
+            {
+                "ITEM_SEQ": "202106092",
+                "ITEM_NAME": "타이레놀정500밀리그람(아세트아미노펜)",
+                "NB_DOC_DATA": None,
+            }
+        ],
+    },
+}
+
+
+def test_search_permit_detail_parses_items():
+    with patch("rag.mfds_client.requests.get", return_value=_FakeResponse(PERMIT_DETAIL_RESPONSE)):
+        results = search_permit_detail("타이레놀")
+
+    assert len(results) == 1
+    assert results[0].item_name == "타이레놀정500밀리그람(아세트아미노펜)"
+    assert results[0].nb_doc_data == NB_DOC_DATA_SAMPLE
+
+
+def test_parse_doc_sections_extracts_titles_and_strips_embedded_html():
+    sections = parse_doc_sections(NB_DOC_DATA_SAMPLE)
+
+    assert sections == [
+        ("1. 경고", "간손상을 일으킬 수 있으므로 정해진 용법·용량을 지키십시오."),
+        ("2. 다음 환자에는 투여하지 말 것", "이 약 또는 이 약의 구성성분에 과민증 환자 구분"),
+    ]
+
+
+def test_parse_doc_sections_returns_empty_list_when_no_data():
+    assert parse_doc_sections(None) == []
+    assert parse_doc_sections("") == []
+
+
+def test_parse_doc_sections_returns_empty_list_on_invalid_xml():
+    assert parse_doc_sections("<DOC><ARTICLE title=") == []

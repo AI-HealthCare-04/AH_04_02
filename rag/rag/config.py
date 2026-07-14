@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     # DATA_GO_KR_SERVICE_KEY를 재사용한다. mfds_client.py의 search_permit_info()/
     # is_officially_approved()도 함께 복원.
     PERMIT_INFO_BASE_URL: str = "https://apis.data.go.kr/1471000/DrugPrdtPrmsnInfoService07/getDrugPrdtPrmsnInq07"
+    # [2026-07-14 추가] 목록 조회와 별개 엔드포인트 — 사용상의주의사항(NB_DOC_DATA) 등 원문 텍스트 제공.
+    PERMIT_DETAIL_BASE_URL: str = (
+        "https://apis.data.go.kr/1471000/DrugPrdtPrmsnInfoService07/getDrugPrdtPrmsnDtlInq06"
+    )
 
     # [2026-07-10 → 7/13] 식약처_의약품안전사용서비스(DUR) 병용금기는 원래 API 연동(같은
     # DATA_GO_KR_SERVICE_KEY 재사용)을 시도했으나 403 Forbidden(활용신청 승인 대기중)이라,

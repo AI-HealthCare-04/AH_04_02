@@ -1,9 +1,14 @@
+import re
 import time
+import xml.etree.ElementTree as ET
 
 import requests
 
 from rag.config import settings
-from rag.schemas import DrugInfo, DrugPermitInfo
+from rag.schemas import DrugInfo, DrugPermitDetail, DrugPermitInfo
+
+_TAG_RE = re.compile(r"<[^>]+>")
+_WHITESPACE_RE = re.compile(r"\s+")
 
 
 class MfdsApiError(RuntimeError):
@@ -85,3 +90,50 @@ def is_officially_approved(item_name: str) -> bool | None:
     if not results:
         return None
     return any(item.is_active for item in results)
+
+
+# [2026-07-14 추가] 사용자가 "제품허가정보로 사용상의 주의사항 조회 가능한지" 확인 요청 —
+# 목록 조회(getDrugPrdtPrmsnInq07)에는 없고, 상세정보(getDrugPrdtPrmsnDtlInq06)에만 있다.
+def search_permit_detail(item_name: str, num_of_rows: int = 10, page_no: int = 1) -> list[DrugPermitDetail]:
+    """식약처_의약품제품허가정보 상세정보(getDrugPrdtPrmsnDtlInq06)를 품목명(부분 일치)으로 조회합니다.
+
+    효능효과/용법용량/사용상의주의사항/임부수유부주의사항 원문(XX_DOC_DATA, 구조화 XML)을
+    담고 있다 — parse_doc_sections()로 사람이 읽을 텍스트로 변환해야 한다.
+    """
+    data = _request(
+        {"item_name": item_name, "numOfRows": num_of_rows, "pageNo": page_no},
+        base_url=settings.PERMIT_DETAIL_BASE_URL,
+    )
+    items = data.get("body", {}).get("items") or []
+    return [DrugPermitDetail.model_validate(item) for item in items]
+
+
+def parse_doc_sections(doc_xml: str | None) -> list[tuple[str, str]]:
+    """`<DOC><SECTION><ARTICLE title="...">문단들</ARTICLE></SECTION></DOC>` 구조의
+    XX_DOC_DATA 문자열을 (섹션 제목, 본문 텍스트) 리스트로 변환합니다.
+
+    문단(PARAGRAPH) 안에 표 등 HTML 마크업이 CDATA로 섞여 있을 수 있어 태그를 제거한다.
+    파싱 실패(빈 값·잘못된 XML)는 예외를 던지지 않고 빈 리스트로 처리한다 — 이 텍스트가
+    없어도 나머지 인용(e약은요/HIRA/DUR)은 그대로 유효해야 하기 때문이다.
+    """
+    if not doc_xml or not doc_xml.strip():
+        return []
+    try:
+        root = ET.fromstring(doc_xml)
+    except ET.ParseError:
+        return []
+
+    sections = []
+    for article in root.iter("ARTICLE"):
+        title = (article.get("title") or "").strip()
+        paragraphs = []
+        for p in article.iter("PARAGRAPH"):
+            if not p.text:
+                continue
+            cleaned = _WHITESPACE_RE.sub(" ", _TAG_RE.sub(" ", p.text)).strip()
+            if cleaned:
+                paragraphs.append(cleaned)
+        text = " ".join(paragraphs)
+        if title and text:
+            sections.append((title, text))
+    return sections

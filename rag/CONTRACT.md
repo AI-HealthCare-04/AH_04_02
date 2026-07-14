@@ -166,6 +166,51 @@ FAQ 형식인 게 e약은요의 시그니처). "진짜 의약품 허가정보"�
 2026-07-14 실제 API로 e2e 검증 완료: "타이레놀정500밀리그람"으로 `permit_kind_code="신고"`,
 `permit_active=True`가 `source_refs`에 정확히 채워짐을 확인.
 
+### 6-1. 사용상의주의사항 — 상세정보 API (`getDrugPrdtPrmsnDtlInq06`) — [2026-07-14] 추가
+
+"제품허가정보로 사용상의 주의사항도 조회 가능한지" 확인 요청으로 찾음 — 위 목록 조회
+(`getDrugPrdtPrmsnInq07`)에는 효능효과·용법용량·주의사항 같은 설명문이 전혀 없지만, **같은
+서비스의 상세정보 오퍼레이션**에는 있다.
+
+**API 상세** (`item_name=타이레놀정500밀리그람`으로 실제 호출해 검증 완료):
+
+- **Base URL**: `https://apis.data.go.kr/1471000/DrugPrdtPrmsnInfoService07`
+- **Operation**: `getDrugPrdtPrmsnDtlInq06`
+- **파라미터**: 목록 조회와 동일 — `item_name`(snake_case, DUR API의 `itemName`과 다름 주의)
+- **같은 `DATA_GO_KR_SERVICE_KEY` 재사용** — 별도 활용신청 불필요
+
+**응답 필드** (목록 조회에 없는 4개 원문 필드 추가):
+
+| 필드 | 의미 |
+|---|---|
+| `EE_DOC_DATA` | 효능효과 원문 (구조화 XML) |
+| `UD_DOC_DATA` | 용법용량 원문 (구조화 XML) |
+| `NB_DOC_DATA` | 사용상의주의사항 원문 (구조화 XML) — RAG에서 실제로 쓰는 필드 |
+| `PN_DOC_DATA` | 임부·수유부 주의사항 원문 (구조화 XML, 없는 품목 많음) |
+
+각 `XX_DOC_DATA`는 `<DOC title="..." type="..."><SECTION title=""><ARTICLE
+title="1. 경고">...<PARAGRAPH tagName="p">문단 텍스트</PARAGRAPH>...</ARTICLE></SECTION></DOC>`
+형태의 문자열이다. 실제 응답에서 `NB_DOC_DATA`는 "타이레놀정500밀리그람" 기준 6개
+ARTICLE(경고/복용금지대상/상담필요대상/즉시중단상담대상/기타주의사항/저장상의주의사항)을
+가진 걸 실측 확인. PARAGRAPH 문단 안에 표 등 HTML 마크업이 CDATA로 섞여 들어오는 경우가
+있어(`<table><tbody>...` 형태) 태그를 정규식으로 벗겨내야 순수 텍스트가 된다.
+
+### 코드 위치 (6-1)
+
+| 파일 | 내용 |
+|---|---|
+| `rag/config.py` | `PERMIT_DETAIL_BASE_URL` |
+| `rag/schemas.py` | `DrugPermitDetail` 모델 (`EE_DOC_DATA`/`UD_DOC_DATA`/`NB_DOC_DATA`/`PN_DOC_DATA` alias 매핑) |
+| `rag/mfds_client.py` | `search_permit_detail(item_name)` — 상세정보 조회 / `parse_doc_sections(doc_xml)` — `XX_DOC_DATA` 문자열을 `(섹션 제목, 본문)` 목록으로 변환(빈 값·XML 파싱 실패는 예외 없이 빈 리스트) |
+| `rag/rag_chain.py` | `_lookup_permit_precautions()` — e약은요 item_name으로 조회해 `NB_DOC_DATA`를 파싱, 섹션별로 `context_items`에 `field="사용상의주의사항 - {섹션 제목}"`인 추가 인용을 붙임(품목당 상세 API 1회만 호출하도록 `_build_context`에서 문서 루프와 분리된 두 번째 루프로 처리) |
+| `tests/test_mfds_client.py` | `search_permit_detail`/`parse_doc_sections` 테스트(CDATA 내 HTML 마크업 케이스 포함) |
+| `tests/test_rag_chain.py` | `_build_context`의 사용상의주의사항 통합 테스트 3건(정상 매칭/미매칭/조회 실패 격리) |
+| `tests/conftest.py` | `_no_real_dur_lookups` autouse fixture에 `search_permit_detail` 기본값도 빈 리스트로 추가 |
+
+2026-07-14 실제 API로 검증 완료: `search_permit_detail('타이레놀정500밀리그람', num_of_rows=1)` →
+1건, `parse_doc_sections(detail.nb_doc_data)` → 6개 섹션이 실제 한글 주의사항 텍스트와 함께
+정상 추출됨을 확인.
+
 ## 7. DUR(의약품안전사용서비스) 연동 — [2026-07-13] 로컬 CSV 방식, 5개 카테고리 전부 구현 완료
 
 RAG 파트에 DUR(의약품안전사용서비스) 주의/금기 경고를 붙였다.

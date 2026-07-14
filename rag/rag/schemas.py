@@ -66,6 +66,28 @@ class DrugPermitInfo(BaseModel):
         return self.cancel_date is None and self.cancel_name == "정상"
 
 
+# [2026-07-14 추가] 목록 조회(getDrugPrdtPrmsnInq07, DrugPermitInfo)와 별개 엔드포인트 —
+# 사용자가 "제품허가정보로 사용상의 주의사항 조회 가능한지" 확인 요청해서 찾음.
+class DrugPermitDetail(BaseModel):
+    """식약처 DrugPrdtPrmsnInfoService07 getDrugPrdtPrmsnDtlInq06 응답 1개 품목.
+
+    목록 조회(DrugPermitInfo)와 달리 효능효과/용법용량/사용상의주의사항/임부수유부주의사항
+    원문(각 XX_DOC_DATA)을 담고 있다 — 이 4개 필드는 `<DOC><SECTION><ARTICLE
+    title="...">문단들</ARTICLE></SECTION></DOC>` 형태의 구조화 XML 문자열이라
+    `mfds_client.parse_doc_sections()`로 파싱해야 사람이 읽을 텍스트가 된다.
+    """
+
+    item_seq: str = Field(alias="ITEM_SEQ")
+    item_name: str = Field(alias="ITEM_NAME")
+    entp_name: str | None = Field(default=None, alias="ENTP_NAME")
+    ee_doc_data: str | None = Field(default=None, alias="EE_DOC_DATA")  # 효능효과
+    ud_doc_data: str | None = Field(default=None, alias="UD_DOC_DATA")  # 용법용량
+    nb_doc_data: str | None = Field(default=None, alias="NB_DOC_DATA")  # 사용상의주의사항
+    pn_doc_data: str | None = Field(default=None, alias="PN_DOC_DATA")  # 임부·수유부 주의사항(없는 품목 많음)
+
+    model_config = {"populate_by_name": True, "extra": "ignore"}
+
+
 class HiraDrugMasterEntry(BaseModel):
     """건강보험심사평가원 약가마스터·의약품표준코드 CSV(backend/data/hira_drug_master_20251031.csv) 1개 행.
 
