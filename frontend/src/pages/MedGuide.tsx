@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import NavBar from "../components/NavBar";
-import { dedupeSourceRefs, formatSourceRef, getRecord, type RecordResult } from "../api/records";
+import { formatUniqueSourceRefs, getRecord, type RecordResult } from "../api/records";
 import { C } from "../theme";
 
 // ponytail: Figma 원본은 병명 백과사전·시간대별 복약 일정 탭도 있었지만, 백엔드가
@@ -216,7 +216,7 @@ export default function MedGuide() {
         )}
 
         {guide.source_refs.length > 0 && (() => {
-          const uniqueRefs = dedupeSourceRefs(guide.source_refs);
+          const uniqueRefs = formatUniqueSourceRefs(guide.source_refs);
           return (
             <p className="text-[12px] mt-6" style={{ color: C.muted }}>
               출처:{" "}
@@ -225,10 +225,10 @@ export default function MedGuide() {
                   {/* [7/9] url(stub)이 있을 때만 링크로, 실제 파이프라인 인용(url 없음)은 텍스트로만 표시 */}
                   {s.url ? (
                     <a href={s.url} target="_blank" rel="noreferrer" className="underline" style={{ color: C.muted }}>
-                      {formatSourceRef(s)}
+                      {s.text}
                     </a>
                   ) : (
-                    formatSourceRef(s)
+                    s.text
                   )}
                   {i < uniqueRefs.length - 1 && ", "}
                 </span>

@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import NavBar from "../components/NavBar";
-import { dedupeSourceRefs, formatSourceRef, type RecordResult } from "../api/records";
+import { formatUniqueSourceRefs, type RecordResult } from "../api/records";
 import { C } from "../theme";
 
 const STATIC_DISCLAIMER =
@@ -166,7 +166,7 @@ export default function Result() {
               {guide.source_refs.length > 0 && (
                 <div style={styles.sources}>
                   <p style={styles.sourcesText}>
-                    출처: {dedupeSourceRefs(guide.source_refs).map(formatSourceRef).join(", ")}
+                    출처: {formatUniqueSourceRefs(guide.source_refs).map((s) => s.text).join(", ")}
                   </p>
                 </div>
               )}

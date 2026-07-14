@@ -78,20 +78,18 @@ export function formatSourceRef(ref: SourceRef): string {
   return ref.drug_name ?? "출처 미상";
 }
 
-/**
- * 여러 약의 source_refs를 합친 배열엔 drug_name별로 항목이 따로 들어있어 데이터상으론
- * 안 겹치지만, formatSourceRef()가 drug_name을 표시에서 빼기 때문에(예: 두 약이 같은
- * 생활지침·같은 DUR 주의를 각자 인용) 화면엔 같은 문구가 중복으로 보인다.
- * 표시 문구(+url) 기준으로 중복을 제거한다.
- */
-export function dedupeSourceRefs(refs: SourceRef[]): SourceRef[] {
+/** source_refs를 표시용 문자열로 변환하되, 같은 출처 텍스트가 반복되면 한 번만 남긴다
+ * (여러 약이 같은 학회 지침·같은 DUR 주의를 각자 인용하는 경우가 많음). */
+export function formatUniqueSourceRefs(refs: SourceRef[]): { text: string; url?: string }[] {
   const seen = new Set<string>();
-  return refs.filter((ref) => {
-    const key = `${formatSourceRef(ref)}|${ref.url ?? ""}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  const result: { text: string; url?: string }[] = [];
+  for (const ref of refs) {
+    const text = formatSourceRef(ref);
+    if (seen.has(text)) continue;
+    seen.add(text);
+    result.push({ text, url: ref.url });
+  }
+  return result;
 }
 
 export interface RecordResult {
