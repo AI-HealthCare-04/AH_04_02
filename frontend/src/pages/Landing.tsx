@@ -211,7 +211,7 @@ export default function Landing() {
               <span style={styles.valueItemText}>{item}</span>
             </div>
           ))}
-          <button style={styles.valueBtn} onClick={() => navigate("/register")}>
+          <button style={styles.valueBtn} onClick={() => navigate("/upload")}>
             가이드 생성하기 <ChevronRight className="w-4 h-4" />
           </button>
         </div>
