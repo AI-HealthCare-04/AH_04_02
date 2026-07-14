@@ -13,3 +13,5 @@ pandas
 openpyxl
 rapidfuzz
 pytest  # [7/9] security.py 테스트용 (backend/tests/)
+pymysql  # [2026-07-14 추가] APP_ENV=development/production에서 MySQL(mysql+pymysql://) 연결용 — local(SQLite)은 불필요하지만 설치돼 있어도 무해
+alembic  # [2026-07-14 추가] DB 스키마 마이그레이션 — database.py/alembic/README 참고

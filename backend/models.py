@@ -52,7 +52,10 @@ class Patient(SQLModel, table=True):
     note: Optional[str] = None  # 특이사항 (예: "치매 초기", "혼자 거주" 등 자유 텍스트)
     phone_encrypted: Optional[str] = None  # [7/8 추가, 7/9 암호화] 회원가입(SignUp.tsx) 연락처
     phone_hash: Optional[str] = Field(default=None, index=True)  # [7/9] 로그인/검색용, 복호화 대상 아님
-    email: Optional[str] = None  # [7/8 추가] 회원가입 시 아이디 — unique 제약 없음(이메일/전화번호 둘 다 로그인 식별자로 허용)
+    # [7/8 추가] 회원가입 시 아이디(이메일/전화번호 둘 다 로그인 식별자로 허용).
+    # [2026-07-14] 유니크 제약이 없어서 같은 이메일로 중복 가입이 조용히 허용되던 버그를
+    # 고쳤다 — 항상 security.normalize_email()로 정규화한 값만 여기 저장한다는 전제.
+    email: Optional[str] = Field(default=None, unique=True, index=True)
     birth_date: Optional[str] = None  # [7/8 추가] 생년월일 (자유 텍스트, 예: "1945.03.15")
     # [7/8 추가, 7/9 실제 로그인 대상으로 전환] 환자 본인 계정 비밀번호 — Caregiver.hashed_password와 동일 원칙
     hashed_password: Optional[str] = None
@@ -201,6 +204,18 @@ class MedicationSchedule(SQLModel, table=True):
     memo: Optional[str] = None
     active: bool = True
     created_at: datetime = Field(default_factory=datetime.now)
+    # [2026-07-14 추가] patient_medications 도입 이후 새 일정은 여기로 연결한다. 기존
+    # /monitoring/schedules 플로우(drug_name 자유 텍스트, patient_medication_id 없음)는
+    # 전혀 안 건드리고 전부 nullable로만 추가 — 과거 데이터도 그대로 유효하다.
+    patient_medication_id: Optional[int] = Field(
+        default=None, foreign_key="patient_medications.id", index=True
+    )
+    meal_relation: Optional[str] = None  # 식전 / 식후 / 취침 전 등
+    instructions: Optional[str] = None
+    timezone: Optional[str] = None
+    # JSON 배열 문자열(예: '["mon","wed","fri"]') — SQLite엔 JSON 타입이 없어 문자열로 저장
+    # (guide_results.source_refs와 동일한 관례).
+    days_of_week: Optional[str] = None
 
 
 # ── 복약 기록 (담당: 박소정) ──
@@ -215,6 +230,62 @@ class MedicationLog(SQLModel, table=True):
     # [7/9 추가] 이 체크를 누가 했는지 — 환자 본인(patient) vs 보호자 대신(caregiver)
     confirmed_by_type: str = "patient"
     confirmed_by_caregiver_id: Optional[int] = Field(default=None, foreign_key="caregivers.id")
+
+
+# ── 환자 의약품 등록 [2026-07-14 추가, 담당: 김영혜] ──
+# 여러 로컬 개발 환경이 공통 DB를 쓰도록 정리하면서 함께 요청된 기능 — "환자가 입력한
+# 의약품"을 OCR 파이프라인(medical_records/ocr_results)과 별개로 등록/조회할 수 있게 한다.
+# OcrResult(review_required/user_confirmed/matched_drug_name/match_score)와 동일한 원칙:
+# AI/OCR이 추정한 값과 사용자가 최종 확인한 값을 한 행에서 덮어쓰지 않고 함께 보존한다.
+class PatientMedication(SQLModel, table=True):
+    __tablename__ = "patient_medications"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    patient_id: int = Field(foreign_key="patients.id", index=True)
+    # 의약품 마스터 테이블 자체가 이 프로젝트에 아직 없다(rag/의 CSV·정부 API 실시간 조회로
+    # 대체 중 — CONTRACT.md 참고). 그래서 FK를 걸 대상이 없어 drug_id는 제약 없는 컬럼으로
+    # 남겨둔다 — 나중에 마스터 테이블이 생기면 그때 foreign_key를 추가한다. 검색 결과가
+    # 하나로 확정되지 않으면 drug_id/item_seq를 null로 두고 원문(source_raw_text)만 남긴다.
+    drug_id: Optional[int] = Field(default=None, index=True)
+    item_seq: Optional[str] = Field(default=None, index=True)  # 식약처 품목일련번호
+    product_code: Optional[str] = None
+    medication_name: str  # 환자가 최종 확인한 의약품명 (확정 데이터 — 필수)
+    manufacturer_name: Optional[str] = None
+    dosage_amount: Optional[str] = None
+    dosage_unit: Optional[str] = None  # 정 / 캡슐 / mL 등
+    frequency_per_day: Optional[int] = None
+    administration_route: Optional[str] = None  # 경구 등
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    prescription_id: Optional[int] = Field(default=None, foreign_key="medical_records.id")
+    source_type: str = "manual"  # manual / prescription_ocr / pill_image / api_search
+    # AI/OCR이 맨 처음 추출한 원문 그대로 — medication_name(사용자 확정값)과 절대 덮어쓰지
+    # 않고 나란히 보존해서, 나중에 "AI가 뭐라고 봤었는지" 추적 가능하게 한다.
+    source_raw_text: Optional[str] = None
+    verification_status: str = "unverified"  # unverified / matched / user_confirmed / pharmacist_confirmed
+    is_active: bool = True  # 현재 복용 여부
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+    deleted_at: Optional[datetime] = None  # soft delete (DELETE API가 실제로 지우지 않고 여기만 채움)
+
+
+# ── 실제 복약 수행 기록 [2026-07-14 추가, 담당: 김영혜] ──
+# MedicationLog(기존, MedicationSchedule.schedule_id 필수)와 별개 테이블 — 기존 스케줄
+# 체크인 플로우는 그대로 두고, patient_medications 기반의 새 등록/기록 플로우를 위해 추가.
+class MedicationRecord(SQLModel, table=True):
+    __tablename__ = "medication_records"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    patient_medication_id: int = Field(foreign_key="patient_medications.id", index=True)
+    schedule_id: Optional[int] = Field(default=None, foreign_key="medication_schedules.id")
+    scheduled_at: Optional[datetime] = None
+    taken_at: Optional[datetime] = None  # 실제 복용 시간, 아직 안 먹었으면 None
+    status: str = "scheduled"  # scheduled / taken / missed / skipped / duplicate_suspected
+    verification_method: str = "self_report"  # self_report / caregiver / photo / device
+    evidence_image_url: Optional[str] = None
+    memo: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
 
 
 # ══════════════════════════════════════════════════════════

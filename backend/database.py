@@ -1,22 +1,74 @@
 """
-database.py — SQLite 연결 설정 (관리: 박소정)
+database.py — DB 연결 설정 (관리: 박소정)
 
-app.db 파일 하나가 DB 전체예요. 삭제하면 데이터 초기화됩니다 (개발 중엔 그래도 됨).
+[2026-07-14 변경] 팀원마다 로컬 SQLite 파일(app.db)이 따로 생겨서 "내가 가입한 계정이
+다른 팀원 서버에서 로그인 안 된다"는 문제가 있었음 — DATABASE_URL을 하드코딩된 SQLite
+경로 대신 환경변수로 읽도록 바꿔서, 팀 공통 개발 DB(MySQL 등)를 .env 하나로 가리킬 수
+있게 했다. APP_ENV=local이면 지금까지처럼 로컬 SQLite로 동작(기본값 유지, 하위호환).
+
+APP_ENV 4단계:
+- local: 개인 로컬 SQLite (기본값, DATABASE_URL 생략 가능)
+- development: 팀 공통 개발 DB (DATABASE_URL 필수, 보통 MySQL)
+- test: pytest가 그때그때 in-memory SQLite로 오버라이드(이 모듈의 값은 안 씀) — CONTRACT 유지 목적으로만 명시
+- production: 운영 DB (DATABASE_URL 필수, 로그에 상세 정보 노출 안 함)
+
+동기 SQLAlchemy(SQLModel)를 그대로 쓴다 — 비동기로 바꾸지 않음(기존 구조 유지).
 """
+import os
+
+from sqlalchemy.engine import make_url
 from sqlmodel import SQLModel, Session, create_engine, select
 
-DATABASE_URL = "sqlite:///./app.db"
+APP_ENV = os.environ.get("APP_ENV", "local")
 
-# check_same_thread=False: FastAPI가 여러 요청을 처리할 때 필요한 SQLite 옵션
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+_DEFAULT_SQLITE_URL = "sqlite:///./app.db"
+
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    if APP_ENV in ("development", "production"):
+        raise RuntimeError(
+            f"APP_ENV={APP_ENV}인데 DATABASE_URL이 설정되지 않았습니다. "
+            "팀 공통/운영 DB는 반드시 환경변수로 지정해야 합니다 (.env.example 참고)."
+        )
+    DATABASE_URL = _DEFAULT_SQLITE_URL  # local/test 기본값 — 기존 동작과 동일
+
+_url = make_url(DATABASE_URL)
+
+# check_same_thread=False: SQLite에서 FastAPI가 여러 요청을 처리할 때 필요한 옵션.
+# MySQL 등 서버형 DB는 이 옵션이 없고, 대신 pool_pre_ping으로 끊긴 연결을 자동 복구한다.
+if _url.get_backend_name() == "sqlite":
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+
+
+def log_db_connection_info() -> None:
+    """서버 시작 시 호출 — 비밀번호 등 민감정보 없이 어느 DB에 붙었는지만 로그로 남긴다.
+    운영 환경에서는 상세 정보(host/port/db명)까지도 노출하지 않고 연결 여부만 알린다.
+    """
+    if APP_ENV == "production":
+        print(f"[db] APP_ENV={APP_ENV} — DB 연결됨 (상세 연결 정보는 운영 환경에서 로그에 남기지 않음)")
+        return
+    print(
+        f"[db] APP_ENV={APP_ENV} host={_url.host or '(파일 기반)'} "
+        f"port={_url.port or '-'} database={_url.database}"
+    )
 
 
 def init_db() -> None:
-    """models.py에 정의된 테이블을 전부 생성 (이미 있으면 건너뜀) + 데모 데이터 시드"""
+    """models.py에 정의된 테이블을 전부 생성 (이미 있으면 건너뜀) + 데모 데이터 시드.
+
+    [2026-07-14 변경] development/production은 Alembic migration으로 스키마를 관리해야
+    하므로(alembic/README 참고) 여기서 create_all()을 실행하지 않는다 — 팀 공통 DB가
+    아직 마이그레이션 안 된 상태로 반쪽짜리 스키마가 생기는 걸 방지. 데모 데이터 시드도
+    local(내 컴퓨터에만 있는 SQLite)에서만 의미가 있어 local일 때만 실행한다.
+    """
     import models  # noqa: F401 — 테이블 정의를 메모리에 올리기 위한 import
 
-    SQLModel.metadata.create_all(engine)
-    _seed_demo_data()
+    if APP_ENV in ("local", "test"):
+        SQLModel.metadata.create_all(engine)
+        if APP_ENV == "local":
+            _seed_demo_data()
 
 
 def _seed_demo_data() -> None:
@@ -27,6 +79,9 @@ def _seed_demo_data() -> None:
 
     [7/6 추가 2] 로그인 도입 이후: 데모 보호자 계정으로 바로 로그인 테스트 가능하도록
     email=demo@example.com / password=password1234 로 시드함.
+
+    [2026-07-14] local 전용 — 팀 공통 DB(development)에서 서버를 띄운 팀원마다
+    이 데모 데이터가 중복 시도되는 걸 막기 위해 init_db()에서 APP_ENV==local일 때만 호출한다.
     """
     import models
     from auth import hash_password
