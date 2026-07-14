@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import NavBar from "../components/NavBar";
 import { login } from "../api/auth";
 import { getCaregiverPatients, type Caregiver, type Patient } from "../api/monitoring";
+import { C } from "../theme";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -98,7 +99,7 @@ export default function Login() {
                 style={styles.input}
                 autoComplete="current-password"
               />
-              {error && <p style={{ ...styles.stateText, color: "#D94F4F" }}>{error}</p>}
+              {error && <p style={{ ...styles.stateText, color: C.danger }}>{error}</p>}
               <button type="submit" disabled={loading} style={styles.submitBtn}>
                 {loading ? "로그인 중..." : "로그인"}
               </button>
@@ -107,7 +108,7 @@ export default function Login() {
 
           {selectedCaregiver && (
             <div style={styles.optionList}>
-              {error && <p style={{ ...styles.stateText, color: "#D94F4F" }}>{error}</p>}
+              {error && <p style={{ ...styles.stateText, color: C.danger }}>{error}</p>}
               {patients.map((p) => (
                 <button
                   key={p.id}
@@ -129,7 +130,7 @@ export default function Login() {
           처음이신가요?{" "}
           <button
             onClick={() => navigate("/register")}
-            style={{ color: "#C16A45", fontWeight: 700, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+            style={{ color: C.terracotta, fontWeight: 700, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
           >
             회원가입
           </button>
@@ -142,7 +143,7 @@ export default function Login() {
 const styles: Record<string, React.CSSProperties> = {
   page: {
     minHeight: "100vh",
-    background: "#FAF6F1",
+    background: C.ivory,
     fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif",
   },
   main: {
@@ -154,17 +155,17 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
   },
   header: { textAlign: "center", marginBottom: 36 },
-  title: { fontSize: 32, fontWeight: 700, color: "#2A2A2A", marginBottom: 8, letterSpacing: "-0.5px" },
-  subtitle: { fontSize: 16, color: "#888888" },
+  title: { fontSize: 32, fontWeight: 700, color: C.dark, marginBottom: 8, letterSpacing: "-0.5px" },
+  subtitle: { fontSize: 16, color: C.muted },
   card: {
     width: "100%",
-    background: "#FFFFFF",
+    background: C.white,
     borderRadius: 16,
     padding: "28px 24px",
     boxShadow: "0 2px 16px rgba(0,0,0,0.06)",
-    border: "1px solid #EEE6DC",
+    border: "1px solid rgba(30,26,23,0.12)",
   },
-  stateText: { fontSize: 14, color: "#888888", textAlign: "center" as const, padding: "12px 0" },
+  stateText: { fontSize: 14, color: C.muted, textAlign: "center" as const, padding: "12px 0" },
   optionList: { display: "flex", flexDirection: "column" as const, gap: 10 },
   optionBtn: {
     display: "flex",
@@ -174,9 +175,9 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "16px 18px",
     fontSize: 15,
     fontWeight: 600,
-    color: "#2A2A2A",
-    background: "#FAFAFA",
-    border: "1.5px solid #EEE6DC",
+    color: C.dark,
+    background: C.ivory,
+    border: "1.5px solid rgba(30,26,23,0.12)",
     borderRadius: 10,
     cursor: "pointer",
     textAlign: "left" as const,
@@ -185,9 +186,9 @@ const styles: Record<string, React.CSSProperties> = {
     width: "100%",
     padding: "14px 16px",
     fontSize: 15,
-    color: "#2A2A2A",
-    background: "#FAFAFA",
-    border: "1.5px solid #EEE6DC",
+    color: C.dark,
+    background: C.ivory,
+    border: "1.5px solid rgba(30,26,23,0.12)",
     borderRadius: 10,
     outline: "none",
     boxSizing: "border-box" as const,
@@ -197,23 +198,23 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "14px",
     fontSize: 15,
     fontWeight: 700,
-    color: "#FFFFFF",
-    background: "#C16A45",
+    color: C.white,
+    background: C.terracotta,
     border: "none",
     borderRadius: 10,
     cursor: "pointer",
   },
-  optionName: { fontSize: 15, fontWeight: 700, color: "#2A2A2A" },
-  optionTag: { fontSize: 12, fontWeight: 600, color: "#C16A45", background: "#F5EDE4", borderRadius: 12, padding: "4px 10px" },
+  optionName: { fontSize: 15, fontWeight: 700, color: C.dark },
+  optionTag: { fontSize: 12, fontWeight: 600, color: C.terracotta, background: C.bubbleBg, borderRadius: 12, padding: "4px 10px" },
   backBtn: {
     marginTop: 4,
     padding: "10px",
     fontSize: 13,
-    color: "#AAAAAA",
+    color: C.muted,
     background: "transparent",
     border: "none",
     cursor: "pointer",
     textAlign: "left" as const,
   },
-  trust: { marginTop: 28, fontSize: 13, color: "#AAAAAA", textAlign: "center" },
+  trust: { marginTop: 28, fontSize: 13, color: C.muted, textAlign: "center" },
 };

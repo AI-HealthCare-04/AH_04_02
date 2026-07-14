@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import NavBar from "../components/NavBar";
+import { C } from "../theme";
 
 export default function Select() {
   const navigate = useNavigate();
@@ -42,19 +43,19 @@ export default function Select() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  page: { minHeight: "100vh", background: "#FAF6F1", fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" },
+  page: { minHeight: "100vh", background: C.ivory, fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" },
   main: { maxWidth: 900, margin: "0 auto", padding: "60px 24px" },
   header: { marginBottom: 48, textAlign: "center" as const },
-  title: { fontSize: 28, fontWeight: 700, color: "#2A2A2A", marginBottom: 12 },
-  subtitle: { fontSize: 15, color: "#888888" },
+  title: { fontSize: 28, fontWeight: 700, color: C.dark, marginBottom: 12 },
+  subtitle: { fontSize: 15, color: C.muted },
   cards: { display: "flex", gap: 24, marginBottom: 48 },
-  card: { flex: 1, background: "#FFFFFF", border: "2px solid #EEE6DC", borderRadius: 16, padding: "36px 28px", cursor: "pointer", transition: "border-color 0.15s, box-shadow 0.15s" },
+  card: { flex: 1, background: C.white, border: "2px solid rgba(30,26,23,0.12)", borderRadius: 16, padding: "36px 28px", cursor: "pointer", transition: "border-color 0.15s, box-shadow 0.15s" },
   cardIcon: { fontSize: 40, marginBottom: 16 },
-  cardTitle: { fontSize: 18, fontWeight: 700, color: "#2A2A2A", marginBottom: 8 },
-  cardTag: { fontSize: 13, color: "#C16A45", fontWeight: 600, marginBottom: 12 },
-  cardDesc: { fontSize: 14, color: "#666666", lineHeight: 1.6, marginBottom: 16 },
+  cardTitle: { fontSize: 18, fontWeight: 700, color: C.dark, marginBottom: 8 },
+  cardTag: { fontSize: 13, color: C.terracotta, fontWeight: 600, marginBottom: 12 },
+  cardDesc: { fontSize: 14, color: C.muted, lineHeight: 1.6, marginBottom: 16 },
   cardMeta: { display: "flex", gap: 8, flexWrap: "wrap" as const },
-  metaTag: { fontSize: 12, background: "#F0E5D8", color: "#C16A45", padding: "3px 10px", borderRadius: 99 },
+  metaTag: { fontSize: 12, background: C.bubbleBg, color: C.terracotta, padding: "3px 10px", borderRadius: 99 },
   actions: { display: "flex", justifyContent: "center" },
-  backBtn: { padding: "12px 32px", fontSize: 15, background: "#FFFFFF", border: "1.5px solid #D9C8B8", borderRadius: 10, color: "#666666", cursor: "pointer" },
+  backBtn: { padding: "12px 32px", fontSize: 15, background: C.white, border: "1.5px solid rgba(30,26,23,0.12)", borderRadius: 10, color: C.muted, cursor: "pointer" },
 };

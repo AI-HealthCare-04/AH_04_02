@@ -12,6 +12,7 @@ import {
   type Schedule,
 } from "../api/monitoring";
 import { getCurrentPatientId } from "../lib/session";
+import { C } from "../theme";
 
 // [7/8 변경] 피그마 디자인 반영 — 시간대(아침/점심/저녁) 대신 "복용 상태" 6종 + 실제 시각 입력
 const DOSE_TIMINGS = ["공복", "아침 식후", "점심 식전", "점심 식후", "저녁 식전", "저녁 식후"];
@@ -74,7 +75,7 @@ function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
       type="button"
       onClick={onClick}
       className="relative w-11 h-6 rounded-full transition-colors shrink-0"
-      style={{ background: on ? "#C1653D" : "#E4DDD3" }}
+      style={{ background: on ? C.terracotta : "rgba(30,26,23,0.15)" }}
     >
       <span
         className="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform"
@@ -139,7 +140,7 @@ function WheelColumn({
               settle(i);
             }}
             className="flex items-center justify-center text-[15px] font-bold cursor-pointer select-none"
-            style={{ height: itemH, scrollSnapAlign: "center", color: opt === value ? "#C1653D" : "#B8B0A6" }}
+            style={{ height: itemH, scrollSnapAlign: "center", color: opt === value ? C.terracotta : C.muted }}
           >
             {opt}
           </div>
@@ -148,7 +149,7 @@ function WheelColumn({
       </div>
       <div
         className="absolute left-0 right-0 pointer-events-none border-t border-b"
-        style={{ top: itemH, height: itemH, borderColor: "#C1653D30" }}
+        style={{ top: itemH, height: itemH, borderColor: `${C.terracotta}30` }}
       />
     </div>
   );
@@ -334,8 +335,8 @@ export default function SchedulePage() {
       <main className="max-w-3xl mx-auto px-6 sm:px-8 py-10">
         <div className="flex items-center justify-between mb-7 flex-wrap gap-3">
           <div>
-            <h1 className="text-[26px] font-black text-[#2A2A2A]">복약 일정</h1>
-            <p className="text-[14px] text-[#888888] mt-1">복용 시간대를 등록하고 관리하세요.</p>
+            <h1 className="text-[26px] font-black text-[#1E1A17]">복약 일정</h1>
+            <p className="text-[14px] text-[#8A7E75] mt-1">복용 시간대를 등록하고 관리하세요.</p>
           </div>
           <button
             onClick={openAddModal}
@@ -348,9 +349,9 @@ export default function SchedulePage() {
         {error && <p className="text-[13px] text-[#D94F4F] mb-4">{error}</p>}
 
         {!loading && !patientValid && (
-          <div className="mb-5 p-4 rounded-xl" style={{ background: "#FDEDED", border: "1px solid #F3C6C6" }}>
-            <p className="text-[14px] font-bold text-[#B3261E] mb-1">환자 정보를 찾을 수 없어요</p>
-            <p className="text-[13px] text-[#888888] mb-3">
+          <div className="mb-5 p-4 rounded-xl" style={{ background: `${C.danger}12`, border: `1px solid ${C.danger}35` }}>
+            <p className="text-[14px] font-bold text-[#D94F4F] mb-1">환자 정보를 찾을 수 없어요</p>
+            <p className="text-[13px] text-[#8A7E75] mb-3">
               기존 로그인 정보가 만료되었을 수 있어요 (예: 서버 데이터가 초기화됨). 다시 로그인하면 해결돼요.
             </p>
             <button
@@ -362,53 +363,53 @@ export default function SchedulePage() {
           </div>
         )}
 
-        <div className="bg-white border border-[#EEE6DC] rounded-2xl overflow-hidden">
+        <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden">
           {loading ? (
-            <p className="px-6 py-8 text-center text-[14px] text-[#888888]">불러오는 중이에요...</p>
+            <p className="px-6 py-8 text-center text-[14px] text-[#8A7E75]">불러오는 중이에요...</p>
           ) : groups.length === 0 ? (
-            <p className="px-6 py-10 text-center text-[14px] text-[#888888]">등록된 일정이 없어요.</p>
+            <p className="px-6 py-10 text-center text-[14px] text-[#8A7E75]">등록된 일정이 없어요.</p>
           ) : (
             groups.map((g) => (
               <div
                 key={g.drugName}
-                className="flex items-center justify-between gap-4 px-6 py-4 border-b border-[#F5F0EA] last:border-0 flex-wrap"
+                className="flex items-center justify-between gap-4 px-6 py-4 border-b border-[#F4F0EA] last:border-0 flex-wrap"
                 style={{ opacity: g.active ? 1 : 0.5 }}
               >
                 <div className="min-w-[160px]">
-                  <p className="text-[15px] font-bold text-[#2A2A2A]">{g.drugName}</p>
+                  <p className="text-[15px] font-bold text-[#1E1A17]">{g.drugName}</p>
                   <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                     {g.entries.map((e) => (
                       <span
                         key={e.id}
                         className="px-2 py-0.5 rounded-md text-[11px] font-bold"
-                        style={{ background: "#F0EDE8", color: "#6B6B6B" }}
+                        style={{ background: C.bubbleBg, color: C.muted }}
                       >
                         {formatTime12(e.time)}
                       </span>
                     ))}
                   </div>
-                  <p className="text-[13px] text-[#888888] mt-1">
+                  <p className="text-[13px] text-[#8A7E75] mt-1">
                     {Array.from(new Set(g.entries.map((e) => e.doseTiming).filter(Boolean))).join(" · ") || "-"}
                   </p>
                 </div>
                 <div className="flex items-center gap-5 shrink-0">
                   <div className="text-center">
-                    <p className="text-[11px] text-[#888888] mb-1">보호자 알림</p>
+                    <p className="text-[11px] text-[#8A7E75] mb-1">보호자 알림</p>
                     <Toggle on={g.caregiverAlert} onClick={() => toggleGroupAlert(g)} />
                   </div>
                   <div className="text-center">
-                    <p className="text-[11px] text-[#888888] mb-1">사용 여부</p>
+                    <p className="text-[11px] text-[#8A7E75] mb-1">사용 여부</p>
                     <Toggle on={g.active} onClick={() => toggleGroupActive(g)} />
                   </div>
                   <button
                     onClick={() => openEditModal(g)}
-                    className="px-3 py-1.5 rounded-full text-[12px] font-bold border border-black/12 text-[#2A2A2A]"
+                    className="px-3 py-1.5 rounded-full text-[12px] font-bold border border-[rgba(30,26,23,0.12)] text-[#1E1A17]"
                   >
                     수정
                   </button>
                   <button
                     onClick={() => removeGroup(g)}
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-[#888888] hover:bg-black/5"
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-[#8A7E75] hover:bg-[rgba(30,26,23,0.05)]"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -429,11 +430,11 @@ export default function SchedulePage() {
             className="bg-white rounded-2xl p-7 w-full max-w-sm my-auto max-h-[calc(100vh-4rem)] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-[19px] font-black text-[#2A2A2A] mb-5">
+            <h3 className="text-[19px] font-black text-[#1E1A17] mb-5">
               {editingDrug ? "일정 수정" : "새 일정 추가"}
             </h3>
 
-            <label className="block text-[12px] font-bold text-[#888888] uppercase tracking-wide mb-2">
+            <label className="block text-[12px] font-bold text-[#8A7E75] uppercase tracking-wide mb-2">
               약물 선택
             </label>
             {drugMode === "select" ? (
@@ -441,7 +442,7 @@ export default function SchedulePage() {
                 <select
                   value={drugName}
                   onChange={(e) => setDrugName(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-black/12 text-[14px] outline-none mb-2 bg-white"
+                  className="w-full px-4 py-3 rounded-xl border border-[rgba(30,26,23,0.12)] text-[14px] outline-none mb-2 bg-white"
                 >
                   {knownDrugs.map((d) => (
                     <option key={d} value={d}>
@@ -466,7 +467,7 @@ export default function SchedulePage() {
                   value={drugName}
                   onChange={(e) => setDrugName(e.target.value)}
                   placeholder="예: 암로디핀 5mg"
-                  className="w-full px-4 py-3 rounded-xl border border-black/12 text-[14px] outline-none mb-2"
+                  className="w-full px-4 py-3 rounded-xl border border-[rgba(30,26,23,0.12)] text-[14px] outline-none mb-2"
                 />
                 {knownDrugs.length > 0 ? (
                   <button
@@ -482,14 +483,14 @@ export default function SchedulePage() {
               </>
             )}
 
-            <label className="block text-[12px] font-bold text-[#888888] uppercase tracking-wide mb-2">
+            <label className="block text-[12px] font-bold text-[#8A7E75] uppercase tracking-wide mb-2">
               복용 시간
             </label>
             <div className="space-y-3 mb-2">
               {entries.map((entry) => {
                 const t12 = to12(entry.time);
                 return (
-                  <div key={entry.key} className="rounded-xl border border-black/10 p-3">
+                  <div key={entry.key} className="rounded-xl border border-[rgba(30,26,23,0.10)] p-3">
                     <div className="flex items-center gap-2 mb-2.5">
                       <div className="flex items-center gap-0.5 flex-1 justify-center">
                         <WheelColumn
@@ -503,7 +504,7 @@ export default function SchedulePage() {
                           value={t12.hour}
                           onChange={(v) => updateEntry(entry.key, { time: from12(t12.period, v, t12.minute) })}
                         />
-                        <span className="text-[15px] font-bold text-[#888888] px-0.5">:</span>
+                        <span className="text-[15px] font-bold text-[#8A7E75] px-0.5">:</span>
                         <WheelColumn
                           options={MINUTES_5}
                           value={t12.minute}
@@ -514,7 +515,7 @@ export default function SchedulePage() {
                         <button
                           type="button"
                           onClick={() => removeTimeEntry(entry.key)}
-                          className="w-8 h-8 shrink-0 rounded-full flex items-center justify-center text-[#888888] hover:bg-black/5"
+                          className="w-8 h-8 shrink-0 rounded-full flex items-center justify-center text-[#8A7E75] hover:bg-[rgba(30,26,23,0.05)]"
                         >
                           <X className="w-4 h-4" />
                         </button>
@@ -528,8 +529,8 @@ export default function SchedulePage() {
                           onClick={() => updateEntry(entry.key, { doseTiming: d })}
                           className="py-2 rounded-lg text-[12px] font-bold transition-all"
                           style={{
-                            background: entry.doseTiming === d ? "#C1653D" : "#F0EDE8",
-                            color: entry.doseTiming === d ? "#FFFFFF" : "#888888",
+                            background: entry.doseTiming === d ? C.terracotta : C.bubbleBg,
+                            color: entry.doseTiming === d ? C.white : C.muted,
                           }}
                         >
                           {d}
@@ -546,8 +547,8 @@ export default function SchedulePage() {
 
             <div className="flex items-start justify-between gap-3 mb-6 p-4 rounded-xl bg-[#FAF6F1]">
               <div>
-                <p className="text-[14px] font-bold text-[#2A2A2A]">보호자에게도 알림</p>
-                <p className="text-[12px] text-[#888888] mt-0.5">복약 시간에 보호자에게도 알림을 전송합니다</p>
+                <p className="text-[14px] font-bold text-[#1E1A17]">보호자에게도 알림</p>
+                <p className="text-[12px] text-[#8A7E75] mt-0.5">복약 시간에 보호자에게도 알림을 전송합니다</p>
               </div>
               <Toggle on={caregiverAlert} onClick={() => setCaregiverAlert((v) => !v)} />
             </div>
@@ -557,7 +558,7 @@ export default function SchedulePage() {
             <div className="flex gap-3">
               <button
                 onClick={() => setModalOpen(false)}
-                className="flex-1 py-3 rounded-full font-bold text-[14px] border-2 border-black/12 text-[#2A2A2A]"
+                className="flex-1 py-3 rounded-full font-bold text-[14px] border-2 border-[rgba(30,26,23,0.12)] text-[#1E1A17]"
               >
                 취소
               </button>
