@@ -31,37 +31,39 @@ DRUG_FIELD_LABELS: dict[str, str] = {
 }
 
 
-# [보류] 식약처 의약품제품허가정보(DrugPrdtPrmsnInfoService07) 스키마 — e약은요·약가마스터만으로
-# 우선 조회하기로 하고 비활성화. 정보량이 방대하고 팀원 연동(HIRA 약가마스터) 조율이 더 필요해서
-# 나중에 정말 경로를 바꿔야 하는 문제가 생기면 그때 주석을 풀어 쓴다.
-# class DrugPermitInfo(BaseModel):
-#     """식약처 DrugPrdtPrmsnInfoService07 getDrugPrdtPrmsnInq07 응답 1개 품목.
-#
-#     e약은요(DrugInfo)와 원천이 다른 별도 API — 효능효과 등 설명문 텍스트는 없고,
-#     허가번호·허가일자·허가/신고 구분·취소여부 같은 규제 메타데이터만 담는다.
-#     "정식으로 허가·신고되어 현재 정상 상태인 의약품인지" 검증 용도.
-#     """
-#
-#     item_seq: str = Field(alias="ITEM_SEQ")
-#     item_name: str = Field(alias="ITEM_NAME")
-#     item_eng_name: str | None = Field(default=None, alias="ITEM_ENG_NAME")
-#     entp_name: str = Field(alias="ENTP_NAME")
-#     entp_eng_name: str | None = Field(default=None, alias="ENTP_ENG_NAME")
-#     item_permit_date: str | None = Field(default=None, alias="ITEM_PERMIT_DATE")
-#     specialty_pblc: str | None = Field(default=None, alias="SPCLTY_PBLC")  # 전문/일반의약품
-#     product_type: str | None = Field(default=None, alias="PRDUCT_TYPE")  # 예: "[01140]해열.진통.소염제"
-#     permit_no: str | None = Field(default=None, alias="PRDUCT_PRMISN_NO")
-#     ingr_name: str | None = Field(default=None, alias="ITEM_INGR_NAME")
-#     permit_kind_code: str | None = Field(default=None, alias="PERMIT_KIND_CODE")  # "허가" | "신고"
-#     cancel_date: str | None = Field(default=None, alias="CANCEL_DATE")
-#     cancel_name: str | None = Field(default=None, alias="CANCEL_NAME")  # "정상" | 취소·취하 상태명
-#
-#     model_config = {"populate_by_name": True}
-#
-#     @property
-#     def is_active(self) -> bool:
-#         """취소·취하되지 않고 현재 정상 허가 상태인지 (cancel_date가 없고 cancel_name이 '정상')."""
-#         return self.cancel_date is None and self.cancel_name == "정상"
+# [2026-07-14] 활용신청 승인되어 재활성화 — e약은요·약가마스터와 조율할 필요 없이 그대로
+# 세 번째 인용 소스로 추가한다(HIRA와 마찬가지로 SourceRef 보강 필드로 병합).
+class DrugPermitInfo(BaseModel):
+    """식약처 DrugPrdtPrmsnInfoService07 getDrugPrdtPrmsnInq07 응답 1개 품목.
+
+    e약은요(DrugInfo)와 원천이 다른 별도 API — 효능효과 등 설명문 텍스트는 없고,
+    허가번호·허가일자·허가/신고 구분·취소여부 같은 규제 메타데이터만 담는다.
+    "정식으로 허가·신고되어 현재 정상 상태인 의약품인지" 검증 용도.
+
+    [2026-07-14] 실제 API 호출로 필드명 확인 완료(item_name 쿼리 파라미터, 응답 필드
+    전부 이전 설계 그대로 일치).
+    """
+
+    item_seq: str = Field(alias="ITEM_SEQ")
+    item_name: str = Field(alias="ITEM_NAME")
+    item_eng_name: str | None = Field(default=None, alias="ITEM_ENG_NAME")
+    entp_name: str = Field(alias="ENTP_NAME")
+    entp_eng_name: str | None = Field(default=None, alias="ENTP_ENG_NAME")
+    item_permit_date: str | None = Field(default=None, alias="ITEM_PERMIT_DATE")
+    specialty_pblc: str | None = Field(default=None, alias="SPCLTY_PBLC")  # 전문/일반의약품
+    product_type: str | None = Field(default=None, alias="PRDUCT_TYPE")  # 예: "[01140]해열.진통.소염제"
+    permit_no: str | None = Field(default=None, alias="PRDUCT_PRMISN_NO")
+    ingr_name: str | None = Field(default=None, alias="ITEM_INGR_NAME")
+    permit_kind_code: str | None = Field(default=None, alias="PERMIT_KIND_CODE")  # "허가" | "신고"
+    cancel_date: str | None = Field(default=None, alias="CANCEL_DATE")
+    cancel_name: str | None = Field(default=None, alias="CANCEL_NAME")  # "정상" | 취소·취하 상태명
+
+    model_config = {"populate_by_name": True, "extra": "ignore"}
+
+    @property
+    def is_active(self) -> bool:
+        """취소·취하되지 않고 현재 정상 허가 상태인지 (cancel_date가 없고 cancel_name이 '정상')."""
+        return self.cancel_date is None and self.cancel_name == "정상"
 
 
 class HiraDrugMasterEntry(BaseModel):
@@ -193,6 +195,10 @@ class SourceRef(BaseModel):
     hira_atc_code: str | None = None
     hira_permit_date: str | None = None
     hira_active: bool | None = None  # None=HIRA에서 못 찾음, True=정상 등재, False=취소·취하됨
+    # [2026-07-14 추가] 식약처 의약품제품허가정보(DrugPermitInfo) 보강 필드 — e약은요 item_name으로
+    # 조회해 채움. HIRA(약가 등재 상태)와는 다른 개념 — 이건 제조·판매 허가 자체의 취소여부다.
+    permit_kind_code: str | None = None  # "허가" | "신고"
+    permit_active: bool | None = None  # None=허가정보에서 못 찾음, True=정상, False=취소·취하됨
 
 
 class LifestyleSourceRef(BaseModel):

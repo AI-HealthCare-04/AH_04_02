@@ -9,8 +9,9 @@ from rag.dur_master import (
     search_usjnt_taboo,
 )
 from rag.hira_master import search_by_product_name as search_hira_by_product_name
-from rag.mfds_client import search_by_name
+from rag.mfds_client import search_by_name, search_permit_info
 from rag.schemas import (
+    DrugPermitInfo,
     DurCaution,
     DurWarning,
     GuideResponse,
@@ -104,6 +105,24 @@ def _lookup_hira_entry(item_name: str, cache: dict[str, HiraDrugMasterEntry | No
     return entry
 
 
+def _lookup_permit_entry(item_name: str, cache: dict[str, DrugPermitInfo | None]) -> DrugPermitInfo | None:
+    """e약은요 item_name으로 식약처 의약품제품허가정보를 조회한다 (호출 1회당 품목명별로 1번만 조회).
+
+    [2026-07-14 추가] HIRA(약가 등재 상태)와는 다른 개념 — 이건 제조·판매 허가 자체의
+    취소여부다. API 오류 등 예기치 못한 문제가 생겨도 인용 자체(SourceRef의 e약은요 필드)는
+    막지 않도록, 실패하면 조용히 None으로 넘어간다 (HIRA 조회 실패 처리와 동일한 원칙).
+    """
+    if item_name in cache:
+        return cache[item_name]
+    try:
+        results = search_permit_info(item_name, num_of_rows=1)
+    except Exception:  # noqa: BLE001 — 허가정보 조회 실패가 인용 생성 자체를 막으면 안 됨
+        results = []
+    entry = results[0] if results else None
+    cache[item_name] = entry
+    return entry
+
+
 def _build_context(
     drug_name: str,
     situation: str | None,
@@ -119,10 +138,12 @@ def _build_context(
         docs = similarity_search(query, k=settings.TOP_K)
 
     hira_cache: dict[str, HiraDrugMasterEntry | None] = {}
+    permit_cache: dict[str, DrugPermitInfo | None] = {}
     context_items = []
     for doc in docs:
         item_name = doc.metadata["item_name"]
         hira_entry = _lookup_hira_entry(item_name, hira_cache)
+        permit_entry = _lookup_permit_entry(item_name, permit_cache)
         context_items.append(
             {
                 "kind": "drug",
@@ -136,6 +157,8 @@ def _build_context(
                     hira_atc_code=hira_entry.atc_code if hira_entry else None,
                     hira_permit_date=hira_entry.permit_date if hira_entry else None,
                     hira_active=hira_entry.is_active if hira_entry else None,
+                    permit_kind_code=permit_entry.permit_kind_code if permit_entry else None,
+                    permit_active=permit_entry.is_active if permit_entry else None,
                 ),
             }
         )
