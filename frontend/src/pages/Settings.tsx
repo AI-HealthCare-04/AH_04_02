@@ -1,0 +1,109 @@
+import { useEffect, useState } from "react";
+import NavBar from "../components/NavBar";
+import { getNotificationSettings, updateNotificationSettings, type NotificationSettings } from "../api/care";
+import { applyFontScale, getFontScale, useGuardedPatientId, type FontScale } from "../lib/session";
+
+const DEFAULT_CHATBOT_NAME = "약콩이";
+
+const FONT_SCALE_OPTIONS: { value: FontScale; label: string }[] = [
+  { value: "small", label: "작게" },
+  { value: "medium", label: "보통" },
+  { value: "large", label: "크게" },
+];
+
+export default function Settings() {
+  const patientId = useGuardedPatientId();
+  const [settings, setSettings] = useState<NotificationSettings | null>(null);
+  const [chatbotName, setChatbotName] = useState("");
+  const [fontScale, setFontScale] = useState<FontScale>(() => getFontScale());
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (patientId == null) return;
+    getNotificationSettings(patientId)
+      .then((s) => {
+        setSettings(s);
+        setChatbotName(s.chatbot_name || DEFAULT_CHATBOT_NAME);
+      })
+      .catch(() => setError("설정을 불러오지 못했어요."))
+      .finally(() => setLoading(false));
+  }, [patientId]);
+
+  const saveChatbotName = async () => {
+    if (!settings || patientId == null) return;
+    const name = chatbotName.trim() || DEFAULT_CHATBOT_NAME;
+    setChatbotName(name);
+    try {
+      await updateNotificationSettings(patientId, { chatbot_name: name });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {
+      setError("저장하지 못했어요.");
+    }
+  };
+
+  const changeFontScale = (scale: FontScale) => {
+    setFontScale(scale);
+    applyFontScale(scale);
+  };
+
+  return (
+    <div className="min-h-screen bg-[#FAF6F1]">
+      <NavBar isLoggedIn userName="김건강" />
+      <main className="max-w-xl mx-auto px-6 sm:px-8 py-10">
+        <h1 className="text-[26px] font-black text-[#1E1A17] mb-1">화면·챗봇 설정</h1>
+        <p className="text-[14px] text-[#8A7E75] mb-7">챗봇 이름과 글자 크기를 원하는 대로 바꿀 수 있어요.</p>
+
+        {loading && <p className="text-[14px] text-[#8A7E75]">불러오는 중이에요...</p>}
+        {error && <p className="text-[13px] text-[#D94F4F] mb-4">{error}</p>}
+
+        {settings && (
+          <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
+            <p className="text-[16px] font-bold text-[#1E1A17] mb-1">챗봇 이름</p>
+            <p className="text-[14px] text-[#8A7E75] mb-4">기본값은 "{DEFAULT_CHATBOT_NAME}"예요. 원하는 이름으로 바꿔보세요.</p>
+            <div className="flex gap-2">
+              <input
+                value={chatbotName}
+                onChange={(e) => setChatbotName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && saveChatbotName()}
+                placeholder={DEFAULT_CHATBOT_NAME}
+                maxLength={20}
+                className="flex-1 px-4 py-3 rounded-xl text-[15px] outline-none border border-[rgba(30,26,23,0.15)] text-[#1E1A17]"
+              />
+              <button
+                onClick={saveChatbotName}
+                className="px-5 py-3 rounded-xl text-white font-bold text-[14px] shrink-0 bg-[#C1653D] hover:opacity-88 transition-all"
+              >
+                저장
+              </button>
+            </div>
+            {saved && <p className="text-[12px] font-semibold text-[#4A7A47] mt-2">✓ 저장됐어요</p>}
+          </div>
+        )}
+
+        <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl p-6">
+          <p className="text-[16px] font-bold text-[#1E1A17] mb-1">글자 크기</p>
+          <p className="text-[14px] text-[#8A7E75] mb-4">화면 전체의 글자와 여백 크기가 함께 조절돼요.</p>
+          <div className="flex gap-2">
+            {FONT_SCALE_OPTIONS.map(({ value, label }) => (
+              <button
+                key={value}
+                onClick={() => changeFontScale(value)}
+                className="flex-1 py-3 rounded-xl font-bold text-[15px] border transition-all"
+                style={
+                  fontScale === value
+                    ? { background: "#C1653D", color: "#FFFFFF", borderColor: "#C1653D" }
+                    : { background: "#FFFFFF", color: "#1E1A17", borderColor: "rgba(30,26,23,0.15)" }
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}

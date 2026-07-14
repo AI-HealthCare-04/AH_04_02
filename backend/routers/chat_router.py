@@ -28,7 +28,7 @@ from pathlib import Path
 from database import get_session
 from dependencies import Actor, get_current_actor, require_actor_patient_access
 from fastapi import APIRouter, Depends, HTTPException
-from models import ChatMessage, GuideResult, MedicalRecord, OcrResult, Patient
+from models import ChatMessage, GuideResult, MedicalRecord, NotificationSetting, OcrResult, Patient
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -223,14 +223,14 @@ def _build_patient_context(patient_id: int, session: Session) -> str:
     return "\n".join(lines) if lines else "아직 등록된 처방전 정보가 없습니다."
 
 
-def _generate_llm_answer(question_text: str, context_text: str) -> str:
+def _generate_llm_answer(question_text: str, context_text: str, bot_name: str) -> str:
     from langchain_openai import ChatOpenAI
     from rag.config import settings as rag_settings
 
     chat = ChatOpenAI(model=rag_settings.OPENAI_MODEL, api_key=rag_settings.OPENAI_API_KEY, temperature=0.4)
     response = chat.invoke(
         [
-            {"role": "system", "content": CHAT_SYSTEM_PROMPT},
+            {"role": "system", "content": f"당신의 이름은 '{bot_name}'입니다. 이름을 물어보면 이렇게 답하세요.\n\n{CHAT_SYSTEM_PROMPT}"},
             {
                 "role": "user",
                 "content": (
@@ -283,7 +283,9 @@ def ask(payload: ChatAsk, actor: Actor = Depends(get_current_actor), session: Se
     if _CHAT_LLM_AVAILABLE:
         try:
             context_text = _build_patient_context(payload.patient_id, session)
-            answer_text = _generate_llm_answer(question_text, context_text)
+            setting = session.get(NotificationSetting, payload.patient_id)
+            bot_name = setting.chatbot_name if setting else "약콩이"
+            answer_text = _generate_llm_answer(question_text, context_text, bot_name)
             answer_source = f"llm ({_rag_settings.OPENAI_MODEL})"
         except Exception as exc:  # noqa: BLE001 — LLM 실패해도 챗봇 자체는 응답해야 함
             answer_text, answer_source = fallback_answer, f"{fallback_source}_fallback ({type(exc).__name__})"

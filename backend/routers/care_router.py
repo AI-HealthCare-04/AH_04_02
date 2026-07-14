@@ -229,6 +229,7 @@ class NotificationUpdate(BaseModel):
     medication_reminder_enabled: bool | None = None
     care_alert_enabled: bool | None = None
     all_push_enabled: bool | None = None
+    chatbot_name: str | None = None
 
 
 @router.get("/notification-settings", response_model=NotificationSetting)

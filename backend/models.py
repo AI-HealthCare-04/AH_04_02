@@ -260,6 +260,7 @@ class NotificationSetting(SQLModel, table=True):
     medication_reminder_enabled: bool = True
     care_alert_enabled: bool = True
     all_push_enabled: bool = True
+    chatbot_name: str = Field(default="약콩이")  # [2026-07-14 추가] 챗봇 표시 이름 — 사용자가 마이페이지에서 변경 가능
     updated_at: datetime = Field(default_factory=datetime.now)
 
 

@@ -104,6 +104,7 @@ export interface NotificationSettings {
   medication_reminder_enabled: boolean;
   care_alert_enabled: boolean;
   all_push_enabled: boolean;
+  chatbot_name: string;
   updated_at: string;
 }
 
@@ -119,7 +120,7 @@ export async function updateNotificationSettings(
   payload: Partial<
     Pick<
       NotificationSettings,
-      "medication_reminder_enabled" | "care_alert_enabled" | "all_push_enabled"
+      "medication_reminder_enabled" | "care_alert_enabled" | "all_push_enabled" | "chatbot_name"
     >
   >
 ) {
