@@ -10,9 +10,13 @@ chat_router.py — 담당: 김영혜
 프롬프트에 추가했습니다.
 
 CHAT_PROVIDER=real (OCR_PROVIDER/RAG_PROVIDER와 동일 컨벤션)을 .env에 켜야 LLM을
-시도합니다. 기본값(미설정)이거나, rag-prototype 의존성이 없거나, LLM 호출이 실패하면
+시도합니다. 기본값(미설정)이거나, rag 의존성이 없거나, LLM 호출이 실패하면
 고정 질문은 PRESET_QUESTIONS 답변으로, 자유 질문은 "지금은 어렵다"는 안내로 조용히
 폴백합니다 — 챗봇 자체가 죽는 것보단 뭐라도 답이 나가는 게 낫다는 판단.
+
+[7/14] POST /ask, GET /history가 patient_id를 검증 없이 그대로 신뢰하던 IDOR을
+monitoring_router.py/care_router.py와 동일한 `get_current_actor`/
+`require_actor_patient_access` 패턴으로 막았습니다(issue #21 잔여 범위).
 """
 from __future__ import annotations
 
@@ -22,6 +26,7 @@ import sys
 from pathlib import Path
 
 from database import get_session
+from dependencies import Actor, get_current_actor, require_actor_patient_access
 from fastapi import APIRouter, Depends, HTTPException
 from models import ChatMessage, GuideResult, MedicalRecord, OcrResult, Patient
 from pydantic import BaseModel
@@ -62,6 +67,10 @@ CHAT_SYSTEM_PROMPT = """\
 "OO 하려면 어디로 가야 하나요?" 같은 질문에는 이 목록만 근거로 화면 이름을 안내해도 됩니다
 (예: "복약 일정은 하단의 '일정' 메뉴에서 확인하실 수 있어요"). [메뉴 안내]에 없는 기능을
 지어내지는 마세요.
+
+[2026-07-14 추가] 답변 문장 안에 "출처:", "(식약처 ...)", "(대한OO학회 ...)" 같은 출처·자료명은
+언급하지 마세요 — 출처는 복약 가이드 화면에 별도로 표시되므로, 챗봇 답변은 내용 자체만
+전달하면 됩니다.
 """
 
 # [7/10 추가] 서비스 메뉴 지도 — "OO 어디서 해요?" 질문에 답하기 위한 고정 정보.
@@ -92,15 +101,15 @@ _CHAT_PROVIDER = os.environ.get("CHAT_PROVIDER", "stub")
 
 _CHAT_LLM_AVAILABLE = False
 if _CHAT_PROVIDER == "real":
-    # rag-prototype/의 OpenAI 설정(.env의 OPENAI_API_KEY/OPENAI_MODEL)과 langchain-openai를
-    # 재사용한다 — 키를 backend에 따로 둘 필요 없이 한 곳(rag-prototype/.env)만 관리하면 됨.
-    _RAG_PROTOTYPE_DIR = Path(__file__).resolve().parent.parent.parent / "rag-prototype"
-    if _RAG_PROTOTYPE_DIR.is_dir() and str(_RAG_PROTOTYPE_DIR) not in sys.path:
-        sys.path.insert(0, str(_RAG_PROTOTYPE_DIR))
+    # rag/의 OpenAI 설정(.env의 OPENAI_API_KEY/OPENAI_MODEL)과 langchain-openai를
+    # 재사용한다 — 키를 backend에 따로 둘 필요 없이 한 곳(rag/.env)만 관리하면 됨.
+    _RAG_DIR = Path(__file__).resolve().parent.parent.parent / "rag"
+    if _RAG_DIR.is_dir() and str(_RAG_DIR) not in sys.path:
+        sys.path.insert(0, str(_RAG_DIR))
 
     try:
         from langchain_openai import ChatOpenAI  # noqa: F401 — 임포트 가능 여부만 확인(실사용은 지연 임포트)
-        from rag_prototype.config import settings as _rag_settings
+        from rag.config import settings as _rag_settings
 
         _CHAT_LLM_AVAILABLE = bool(_rag_settings.OPENAI_API_KEY)
     except Exception:  # noqa: BLE001 — 의존성 미설치/키 없음 등 어떤 이유로든 실패하면 폴백
@@ -122,7 +131,12 @@ def _summarize_ocr_items(ocr_items: list[OcrResult]) -> list[str]:
 
 
 def _summarize_medication_guide(medication_guide_json: str) -> list[str]:
-    """RAG_PROVIDER 설정에 따라 모양이 다를 수 있어(스텁 vs 실제 파이프라인) 방어적으로 읽는다."""
+    """RAG_PROVIDER 설정에 따라 모양이 다를 수 있어(스텁 vs 실제 파이프라인) 방어적으로 읽는다.
+
+    [2026-07-14] precautions(주의사항 목록)가 medication_guide 텍스트와 별개의 구조화
+    필드인데 지금까지 빠져 있었다 — "부작용 있으면 어떻게 하나요?" 같은 질문에 챗봇이
+    반드시 참고해야 할 정보라 함께 넣는다.
+    """
     try:
         medication_guide = json.loads(medication_guide_json)
         drugs = medication_guide.get("drugs", [])
@@ -131,9 +145,37 @@ def _summarize_medication_guide(medication_guide_json: str) -> list[str]:
 
     lines = []
     for drug in drugs:
+        drug_name = drug.get("drug_name", "약")
         text = drug.get("medication_guide") or drug.get("caution")
         if text:
-            lines.append(f"[{drug.get('drug_name', '약')} 복약 안내] {text}")
+            lines.append(f"[{drug_name} 복약 안내] {text}")
+        precautions = drug.get("precautions") or []
+        if precautions:
+            lines.append(f"[{drug_name} 주의사항] " + " / ".join(precautions))
+    return lines
+
+
+def _summarize_source_refs(source_refs_json: str) -> list[str]:
+    """[2026-07-14 추가] DUR(의약품안전사용서비스) 병용금기/노인주의/연령금기/임부금기 경고를
+    챗봇 컨텍스트에 추가한다. 지금까지 source_refs(DUR 포함)가 통째로 챗봇 컨텍스트에서
+    빠져 있어, "부작용 있으면?" 같은 질문에 DUR 데이터가 전혀 반영되지 않는 문제가 있었다
+    (복약가이드 화면에는 표시되지만 챗봇은 못 보는 상태). 의약품·생활지침 인용은 이미
+    medication_guide/lifestyle_guide 텍스트에 녹아 있으므로 여기서는 DUR만 추가한다.
+    """
+    try:
+        refs = json.loads(source_refs_json)
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+    lines = []
+    for ref in refs:
+        if ref.get("mixture_item_name"):
+            content = f" ({ref['prohbt_content']})" if ref.get("prohbt_content") else ""
+            lines.append(f"[DUR 병용금기] {ref.get('drug_name', '약')}은(는) {ref['mixture_item_name']}와 병용금기{content}")
+        elif ref.get("dur_category"):
+            detail = f": {ref['dur_detail']}" if ref.get("dur_detail") else ""
+            extra = f" ({ref['dur_extra']})" if ref.get("dur_extra") else ""
+            lines.append(f"[DUR {ref['dur_category']}] {ref.get('drug_name', '약')}{extra}{detail}")
     return lines
 
 
@@ -176,13 +218,14 @@ def _build_patient_context(patient_id: int, session: Session) -> str:
     if guide:
         lines.extend(_summarize_medication_guide(guide.medication_guide))
         lines.extend(_summarize_lifestyle_guide(guide.lifestyle_guide))
+        lines.extend(_summarize_source_refs(guide.source_refs))
 
     return "\n".join(lines) if lines else "아직 등록된 처방전 정보가 없습니다."
 
 
 def _generate_llm_answer(question_text: str, context_text: str) -> str:
     from langchain_openai import ChatOpenAI
-    from rag_prototype.config import settings as rag_settings
+    from rag.config import settings as rag_settings
 
     chat = ChatOpenAI(model=rag_settings.OPENAI_MODEL, api_key=rag_settings.OPENAI_API_KEY, temperature=0.4)
     response = chat.invoke(
@@ -213,11 +256,12 @@ class ChatAsk(BaseModel):
 
 
 @router.post("/ask")
-def ask(payload: ChatAsk, session: Session = Depends(get_session)):
+def ask(payload: ChatAsk, actor: Actor = Depends(get_current_actor), session: Session = Depends(get_session)):
     """고정 질문(question_id) 또는 자유 텍스트(question) 중 하나로 묻는다.
     CHAT_PROVIDER=real이면 그 환자의 최근 처방전을 참고해 GPT가 답변을 생성하고,
     아니거나 실패하면 고정 질문은 PRESET_QUESTIONS 답변으로, 자유 질문은 안내 문구로 나간다.
     """
+    require_actor_patient_access(payload.patient_id, actor, session)
     if not session.get(Patient, payload.patient_id):
         raise HTTPException(404, "해당 환자를 찾을 수 없어요")
 
@@ -263,8 +307,9 @@ def ask(payload: ChatAsk, session: Session = Depends(get_session)):
 
 
 @router.get("/history")
-def history(patient_id: int, session: Session = Depends(get_session)):
+def history(patient_id: int, actor: Actor = Depends(get_current_actor), session: Session = Depends(get_session)):
     """지난 대화 이력 (마이페이지 등에서 참고용으로 쓸 수 있음)"""
+    require_actor_patient_access(patient_id, actor, session)
     return session.exec(
         select(ChatMessage)
         .where(ChatMessage.patient_id == patient_id)

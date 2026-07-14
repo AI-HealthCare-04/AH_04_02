@@ -1,6 +1,0 @@
-.env
-chroma_db/
-*.egg-info/
-__pycache__/
-.venv/
-data/*.csv

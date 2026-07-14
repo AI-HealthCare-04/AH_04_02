@@ -52,6 +52,10 @@ export interface SourceRef {
   hira_atc_code?: string;
   hira_permit_date?: string;
   hira_active?: boolean;
+  // 실제 파이프라인 — 의약품 인용(식약처 의약품제품허가정보, 2026-07-14 추가)
+  // hira_active(약가 등재 상태)와는 다른 개념 — 이건 제조·판매 허가 자체의 취소여부다.
+  permit_kind_code?: string;
+  permit_active?: boolean;
   // 실제 파이프라인 — 생활지침 인용
   disease?: string;
   category?: string;

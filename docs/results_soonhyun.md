@@ -512,3 +512,34 @@ OCRResult { raw_text, medications[], overall_confidence,
 ## 15. OCR 비동기 처리 개선 (2026-07-10)
 
 `ocr_router.py`의 CLOVA 호출을 `asyncio.to_thread`로 비동기 처리. 동시 요청 N건 기준 수정 전 ~N초 → 수정 후 ~1초(스레드풀 여유 시). 24개 목업 40건 회귀 없음, 동기/비동기 결과 완전 일치 확인. 서비스평가 5-1(성능), 3-2/5-5(비동기 일관성) 항목 대응. (2026-07-10)
+
+---
+
+## 16. 전체 회귀 재검증 (2026-07-14)
+
+> 기준: PR #29~#34 dev 머지 반영 후 (`git pull origin dev`, HEAD `5e6212b`)
+
+| 지표 | 결과 |
+|------|:----:|
+| 배치 회귀 (24개 목업, 검증 조건 40건) | **40/40 통과** |
+| pytest | **31/31 통과, 0 실패** |
+| 서버 기동 | **정상 (API 라우트 46개)** |
+
+### pytest 구성 (31개)
+
+| 파일 | 통과 |
+|------|:----:|
+| test_auth_router.py | 1/1 |
+| test_care_router_invitations.py | 2/2 |
+| test_models_pii.py | 4/4 |
+| test_monitoring_router_linking.py | 3/3 |
+| test_records_router_auth.py (PR #31, 신규) | 11/11 |
+| test_security.py | 10/10 |
+
+### 서버 기동 확인 라우터
+
+PR #29~#34 반영 후 `from main import app` 정상. chat_router·records_router 등 여러 PR이 겹쳐 손댄 파일 포함 import 충돌 없음. 주요 신규/변경 라우트: `POST /chat/ask`, `GET /chat/history`, `GET /chat/questions`, `GET/POST /records/{record_id}` 계열 전체.
+
+### 미적용 사항
+
+`chat_router.py`의 `POST /chat/ask`, `GET /chat/history`는 인가 검증 미적용 상태로 확인. 이슈 #21에서 논의 중 (담당자 미지정, 김영혜 답변 대기).
