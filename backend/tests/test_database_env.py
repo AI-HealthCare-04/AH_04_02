@@ -34,7 +34,7 @@ def _run(code: str, extra_env: dict) -> subprocess.CompletedProcess:
 
 def test_local_env_defaults_to_sqlite_without_database_url():
     result = _run(
-        "import database; print(database.engine.dialect.name)",
+        "from core import database; print(database.engine.dialect.name)",
         {"APP_ENV": "local"},  # DATABASE_URL 생략
     )
     assert result.returncode == 0, result.stderr
@@ -42,20 +42,20 @@ def test_local_env_defaults_to_sqlite_without_database_url():
 
 
 def test_development_env_requires_database_url():
-    result = _run("import database", {"APP_ENV": "development"})  # DATABASE_URL 생략
+    result = _run("from core import database", {"APP_ENV": "development"})  # DATABASE_URL 생략
     assert result.returncode != 0
     assert "DATABASE_URL" in result.stderr
 
 
 def test_production_env_requires_database_url():
-    result = _run("import database", {"APP_ENV": "production"})  # DATABASE_URL 생략
+    result = _run("from core import database", {"APP_ENV": "production"})  # DATABASE_URL 생략
     assert result.returncode != 0
     assert "DATABASE_URL" in result.stderr
 
 
 def test_development_env_with_mysql_url_uses_mysql_dialect_and_correct_host():
     result = _run(
-        "import database; print(database.engine.dialect.name)",
+        "from core import database; print(database.engine.dialect.name)",
         {"APP_ENV": "development", "DATABASE_URL": "mysql+pymysql://user:pass@shared-db.internal:3306/healthdb"},
     )
     assert result.returncode == 0, result.stderr
@@ -64,7 +64,7 @@ def test_development_env_with_mysql_url_uses_mysql_dialect_and_correct_host():
 
 def test_log_db_connection_info_never_prints_password():
     result = _run(
-        "import database; database.log_db_connection_info()",
+        "from core import database; database.log_db_connection_info()",
         {"APP_ENV": "development", "DATABASE_URL": "mysql+pymysql://secretuser:secretpass123@shared-db.internal:3306/healthdb"},
     )
     assert result.returncode == 0, result.stderr
@@ -75,7 +75,7 @@ def test_log_db_connection_info_never_prints_password():
 
 def test_log_db_connection_info_hides_details_in_production():
     result = _run(
-        "import database; database.log_db_connection_info()",
+        "from core import database; database.log_db_connection_info()",
         {"APP_ENV": "production", "DATABASE_URL": "mysql+pymysql://user:pass@prod-db.internal:3306/healthdb_prod"},
     )
     assert result.returncode == 0, result.stderr

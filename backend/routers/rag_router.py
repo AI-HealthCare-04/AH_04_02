@@ -29,7 +29,7 @@ import os
 import sys
 from pathlib import Path
 
-from database import get_session
+from core.database import get_session
 from fastapi import APIRouter, Depends, HTTPException
 from models import GuideResult, OcrResult
 from sqlmodel import Session, select
@@ -159,9 +159,11 @@ async def run_rag(record_id: int, session: Session) -> GuideResult:
     (medication_guide/lifestyle_guide/source_refs는 SQLite에 JSON 타입이 없어서
      json.dumps()로 문자열로 저장 — 꺼낼 때는 json.loads() 사용)
     """
-    ocr_items = session.exec(
-        select(OcrResult).where(OcrResult.record_id == record_id)
-    ).all()
+    # session.exec()는 동기 SQLModel 호출이라, async def 안에서 그대로 부르면 이벤트
+    # 루프를 막는다 — 아래 _generate_via_rag(LLM/벡터DB 호출)와 동일한 이유로 스레드에서 실행.
+    ocr_items = await asyncio.to_thread(
+        lambda: session.exec(select(OcrResult).where(OcrResult.record_id == record_id)).all()
+    )
     if not ocr_items:
         raise ValueError("해당 record_id의 OCR 결과가 없어요. 먼저 OCR이 실행되어야 합니다.")
 
@@ -179,9 +181,12 @@ async def run_rag(record_id: int, session: Session) -> GuideResult:
         lifestyle_guide=json.dumps(lifestyle_guide, ensure_ascii=False),
         source_refs=json.dumps(source_refs, ensure_ascii=False),
     )
-    session.add(guide)
-    session.commit()
-    session.refresh(guide)
+    def _save_guide() -> None:
+        session.add(guide)
+        session.commit()
+        session.refresh(guide)
+
+    await asyncio.to_thread(_save_guide)
     return guide
 
 

@@ -8,7 +8,7 @@ from sqlalchemy import pool
 from alembic import context
 
 # backend/ 자체가 패키지가 아니라 평평한 구조라(다른 backend 모듈들과 동일한 방식으로)
-# sys.path에 넣어야 `import database`/`import models`가 된다.
+# sys.path에 넣어야 `from core import database`/`import models`가 된다.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dotenv import load_dotenv
@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 # APP_ENV/DATABASE_URL/PII_* 등이 채워진다 (main.py의 load_dotenv와 동일한 이유).
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-import database  # noqa: E402 — sys.path/load_dotenv 이후에 import 해야 함
+from core import database  # noqa: E402 — sys.path/load_dotenv 이후에 import 해야 함
 import models  # noqa: E402,F401 — SQLModel.metadata에 테이블 정의를 올리기 위한 import
 from sqlmodel import SQLModel
 

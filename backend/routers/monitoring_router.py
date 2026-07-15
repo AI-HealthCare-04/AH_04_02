@@ -26,9 +26,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, func, select
 
-from auth import hash_password
-from database import get_session
-from dependencies import (
+from core.auth import hash_password
+from core.database import get_session
+from core.dependencies import (
     Actor,
     get_current_actor,
     get_current_caregiver,
@@ -44,7 +44,7 @@ from models import (
     OcrResult,
     Patient,
 )
-from security import normalize_email
+from core.security import normalize_email
 
 router = APIRouter(prefix="/monitoring", tags=["Monitoring"])
 

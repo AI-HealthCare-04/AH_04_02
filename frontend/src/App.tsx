@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Outlet } from "react-router-dom";
 import Footer from "./components/Footer";
+import ChatFab from "./components/ChatFab";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import SignUp from "./pages/SignUp";
@@ -20,6 +21,7 @@ import PrescriptionDetail from "./pages/PrescriptionDetail";
 import PrescriptionReview from "./pages/PrescriptionReview";
 import MedGuide from "./pages/MedGuide";
 import MyPage from "./pages/MyPage";
+import Settings from "./pages/Settings";
 import PatientManagement from "./pages/PatientManagement";
 import CareEducation from "./pages/CareEducation";
 import MonitoringDashboard from "./pages/MonitoringDashboard";
@@ -33,6 +35,7 @@ function Layout() {
     <>
       <Outlet />
       <Footer />
+      <ChatFab />
     </>
   );
 }
@@ -63,6 +66,7 @@ function App() {
           <Route path="/records/:recordId/guide" element={<MedGuide />} />
           <Route path="/records/:recordId/drugs/:medId" element={<DrugInfo />} />
           <Route path="/mypage" element={<MyPage />} />
+          <Route path="/settings" element={<Settings />} />
           <Route path="/patients" element={<PatientManagement />} />
           <Route path="/care-education" element={<CareEducation />} />
           <Route path="/monitoring" element={<MonitoringDashboard />} />

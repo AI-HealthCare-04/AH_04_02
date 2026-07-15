@@ -30,7 +30,7 @@ from typing import Optional
 
 _logger = logging.getLogger(__name__)
 
-_BASE = Path(__file__).parent / "data"
+_BASE = Path(__file__).parent.parent / "data"
 
 # ──────────────────────────────────────────────────────────────────
 # 1. ATC 코드 → 약효 분류 매핑 테이블

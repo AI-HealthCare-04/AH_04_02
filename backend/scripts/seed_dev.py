@@ -23,10 +23,10 @@ from sqlmodel import Session, select
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import database  # noqa: E402
+from core import database  # noqa: E402
 import models  # noqa: E402
-from auth import hash_password  # noqa: E402
-from security import normalize_email  # noqa: E402
+from core.auth import hash_password  # noqa: E402
+from core.security import normalize_email  # noqa: E402
 
 SEED_CAREGIVER_EMAIL = normalize_email("seed.guardian@example.test")
 SEED_PATIENTS = [

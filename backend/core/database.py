@@ -91,7 +91,7 @@ def _seed_demo_data() -> None:
     이 데모 데이터가 중복 시도되는 걸 막기 위해 init_db()에서 APP_ENV==local일 때만 호출한다.
     """
     import models
-    from auth import hash_password
+    from core.auth import hash_password
 
     with Session(engine) as session:
         existing = session.exec(select(models.Patient)).first()

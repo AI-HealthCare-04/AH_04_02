@@ -22,10 +22,10 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from auth import create_access_token, create_refresh_token, decode_token, verify_password
-from database import get_session
+from core.auth import create_access_token, create_refresh_token, decode_token, verify_password
+from core.database import get_session
+from core.security import hash_phone, normalize_email
 from models import Caregiver, Patient
-from security import hash_phone, normalize_email
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 

@@ -5,9 +5,9 @@ security.py는 PII_ENCRYPTION_KEY/PII_HASH_SECRET가 없으면 import 시점에 
 에러를 내므로, 어떤 backend 모듈이든 import되기 전에 여기서 테스트 전용 값을
 환경변수로 넣어둔다. 실제 배포용 키가 아니라 테스트에서만 쓰는 더미 값이다.
 
-또 backend/ 아래는 패키지(__init__.py)가 아니라 평평한 구조라 `from security import ...`
-처럼 절대 임포트를 쓰므로, backend/ 자체를 sys.path에 넣어줘야 테스트에서도 같은
-방식으로 임포트할 수 있다.
+또 backend/ 자체는 패키지(__init__.py)가 아니라 `core/`, `services/`, `routers/` 같은
+서브패키지들을 담는 루트라 `from core.security import ...`처럼 절대 임포트를 쓰므로,
+backend/ 자체를 sys.path에 넣어줘야 테스트에서도 같은 방식으로 임포트할 수 있다.
 """
 import os
 import sys

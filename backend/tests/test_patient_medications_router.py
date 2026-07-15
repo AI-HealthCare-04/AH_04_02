@@ -6,8 +6,8 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
 
-from auth import create_access_token
-from database import get_session
+from core.auth import create_access_token
+from core.database import get_session
 from main import app
 from models import Caregiver, CaregiverPatient, Patient
 
