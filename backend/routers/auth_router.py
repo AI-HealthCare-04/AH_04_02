@@ -1,19 +1,26 @@
 """
-auth_router.py — 보호자·환자 로그인, 보호자 회원가입 (담당: 박소정, 환자 로그인 확장: 김영혜)
+auth_router.py — 보호자·환자 로그인 (담당: 박소정, 환자 로그인 확장: 김영혜)
 
 [7/6 추가] app/ 예시 프로젝트의 JWT 로그인 방식을 이 SQLite 백엔드로 옮겨왔습니다.
 
-[7/9] 환자(Patient)도 이제 로그인 대상입니다. 회원가입(계정 생성)은 이미
+[7/9] 환자(Patient)도 이제 로그인 대상입니다. 회원가입(계정 생성)은
 monitoring_router.py의 POST /monitoring/patients, /monitoring/caregivers가
 이름/연락처/비밀번호를 다 받아 처리하므로 여기서 중복 만들지 않고, 로그인만
 보호자/환자 양쪽을 지원하도록 확장합니다 — 이메일 또는 전화번호 중 하나로
 로그인할 수 있습니다(이름은 로그인 식별자로 쓰지 않음).
+
+[2026-07-14] 여기 있던 POST /auth/signup(보호자 전용 가입)은 monitoring_router.py의
+POST /monitoring/caregivers와 완전히 중복되는 죽은 코드였다(프론트/테스트 어디서도
+호출 안 함, 이 파일 자체 docstring에도 "여기서 중복 안 만든다"고 적혀 있었음) — 혼란
+방지를 위해 제거. 가입은 항상 monitoring_router.py를 통해서만.
 """
 from __future__ import annotations
+import logging
+
 import jwt
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
-from pydantic import BaseModel, EmailStr
-from sqlmodel import Session, func, select
+from pydantic import BaseModel
+from sqlmodel import Session, select
 
 from datetime import datetime, timedelta
 
@@ -22,21 +29,15 @@ from core.auth import (
     create_access_token,
     create_refresh_token,
     decode_refresh_token,
-    hash_password,
     verify_password,
 )
 from core.database import get_session
+from core.security import hash_phone, normalize_email
 from models import Caregiver, Patient, RefreshToken
-from core.security import hash_phone
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
-
-class SignUpRequest(BaseModel):
-    email: EmailStr
-    password: str
-    name: str
-    relation_type: str = "guardian"  # guardian / caregiver / life_support_worker / social_worker
+logger = logging.getLogger(__name__)
 
 
 class LoginRequest(BaseModel):
@@ -54,35 +55,28 @@ class LoginResponse(BaseModel):
 
 def _find_by_identifier(session: Session, model, identifier: str):
     """identifier가 이메일 형식이면 email로, 아니면 전화번호로 보고 phone_hash로 조회.
-    이메일은 대소문자·좌우공백 차이(모바일 자동대문자화 등)로 가입 때와 다르게
-    입력돼도 같은 계정으로 찾도록 대소문자 무시 비교한다."""
+
+    [2026-07-14] 이메일은 대소문자·좌우공백 차이(모바일 자동대문자화 등)로 가입 때와
+    다르게 입력돼도 같은 계정으로 찾아야 한다. 가입 시(monitoring_router.py)부터
+    normalize_email()로 정규화해서 저장하므로, 조회할 때도 같은 정규화 함수로 비교한다
+    — DB의 `func.lower()` 비교는 가입 시 저장값 자체가 정규화돼 있지 않으면 여전히
+    " Test@x.com "과 "test@x.com"이 별개 계정으로 남는 문제를 못 막아서 채택하지 않았다.
+    """
     if "@" in identifier:
-        norm = identifier.strip().lower()
-        return session.exec(select(model).where(func.lower(model.email) == norm)).first()
+        return session.exec(select(model).where(model.email == normalize_email(identifier))).first()
     return session.exec(select(model).where(model.phone_hash == hash_phone(identifier))).first()
-
-
-@router.post("/signup", status_code=status.HTTP_201_CREATED)
-def signup(payload: SignUpRequest, session: Session = Depends(get_session)):
-    existing = session.exec(select(Caregiver).where(Caregiver.email == payload.email)).first()
-    if existing:
-        raise HTTPException(status.HTTP_409_CONFLICT, "이미 사용중인 이메일입니다.")
-
-    caregiver = Caregiver(
-        email=payload.email,
-        hashed_password=hash_password(payload.password),
-        relation_type=payload.relation_type,
-    )
-    caregiver.name = payload.name  # [7/9] setter가 암호화해서 name_encrypted에 저장
-    session.add(caregiver)
-    session.commit()
-    session.refresh(caregiver)
-    return {"id": caregiver.id, "email": caregiver.email, "name": caregiver.name}
 
 
 @router.post("/login", response_model=LoginResponse)
 def login(payload: LoginRequest, response: Response, session: Session = Depends(get_session)):
-    """[7/9] 보호자/환자 양쪽 다 로그인 가능. 이메일 또는 전화번호로 식별."""
+    """[7/9] 보호자/환자 양쪽 다 로그인 가능. 이메일 또는 전화번호로 식별.
+
+    [2026-07-14] 실패 원인(계정 없음 vs 비밀번호 틀림)은 서버 로그에만 구분해서 남기고,
+    클라이언트에는 어느 쪽인지 알 수 없는 통합 메시지만 준다(계정 존재 여부 추측 방지).
+    """
+    # [2026-07-14] caregiver/patient 두 테이블은 독립적으로 유니크해서, 같은 식별자가
+    # (이론상) 양쪽에 각각 다른 계정으로 존재할 수 있다 — 원래 동작대로 두 테이블을
+    # 항상 각각 확인한다(한쪽에서 비밀번호가 틀렸다고 다른 쪽 확인을 건너뛰지 않음).
     caregiver = _find_by_identifier(session, Caregiver, payload.identifier)
     if caregiver and caregiver.hashed_password and verify_password(payload.password, caregiver.hashed_password):
         return _issue_login_response(response, caregiver.id, "caregiver", caregiver.name, session)
@@ -90,6 +84,13 @@ def login(payload: LoginRequest, response: Response, session: Session = Depends(
     patient = _find_by_identifier(session, Patient, payload.identifier)
     if patient and patient.hashed_password and verify_password(payload.password, patient.hashed_password):
         return _issue_login_response(response, patient.id, "patient", patient.name, session)
+
+    if caregiver:
+        logger.info("login failed: caregiver_id=%s wrong password", caregiver.id)
+    elif patient:
+        logger.info("login failed: patient_id=%s wrong password", patient.id)
+    else:
+        logger.info("login failed: no caregiver/patient matches identifier")
 
     raise HTTPException(status.HTTP_400_BAD_REQUEST, "이메일/전화번호 또는 비밀번호가 올바르지 않습니다.")
 

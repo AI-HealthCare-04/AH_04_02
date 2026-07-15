@@ -44,6 +44,7 @@ from models import (
     OcrResult,
     Patient,
 )
+from core.security import normalize_email
 
 router = APIRouter(prefix="/monitoring", tags=["Monitoring"])
 
@@ -87,10 +88,22 @@ class PatientPublic(BaseModel):
 
 @router.post("/patients", response_model=PatientPublic)
 def create_patient(payload: PatientCreate, session: Session = Depends(get_session)):
+    # [2026-07-14] 이메일 앞뒤 공백/대소문자가 섞이면 같은 사람이 다른 계정으로 취급돼
+    # 로그인이 안 되는 문제가 있었다 — 저장 전에 항상 정규화한다.
+    email = normalize_email(payload.email) if payload.email else None
+    # [2026-07-14] Patient.email엔 이제 유니크 제약이 있지만, DB의 raw IntegrityError
+    # 대신 사용자에게 명확한 409를 주기 위해 사전 검사도 함께 한다.
+    if email and session.exec(select(Patient).where(Patient.email == email)).first():
+        raise HTTPException(409, "이미 사용중인 이메일입니다.")
+
     # [7/9] name/phone은 Patient의 프로퍼티(암호화 setter)라 생성자 kwarg로 못 받음 —
     # 나머지 필드로 먼저 만들고 .name/.phone에 대입해서 암호화·해시 처리한다.
-    data = payload.model_dump(exclude={"password", "name", "phone"})
-    patient = Patient(**data, hashed_password=hash_password(payload.password) if payload.password else None)
+    data = payload.model_dump(exclude={"password", "name", "phone", "email"})
+    patient = Patient(
+        **data,
+        email=email,
+        hashed_password=hash_password(payload.password) if payload.password else None,
+    )
     patient.name = payload.name
     patient.phone = payload.phone
     session.add(patient)
@@ -196,10 +209,21 @@ class CaregiverPublic(BaseModel):
 
 @router.post("/caregivers", response_model=CaregiverPublic)
 def create_caregiver(payload: CaregiverCreate, session: Session = Depends(get_session)):
+    # [2026-07-14] Patient와 동일하게 이메일 정규화 + 사전 중복검사(친절한 409) 적용.
+    # Caregiver.email은 원래부터 DB 유니크 제약이 있었지만, 정규화 없이 비교하면
+    # "Test@x.com"과 "test@x.com"을 다른 값으로 보고 제약을 통과시켜버릴 수 있었다.
+    email = normalize_email(payload.email) if payload.email else None
+    if email and session.exec(select(Caregiver).where(Caregiver.email == email)).first():
+        raise HTTPException(409, "이미 사용중인 이메일입니다.")
+
     # [7/9] name/phone은 Caregiver의 프로퍼티(암호화 setter)라 생성자 kwarg로 못 받음 —
     # 나머지 필드로 먼저 만들고 .name/.phone에 대입해서 암호화·해시 처리한다.
-    data = payload.model_dump(exclude={"password", "name", "phone"})
-    caregiver = Caregiver(**data, hashed_password=hash_password(payload.password) if payload.password else None)
+    data = payload.model_dump(exclude={"password", "name", "phone", "email"})
+    caregiver = Caregiver(
+        **data,
+        email=email,
+        hashed_password=hash_password(payload.password) if payload.password else None,
+    )
     caregiver.name = payload.name
     caregiver.phone = payload.phone
     session.add(caregiver)

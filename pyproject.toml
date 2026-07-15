@@ -27,6 +27,8 @@ dependencies = [
     "chromadb>=0.5",
     "sentence-transformers>=3.0",
     "numpy>=1.26",
+    "pymysql>=1.2.0",
+    "alembic>=1.18.5",
 ]
 
 # backend(routers/chat_router.py)가 rag/를 sys.path에 얹어 같은 프로세스에서 import하므로
