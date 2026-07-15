@@ -103,11 +103,16 @@ class Caregiver(SQLModel, table=True):
     name_encrypted: str = Field(default="")  # [7/9] Patient.name_encrypted와 동일한 원칙 — .name 프로퍼티 참고
     email: Optional[str] = Field(default=None, unique=True, index=True)  # 회원가입 화면의 "아이디" 입력이 여기 저장됨
     hashed_password: Optional[str] = None
-    # [2026-07-16 정정] 실제로 쓰이는 값은 "guardian"(개인)과 "organization"(단체·기관 —
-    # 요양보호사/협회/보건소 등도 이 값으로 가입) 둘뿐이다(routers/monitoring_router.py의
-    # CaregiverCreate.relation_type이 Literal로 강제). DB 컬럼 자체는 그냥 VARCHAR라
-    # 여기서는 강제 안 됨 — caregiver/life_support_worker/social_worker는 과거에 구상만
-    # 되고 실제로 프론트에서 보낸 적 없는 값이라 목록에서 뺐다.
+    # [2026-07-16 정정] 실제로 DB에 저장되는 값은 "guardian"(보호자)과 "organization"
+    # (단체·기관) 둘뿐이다(routers/monitoring_router.py의 CaregiverCreate.relation_type이
+    # Literal로 강제, DB 컬럼 자체는 그냥 VARCHAR라 여기서는 강제 안 됨). 회원가입 화면이
+    # 먼저 "개인"과 "단체·기관" 중 하나를 고르게 하는데, caregiver(요양보호사)/
+    # life_support_worker(생활지원사)/social_worker(사회복지사)는 이 개인/기관 구분에서
+    # 전부 "단체·기관"(organization) 쪽 클라이언트 그룹으로 취급된다 — 즉 실제 직군은
+    # 존재하지만 relation_type 값으로 세분화되지 않고 organization으로 뭉뚱그려 저장된다.
+    # 나중에 "지원인력을 organization과 별도로 구분해서 통계/필터링" 같은 요구사항이
+    # 생기면, org_type 필드(요양원/재가센터/협회/보건소/기타)나 별도 컬럼으로 세분화해야
+    # 한다 — 지금 이 값들을 relation_type에 추가해도 프론트가 안 보내므로 의미 없음.
     relation_type: str = "guardian"
     phone_encrypted: Optional[str] = None  # [7/8 추가, 7/9 암호화] 회원가입 연락처
     phone_hash: Optional[str] = Field(default=None, index=True)  # [7/9] 로그인/검색용, 복호화 대상 아님
