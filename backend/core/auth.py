@@ -22,6 +22,10 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "change-this-secret-key-before-deploy"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_MINUTES = 14 * 24 * 60  # 14일
+# [2026-07-15 추가, REQ-039] 임시번호 검증 성공 후 발급되는 전용 토큰 — 이 토큰으로는
+# "새 비밀번호 설정"(POST /auth/password-reset/confirm) 외에는 아무것도 못 하게
+# get_current_actor 등 일반 인증 의존성이 이 type을 거부해야 한다(로그인 완전 우회 방지).
+PASSWORD_RESET_TOKEN_EXPIRE_MINUTES = 10
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -62,6 +66,12 @@ def create_refresh_token(subject_id: int, role: str) -> tuple[str, str]:
     }
     token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
     return token, jti
+
+
+def create_password_reset_token(subject_id: int, role: str) -> str:
+    """[2026-07-15 추가, REQ-039] 임시번호 검증 성공 후 발급 — expected_type="access"를
+    요구하는 get_current_actor 등 기존 인증 의존성으로는 절대 통과할 수 없다."""
+    return _create_token(subject_id, role, "password_reset", timedelta(minutes=PASSWORD_RESET_TOKEN_EXPIRE_MINUTES))
 
 
 def decode_token(token: str, expected_type: str) -> tuple[int, str]:

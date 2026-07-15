@@ -63,6 +63,15 @@ class Patient(SQLModel, table=True):
     sms_enabled: bool = False
     email_opt_in: bool = False
     created_at: datetime = Field(default_factory=datetime.now)
+    # [2026-07-15 추가, REQ-039] 로그인 실패 추적 + 계정 잠금. 5회 실패 시 locked_at이
+    # 채워지고, 잠긴 동안은 비밀번호가 맞아도 로그인이 거부된다(비밀번호 재설정으로만 해제).
+    failed_login_attempts: int = Field(default=0)
+    locked_at: Optional[datetime] = None
+    # [2026-07-15 추가, REQ-035] 회원 탈퇴 — 즉시 비활성화하고 30일 뒤 실제 삭제(purge
+    # 스크립트가 처리). deactivated_at이 채워지면 로그인 자체가 막힌다. 30일 안에는
+    # withdraw/cancel로 취소 가능(둘 다 None으로 되돌림).
+    deactivated_at: Optional[datetime] = None
+    deletion_scheduled_at: Optional[datetime] = None
 
     @property
     def name(self) -> str:
@@ -110,6 +119,12 @@ class Caregiver(SQLModel, table=True):
     manager_name: Optional[str] = None  # 담당자 이름 (name과 별개 — 기관 소속 실무 담당자)
     manager_phone: Optional[str] = None  # 담당자 전화번호
     created_at: datetime = Field(default_factory=datetime.now)
+    # [2026-07-15 추가, REQ-039] Patient와 동일한 로그인 잠금 원칙 — 아래 Patient 클래스 참고.
+    failed_login_attempts: int = Field(default=0)
+    locked_at: Optional[datetime] = None
+    # [2026-07-15 추가, REQ-035] Patient와 동일한 탈퇴·유예삭제 원칙 — 아래 Patient 클래스 참고.
+    deactivated_at: Optional[datetime] = None
+    deletion_scheduled_at: Optional[datetime] = None
 
     @property
     def name(self) -> str:
@@ -141,6 +156,41 @@ class CaregiverPatient(SQLModel, table=True):
     caregiver_id: int = Field(foreign_key="caregivers.id")
     patient_id: int = Field(foreign_key="patients.id")
     created_at: datetime = Field(default_factory=datetime.now)
+
+
+# ── 비밀번호 재설정 임시코드 [2026-07-15 추가, REQ-039] ──
+# Patient/Caregiver 둘 다 로그인 대상이라 subject_type으로 구분한다(다형 참조) — FK를
+# 어느 한쪽 테이블로 고정할 수 없어 애플리케이션 레벨에서만 유효성을 검증한다.
+class PasswordResetCode(SQLModel, table=True):
+    __tablename__ = "password_reset_codes"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    subject_type: str  # "patient" | "caregiver"
+    subject_id: int = Field(index=True)
+    code_hash: str = Field(index=True)  # HMAC-SHA256(정규화된 임시번호) — 평문 저장 안 함
+    expires_at: datetime  # 발급 후 10분
+    used_at: Optional[datetime] = None  # 채워지면 재사용 불가
+    # [2026-07-15 추가] 팀원 리뷰(PR #48)에서 지적된 무제한 시도 문제 수정 — 이 코드로
+    # /password-reset/verify를 시도한 횟수. MAX_RESET_CODE_VERIFY_ATTEMPTS(auth_router.py)
+    # 넘으면 코드를 강제로 무효화(used_at 채움)해서 브루트포스를 막는다.
+    attempts: int = Field(default=0)
+    created_at: datetime = Field(default_factory=datetime.now)
+
+
+# ── 회원 탈퇴 감사기록 [2026-07-15 추가, REQ-035] ──
+# 이름·전화번호 등 실제 PII는 담지 않는 비식별 기록 — subject_id만 참조하고, 개인정보가
+# 실제로 삭제된 뒤(completed)에도 이 행 자체는 증빙으로 계속 보존한다.
+class PrivacyPurgeAudit(SQLModel, table=True):
+    __tablename__ = "privacy_purge_audits"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    subject_type: str  # "patient" | "caregiver"
+    subject_id: int = Field(index=True)
+    requested_at: datetime = Field(default_factory=datetime.now)
+    deactivated_at: datetime
+    scheduled_purge_at: datetime  # deactivated_at + 30일 — purge 스크립트가 이 값 기준으로 찾음
+    status: str = Field(default="pending")  # pending / completed / cancelled
+    completed_at: Optional[datetime] = None
 
 
 # ── 업로드 원본 단위 (1건의 처방전 사진 = 1행) ──

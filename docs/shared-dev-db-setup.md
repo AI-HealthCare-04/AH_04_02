@@ -249,3 +249,67 @@ uv run pytest tests/ -q
 - **운영(production) 배포 자체가 아직 없습니다**(README에 "배포는 추후 검토 예정"으로 명시돼
   있음) — `APP_ENV=production` 관련 코드는 준비만 해뒀을 뿐 실제 운영 환경에서 실행해본 적은
   없습니다.
+
+## 12. REQ-039(로그인 잠금·비밀번호 재설정)·REQ-035(회원 탈퇴) 추가 (2026-07-15)
+
+### 새 API
+
+| Method | Endpoint | 설명 | 인증 |
+|---|---|---|---|
+| POST | `/auth/password-reset/request` | 임시번호(6자리) 이메일 발송 요청 | X (계정 존재 여부와 무관하게 같은 응답) |
+| POST | `/auth/password-reset/verify` | 임시번호 확인 → 재설정 전용 `reset_token` 발급 | X |
+| POST | `/auth/password-reset/confirm` | `reset_token`으로 새 비밀번호 설정, 잠금·실패횟수 초기화 | X (reset_token 자체가 인증) |
+| POST | `/auth/withdraw` | 탈퇴 요청 — 즉시 비활성화, 30일 뒤 개인정보 삭제 예약 | O (본인 로그인 + 비밀번호 재입력) |
+| POST | `/auth/withdraw/cancel` | 탈퇴 취소(30일 이내) | X (탈퇴 후엔 로그인이 막히므로 identifier+password로 본인 확인) |
+
+`POST /auth/login`도 두 가지가 바뀌었습니다:
+- 5회 연속 비밀번호 실패 시 계정을 잠그고(`locked_at`), 가입 이메일로 임시번호를 자동 발송합니다.
+  잠긴 동안은 비밀번호가 맞아도 로그인이 거부됩니다(재설정으로만 해제).
+- 탈퇴(`deactivated_at`이 채워진) 계정도 로그인이 거부됩니다 — `/auth/withdraw/cancel`로만 복구.
+
+### 새 환경변수
+
+`EMAIL_PROVIDER=mock`(기본값, 로그만 남김) `| smtp`(실제 발송) — `backend/.env.example`의
+"이메일 발송" 섹션 참고. `smtp`로 켤 때만 `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASSWORD`/
+`SMTP_FROM`이 필요합니다(하나라도 없으면 즉시 에러 — 재설정 코드가 조용히 안 나가는 사고 방지).
+
+### 새 스키마 (마이그레이션 `38a30cdfa517`)
+
+- `caregivers`/`patients`에 `failed_login_attempts`/`locked_at`/`deactivated_at`/
+  `deletion_scheduled_at` 컬럼 추가(기존 행은 `server_default`로 안전하게 백필됨)
+- `password_reset_codes` 테이블 신규 (임시번호는 평문 저장하지 않고 HMAC-SHA256 해시만 저장,
+  10분 만료, 1회 사용)
+- `privacy_purge_audits` 테이블 신규 (탈퇴 요청·비활성화·삭제예정 시각 + 상태(pending/
+  completed/cancelled) 기록 — PII를 담지 않는 비식별 감사기록이라 계정이 실제로 삭제된
+  뒤에도 이 행 자체는 보존됨)
+
+### 회원 탈퇴 → 실제 삭제 스크립트
+
+`scripts/purge_expired_accounts.py --dry-run`(먼저 확인) / 실행(실제 삭제). 서버가 자동으로
+스케줄 실행하지 않는 **수동 스크립트**입니다(사용자 확인 — 새 인프라(Celery 등) 추가 없이
+바로 쓸 수 있는 방법을 택함) — 팀이 원하는 주기로 cron 등에 직접 등록해서 돌릴지는 각자
+결정할 부분입니다. `scheduled_purge_at`이 지난 `pending` 감사기록만 골라 개인정보 필드
+(이름·전화번호·이메일·비밀번호 해시 등)만 지우고, `Patient`/`Caregiver` 행 자체나
+`medical_records`/`patient_medications` 등 연관 데이터는 지우지 않습니다(FK 참조가 끊기는
+문제와 "임의로 데이터를 지우지 않는다"는 팀 방침 때문).
+
+### 테스트
+
+`test_login_lockout_and_password_reset.py`(10) / `test_account_withdrawal.py`(9) /
+`test_purge_expired_accounts.py`(3) 추가 — `uv run pytest backend/tests/` **98개 전부 통과**
+(기존 76 + 신규 22). 잠금 임계치 미만/도달, 잠긴 계정 로그인 거부, 재설정 코드 1회성·만료·
+오입력, `reset_token`으로 다른 보호된 엔드포인트 접근 불가, 탈퇴→로그인 차단→취소→재로그인,
+유예기간 경과 후 취소 거부, purge 스크립트의 dry-run/실행/대상 필터링(계정 없음 케이스 포함)
+까지 커버합니다.
+
+### 남아 있는 제한 사항
+
+- **연락처(전화번호)로 가입한 계정은 임시번호를 받을 방법이 없습니다** — 이메일 발송만
+  구현했습니다(REQ-039 요구사항 자체가 "가입이 이메일 기반이라 SMS 등 추가 계약 없이 바로
+  구축 가능"이라는 판단 하에 진행됨, 사용자 확인). `account.email`이 없으면 코드는 생성되지만
+  발송은 안 되고 서버 로그에 경고만 남습니다 — 이 경우 팀에 직접 문의해야 합니다.
+- **임시번호 재전송/검증 시도 횟수 제한은 구현하지 않았습니다**(요구사항의 인수조건 5개 항목에는
+  없고 비고에만 있는 항목) — 10분 만료 + 1회 사용만으로 충분하다고 판단했으나, 무차별 대입
+  방어가 더 필요하면 추가 작업이 필요합니다.
+- **탈퇴 확인 절차는 "현재 비밀번호 재입력"으로 구현**했습니다 — 요구사항의 "확인 절차"가
+  프론트 확인 모달만 뜻하는 것일 수도 있어, 프론트 쪽과 UX 확인이 필요할 수 있습니다.
