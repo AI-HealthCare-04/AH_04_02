@@ -61,6 +61,15 @@ def normalize_phone(phone: str) -> str:
     return phone.replace("-", "").replace(" ", "")
 
 
+def normalize_email(email: str) -> str:
+    """[2026-07-14 추가] 이메일 앞뒤 공백 제거 + 소문자 정규화.
+
+    가입/로그인 양쪽에서 항상 이 함수를 거치지 않으면 " Test@Example.COM "과
+    "test@example.com"이 서로 다른 계정으로 취급돼 로그인이 안 되는 문제가 있었다.
+    """
+    return email.strip().lower()
+
+
 def hash_phone(phone: str) -> str:
     """정규화한 전화번호를 HMAC-SHA256으로 해시 — 로그인/검색 조회용(복호화 대상 아님)."""
     normalized = normalize_phone(phone)

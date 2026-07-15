@@ -2,7 +2,8 @@
 건강동행 백엔드 — main.py (관리: 박소정)
 
 v6 확정 구조:
-- DB: SQLite (app.db 파일 하나, 설치 불필요)
+- DB: APP_ENV/DATABASE_URL 환경변수로 결정 (기본값은 지금까지처럼 로컬 SQLite,
+  APP_ENV=development면 팀 공통 DB(MySQL 등)를 가리킴 — database.py 참고, 2026-07-14 변경)
 - 동기 방식 (스트리밍/폴링 없음)
 - Redis 미사용
 - 로그인: /auth/login으로 Caregiver 이메일/비밀번호 인증, JWT 발급 (7/10 재개)
@@ -34,8 +35,17 @@ load_dotenv(Path(__file__).parent / ".env")
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from core.database import init_db
-from routers import auth_router, ocr_router, rag_router, monitoring_router, records_router, care_router, chat_router
+from core.database import init_db, log_db_connection_info
+from routers import (
+    auth_router,
+    care_router,
+    chat_router,
+    monitoring_router,
+    ocr_router,
+    patient_medications_router,
+    rag_router,
+    records_router,
+)
 
 app = FastAPI(
     title="건강동행 API",
@@ -58,7 +68,9 @@ app.add_middleware(
 
 @app.on_event("startup")
 def on_startup() -> None:
-    """서버 시작 시 SQLite 테이블 자동 생성 (없으면 만들고, 있으면 그대로 둠)"""
+    """서버 시작 시 어느 DB에 붙었는지 로그로 남기고, local/test면 테이블 자동 생성
+    (development/production은 Alembic migration으로 관리 — database.py 참고)"""
+    log_db_connection_info()
     init_db()
 
 
@@ -76,3 +88,4 @@ app.include_router(rag_router.router)
 app.include_router(monitoring_router.router)
 app.include_router(care_router.router)
 app.include_router(chat_router.router)
+app.include_router(patient_medications_router.router)  # [2026-07-14 추가] 환자 의약품 등록/조회/일정/복약기록
