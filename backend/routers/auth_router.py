@@ -20,6 +20,7 @@ import logging
 import jwt
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from pydantic import BaseModel
+from sqlalchemy import update
 from sqlmodel import Session, select
 
 from datetime import datetime, timedelta
@@ -128,17 +129,25 @@ def refresh_token(
     except jwt.PyJWTError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "유효하지 않거나 만료된 refresh token입니다.")
 
-    stored = session.get(RefreshToken, jti)
-    if not stored or stored.revoked:
+    # [수정] 예전엔 session.get()으로 읽어서 revoked 여부를 확인한 다음 따로 True로
+    # 갱신하는 2단계였는데, 같은 refresh_token으로 동시에 두 요청이 들어오면 둘 다
+    # revoked=False를 읽고 둘 다 회전에 성공하는 레이스가 있었다(순차적인 재사용 차단
+    # 자체는 되지만 동시 요청에는 취약). UPDATE ... WHERE revoked=false를 원자적으로
+    # 실행해서, 이 요청이 실제로 false -> true로 바꾼 행이 있는지(rowcount)로 판단한다.
+    result = session.execute(
+        update(RefreshToken)
+        .where(RefreshToken.jti == jti)
+        .where(RefreshToken.revoked == False)  # noqa: E712
+        .values(revoked=True)
+    )
+    if result.rowcount == 0:
+        session.rollback()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "이미 사용되었거나 무효화된 refresh token입니다.")
+    session.commit()
 
     model = Caregiver if role == "caregiver" else Patient
     subject = session.get(model, subject_id)
     if not subject:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "인증에 실패했습니다.")
-
-    stored.revoked = True
-    session.add(stored)
-    session.commit()
 
     return _issue_login_response(response, subject_id, role, subject.name, session)

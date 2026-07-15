@@ -90,6 +90,10 @@ def downgrade() -> None:
         batch_op.drop_index('ix_invitations_token_hash')
         batch_op.add_column(sa.Column('token', sqlmodel.sql.sqltypes.AutoString(), nullable=True))
         batch_op.add_column(sa.Column('invited_phone', sqlmodel.sql.sqltypes.AutoString(), nullable=True))
+        # [수정] upgrade()가 이 인덱스를 drop_index('ix_invitations_token')으로 지우고
+        # 시작하므로, downgrade에서도 다시 만들어둬야 그 다음 upgrade가 또 정상 동작한다
+        # (안 만들면 downgrade -> upgrade 왕복 시 "No such index" 에러로 깨짐).
+        batch_op.create_index('ix_invitations_token', ['token'], unique=True)
         batch_op.drop_column('token_hash')
         batch_op.drop_column('invited_phone_encrypted')
         batch_op.drop_column('expires_at')
