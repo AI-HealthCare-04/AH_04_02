@@ -46,6 +46,16 @@ DATABASE_SSL_REQUIRED = os.environ.get("DATABASE_SSL_REQUIRED", "false").lower()
 # 이 값을 채워야 한다.
 DATABASE_SSL_CA = os.environ.get("DATABASE_SSL_CA")
 
+# [2026-07-15 수정] 이 가드가 원래 아래 `elif DATABASE_SSL_REQUIRED:` 블록 안에만 있어서,
+# production인데 DATABASE_SSL_CA뿐 아니라 DATABASE_SSL_REQUIRED 자체를 깜빡 안 켜면
+# else 분기(SSL 없는 평문 연결)로 빠져 이 검사 자체를 건너뛰는 구멍이 있었다(실제 재현
+# 확인됨). production은 DATABASE_SSL_REQUIRED 값과 무관하게 항상 여기서 먼저 막는다.
+if APP_ENV == "production" and not DATABASE_SSL_REQUIRED:
+    raise RuntimeError(
+        "APP_ENV=production인데 DATABASE_SSL_REQUIRED가 true가 아닙니다. 운영 DB는 "
+        "반드시 SSL로 연결해야 합니다 — DATABASE_SSL_REQUIRED=true와 DATABASE_SSL_CA를 지정하세요."
+    )
+
 # check_same_thread=False: SQLite에서 FastAPI가 여러 요청을 처리할 때 필요한 옵션.
 # MySQL 등 서버형 DB는 이 옵션이 없고, 대신 pool_pre_ping으로 끊긴 연결을 자동 복구한다.
 if _url.get_backend_name() == "sqlite":
