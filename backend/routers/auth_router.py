@@ -20,12 +20,21 @@ import logging
 import jwt
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from pydantic import BaseModel
+from sqlalchemy import update
 from sqlmodel import Session, select
 
-from core.auth import create_access_token, create_refresh_token, decode_token, verify_password
+from datetime import datetime, timedelta
+
+from core.auth import (
+    REFRESH_TOKEN_EXPIRE_MINUTES,
+    create_access_token,
+    create_refresh_token,
+    decode_refresh_token,
+    verify_password,
+)
 from core.database import get_session
 from core.security import hash_phone, normalize_email
-from models import Caregiver, Patient
+from models import Caregiver, Patient, RefreshToken
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -71,11 +80,11 @@ def login(payload: LoginRequest, response: Response, session: Session = Depends(
     # 항상 각각 확인한다(한쪽에서 비밀번호가 틀렸다고 다른 쪽 확인을 건너뛰지 않음).
     caregiver = _find_by_identifier(session, Caregiver, payload.identifier)
     if caregiver and caregiver.hashed_password and verify_password(payload.password, caregiver.hashed_password):
-        return _issue_login_response(response, caregiver.id, "caregiver", caregiver.name)
+        return _issue_login_response(response, caregiver.id, "caregiver", caregiver.name, session)
 
     patient = _find_by_identifier(session, Patient, payload.identifier)
     if patient and patient.hashed_password and verify_password(payload.password, patient.hashed_password):
-        return _issue_login_response(response, patient.id, "patient", patient.name)
+        return _issue_login_response(response, patient.id, "patient", patient.name, session)
 
     if caregiver:
         logger.info("login failed: caregiver_id=%s wrong password", caregiver.id)
@@ -87,25 +96,58 @@ def login(payload: LoginRequest, response: Response, session: Session = Depends(
     raise HTTPException(status.HTTP_400_BAD_REQUEST, "이메일/전화번호 또는 비밀번호가 올바르지 않습니다.")
 
 
-def _issue_login_response(response: Response, subject_id: int, role: str, name: str) -> LoginResponse:
+def _issue_login_response(response: Response, subject_id: int, role: str, name: str, session: Session) -> LoginResponse:
+    """[2026-07-15] refresh 토큰 발급마다 jti를 RefreshToken 테이블에 기록 — /token/refresh가
+    회전(재발급) 시 이 jti를 revoke해서 재사용을 막는다(REQ-001)."""
     access_token = create_access_token(subject_id, role)
-    refresh_token = create_refresh_token(subject_id, role)
+    refresh_token, jti = create_refresh_token(subject_id, role)
+    session.add(RefreshToken(
+        jti=jti,
+        subject_id=subject_id,
+        role=role,
+        expires_at=datetime.now() + timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES),
+    ))
+    session.commit()
     response.set_cookie(key="refresh_token", value=refresh_token, httponly=True)
     return LoginResponse(access_token=access_token, caregiver_id=subject_id, name=name, role=role)
 
 
 @router.get("/token/refresh", response_model=LoginResponse)
-def refresh_token(refresh_token: str | None = Cookie(default=None), session: Session = Depends(get_session)):
-    """login에서 set_cookie로 심어둔 refresh_token 쿠키를 읽어서 새 access_token을 발급."""
+def refresh_token(
+    response: Response,
+    refresh_token: str | None = Cookie(default=None),
+    session: Session = Depends(get_session),
+):
+    """login에서 set_cookie로 심어둔 refresh_token 쿠키를 검증하고, 새 access_token과
+    함께 새 refresh_token도 발급한다(rotation) — 이전 jti는 revoke 처리해 재사용을 막는다.
+    [2026-07-15] 예전엔 access_token만 새로 발급하고 같은 refresh_token을 계속 재사용해서,
+    탈취된 refresh_token이 만료(14일) 전까지 계속 유효했다(REQ-001)."""
     if not refresh_token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Refresh token이 없습니다.")
     try:
-        subject_id, role = decode_token(refresh_token, expected_type="refresh")
+        subject_id, role, jti = decode_refresh_token(refresh_token)
     except jwt.PyJWTError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "유효하지 않거나 만료된 refresh token입니다.")
+
+    # [수정] 예전엔 session.get()으로 읽어서 revoked 여부를 확인한 다음 따로 True로
+    # 갱신하는 2단계였는데, 같은 refresh_token으로 동시에 두 요청이 들어오면 둘 다
+    # revoked=False를 읽고 둘 다 회전에 성공하는 레이스가 있었다(순차적인 재사용 차단
+    # 자체는 되지만 동시 요청에는 취약). UPDATE ... WHERE revoked=false를 원자적으로
+    # 실행해서, 이 요청이 실제로 false -> true로 바꾼 행이 있는지(rowcount)로 판단한다.
+    result = session.execute(
+        update(RefreshToken)
+        .where(RefreshToken.jti == jti)
+        .where(RefreshToken.revoked == False)  # noqa: E712
+        .values(revoked=True)
+    )
+    if result.rowcount == 0:
+        session.rollback()
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "이미 사용되었거나 무효화된 refresh token입니다.")
+    session.commit()
 
     model = Caregiver if role == "caregiver" else Patient
     subject = session.get(model, subject_id)
     if not subject:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "인증에 실패했습니다.")
-    return LoginResponse(access_token=create_access_token(subject_id, role), caregiver_id=subject_id, name=subject.name, role=role)
+
+    return _issue_login_response(response, subject_id, role, subject.name, session)

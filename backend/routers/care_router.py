@@ -13,7 +13,7 @@ Figma에만 있고 백엔드가 없던 3개 기능을 여기 모았습니다:
 """
 from __future__ import annotations
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -22,6 +22,7 @@ from sqlmodel import Session, select
 
 from core.database import get_session
 from core.dependencies import Actor, get_current_actor, require_actor_patient_access
+from core.security import hash_token, normalize_phone
 from models import (
     CareLevelAssessment,
     Caregiver,
@@ -30,6 +31,8 @@ from models import (
     NotificationSetting,
     Patient,
 )
+
+INVITATION_EXPIRE_DAYS = 7
 
 router = APIRouter(tags=["Care"])
 
@@ -111,6 +114,31 @@ class InvitationCreate(BaseModel):
 class InvitationAccept(BaseModel):
     caregiver_name: str
     caregiver_id: int | None = None  # 기존 보호자면 전달, 신규면 None
+    phone: str | None = None  # [2026-07-15] invited_phone이 지정된 초대는 이 값과 일치해야 수락 가능(REQ-003)
+
+
+class InvitationPublic(BaseModel):
+    """token_hash/invited_phone_encrypted는 API 응답에 노출하지 않기 위한 응답 전용 모델"""
+    id: int
+    patient_id: int
+    inviter_caregiver_id: int | None = None
+    relation_type: str
+    invited_phone: str | None = None
+    status: str
+    created_at: datetime
+    accepted_at: datetime | None = None
+    expires_at: datetime | None = None
+
+
+def _get_invitation_by_token(session: Session, token: str) -> Invitation:
+    invitation = session.exec(select(Invitation).where(Invitation.token_hash == hash_token(token))).first()
+    if not invitation:
+        raise HTTPException(404, "유효하지 않은 초대예요")
+    if invitation.status == "pending" and invitation.is_expired:
+        invitation.status = "expired"
+        session.add(invitation)
+        session.commit()
+    return invitation
 
 
 @router.post("/invitations")
@@ -125,10 +153,11 @@ def create_invitation(
     invitation = Invitation(
         patient_id=payload.patient_id,
         relation_type=payload.relation_type,
-        invited_phone=payload.invited_phone,
         inviter_caregiver_id=payload.inviter_caregiver_id,
-        token=token,
+        token_hash=hash_token(token),
+        expires_at=datetime.now() + timedelta(days=INVITATION_EXPIRE_DAYS),
     )
+    invitation.invited_phone = payload.invited_phone
     session.add(invitation)
     session.commit()
     session.refresh(invitation)
@@ -138,9 +167,7 @@ def create_invitation(
 @router.get("/invitations/{token}")
 def get_invitation(token: str, session: Session = Depends(get_session)):
     """InvitePage — 초대 링크 열었을 때 보여줄 정보"""
-    invitation = session.exec(select(Invitation).where(Invitation.token == token)).first()
-    if not invitation:
-        raise HTTPException(404, "유효하지 않은 초대예요")
+    invitation = _get_invitation_by_token(session, token)
 
     patient = session.get(Patient, invitation.patient_id)
     inviter = (
@@ -150,21 +177,25 @@ def get_invitation(token: str, session: Session = Depends(get_session)):
     )
 
     return {
-        "token": invitation.token,
         "status": invitation.status,
         "relation_type": invitation.relation_type,
         "patient_name": patient.name if patient else "알 수 없음",
         "inviter_name": inviter.name if inviter else None,
+        "phone_verification_required": bool(invitation.invited_phone),
     }
 
 
 @router.post("/invitations/{token}/accept")
 def accept_invitation(token: str, payload: InvitationAccept, session: Session = Depends(get_session)):
-    invitation = session.exec(select(Invitation).where(Invitation.token == token)).first()
-    if not invitation:
-        raise HTTPException(404, "유효하지 않은 초대예요")
+    invitation = _get_invitation_by_token(session, token)
     if invitation.status != "pending":
         raise HTTPException(409, f"이미 {invitation.status} 처리된 초대예요")
+
+    # [2026-07-15] 초대가 특정 전화번호를 지정했다면, 수락자가 그 번호의 소유자인지 확인
+    # (REQ-003) — 안 그러면 초대 URL만 탈취해도 본인 인증 없이 보호자-환자 관계가 생김.
+    if invitation.invited_phone:
+        if not payload.phone or normalize_phone(payload.phone) != normalize_phone(invitation.invited_phone):
+            raise HTTPException(403, "초대받은 전화번호와 일치하지 않아요.")
 
     if payload.caregiver_id:
         caregiver = session.get(Caregiver, payload.caregiver_id)
@@ -200,20 +231,21 @@ def accept_invitation(token: str, payload: InvitationAccept, session: Session = 
 
 @router.post("/invitations/{token}/reject")
 def reject_invitation(token: str, session: Session = Depends(get_session)):
-    invitation = session.exec(select(Invitation).where(Invitation.token == token)).first()
-    if not invitation:
-        raise HTTPException(404, "유효하지 않은 초대예요")
+    invitation = _get_invitation_by_token(session, token)
     invitation.status = "rejected"
     session.add(invitation)
     session.commit()
     return {"status": "rejected"}
 
 
-@router.get("/patients/{patient_id}/invitations")
+@router.get("/patients/{patient_id}/invitations", response_model=list[InvitationPublic])
 def list_invitations(
     patient_id: int, actor: Actor = Depends(get_current_actor), session: Session = Depends(get_session)
 ):
-    """CaregiverPage — 환자의 초대 발송 이력 (대기중/승인됨 목록)"""
+    """CaregiverPage — 환자의 초대 발송 이력 (대기중/승인됨 목록)
+
+    [2026-07-15] response_model=InvitationPublic으로 token_hash를 응답에서 제외 — 예전엔
+    token 원문이 이 목록 응답에 그대로 노출돼 재사용될 수 있었다."""
     require_actor_patient_access(patient_id, actor, session)
     return session.exec(
         select(Invitation)

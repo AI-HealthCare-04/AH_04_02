@@ -309,6 +309,8 @@ class CareLevelAssessment(SQLModel, table=True):
 
 
 # ── 보호자 초대 (담당: 박소정) — CaregiverPage/InvitePage 실제 연동용 ──
+# [2026-07-15] 보안 검토 반영: 토큰 원문 대신 해시 저장(token_hash), 만료시각 추가(expires_at),
+# invited_phone도 다른 PII와 동일하게 암호화(.invited_phone 프로퍼티로 투명하게 암복호화).
 class Invitation(SQLModel, table=True):
     __tablename__ = "invitations"
 
@@ -316,11 +318,38 @@ class Invitation(SQLModel, table=True):
     patient_id: int = Field(foreign_key="patients.id")
     inviter_caregiver_id: Optional[int] = Field(default=None, foreign_key="caregivers.id")
     relation_type: str = "guardian"
-    invited_phone: Optional[str] = None
-    token: str = Field(unique=True, index=True)
+    invited_phone_encrypted: Optional[str] = None
+    token_hash: str = Field(unique=True, index=True)
     status: str = "pending"  # pending / accepted / rejected / expired
     created_at: datetime = Field(default_factory=datetime.now)
     accepted_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+
+    @property
+    def invited_phone(self) -> Optional[str]:
+        return decrypt_pii(self.invited_phone_encrypted) if self.invited_phone_encrypted else None
+
+    @invited_phone.setter
+    def invited_phone(self, value: Optional[str]) -> None:
+        self.invited_phone_encrypted = encrypt_pii(value) if value else None
+
+    @property
+    def is_expired(self) -> bool:
+        return self.expires_at is not None and datetime.now() > self.expires_at
+
+
+# ── refresh 토큰 회전/재사용 탐지 (2026-07-15 추가, 보안 검토 REQ-001 반영) ──
+# JWT 자체엔 무효화 개념이 없어서, 발급마다 jti를 여기 기록해두고 회전(재발급) 시 이전
+# jti를 revoke한다 — 탈취된 refresh 토큰이 만료 전까지 계속 유효하던 문제를 완화한다.
+class RefreshToken(SQLModel, table=True):
+    __tablename__ = "refresh_tokens"
+
+    jti: str = Field(primary_key=True)
+    subject_id: int
+    role: str
+    revoked: bool = False
+    expires_at: datetime
+    created_at: datetime = Field(default_factory=datetime.now)
 
 
 # ── 알림 설정 (담당: 박소정) — NotificationPage 저장용 ──

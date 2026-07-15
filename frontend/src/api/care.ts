@@ -45,11 +45,12 @@ export interface InvitationCreated {
 }
 
 export interface InvitationInfo {
-  token: string;
   status: "pending" | "accepted" | "rejected" | "expired";
   relation_type: string;
   patient_name: string;
   inviter_name: string | null;
+  // [2026-07-15] 초대가 특정 전화번호를 지정했으면 true — 수락 시 본인 전화번호 입력을 요구해야 함(REQ-003)
+  phone_verification_required: boolean;
 }
 
 export async function createInvitation(payload: {
@@ -69,7 +70,7 @@ export async function getInvitation(token: string) {
 
 export async function acceptInvitation(
   token: string,
-  payload: { caregiver_name: string; caregiver_id?: number }
+  payload: { caregiver_name: string; caregiver_id?: number; phone?: string }
 ) {
   const { data } = await monitoringClient.post(`/invitations/${token}/accept`, payload);
   return data;
@@ -85,7 +86,6 @@ export interface InvitationSummary {
   patient_id: number;
   relation_type: string;
   invited_phone: string | null;
-  token: string;
   status: string;
   created_at: string;
 }

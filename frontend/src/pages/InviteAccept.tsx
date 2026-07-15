@@ -19,6 +19,7 @@ export default function InviteAccept() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [caregiverName, setCaregiverName] = useState("");
+  const [phone, setPhone] = useState("");
   const [decided, setDecided] = useState<"accepted" | "rejected" | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -37,14 +38,22 @@ export default function InviteAccept() {
 
   const handleAccept = async () => {
     if (!token || !caregiverName.trim()) return;
+    if (invite?.phone_verification_required && !phone.trim()) return;
     setSubmitting(true);
     try {
-      const result = await acceptInvitation(token, { caregiver_name: caregiverName.trim() });
+      const result = await acceptInvitation(token, {
+        caregiver_name: caregiverName.trim(),
+        phone: phone.trim() || undefined,
+      });
       localStorage.setItem("caregiver_id", String(result.caregiver_id));
       localStorage.setItem("patient_id", String(result.patient_id));
       setDecided("accepted");
     } catch {
-      setError("수락 처리에 실패했어요.");
+      setError(
+        invite?.phone_verification_required
+          ? "수락 처리에 실패했어요. 초대받은 전화번호를 정확히 입력했는지 확인해 주세요."
+          : "수락 처리에 실패했어요."
+      );
     } finally {
       setSubmitting(false);
     }
@@ -136,6 +145,19 @@ export default function InviteAccept() {
                 placeholder="본인 이름을 입력해 주세요"
                 className="w-full px-4 py-3.5 mb-5 rounded-xl border border-[rgba(30,26,23,0.12)] text-[15px] outline-none"
               />
+              {invite.phone_verification_required && (
+                <>
+                  <input
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="초대받은 전화번호를 입력해 주세요"
+                    className="w-full px-4 py-3.5 mb-2 rounded-xl border border-[rgba(30,26,23,0.12)] text-[15px] outline-none"
+                  />
+                  <p className="text-[12px] text-[#8A7E75] mb-5 text-left">
+                    이 초대는 특정 전화번호로 발송됐어요. 본인 확인을 위해 그 번호를 입력해 주세요.
+                  </p>
+                </>
+              )}
               {error && <p className="text-[13px] text-[#D94F4F] mb-4">{error}</p>}
 
               <div className="flex gap-3">
@@ -148,7 +170,7 @@ export default function InviteAccept() {
                 </button>
                 <button
                   onClick={handleAccept}
-                  disabled={submitting || !caregiverName.trim()}
+                  disabled={submitting || !caregiverName.trim() || (invite.phone_verification_required && !phone.trim())}
                   className="flex-1 py-3.5 rounded-full font-bold text-[15px] text-white bg-[#C1653D] disabled:opacity-50"
                 >
                   수락
