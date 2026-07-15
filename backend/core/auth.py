@@ -12,6 +12,7 @@ auth.py — 비밀번호 해시 + JWT 발급/검증 (담당: 박소정, 환자 �
 ⚠️ SECRET_KEY는 데모용 기본값입니다. 실제 배포 전에는 반드시 .env 등으로 바꾸세요.
 """
 import os
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -51,8 +52,20 @@ def create_access_token(subject_id: int, role: str) -> str:
     return _create_token(subject_id, role, "access", timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
 
 
-def create_refresh_token(subject_id: int, role: str) -> str:
-    return _create_token(subject_id, role, "refresh", timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES))
+def create_refresh_token(subject_id: int, role: str) -> tuple[str, str]:
+    """[2026-07-15 추가] JWT 자체엔 무효화 개념이 없어서, 발급마다 고유 jti를 심어 반환한다 —
+    호출부가 이 jti를 RefreshToken 테이블에 저장해두고, 회전(재발급) 시 이전 jti를 revoke하는
+    방식으로 "탈취된 토큰이 만료 전까지 계속 유효한" 문제를 막는다. 반환값: (JWT 문자열, jti)."""
+    jti = uuid.uuid4().hex
+    payload = {
+        "subject_id": subject_id,
+        "role": role,
+        "type": "refresh",
+        "jti": jti,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES),
+    }
+    token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+    return token, jti
 
 
 def create_password_reset_token(subject_id: int, role: str) -> str:
@@ -67,3 +80,14 @@ def decode_token(token: str, expected_type: str) -> tuple[int, str]:
     if payload.get("type") != expected_type:
         raise jwt.InvalidTokenError(f"Expected token type '{expected_type}', got '{payload.get('type')}'")
     return payload["subject_id"], payload["role"]
+
+
+def decode_refresh_token(token: str) -> tuple[int, str, str]:
+    """decode_token과 같지만 jti(회전·재사용 탐지용 고유 id)까지 반환 — /auth/token/refresh 전용."""
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    if payload.get("type") != "refresh":
+        raise jwt.InvalidTokenError(f"Expected token type 'refresh', got '{payload.get('type')}'")
+    jti = payload.get("jti")
+    if not jti:
+        raise jwt.InvalidTokenError("jti가 없는 refresh token입니다.")
+    return payload["subject_id"], payload["role"], jti

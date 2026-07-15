@@ -1,7 +1,7 @@
 """add login lockout and account withdrawal fields
 
 Revision ID: 38a30cdfa517
-Revises: bcdbae97c089
+Revises: d9616a377d8c
 Create Date: 2026-07-15 15:22:59.341128
 
 """
@@ -14,7 +14,11 @@ import sqlmodel  # [2026-07-14] SQLModel 커스텀 컬럼 타입(AutoString 등)
 
 # revision identifiers, used by Alembic.
 revision: str = '38a30cdfa517'
-down_revision: Union[str, Sequence[str], None] = 'bcdbae97c089'
+# [2026-07-15 리베이스] PR #47(d9616a377d8c)이 dev에 먼저 머지되면서 원래 부모였던
+# bcdbae97c089가 더 이상 head가 아니게 됨 — 두 revision이 같은 부모에서 갈라져
+# head가 2개가 되는 것을 막기 위해 d9616a377d8c 뒤로 이어붙임. 이 리비전은 실제 DB
+# 어디에도 적용된 적이 없어(PR #48 자체가 아직 미머지) 안전하게 재배치 가능.
+down_revision: Union[str, Sequence[str], None] = 'd9616a377d8c'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

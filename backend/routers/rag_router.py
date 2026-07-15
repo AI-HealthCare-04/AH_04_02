@@ -205,9 +205,13 @@ async def stub_generate_guide(
 ):
     """RAG만 따로 테스트하고 싶을 때 쓰는 엔드포인트 (실제 흐름은 POST /records 사용)
 
-    [2026-07-15 추가, REQ-030] 이 라우터에서 유일하게 인가가 빠져있던 엔드포인트 —
+    [2026-07-15 추가, REQ-030/REQ-031] 이 라우터에서 유일하게 인가가 빠져있던 엔드포인트 —
     다른 라우터(records/ocr/chat)와 동일한 get_current_actor/require_actor_patient_access
     패턴으로 record_id 소유자(또는 케어하는 보호자)만 호출 가능하게 막았다.
+
+    [병합 메모] PR #47과 PR #48이 이 IDOR을 각자 독립적으로 고쳤음 — 로직은 동일하고,
+    session.get()을 asyncio.to_thread로 감싸는 쪽(이 async 함수 안에서 동기 SQLModel
+    호출을 직접 부르면 이벤트 루프를 막는다는 이 파일 상단 docstring의 기존 관례)을 채택.
     """
     record = await asyncio.to_thread(session.get, MedicalRecord, record_id)
     if not record:

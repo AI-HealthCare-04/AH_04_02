@@ -53,6 +53,50 @@ def test_production_env_requires_database_url():
     assert "DATABASE_URL" in result.stderr
 
 
+def test_production_env_requires_ssl_even_without_ssl_required_flag_set():
+    """[2026-07-15 추가] 회귀 테스트 — production인데 DATABASE_SSL_REQUIRED 자체를 안 켜면
+    (DATABASE_SSL_CA도 없이) else 분기(SSL 없는 평문 연결)로 빠져 가드를 통째로 건너뛰던
+    버그. DATABASE_SSL_REQUIRED 값과 무관하게 production은 항상 막혀야 한다."""
+    result = _run(
+        "from core import database",
+        {
+            "APP_ENV": "production",
+            "DATABASE_URL": "mysql+pymysql://user:pass@prod-db.internal:3306/healthdb_prod",
+            # DATABASE_SSL_REQUIRED/DATABASE_SSL_CA 둘 다 생략 — 이게 버그를 재현하던 조합
+        },
+    )
+    assert result.returncode != 0
+    assert "DATABASE_SSL_REQUIRED" in result.stderr
+
+
+def test_production_env_requires_ssl_ca_when_ssl_required_is_true():
+    result = _run(
+        "from core import database",
+        {
+            "APP_ENV": "production",
+            "DATABASE_URL": "mysql+pymysql://user:pass@prod-db.internal:3306/healthdb_prod",
+            "DATABASE_SSL_REQUIRED": "true",
+            # DATABASE_SSL_CA 생략
+        },
+    )
+    assert result.returncode != 0
+    assert "DATABASE_SSL_CA" in result.stderr
+
+
+def test_production_env_succeeds_with_ssl_required_and_ca_set():
+    result = _run(
+        "from core import database; print(database.engine.dialect.name)",
+        {
+            "APP_ENV": "production",
+            "DATABASE_URL": "mysql+pymysql://user:pass@prod-db.internal:3306/healthdb_prod",
+            "DATABASE_SSL_REQUIRED": "true",
+            "DATABASE_SSL_CA": "/tmp/fake-ca-for-test.pem",
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    assert "mysql" in result.stdout
+
+
 def test_development_env_with_mysql_url_uses_mysql_dialect_and_correct_host():
     result = _run(
         "from core import database; print(database.engine.dialect.name)",
@@ -76,7 +120,15 @@ def test_log_db_connection_info_never_prints_password():
 def test_log_db_connection_info_hides_details_in_production():
     result = _run(
         "from core import database; database.log_db_connection_info()",
-        {"APP_ENV": "production", "DATABASE_URL": "mysql+pymysql://user:pass@prod-db.internal:3306/healthdb_prod"},
+        {
+            "APP_ENV": "production",
+            "DATABASE_URL": "mysql+pymysql://user:pass@prod-db.internal:3306/healthdb_prod",
+            # [2026-07-15] production은 이제 DATABASE_SSL_REQUIRED/CA 없이는 임포트 시점에
+            # RuntimeError를 낸다(SSL 가드) — 이 테스트가 검증하려는 건 로그 마스킹이지
+            # SSL 가드가 아니므로, 가드를 통과할 최소 값을 채워준다.
+            "DATABASE_SSL_REQUIRED": "true",
+            "DATABASE_SSL_CA": "/tmp/fake-ca-for-test.pem",
+        },
     )
     assert result.returncode == 0, result.stderr
     assert "prod-db.internal" not in result.stdout  # 운영은 host도 로그에 안 남김

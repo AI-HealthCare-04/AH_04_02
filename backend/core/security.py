@@ -85,3 +85,9 @@ def generate_reset_code() -> str:
 def hash_reset_code(code: str) -> str:
     """[2026-07-15 추가, REQ-039] 임시번호를 HMAC-SHA256으로 해시 — DB에는 평문 저장 안 함."""
     return hmac.new(_HASH_SECRET_BYTES, code.encode(), hashlib.sha256).hexdigest()
+
+
+def hash_token(token: str) -> str:
+    """[2026-07-15 추가] 무작위 토큰(초대 링크 등)을 HMAC-SHA256으로 해시 — 원문은 저장하지
+    않고, 조회 시 넘어온 토큰을 같은 방식으로 해시해 DB의 해시값과 대조한다."""
+    return hmac.new(_HASH_SECRET_BYTES, token.encode(), hashlib.sha256).hexdigest()
