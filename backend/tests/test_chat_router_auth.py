@@ -14,8 +14,8 @@ from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
 
 from main import app
-from database import get_session
-from auth import create_access_token
+from core.database import get_session
+from core.auth import create_access_token
 from models import Caregiver, Patient, CaregiverPatient
 
 

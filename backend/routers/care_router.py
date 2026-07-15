@@ -20,8 +20,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from database import get_session
-from dependencies import Actor, get_current_actor, require_actor_patient_access
+from core.database import get_session
+from core.dependencies import Actor, get_current_actor, require_actor_patient_access
 from models import (
     CareLevelAssessment,
     Caregiver,
@@ -229,6 +229,7 @@ class NotificationUpdate(BaseModel):
     medication_reminder_enabled: bool | None = None
     care_alert_enabled: bool | None = None
     all_push_enabled: bool | None = None
+    chatbot_name: str | None = None
 
 
 @router.get("/notification-settings", response_model=NotificationSetting)

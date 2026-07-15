@@ -18,8 +18,8 @@ from typing import Literal
 import json
 import os
 
-from parsing_rules import parse_prescription
-from drug_reference import get_drug_class
+from services.parsing_rules import parse_prescription
+from services.drug_reference import get_drug_class
 
 
 # ------------------------------------------------------------------

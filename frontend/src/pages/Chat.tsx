@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import NavBar from "../components/NavBar";
 import { askChat, askChatFreeform, getChatQuestions, type ChatQuestion } from "../api/chat";
+import { getNotificationSettings } from "../api/care";
 import { getCurrentPatientId } from "../lib/session";
 import { C } from "../theme";
 
 type Message = { role: "user" | "bot"; text: string; source?: string };
 type ChatContext = { drugName?: string; diagnosis?: string };
 
+const DEFAULT_CHATBOT_NAME = "약콩이";
 const DEFAULT_GREETING = "안녕하세요 😊 복약 안내 결과에 대해 궁금한 점을 물어보세요.";
 
 // 한글 받침 유무에 따라 "을"/"를" 조사를 골라줍니다 (예: 아스피린 → 을, 로자탄 → 을, 노바스크 → 를).
@@ -47,6 +49,7 @@ export default function Chat() {
   const location = useLocation();
   const context = (location.state as ChatContext | null) ?? null;
   const [questions, setQuestions] = useState<ChatQuestion[]>([]);
+  const [chatbotName, setChatbotName] = useState(DEFAULT_CHATBOT_NAME);
   const [messages, setMessages] = useState<Message[]>(() => [
     { role: "bot", text: buildGreeting(context) },
   ]);
@@ -56,6 +59,10 @@ export default function Chat() {
 
   useEffect(() => {
     getChatQuestions().then(setQuestions).catch(() => setQuestions([]));
+    getNotificationSettings(patientId)
+      .then((s) => setChatbotName(s.chatbot_name || DEFAULT_CHATBOT_NAME))
+      .catch(() => setChatbotName(DEFAULT_CHATBOT_NAME));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // scrollIntoView는 페이지 전체 스크롤 위치까지 건드릴 수 있어서, 메시지 목록 div의
@@ -112,7 +119,7 @@ export default function Chat() {
       <main className="max-w-2xl lg:max-w-4xl mx-auto w-full px-4 py-6 flex flex-col flex-1 min-h-0">
         <div className="mb-5 shrink-0">
           <p className="text-[13px] font-bold mb-1" style={{ color: C.terracotta }}>AI 복약 상담</p>
-          <h1 className="text-[24px] font-black" style={{ color: C.dark }}>복약 상담 챗봇</h1>
+          <h1 className="text-[24px] font-black" style={{ color: C.dark }}>{chatbotName}</h1>
           <p className="text-[14px]" style={{ color: C.muted }}>복약 안내 결과에 대해 궁금한 점을 물어보세요</p>
         </div>
 
@@ -121,11 +128,14 @@ export default function Chat() {
             {messages.map((m, i) => (
               <div key={i} className={`flex items-end gap-3 ${m.role === "user" ? "flex-row-reverse" : ""}`}>
                 {m.role === "bot" && (
-                  <div
-                    className="w-9 h-9 rounded-full shrink-0 flex items-center justify-center text-[18px]"
-                    style={{ background: `${C.terracotta}12` }}
-                  >
-                    💊
+                  <div className="flex flex-col items-center gap-0.5 shrink-0">
+                    <div
+                      className="w-9 h-9 rounded-full flex items-center justify-center text-[18px]"
+                      style={{ background: `${C.terracotta}12` }}
+                    >
+                      💊
+                    </div>
+                    <span className="text-[9px] font-bold" style={{ color: C.muted }}>{chatbotName}</span>
                   </div>
                 )}
                 <div className="max-w-[80%]">

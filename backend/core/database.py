@@ -29,7 +29,7 @@ def _seed_demo_data() -> None:
     email=demo@example.com / password=password1234 로 시드함.
     """
     import models
-    from auth import hash_password
+    from core.auth import hash_password
 
     with Session(engine) as session:
         existing = session.exec(select(models.Patient)).first()

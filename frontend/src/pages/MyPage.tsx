@@ -46,6 +46,7 @@ export default function MyPage() {
     { label: "알림 설정", icon: "🔔", to: "/notification" },
     { label: "등록내역", icon: "📋", to: "/records" },
     { label: "보호자 연결 관리", icon: "👥", to: "/connect" },
+    { label: "화면·챗봇 설정", icon: "⚙️", to: "/settings" },
     ...(caregiverId
       ? [
           { label: "모니터링 대시보드", icon: "📊", to: "/monitoring" },

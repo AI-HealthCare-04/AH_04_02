@@ -1,0 +1,38 @@
+[project]
+name = "health-companion"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "sqlmodel",
+    "python-multipart",
+    "pyjwt",
+    "passlib[bcrypt]",
+    "bcrypt<=4.0.1",
+    "cryptography",
+    "email-validator",
+    "python-dotenv",
+    "requests>=2.32",
+    "pandas",
+    "openpyxl",
+    "rapidfuzz",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "langchain>=0.3",
+    "langchain-community>=0.3",
+    "langchain-chroma>=0.2",
+    "langchain-huggingface>=0.1",
+    "langchain-openai>=0.2",
+    "chromadb>=0.5",
+    "sentence-transformers>=3.0",
+    "numpy>=1.26",
+]
+
+# backend(routers/chat_router.py)가 rag/를 sys.path에 얹어 같은 프로세스에서 import하므로
+# (CHAT_PROVIDER=real/RAG_PROVIDER=real일 때), 두 requirements.txt(backend/, rag/)를
+# 별도 venv가 아니라 이 pyproject.toml 하나로 합쳐서 관리한다.
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]

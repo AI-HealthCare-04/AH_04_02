@@ -17,9 +17,8 @@ schedule_v6에서 시간·인력 상 이번 스프린트 스코프에서 뺐었�
 나머지 라우터는 아직 caregiver_id/patient_id를 쿼리 파라미터로 그대로 신뢰합니다 — 발급된
 토큰을 각 엔드포인트에서 검증하는 작업은 별도(issue #21)로 남아 있습니다.
 
-실행 방법 (backend 폴더에서):
-    pip install -r requirements.txt
-    uvicorn main:app --reload
+실행 방법 (저장소 루트에서 uv sync로 의존성 설치 후, backend 폴더에서):
+    uv run uvicorn main:app --reload
 → http://localhost:8000/docs 열리면 성공
 """
 from __future__ import annotations
@@ -35,7 +34,7 @@ load_dotenv(Path(__file__).parent / ".env")
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from database import init_db
+from core.database import init_db
 from routers import auth_router, ocr_router, rag_router, monitoring_router, records_router, care_router, chat_router
 
 app = FastAPI(

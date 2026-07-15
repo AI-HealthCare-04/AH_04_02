@@ -1,16 +1,45 @@
 # ===== Python-generated files =====
 __pycache__/
-*.py[oc]
+*.py[cod]
+*$py.class
+*.so
 build/
 dist/
 wheels/
 *.egg-info
+*.egg
+MANIFEST
+develop-eggs/
+downloads/
+eggs/
+# lib/ 은 넣지 않음 — frontend/src/lib/과 겹쳐서 새 파일이 조용히 안 잡힐 위험이 있음
+lib64/
+parts/
+sdist/
+var/
+share/python-wheels/
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+cover/
 
 # ===== IDE settings =====
-# pycharm
+# pycharm — .idea 폴더 전체를 위 .* 패턴으로 이미 통째로 무시하므로
+# .idea/**/워크스페이스 단위 세부 규칙(toptal 생성분)은 안 넣음 — 있어도 도달 못 함
 .idea
 # VSCode
 settings.json
+
+# ===== macOS (toptal에서 추가로 확인한 것 중 .*로 안 걸리는 것만) =====
+Icon
+Network Trash Folder
+Temporary Items
+*.icloud
 
 # ===== Virtual environments =====
 .venv

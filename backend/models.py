@@ -37,7 +37,7 @@ from typing import Optional
 
 from sqlmodel import Field, SQLModel
 
-from security import decrypt_pii, encrypt_pii, hash_phone
+from core.security import decrypt_pii, encrypt_pii, hash_phone
 
 
 # ── 환자 [7/6 추가, 7/9 로그인 대상으로 전환 + PII 암호화] ──
@@ -260,6 +260,7 @@ class NotificationSetting(SQLModel, table=True):
     medication_reminder_enabled: bool = True
     care_alert_enabled: bool = True
     all_push_enabled: bool = True
+    chatbot_name: str = Field(default="약콩이")  # [2026-07-14 추가] 챗봇 표시 이름 — 사용자가 마이페이지에서 변경 가능
     updated_at: datetime = Field(default_factory=datetime.now)
 
 

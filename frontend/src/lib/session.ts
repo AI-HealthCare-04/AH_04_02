@@ -22,6 +22,23 @@ export function isLoggedIn(): boolean {
   return !!localStorage.getItem("access_token");
 }
 
+/** [2026-07-14 추가] 마이페이지 글자 크기 설정 — 컴포넌트 대부분이 rem이 아닌 고정 px로
+ * 스타일링되어 있어 :root font-size만으로는 전체 화면에 적용되지 않는다. 대신 브라우저의
+ * `zoom` 배율을 그대로 써서 폰트뿐 아니라 여백·아이콘까지 통째로 축소/확대한다. */
+export type FontScale = "small" | "medium" | "large";
+const FONT_SCALE_KEY = "font_scale";
+const FONT_SCALE_ZOOM: Record<FontScale, string> = { small: "0.9", medium: "1", large: "1.15" };
+
+export function getFontScale(): FontScale {
+  const value = localStorage.getItem(FONT_SCALE_KEY);
+  return value === "small" || value === "large" ? value : "medium";
+}
+
+export function applyFontScale(scale: FontScale): void {
+  localStorage.setItem(FONT_SCALE_KEY, scale);
+  (document.documentElement.style as CSSStyleDeclaration & { zoom?: string }).zoom = FONT_SCALE_ZOOM[scale];
+}
+
 /**
  * [7/14] Dashboard/Schedule/Notification/Connect/Check처럼 "환자 본인 로그인"과
  * "보호자 로그인"이 화면을 공유하는 곳에서, 보호자가 localStorage에 남은 옛/잘못된

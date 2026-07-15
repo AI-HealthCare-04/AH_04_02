@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from difflib import SequenceMatcher, get_close_matches
 
-from drug_reference import get_drug_name_list
+from services.drug_reference import get_drug_name_list
 
 MATCH_THRESHOLD = 0.7
 

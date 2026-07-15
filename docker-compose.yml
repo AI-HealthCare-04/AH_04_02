@@ -1,0 +1,32 @@
+# 로컬 개발용 — 터미널을 닫아도 컨테이너는 계속 떠 있고, 죽으면 Docker가 자동 재시작한다
+# (restart: unless-stopped). 코드는 바인드 마운트라 이미지 재빌드 없이 바로 반영됨.
+#
+# 사용법:
+#   docker compose up -d      # 백그라운드로 기동 (터미널과 무관하게 계속 실행)
+#   docker compose logs -f    # 로그 보기
+#   docker compose down       # 정지
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    volumes:
+      - .:/workspace
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    volumes:
+      - ./frontend:/workspace
+      - /workspace/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      # vite.config.ts의 /api 프록시가 컨테이너 안에서 backend에 닿게 함(컨테이너 안의
+      # "localhost"는 frontend 컨테이너 자신을 가리켜서 서비스명으로 넘겨줘야 함)
+      - VITE_PROXY_TARGET=http://backend:8000
+    restart: unless-stopped

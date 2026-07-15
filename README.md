@@ -76,7 +76,7 @@
 ## 🛠 기술 스택
 
 ### Backend
-`FastAPI` `Uvicorn` `Python 3.12+` `SQLModel` `SQLite`
+`FastAPI` `Uvicorn` `Python 3.13+` `SQLModel` `SQLite` `uv`
 
 ### AI / LLM
 `LangChain` `OpenAI API (gpt-4o-mini)` `CLOVA OCR` `sentence-transformers` `ChromaDB`
@@ -104,7 +104,7 @@ FastAPI (backend/main.py)
        ├─ auth_router      로그인(이메일/전화번호+비밀번호), JWT 발급
        ├─ records_router    처방전 업로드 → OCR 실행 → RAG 가이드 생성까지 한 요청에서 처리
        ├─ ocr_router        CLOVA OCR 연동 (asyncio.to_thread로 감싼 동기 호출)
-       ├─ rag_router        복약·생활습관 가이드 생성 (rag-prototype 연동, asyncio.to_thread)
+       ├─ rag_router        복약·생활습관 가이드 생성 (rag/ 연동, asyncio.to_thread)
        ├─ chat_router       환자 처방·가이드 컨텍스트 기반 GPT 챗봇
        ├─ monitoring_router 보호자용 환자 목록·복약 모니터링
        └─ care_router       보호자-환자 연결, 알림 설정, 돌봄 등급 평가
@@ -115,7 +115,7 @@ FastAPI (backend/main.py)
 
 - **FastAPI**: 요청을 받아 그 자리에서 처리 후 바로 응답 (별도 작업 큐·SSE 스트리밍 없음)
 - **SQLite**: 환자/보호자/처방전/가이드/알림설정 등 전체 데이터 저장 — 설치 없이 파일 하나로 동작
-- **rag-prototype/**: RAG(LangChain + ChromaDB + OpenAI) 로직은 별도 프로토타입 디렉터리에서 개발되어 `backend`가 `RAG_PROVIDER=real`일 때 그대로 import해서 사용
+- **rag/**: RAG(LangChain + ChromaDB + OpenAI) 로직은 별도 디렉터리에서 개발되어 `backend`가 `RAG_PROVIDER=real`/`CHAT_PROVIDER=real`일 때 그대로 import해서 사용 (저장소 루트 `pyproject.toml`/`uv.lock`으로 backend와 같은 가상환경을 공유)
 - **OCR**: CLOVA OCR(`OCR_PROVIDER=clova`) 또는 로컬 목업(`OCR_PROVIDER=mock`)으로 전환 가능
 
 ### 데이터 흐름
@@ -132,23 +132,23 @@ FastAPI (backend/main.py)
 ```
 .
 ├── backend/                 # FastAPI 백엔드 (SQLite)
+│   ├── core/                 # 인프라·횡단 관심사 — auth(JWT), security(PII 암복호화), database(엔진/세션), dependencies(인증 의존성)
+│   ├── services/              # 도메인 로직 — drug_reference, drug_matcher, parsing_rules, ocr_interface
 │   ├── routers/             # auth/records/ocr/rag/chat/monitoring/care 라우터
 │   ├── data/                # HIRA·DUR 등 대용량 로컬 참고 데이터 (git 미추적)
 │   ├── tests/
 │   ├── models.py            # SQLModel 테이블 정의
-│   ├── security.py          # PII 암호화(Fernet)·해시 유틸
-│   ├── main.py
-│   └── requirements.txt
+│   └── main.py
 ├── frontend/                 # React + TypeScript + Vite
 │   ├── src/
 │   │   ├── pages/            # 화면 단위 컴포넌트
 │   │   ├── api/               # 백엔드 API 클라이언트
 │   │   └── components/
 │   └── package.json
-├── rag-prototype/             # RAG 파이프라인 프로토타입 (LangChain + ChromaDB)
-│   ├── rag_prototype/         # 가이드 생성 로직, 식약처/HIRA/DUR 연동
-│   ├── tests/
-│   └── requirements.txt
+├── rag/                       # RAG 파이프라인 (LangChain + ChromaDB)
+│   ├── rag/                   # 가이드 생성 로직, 식약처/HIRA/DUR 연동
+│   └── tests/
+├── pyproject.toml / uv.lock   # backend/ + rag/ 파이썬 의존성 (uv로 관리, 하나의 가상환경 공유)
 ├── API명세서/                 # API 명세서 버전별 문서
 ├── ERD/                       # ERD 버전별 문서
 ├── 요구사항_정의서/            # 요구사항 정의서 버전별 문서
@@ -160,10 +160,9 @@ FastAPI (backend/main.py)
 
 ## 🚀 시작하기
 
-> ⚠️ 이 README의 [기술 스택](#-기술-스택)/[시스템 아키텍처](#-시스템-아키텍처)/[프로젝트 구조](#-프로젝트-구조) 섹션은
-> 초기 기획 당시(Redis Stream + PostgreSQL + S3 + Nginx, 5인 체제) 내용이 그대로 남아있어 실제 코드와
-> 다릅니다 — 아래 "시작하기"/"배포"는 실제 코드 기준으로 갱신했고, 나머지 섹션은 별도 문서 정리 작업으로
-> 남겨뒀습니다.
+> ℹ️ 이 README는 초기 기획 당시(Redis Stream + PostgreSQL + S3 + Nginx, 5인 체제) 내용으로 시작했지만,
+> [기술 스택](#-기술-스택)/[시스템 아키텍처](#-시스템-아키텍처)/[프로젝트 구조](#-프로젝트-구조)/"시작하기"/"배포"
+> 섹션은 모두 실제 코드 기준으로 갱신했습니다.
 
 ### 실제 스택
 
@@ -172,6 +171,7 @@ FastAPI (backend/main.py)
 ### 사전 요구사항
 
 - Python 3.13+
+- [uv](https://docs.astral.sh/uv/) — 백엔드(backend/ + rag/) 파이썬 의존성·가상환경 관리. 팀원마다 pip/venv로 따로 설치하면 버전이 어긋나기 쉬워서, `pyproject.toml`/`uv.lock` 기준으로 `uv sync` 한 번이면 동일한 환경이 만들어지도록 통일했습니다.
 - Node.js 20+
 - Docker / Docker Compose (선택 — 로컬 개발엔 없어도 됨)
 
@@ -202,13 +202,15 @@ docker compose ps   # backend(8000), frontend(5173) 정상 실행 확인
 ### 3-B. 직접 실행
 
 ```bash
-# 백엔드
-pip install -r backend/requirements.txt
-cd backend && uvicorn main:app --reload   # http://localhost:8000
+# 백엔드 — 저장소 루트의 pyproject.toml/uv.lock 기준으로 .venv를 만들고 동기화
+uv sync
+cd backend && uv run uvicorn main:app --reload   # http://localhost:8000
 
 # 프론트엔드 (새 터미널)
 cd frontend && npm install && npm run dev   # http://localhost:5173
 ```
+
+새 패키지가 필요하면 `requirements.txt`를 직접 고치지 말고 `uv add <패키지명>`(저장소 루트에서 실행)으로 추가하세요 — `pyproject.toml`/`uv.lock`이 같이 갱신되어 다른 팀원도 `uv sync`만 하면 동일한 버전을 받습니다.
 
 ### 4. 접속 확인
 
