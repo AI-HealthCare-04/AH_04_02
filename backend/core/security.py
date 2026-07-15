@@ -20,6 +20,7 @@ PII_HASH_SECRET 생성 방법 (32바이트 랜덤 hex):
 import hashlib
 import hmac
 import os
+import secrets
 
 from cryptography.fernet import Fernet
 
@@ -74,6 +75,16 @@ def hash_phone(phone: str) -> str:
     """정규화한 전화번호를 HMAC-SHA256으로 해시 — 로그인/검색 조회용(복호화 대상 아님)."""
     normalized = normalize_phone(phone)
     return hmac.new(_HASH_SECRET_BYTES, normalized.encode(), hashlib.sha256).hexdigest()
+
+
+def generate_reset_code() -> str:
+    """[2026-07-15 추가, REQ-039] 비밀번호 재설정용 6자리 숫자 임시번호. 앞자리 0도 유지됨."""
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+def hash_reset_code(code: str) -> str:
+    """[2026-07-15 추가, REQ-039] 임시번호를 HMAC-SHA256으로 해시 — DB에는 평문 저장 안 함."""
+    return hmac.new(_HASH_SECRET_BYTES, code.encode(), hashlib.sha256).hexdigest()
 
 
 def hash_token(token: str) -> str:
