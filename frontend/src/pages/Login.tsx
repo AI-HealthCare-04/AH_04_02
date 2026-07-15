@@ -42,7 +42,10 @@ export default function Login() {
 
       const list = await getCaregiverPatients(caregiver_id);
       if (list.length === 0) {
-        setError("케어하는 환자가 아직 없어요.");
+        // [2026-07-15] 케어하는 환자가 없으면 여기서 막다른 길이었음 — SignUp.tsx의
+        // 보호자 가입 직후 흐름과 동일하게 환자 등록 화면으로 바로 보낸다.
+        navigate("/patients");
+        return;
       } else if (list.length === 1) {
         proceedWithPatient(caregiver_id, list[0]);
         return;

@@ -23,6 +23,7 @@ schedule_v6에서 시간·인력 상 이번 스프린트 스코프에서 뺐었�
 → http://localhost:8000/docs 열리면 성공
 """
 from __future__ import annotations
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -53,13 +54,18 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# 프론트(Vite 개발서버)에서 호출 허용
+# 프론트(Vite 개발서버)에서 호출 허용. [2026-07-15] 배포된 프론트 도메인은 하드코딩하지
+# 않고 CORS_ALLOWED_ORIGINS(콤마 구분)로 추가한다 — 안 그러면 배포 후 실제 도메인에서의
+# 호출이 전부 브라우저에서 차단된다(로컬 개발 기본값은 그대로 유지).
+_DEV_ORIGINS = [
+    "http://localhost:5173", "http://127.0.0.1:5173",
+    "http://localhost:5174", "http://127.0.0.1:5174",  # [7/10] 별도 포트 미리보기 서버(backend-dev/frontend-dev)
+]
+_extra_origins = [o.strip() for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173", "http://127.0.0.1:5173",
-        "http://localhost:5174", "http://127.0.0.1:5174",  # [7/10] 별도 포트 미리보기 서버(backend-dev/frontend-dev)
-    ],
+    allow_origins=_DEV_ORIGINS + _extra_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

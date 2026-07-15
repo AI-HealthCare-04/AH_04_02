@@ -35,7 +35,7 @@ export default function Select() {
           </div>
         </div>
         <div style={styles.actions}>
-          <button style={styles.backBtn} onClick={() => navigate("/check")}>이전</button>
+          <button style={styles.backBtn} onClick={() => navigate("/")}>이전</button>
         </div>
       </main>
     </div>
