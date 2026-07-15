@@ -95,9 +95,20 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
         raise HTTPException(status_code=400, detail="사진 파일이 비어있어요. 다시 찍어서 올려주시겠어요?")
 
     record = MedicalRecord(patient_id=patient_id, image_path=filename, status="processing")
-    session.add(record)
-    session.commit()
-    session.refresh(record)
+
+    # session.add/commit/refresh는 동기 SQLModel 호출이라, async def 안에서 그대로 부르면
+    # 이벤트 루프를 막는다 — 아래 CLOVA 호출(asyncio.to_thread로 이미 감싸져 있음)과 같은
+    # 이유로 이 함수의 모든 DB 접근도 스레드에서 실행한다.
+    def _persist(rec: MedicalRecord) -> None:
+        session.add(rec)
+        session.commit()
+
+    def _persist_and_refresh(rec: MedicalRecord) -> None:
+        session.add(rec)
+        session.commit()
+        session.refresh(rec)
+
+    await asyncio.to_thread(_persist_and_refresh, record)
 
     tmp_path: str | None = None
     try:
@@ -112,7 +123,7 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
     except requests.exceptions.Timeout as exc:
         record.status = "failed"
         record.failure_reason = "CLOVA API 타임아웃"
-        session.add(record); session.commit()
+        await asyncio.to_thread(_persist, record)
         raise HTTPException(
             status_code=504,
             detail="처방전 인식에 시간이 너무 걸렸어요. 잠시 후 다시 시도해주시겠어요?",
@@ -120,7 +131,7 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
     except requests.exceptions.ConnectionError as exc:
         record.status = "failed"
         record.failure_reason = "CLOVA API 연결 실패"
-        session.add(record); session.commit()
+        await asyncio.to_thread(_persist, record)
         raise HTTPException(
             status_code=503,
             detail="인터넷 연결을 확인하고 다시 시도해주시겠어요?",
@@ -129,7 +140,7 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
         http_status = exc.response.status_code if exc.response is not None else "?"
         record.status = "failed"
         record.failure_reason = f"CLOVA API HTTP {http_status} 오류"
-        session.add(record); session.commit()
+        await asyncio.to_thread(_persist, record)
         raise HTTPException(
             status_code=502,
             detail="처방전 인식 서비스에 일시적인 문제가 생겼어요. 잠시 후 다시 시도해주시겠어요?",
@@ -137,7 +148,7 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
     except RuntimeError as exc:
         record.status = "failed"
         record.failure_reason = str(exc)
-        session.add(record); session.commit()
+        await asyncio.to_thread(_persist, record)
         raise HTTPException(
             status_code=503,
             detail="처방전 인식 서비스를 현재 사용할 수 없어요. 관리자에게 문의해주세요.",
@@ -145,7 +156,7 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
     except Exception as exc:
         record.status = "failed"
         record.failure_reason = str(exc)
-        session.add(record); session.commit()
+        await asyncio.to_thread(_persist, record)
         raise HTTPException(
             status_code=500,
             detail="처방전을 처리하는 중에 문제가 생겼어요. 잠시 후 다시 시도해주시겠어요?",
@@ -160,33 +171,34 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
 
     if not ocr_result.medications:
         record.status = "review_required"
-        session.add(record)
-        session.commit()
+        await asyncio.to_thread(_persist, record)
         raise HTTPException(
             status_code=422,
             detail="처방전에서 약품 정보를 찾지 못했어요. 처방전이 잘 보이도록 다시 찍어서 올려주시겠어요?",
         )
 
-    for med in ocr_result.medications:
-        matched_name, score = match_drug(med.drug_name)
-        row = OcrResult(
-            record_id=record.id,
-            drug_name=med.drug_name,
-            drug_code=med.drug_code,
-            dosage=med.dosage,
-            frequency=med.frequency,
-            diagnosis=med.diagnosis,
-            drug_class=med.drug_class,
-            confidence=med.confidence,
-            review_required=ocr_result.review_required,
-            matched_drug_name=matched_name,
-            match_score=score,
-            needs_review=score < MATCH_THRESHOLD,
-        )
-        session.add(row)
+    def _save_ocr_results() -> None:
+        for med in ocr_result.medications:
+            matched_name, score = match_drug(med.drug_name)
+            row = OcrResult(
+                record_id=record.id,
+                drug_name=med.drug_name,
+                drug_code=med.drug_code,
+                dosage=med.dosage,
+                frequency=med.frequency,
+                diagnosis=med.diagnosis,
+                drug_class=med.drug_class,
+                confidence=med.confidence,
+                review_required=ocr_result.review_required,
+                matched_drug_name=matched_name,
+                match_score=score,
+                needs_review=score < MATCH_THRESHOLD,
+            )
+            session.add(row)
+        session.commit()
+        session.refresh(record)
 
-    session.commit()
-    session.refresh(record)
+    await asyncio.to_thread(_save_ocr_results)
     return record
 
 
@@ -198,22 +210,23 @@ async def test_ocr_upload(
     session: Session = Depends(get_session),
 ):
     """OCR만 따로 테스트하고 싶을 때 쓰는 엔드포인트 (실제 흐름은 POST /records 사용)"""
-    require_actor_patient_access(patient_id, actor, session)
+    # require_actor_patient_access/session.exec 둘 다 동기 SQLModel 호출이라 스레드에서 실행.
+    await asyncio.to_thread(require_actor_patient_access, patient_id, actor, session)
     record = await run_ocr(patient_id, file, session)
-    medications = [
-        {
-            "drug_name": m.drug_name,
-            "dosage": m.dosage,
-            "frequency": m.frequency,
-            "diagnosis": m.diagnosis,
-            "drug_class": m.drug_class,
-            "confidence": m.confidence,
-            "review_required": m.review_required,
-        }
-        for m in session.exec(
-            select(OcrResult).where(OcrResult.record_id == record.id)
-        ).all()
-    ]
+    medications = await asyncio.to_thread(
+        lambda: [
+            {
+                "drug_name": m.drug_name,
+                "dosage": m.dosage,
+                "frequency": m.frequency,
+                "diagnosis": m.diagnosis,
+                "drug_class": m.drug_class,
+                "confidence": m.confidence,
+                "review_required": m.review_required,
+            }
+            for m in session.exec(select(OcrResult).where(OcrResult.record_id == record.id)).all()
+        ]
+    )
     return {
         "record_id": record.id,
         "status": record.status,

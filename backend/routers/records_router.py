@@ -11,6 +11,7 @@ schedule_v6의 "동기 방식" 원칙 그대로: 폴링도 스트리밍도 없�
 3) 응답이 오면 그 데이터를 그대로 들고 /result로 이동 (재조회 없음)
 """
 from __future__ import annotations
+import asyncio
 import json
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -116,24 +117,36 @@ async def create_record(
     ⚠️ CLOVA_OCR_API_URL/SECRET_KEY가 .env에 없으면 503으로 실패합니다(의도된 동작).
        키 없이 파이프라인만 테스트하려면 .env에 OCR_PROVIDER=mock 추가하세요.
     """
-    require_actor_patient_access(patient_id, actor, session)
-    if caregiver_id is not None and not session.get(Caregiver, caregiver_id):
-        raise HTTPException(404, "해당 보호자를 찾을 수 없어요")
+    # require_actor_patient_access/session.get 등은 동기 SQLModel 호출이라, async def
+    # 안에서 그대로 부르면 이벤트 루프를 막는다 — run_ocr 내부(asyncio.to_thread로 이미
+    # 감싸져 있음)와 동일한 이유로 이 함수의 DB 접근도 전부 스레드에서 실행한다.
+    def _check_access() -> None:
+        require_actor_patient_access(patient_id, actor, session)
+        if caregiver_id is not None and not session.get(Caregiver, caregiver_id):
+            raise HTTPException(404, "해당 보호자를 찾을 수 없어요")
+
+    await asyncio.to_thread(_check_access)
 
     record = await run_ocr(patient_id, file, session)
 
     if caregiver_id is not None:
-        record.uploaded_by_caregiver_id = caregiver_id
+        def _mark_uploader() -> None:
+            record.uploaded_by_caregiver_id = caregiver_id
+            session.add(record)
+            session.commit()
+            session.refresh(record)
+
+        await asyncio.to_thread(_mark_uploader)
+
+    # 신뢰도와 무관하게 항상 확인 화면을 거치게 한다 — RAG는 /confirm에서만 호출된다.
+    def _finalize_status() -> None:
+        record.status = "review_required"
         session.add(record)
         session.commit()
         session.refresh(record)
 
-    # 신뢰도와 무관하게 항상 확인 화면을 거치게 한다 — RAG는 /confirm에서만 호출된다.
-    record.status = "review_required"
-    session.add(record)
-    session.commit()
-    session.refresh(record)
-    return _build_record_response(record, session, None)
+    await asyncio.to_thread(_finalize_status)
+    return await asyncio.to_thread(_build_record_response, record, session, None)
 
 
 @router.post("/manual")
@@ -282,49 +295,67 @@ async def confirm_medications(
     수정·확정하면 그 값으로 OCR 결과를 갈아끼우고 바로 RAG 가이드 생성까지 이어서 처리합니다.
     (POST /records 상단 docstring에 있던 "재요청 엔드포인트는 별도 TODO"를 해소)
     """
-    record = session.get(MedicalRecord, record_id)
-    if not record:
-        raise HTTPException(404, "해당 기록을 찾을 수 없어요")
-    require_actor_patient_access(record.patient_id, actor, session)
-    if record.status != "review_required":
-        raise HTTPException(409, "확인이 필요한 상태의 처방전이 아니에요")
+    # 이 함수의 모든 SQLModel 호출(동기)은 스레드에서 실행한다 — run_ocr/run_rag와
+    # 동일한 이유(async def 안에서 동기 DB 호출이 이벤트 루프를 막지 않도록).
+    def _load_and_check() -> MedicalRecord:
+        rec = session.get(MedicalRecord, record_id)
+        if not rec:
+            raise HTTPException(404, "해당 기록을 찾을 수 없어요")
+        require_actor_patient_access(rec.patient_id, actor, session)
+        if rec.status != "review_required":
+            raise HTTPException(409, "확인이 필요한 상태의 처방전이 아니에요")
+        return rec
 
-    for correction in payload.medications:
-        item = session.get(OcrResult, correction.id)
-        if not item or item.record_id != record_id:
-            continue
-        item.drug_name = correction.drug_name
-        item.dosage = correction.dosage
-        item.frequency = correction.frequency
-        item.diagnosis = correction.diagnosis
-        item.drug_class = correction.drug_class
-        item.review_required = False
-        item.user_confirmed = True
-        session.add(item)
-    session.commit()
+    record = await asyncio.to_thread(_load_and_check)
+
+    def _apply_corrections() -> None:
+        for correction in payload.medications:
+            item = session.get(OcrResult, correction.id)
+            if not item or item.record_id != record_id:
+                continue
+            item.drug_name = correction.drug_name
+            item.dosage = correction.dosage
+            item.frequency = correction.frequency
+            item.diagnosis = correction.diagnosis
+            item.drug_class = correction.drug_class
+            item.review_required = False
+            item.user_confirmed = True
+            session.add(item)
+        session.commit()
+
+    await asyncio.to_thread(_apply_corrections)
 
     try:
         guide = await run_rag(record.id, session)
     except ValueError as e:
-        record.status = "failed"
-        record.failure_reason = str(e)
+        def _mark_failed() -> None:
+            record.status = "failed"
+            record.failure_reason = str(e)
+            session.add(record)
+            session.commit()
+            session.refresh(record)
+
+        await asyncio.to_thread(_mark_failed)
+        return await asyncio.to_thread(_build_record_response, record, session, None)
+
+    def _mark_completed() -> None:
+        record.status = "completed"
+        record.failure_reason = None
         session.add(record)
         session.commit()
         session.refresh(record)
-        return _build_record_response(record, session, None)
 
-    record.status = "completed"
-    record.failure_reason = None
-    session.add(record)
-    session.commit()
-    session.refresh(record)
+    await asyncio.to_thread(_mark_completed)
 
     # [7/9 추가] 확인이 끝난 약을 복약 일정에도 자동으로 등록 — 사용자가 Schedule.tsx에서
     # 매번 손으로 다시 입력하지 않도록.
-    ocr_items = session.exec(select(OcrResult).where(OcrResult.record_id == record.id)).all()
-    _create_schedules_from_ocr(record, ocr_items, session)
+    def _register_schedules() -> None:
+        ocr_items = session.exec(select(OcrResult).where(OcrResult.record_id == record.id)).all()
+        _create_schedules_from_ocr(record, ocr_items, session)
 
-    return _build_record_response(record, session, guide)
+    await asyncio.to_thread(_register_schedules)
+
+    return await asyncio.to_thread(_build_record_response, record, session, guide)
 
 
 @router.get("/{record_id}")
