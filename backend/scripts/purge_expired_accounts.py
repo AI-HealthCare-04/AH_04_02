@@ -3,8 +3,8 @@ scripts/purge_expired_accounts.py — 탈퇴 유예기간(30일) 지난 계정 �
 (2026-07-15 추가, REQ-035)
 
 실행:
-    python scripts/purge_expired_accounts.py --dry-run   # 무엇을 지울지만 미리 확인
-    python scripts/purge_expired_accounts.py              # 실제 삭제
+    python scripts/purge_expired_accounts.py --dry-run       # 무엇을 지울지만 미리 확인
+    python scripts/purge_expired_accounts.py --yes-i-am-sure  # 실제 삭제(둘 다 없으면 거부)
 
 자동 실행되지 않는 수동 스크립트입니다(사용자 확인 — 서버 기동 시 자동 점검 대신 이
 스크립트를 직접, 또는 팀이 원하는 주기로 cron 등에 등록해 실행). PrivacyPurgeAudit
@@ -66,7 +66,23 @@ def _scrub_caregiver(caregiver: models.Caregiver) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="실제로 지우지 않고 무엇을 지울지만 출력")
+    parser.add_argument(
+        "--yes-i-am-sure",
+        action="store_true",
+        help="실제 삭제를 실행하려면 반드시 필요 (안전장치 — migrate_local_data.py의 "
+        "--yes-i-have-a-backup과 동일한 취지, 없으면 실행 거부)",
+    )
     args = parser.parse_args()
+
+    # [2026-07-15 추가, PR #48 팀원 리뷰 반영 — MEDIUM] --dry-run 없이 실행하면 곧바로
+    # 실제 삭제부터 되던 게 이 저장소의 다른 스크립트(migrate_local_data.py)와 반대로
+    # "안전한 동작이 기본값이 아닌" 상태였다 — 이제 --dry-run도 --yes-i-am-sure도 없으면
+    # 아무것도 하지 않고 거부한다.
+    if not args.dry_run and not args.yes_i_am_sure:
+        print("❌ 실제 삭제를 실행하려면 --yes-i-am-sure를 함께 주세요(안전장치).")
+        print("   먼저 확인: python scripts/purge_expired_accounts.py --dry-run")
+        print("   실제 실행: python scripts/purge_expired_accounts.py --yes-i-am-sure")
+        sys.exit(1)
 
     now = datetime.now()
     with Session(database.engine) as session:

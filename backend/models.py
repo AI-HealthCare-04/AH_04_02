@@ -170,6 +170,10 @@ class PasswordResetCode(SQLModel, table=True):
     code_hash: str = Field(index=True)  # HMAC-SHA256(정규화된 임시번호) — 평문 저장 안 함
     expires_at: datetime  # 발급 후 10분
     used_at: Optional[datetime] = None  # 채워지면 재사용 불가
+    # [2026-07-15 추가] 팀원 리뷰(PR #48)에서 지적된 무제한 시도 문제 수정 — 이 코드로
+    # /password-reset/verify를 시도한 횟수. MAX_RESET_CODE_VERIFY_ATTEMPTS(auth_router.py)
+    # 넘으면 코드를 강제로 무효화(used_at 채움)해서 브루트포스를 막는다.
+    attempts: int = Field(default=0)
     created_at: datetime = Field(default_factory=datetime.now)
 
 

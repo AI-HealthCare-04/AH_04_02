@@ -29,6 +29,9 @@ def upgrade() -> None:
     sa.Column('code_hash', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('expires_at', sa.DateTime(), nullable=False),
     sa.Column('used_at', sa.DateTime(), nullable=True),
+    # [2026-07-15 추가, PR #48 팀원 리뷰 반영] 이 마이그레이션 자체가 아직 실 DB에
+    # 적용된 적이 없어(PR47 병합 대기 중) 새 리비전을 안 만들고 여기 직접 추가함.
+    sa.Column('attempts', sa.Integer(), nullable=False, server_default='0'),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )

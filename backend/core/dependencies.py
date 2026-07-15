@@ -31,6 +31,11 @@ def get_current_caregiver(
     caregiver = session.get(Caregiver, subject_id)
     if not caregiver:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증에 실패했습니다.")
+    # [2026-07-15 추가, PR #48 팀원 리뷰 반영 — HIGH] deactivated_at 체크가 login()에만
+    # 있어서, 탈퇴(POST /auth/withdraw) 후에도 이미 발급된 access_token은 만료 전까지
+    # 계속 통했다 — 매 요청마다 DB에서 다시 확인하는 이 지점에서 막아야 실제로 끊긴다.
+    if caregiver.deactivated_at is not None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="탈퇴 처리된 계정입니다.")
     return caregiver
 
 
@@ -49,6 +54,8 @@ def get_current_patient(
     patient = session.get(Patient, subject_id)
     if not patient:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증에 실패했습니다.")
+    if patient.deactivated_at is not None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="탈퇴 처리된 계정입니다.")
     return patient
 
 
@@ -84,6 +91,8 @@ def get_current_actor(
     actor = session.get(model, subject_id)
     if not actor:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증에 실패했습니다.")
+    if actor.deactivated_at is not None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="탈퇴 처리된 계정입니다.")
     return role, actor
 
 

@@ -30,9 +30,12 @@ def engine_fixture(monkeypatch):
 
 
 def _run_main(monkeypatch, dry_run: bool) -> None:
-    """argparse가 pytest 자신의 CLI 인자를 읽지 않도록 parse_args만 이 테스트 동안 대체."""
+    """argparse가 pytest 자신의 CLI 인자를 읽지 않도록 parse_args만 이 테스트 동안 대체.
+    실제 삭제(dry_run=False)는 --yes-i-am-sure 없이는 거부되므로 항상 같이 켜준다."""
     monkeypatch.setattr(
-        argparse.ArgumentParser, "parse_args", lambda self, *a, **k: argparse.Namespace(dry_run=dry_run)
+        argparse.ArgumentParser,
+        "parse_args",
+        lambda self, *a, **k: argparse.Namespace(dry_run=dry_run, yes_i_am_sure=not dry_run),
     )
     purge.main()
 
@@ -56,6 +59,26 @@ def _make_patient_with_audit(session: Session, email: str, scheduled_purge_at: d
     )
     session.commit()
     return patient.id
+
+
+def test_no_flags_refuses_to_run(engine, monkeypatch):
+    """[2026-07-15 추가, PR #48 팀원 리뷰 반영] --dry-run도 --yes-i-am-sure도 없으면
+    (예전엔 이 조합이 바로 실제 삭제였다) 아무것도 하지 않고 거부해야 한다."""
+    with Session(engine) as session:
+        patient_id = _make_patient_with_audit(session, "due@test.com", datetime.now() - timedelta(days=1))
+
+    monkeypatch.setattr(
+        argparse.ArgumentParser,
+        "parse_args",
+        lambda self, *a, **k: argparse.Namespace(dry_run=False, yes_i_am_sure=False),
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        purge.main()
+    assert exc_info.value.code != 0
+
+    with Session(engine) as session:
+        patient = session.get(Patient, patient_id)
+        assert patient.email == "due@test.com"  # 거부됐으니 그대로
 
 
 def test_dry_run_changes_nothing(engine, monkeypatch):

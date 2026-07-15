@@ -71,6 +71,8 @@ class TestWithdrawRequest:
         assert audit.status == "pending"
 
     def test_double_withdraw_rejected(self, client: TestClient):
+        """[2026-07-15 갱신, PR #48 팀원 리뷰 반영] 탈퇴 후 같은 access_token은 이제
+        get_current_actor 단계에서 바로 401로 막힌다(예전엔 핸들러까지 도달해 400)."""
         token = _signup_and_login(client)
         r1 = client.post(
             "/auth/withdraw", json={"password": "pw123456"}, headers={"Authorization": f"Bearer {token}"}
@@ -80,7 +82,16 @@ class TestWithdrawRequest:
         r2 = client.post(
             "/auth/withdraw", json={"password": "pw123456"}, headers={"Authorization": f"Bearer {token}"}
         )
-        assert r2.status_code == 400
+        assert r2.status_code == 401
+
+    def test_refresh_token_rejected_after_withdraw(self, client: TestClient):
+        """[2026-07-15 추가, PR #48 팀원 리뷰 반영 — HIGH] 탈퇴 후에도 refresh_token
+        쿠키로 새 access_token을 계속 발급받을 수 있던 문제."""
+        token = _signup_and_login(client)  # 로그인 응답의 Set-Cookie가 client 쿠키 저장소에 남음
+        client.post("/auth/withdraw", json={"password": "pw123456"}, headers={"Authorization": f"Bearer {token}"})
+
+        r = client.get("/auth/token/refresh")
+        assert r.status_code == 401
 
     def test_login_blocked_after_withdraw(self, client: TestClient):
         token = _signup_and_login(client)
