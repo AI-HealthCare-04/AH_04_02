@@ -1,11 +1,14 @@
-# 공통 개발 DB 구조 + 환자 의약품 등록 기능 — 설정 가이드 (2026-07-14)
+# 공통 개발 DB 구조 + 환자 의약품 등록 기능 — 설정 가이드 (2026-07-14, 2026-07-15 Aiven 검증 반영)
 
 여러 로컬 개발 환경에서 같은 회원/환자 의약품 데이터를 볼 수 있도록 DB 연결을
 환경변수 기반으로 바꾸고, 환자 의약품 등록/조회 API를 새로 추가한 작업의 실행 가이드입니다.
+**2026-07-15: 실제 Aiven MySQL 인스턴스(`health_companion_dev`)에 연결·마이그레이션·
+회원가입→로그인 e2e까지 전부 검증 완료했습니다** (10번 섹션 참고).
 
 ## 1. 문제 원인
 
-`backend/database.py`가 `DATABASE_URL = "sqlite:///./app.db"`를 하드코딩하고 있었습니다.
+`backend/core/database.py`(PR #44 이전엔 `backend/database.py`)가
+`DATABASE_URL = "sqlite:///./app.db"`를 하드코딩하고 있었습니다.
 환경변수를 전혀 읽지 않아서, 팀원마다 로컬에서 서버를 띄우면 각자 독립적인 SQLite 파일이
 생겼습니다 — 한 사람이 가입한 계정은 그 사람의 로컬 파일에만 존재하고, 다른 팀원의 서버는
 그 파일의 존재 자체를 모릅니다. 인증 로직(bcrypt 해싱, JWT 발급, commit 등) 자체는 정상이었고,
@@ -16,7 +19,8 @@
 
 ## 2. 현재 DB 연결 구조
 
-`backend/database.py`가 `APP_ENV`/`DATABASE_URL` 환경변수를 읽도록 바뀌었습니다.
+`backend/core/database.py`가 `APP_ENV`/`DATABASE_URL` 환경변수를 읽도록 바뀌었습니다
+(PR #44에서 `backend/database.py` → `backend/core/database.py`로 이동, 이번 작업은 그 위에 맞춰 리베이스함).
 
 | APP_ENV | DATABASE_URL 생략 시 | 스키마 관리 | 데모 데이터 시드 |
 |---|---|---|---|
@@ -28,6 +32,11 @@
 동기 SQLAlchemy(SQLModel)를 그대로 유지했습니다 — 비동기로 전환하지 않았습니다. MySQL 연결은
 `mysql+pymysql://` (동기 드라이버)로 지원합니다.
 
+**[2026-07-15 추가] `DATABASE_SSL_REQUIRED=true`** — Aiven 등 관리형 MySQL은 SSL 연결이
+필수(`ssl-mode=REQUIRED`)인데, pymysql은 URL 쿼리스트링이 아니라 `connect_args`로 SSL을
+켜야 한다. 이 플래그를 켜면 `connect_args={"ssl": {"ssl": {}}}`가 자동으로 적용된다.
+로컬 SQLite/SSL 없는 MySQL엔 영향 없음(기본값 false).
+
 서버 시작 시 `log_db_connection_info()`가 `APP_ENV`/host/port/database명을 로그로 남깁니다
 (비밀번호 제외). `production`에서는 host/port/db명도 로그에 남기지 않고 "연결됨"만 표시합니다.
 
@@ -37,24 +46,32 @@
 - `backend/alembic.ini`, `backend/alembic/env.py`, `backend/alembic/script.py.mako`
 - `backend/alembic/versions/0ff9baa6bb2e_baseline_schema.py` — 기존 12개 테이블 스냅샷
 - `backend/alembic/versions/6ec828d72e5f_add_patient_medications_and_medication_.py` — 신규 테이블/컬럼
+- `backend/alembic/versions/bcdbae97c089_add_chatbot_name_to_notification_.py` — PR #44의
+  `chatbot_name` 컬럼(NOT NULL)을 안전하게 추가(기존 행 있어도 `server_default='약콩이'`로 백필)
 - `backend/routers/patient_medications_router.py` — 환자 의약품 API
 - `backend/scripts/migrate_local_data.py` — 기존 로컬 DB → 공통 DB 이전 스크립트
 - `backend/scripts/seed_dev.py` — 개발용 가상 데이터 시드
 - `backend/tests/test_database_env.py`, `test_auth_signup_login.py`, `test_patient_medications_router.py`
 
 **수정**
-- `backend/database.py` — env 기반 DB 연결, 로그, local/test만 auto-create+seed
+- `backend/core/database.py` — env 기반 DB 연결(APP_ENV/DATABASE_URL/DATABASE_SSL_REQUIRED),
+  로그, local/test만 auto-create+seed (PR #44로 `backend/database.py`에서 이동)
 - `backend/main.py` — 라우터 등록, 시작 로그 호출
 - `backend/models.py` — `PatientMedication`/`MedicationRecord` 신규, `MedicationSchedule` 확장,
   `Patient.email` 유니크 인덱스 추가
-- `backend/security.py` — `normalize_email()` 추가
+- `backend/core/security.py` — `normalize_email()` 추가 (PR #44로 `backend/security.py`에서 이동)
 - `backend/routers/auth_router.py` — 이메일 정규화 로그인, 로그인 실패 원인 서버 로그 분리,
   죽은 코드였던 `POST /auth/signup` 제거
 - `backend/routers/monitoring_router.py` — 가입 시 이메일 정규화 + 중복가입 사전검사(409)
-- `backend/requirements.txt` — `pymysql`, `alembic` 추가
-- `backend/.env.example` — `APP_ENV`/`DATABASE_URL` 예시 추가
+- `pyproject.toml`/`uv.lock` — `pymysql`, `alembic` 추가 (PR #44로 `requirements.txt`→uv 전환,
+  `uv add pymysql alembic`으로 등록)
+- `backend/.env.example` — `APP_ENV`/`DATABASE_URL`/`DATABASE_SSL_REQUIRED` 예시 추가
 - `backend/tests/conftest.py` — 테스트가 진짜 로컬 `app.db`를 안 건드리도록 `APP_ENV=test`/
   `DATABASE_URL=sqlite://` 고정
+
+> **참고**: PR #44(`core/`/`services/` 폴더 재구조화, uv 전환)가 먼저 dev에 병합돼서, 이 작업
+> 전체를 그 구조 위에 리베이스했습니다 — `database.py`/`security.py`/`dependencies.py`/`auth.py`는
+> 전부 `backend/core/` 아래로, `drug_reference.py` 등은 `backend/services/`로 옮겨져 있습니다.
 
 ## 4. 데이터베이스 스키마
 
@@ -97,7 +114,7 @@ patient_id`)까지 별도 확인해 다른 환자의 데이터에 접근할 수 
 
 ```bash
 # 1) 먼저 dry-run으로 검토
-python scripts/migrate_local_data.py \
+uv run python scripts/migrate_local_data.py \
   --source-url "sqlite:///./app.db" \
   --target-url "mysql+pymysql://USER:PASSWORD@HOST:PORT/DATABASE" \
   --source-pii-encryption-key "<기존 로컬 .env의 PII_ENCRYPTION_KEY>" \
@@ -107,7 +124,7 @@ python scripts/migrate_local_data.py \
   --dry-run
 
 # 2) 검토 후 실제 실행 (반드시 타깃 DB 백업 먼저)
-python scripts/migrate_local_data.py \
+uv run python scripts/migrate_local_data.py \
   --source-url "sqlite:///./app.db" \
   --target-url "mysql+pymysql://USER:PASSWORD@HOST:PORT/DATABASE" \
   --source-pii-encryption-key "..." --source-pii-hash-secret "..." \
@@ -136,31 +153,36 @@ medication_schedules → medication_records`. `medical_records`/`ocr_results`/`g
 ```env
 APP_ENV=local
 # DATABASE_URL=mysql+pymysql://USER:PASSWORD@HOST:PORT/DATABASE
+# DATABASE_SSL_REQUIRED=true
 ```
 
 - 개인 로컬로 그냥 쓰려면 `APP_ENV=local`만 두고 `DATABASE_URL`은 주석 처리(생략) 상태 유지
 - 팀 공통 개발 DB에 붙으려면 `APP_ENV=development`로 바꾸고 `DATABASE_URL`에 팀에서 공유한
   접속 정보를 채우기(비밀번호를 이 파일에 커밋하지 말 것 — `.gitignore`가 `.env`를 이미 제외)
+- **Aiven MySQL을 쓴다면 `DATABASE_SSL_REQUIRED=true`도 반드시 함께 설정** — 없으면 SSL
+  핸드셰이크 실패로 연결이 거부됩니다.
 
 ## 9. 마이그레이션 실행 명령
 
 ```bash
 cd backend
-alembic upgrade head      # 최신 스키마로
-alembic downgrade -1      # 한 단계 되돌리기
-alembic history           # 리비전 이력 확인
+uv run alembic upgrade head      # 최신 스키마로
+uv run alembic downgrade -1      # 한 단계 되돌리기
+uv run alembic history           # 리비전 이력 확인
 ```
 
 새 스키마 변경이 필요해지면:
 ```bash
-alembic revision --autogenerate -m "설명"
+uv run alembic revision --autogenerate -m "설명"
 # 생성된 파일의 import sqlmodel 확인 + create_foreign_key(None, ...) 나오면 이름 지정 필요
 # (SQLite batch 모드 제약 — alembic/README 또는 이 문서 "남은 위험" 참고)
-alembic upgrade head      # 로컬에서 먼저 검증
+# NOT NULL 컬럼을 기존 테이블에 추가하는 경우 add_column에 server_default를 직접 채워야
+# 함(autogenerate는 안 채워줌 — bcdbae97c089 리비전 참고)
+uv run alembic upgrade head      # 로컬에서 먼저 검증
 ```
 
 `APP_ENV=local`처럼 로컬에서 기존 `create_all()` 방식으로 이미 만들어둔 `app.db`가 있다면,
-Alembic이 그 상태를 모르기 때문에 `alembic stamp head`로 "이미 최신 상태"라고 표시해두거나,
+Alembic이 그 상태를 모르기 때문에 `uv run alembic stamp head`로 "이미 최신 상태"라고 표시해두거나,
 `app.db`를 지우고 `alembic upgrade head`로 처음부터 만드는 것 중 하나를 선택하세요(팀 공통
 DB는 당연히 `alembic upgrade head`로 처음 생성).
 
@@ -168,7 +190,7 @@ DB는 당연히 `alembic upgrade head`로 처음 생성).
 
 ```bash
 cd backend
-python -m pytest tests/ -q
+uv run pytest tests/ -q
 ```
 
 **76 passed** (기존 48 + 신규 28). 신규 테스트 파일: `test_database_env.py`(6),
@@ -196,14 +218,20 @@ python -m pytest tests/ -q
 
 프론트엔드: `tsc --noEmit` 통과(변경 없음, 백엔드 전용 작업이라 프론트 영향 없음).
 
+**[2026-07-15 추가] 실제 Aiven MySQL 인스턴스로 검증 완료** — `health_companion_dev`
+데이터베이스(같은 Aiven 서비스 안의 기존 개인 프로젝트 DB와는 분리된 전용 DB)에 대해:
+- `database.py`를 통한 SSL 연결(`DATABASE_SSL_REQUIRED=true`) 성공
+- `alembic upgrade head` → 전체 3개 리비전(baseline/patient_medications/chatbot_name) 정상 적용,
+  16개 테이블(15개 + alembic_version) 생성 확인
+- 실제 FastAPI 앱(`TestClient`)으로 `POST /monitoring/patients` 회원가입 → `POST /auth/login`
+  로그인까지 e2e 성공(PII 암호화/복호화, bcrypt, JWT 전부 포함) — 테스트 데이터는 정리함
+- `chatbot_name` NOT NULL 컬럼 추가가 기존 행에도 안전하게 적용되는지(server_default 백필)
+  SQLite로 사전 검증 후 실제 MySQL에도 적용, `DESCRIBE notification_settings`로 확인
+
 ## 11. 남아 있는 위험 및 추가 작업 (숨기지 않고 명시)
 
-- **실제 공통 개발 DB(MySQL)에 대해서는 검증하지 못했습니다** — 팀에서 접속 정보를 아직
-  공유하기 전이라(추후 제공 예정), 이 작업 전체를 SQLite로만 검증했습니다. `mysql+pymysql`
-  드라이버 자체의 동작(문자 인코딩, 타임존, `LOWER()` 함수의 유니코드 처리 차이 등)은 실제
-  MySQL에 연결해서 다시 한번 확인이 필요합니다.
 - **기존 로컬 `app.db`가 있는 팀원의 스키마 동기화**: Alembic 도입 전에 `create_all()`로 이미
-  만들어진 로컬 DB는 Alembic의 리비전 이력을 모릅니다 — 처음 한 번은 `alembic stamp head`
+  만들어진 로컬 DB는 Alembic의 리비전 이력을 모릅니다 — 처음 한 번은 `uv run alembic stamp head`
   (기존 데이터 유지) 또는 `app.db` 삭제 후 `alembic upgrade head`(초기화) 중 선택해야 합니다.
   이 판단은 각자 로컬에 남겨둔 테스트 데이터가 중요한지에 따라 팀원 본인이 결정할 부분이라
   제가 임의로 실행하지 않았습니다.
