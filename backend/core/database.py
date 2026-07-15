@@ -39,12 +39,35 @@ _url = make_url(DATABASE_URL)
 # MySQL(예: Docker)을 직접 붙일 수도 있으니 기본값은 꺼두고 필요할 때만 켠다.
 DATABASE_SSL_REQUIRED = os.environ.get("DATABASE_SSL_REQUIRED", "false").lower() == "true"
 
+# [2026-07-15 수정] 위 SSL_REQUIRED만 켜면 "암호화는 하되 서버 인증서는 검증하지 않는"
+# 상태였다(ssl={} — CA 지정이 없으면 pymysql이 아무 인증서나 그대로 신뢰함, MITM에
+# 취약). DATABASE_SSL_CA에 CA 인증서(Aiven이면 ca.pem) 경로를 주면 그 CA로 서버
+# 인증서를 검증한다 — development는 아직 미검증으로 둬도 되지만 production은 반드시
+# 이 값을 채워야 한다.
+DATABASE_SSL_CA = os.environ.get("DATABASE_SSL_CA")
+
+# [2026-07-15 수정] 이 가드가 원래 아래 `elif DATABASE_SSL_REQUIRED:` 블록 안에만 있어서,
+# production인데 DATABASE_SSL_CA뿐 아니라 DATABASE_SSL_REQUIRED 자체를 깜빡 안 켜면
+# else 분기(SSL 없는 평문 연결)로 빠져 이 검사 자체를 건너뛰는 구멍이 있었다(실제 재현
+# 확인됨). production은 DATABASE_SSL_REQUIRED 값과 무관하게 항상 여기서 먼저 막는다.
+if APP_ENV == "production" and not DATABASE_SSL_REQUIRED:
+    raise RuntimeError(
+        "APP_ENV=production인데 DATABASE_SSL_REQUIRED가 true가 아닙니다. 운영 DB는 "
+        "반드시 SSL로 연결해야 합니다 — DATABASE_SSL_REQUIRED=true와 DATABASE_SSL_CA를 지정하세요."
+    )
+
 # check_same_thread=False: SQLite에서 FastAPI가 여러 요청을 처리할 때 필요한 옵션.
 # MySQL 등 서버형 DB는 이 옵션이 없고, 대신 pool_pre_ping으로 끊긴 연결을 자동 복구한다.
 if _url.get_backend_name() == "sqlite":
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 elif DATABASE_SSL_REQUIRED:
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args={"ssl": {"ssl": {}}})
+    ssl_args = {"ca": DATABASE_SSL_CA} if DATABASE_SSL_CA else {}
+    if APP_ENV == "production" and not DATABASE_SSL_CA:
+        raise RuntimeError(
+            "APP_ENV=production인데 DATABASE_SSL_CA가 없습니다. 운영 DB는 서버 인증서를 "
+            "반드시 검증해야 합니다 — CA 인증서 경로를 DATABASE_SSL_CA에 지정하세요."
+        )
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args={"ssl": ssl_args})
 else:
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
