@@ -34,10 +34,17 @@ if not DATABASE_URL:
 
 _url = make_url(DATABASE_URL)
 
+# [2026-07-15 추가] Aiven 등 관리형 MySQL은 SSL 연결을 강제한다(ssl-mode=REQUIRED) —
+# pymysql은 URL 쿼리스트링이 아니라 connect_args로 ssl을 켜야 한다. 로컬에 SSL 없는
+# MySQL(예: Docker)을 직접 붙일 수도 있으니 기본값은 꺼두고 필요할 때만 켠다.
+DATABASE_SSL_REQUIRED = os.environ.get("DATABASE_SSL_REQUIRED", "false").lower() == "true"
+
 # check_same_thread=False: SQLite에서 FastAPI가 여러 요청을 처리할 때 필요한 옵션.
 # MySQL 등 서버형 DB는 이 옵션이 없고, 대신 pool_pre_ping으로 끊긴 연결을 자동 복구한다.
 if _url.get_backend_name() == "sqlite":
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+elif DATABASE_SSL_REQUIRED:
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args={"ssl": {"ssl": {}}})
 else:
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
