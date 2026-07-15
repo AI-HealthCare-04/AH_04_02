@@ -103,7 +103,12 @@ class Caregiver(SQLModel, table=True):
     name_encrypted: str = Field(default="")  # [7/9] Patient.name_encrypted와 동일한 원칙 — .name 프로퍼티 참고
     email: Optional[str] = Field(default=None, unique=True, index=True)  # 회원가입 화면의 "아이디" 입력이 여기 저장됨
     hashed_password: Optional[str] = None
-    relation_type: str = "guardian"  # guardian / caregiver / life_support_worker / social_worker / organization
+    # [2026-07-16 정정] 실제로 쓰이는 값은 "guardian"(개인)과 "organization"(단체·기관 —
+    # 요양보호사/협회/보건소 등도 이 값으로 가입) 둘뿐이다(routers/monitoring_router.py의
+    # CaregiverCreate.relation_type이 Literal로 강제). DB 컬럼 자체는 그냥 VARCHAR라
+    # 여기서는 강제 안 됨 — caregiver/life_support_worker/social_worker는 과거에 구상만
+    # 되고 실제로 프론트에서 보낸 적 없는 값이라 목록에서 뺐다.
+    relation_type: str = "guardian"
     phone_encrypted: Optional[str] = None  # [7/8 추가, 7/9 암호화] 회원가입 연락처
     phone_hash: Optional[str] = Field(default=None, index=True)  # [7/9] 로그인/검색용, 복호화 대상 아님
     birth_date: Optional[str] = None  # [7/8 추가] 생년월일 (자유 텍스트)

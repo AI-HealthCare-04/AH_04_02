@@ -21,6 +21,7 @@ Dashboard.tsx/Schedule.tsx/Notification.tsx/Records.tsx/Connect.tsx처럼 "보�
 """
 from __future__ import annotations
 from datetime import date, datetime, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -172,7 +173,12 @@ def delete_patient(
 # ══════════════════════════════════════════
 class CaregiverCreate(BaseModel):
     name: str
-    relation_type: str = "guardian"  # guardian / caregiver / life_support_worker / social_worker / organization
+    # [2026-07-16 추가] frontend/src/pages/SignUp.tsx가 실제로 보내는 값은 "guardian"
+    # (개인)과 "organization"(단체·기관 — 요양보호사/협회/보건소 등도 이 값으로 가입)
+    # 둘뿐이다. models.py Caregiver.relation_type 주석에는 caregiver/life_support_worker/
+    # social_worker도 유효한 값처럼 적혀 있었지만 실제로 쓰인 적이 없고, DB 컬럼도 그냥
+    # VARCHAR라 검증 없이는 오타/임의 값이 그대로 저장됐다 — Literal로 실제 사용값만 허용.
+    relation_type: Literal["guardian", "organization"] = "guardian"
     phone: str | None = None  # [7/8 추가] 회원가입 연락처
     email: str | None = None  # [7/8 추가] 회원가입 "아이디"(개인) / "담당자 이메일"(단체)
     birth_date: str | None = None  # [7/8 추가]
