@@ -30,8 +30,9 @@ import sys
 from pathlib import Path
 
 from core.database import get_session
+from core.dependencies import Actor, get_current_actor, require_actor_patient_access
 from fastapi import APIRouter, Depends, HTTPException
-from models import GuideResult, OcrResult
+from models import GuideResult, MedicalRecord, OcrResult
 from sqlmodel import Session, select
 
 router = APIRouter(prefix="/rag", tags=["RAG"])
@@ -197,8 +198,22 @@ def ping():
 
 
 @router.post("/test/{record_id}")
-async def stub_generate_guide(record_id: int, session: Session = Depends(get_session)):
-    """RAG만 따로 테스트하고 싶을 때 쓰는 엔드포인트 (실제 흐름은 POST /records 사용)"""
+async def stub_generate_guide(
+    record_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """RAG만 따로 테스트하고 싶을 때 쓰는 엔드포인트 (실제 흐름은 POST /records 사용)
+
+    [2026-07-15 추가, REQ-030] 이 라우터에서 유일하게 인가가 빠져있던 엔드포인트 —
+    다른 라우터(records/ocr/chat)와 동일한 get_current_actor/require_actor_patient_access
+    패턴으로 record_id 소유자(또는 케어하는 보호자)만 호출 가능하게 막았다.
+    """
+    record = await asyncio.to_thread(session.get, MedicalRecord, record_id)
+    if not record:
+        raise HTTPException(404, "해당 기록을 찾을 수 없어요")
+    await asyncio.to_thread(require_actor_patient_access, record.patient_id, actor, session)
+
     try:
         guide = await run_rag(record_id, session)
     except ValueError as e:
