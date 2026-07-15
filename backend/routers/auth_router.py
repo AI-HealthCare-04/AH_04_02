@@ -15,9 +15,18 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from pydantic import BaseModel, EmailStr
 from sqlmodel import Session, func, select
 
-from core.auth import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
+from datetime import datetime, timedelta
+
+from core.auth import (
+    REFRESH_TOKEN_EXPIRE_MINUTES,
+    create_access_token,
+    create_refresh_token,
+    decode_refresh_token,
+    hash_password,
+    verify_password,
+)
 from core.database import get_session
-from models import Caregiver, Patient
+from models import Caregiver, Patient, RefreshToken
 from core.security import hash_phone
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -76,34 +85,59 @@ def login(payload: LoginRequest, response: Response, session: Session = Depends(
     """[7/9] 보호자/환자 양쪽 다 로그인 가능. 이메일 또는 전화번호로 식별."""
     caregiver = _find_by_identifier(session, Caregiver, payload.identifier)
     if caregiver and caregiver.hashed_password and verify_password(payload.password, caregiver.hashed_password):
-        return _issue_login_response(response, caregiver.id, "caregiver", caregiver.name)
+        return _issue_login_response(response, caregiver.id, "caregiver", caregiver.name, session)
 
     patient = _find_by_identifier(session, Patient, payload.identifier)
     if patient and patient.hashed_password and verify_password(payload.password, patient.hashed_password):
-        return _issue_login_response(response, patient.id, "patient", patient.name)
+        return _issue_login_response(response, patient.id, "patient", patient.name, session)
 
     raise HTTPException(status.HTTP_400_BAD_REQUEST, "이메일/전화번호 또는 비밀번호가 올바르지 않습니다.")
 
 
-def _issue_login_response(response: Response, subject_id: int, role: str, name: str) -> LoginResponse:
+def _issue_login_response(response: Response, subject_id: int, role: str, name: str, session: Session) -> LoginResponse:
+    """[2026-07-15] refresh 토큰 발급마다 jti를 RefreshToken 테이블에 기록 — /token/refresh가
+    회전(재발급) 시 이 jti를 revoke해서 재사용을 막는다(REQ-001)."""
     access_token = create_access_token(subject_id, role)
-    refresh_token = create_refresh_token(subject_id, role)
+    refresh_token, jti = create_refresh_token(subject_id, role)
+    session.add(RefreshToken(
+        jti=jti,
+        subject_id=subject_id,
+        role=role,
+        expires_at=datetime.now() + timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES),
+    ))
+    session.commit()
     response.set_cookie(key="refresh_token", value=refresh_token, httponly=True)
     return LoginResponse(access_token=access_token, caregiver_id=subject_id, name=name, role=role)
 
 
 @router.get("/token/refresh", response_model=LoginResponse)
-def refresh_token(refresh_token: str | None = Cookie(default=None), session: Session = Depends(get_session)):
-    """login에서 set_cookie로 심어둔 refresh_token 쿠키를 읽어서 새 access_token을 발급."""
+def refresh_token(
+    response: Response,
+    refresh_token: str | None = Cookie(default=None),
+    session: Session = Depends(get_session),
+):
+    """login에서 set_cookie로 심어둔 refresh_token 쿠키를 검증하고, 새 access_token과
+    함께 새 refresh_token도 발급한다(rotation) — 이전 jti는 revoke 처리해 재사용을 막는다.
+    [2026-07-15] 예전엔 access_token만 새로 발급하고 같은 refresh_token을 계속 재사용해서,
+    탈취된 refresh_token이 만료(14일) 전까지 계속 유효했다(REQ-001)."""
     if not refresh_token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Refresh token이 없습니다.")
     try:
-        subject_id, role = decode_token(refresh_token, expected_type="refresh")
+        subject_id, role, jti = decode_refresh_token(refresh_token)
     except jwt.PyJWTError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "유효하지 않거나 만료된 refresh token입니다.")
+
+    stored = session.get(RefreshToken, jti)
+    if not stored or stored.revoked:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "이미 사용되었거나 무효화된 refresh token입니다.")
 
     model = Caregiver if role == "caregiver" else Patient
     subject = session.get(model, subject_id)
     if not subject:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "인증에 실패했습니다.")
-    return LoginResponse(access_token=create_access_token(subject_id, role), caregiver_id=subject_id, name=subject.name, role=role)
+
+    stored.revoked = True
+    session.add(stored)
+    session.commit()
+
+    return _issue_login_response(response, subject_id, role, subject.name, session)

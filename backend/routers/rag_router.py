@@ -30,8 +30,9 @@ import sys
 from pathlib import Path
 
 from core.database import get_session
+from core.dependencies import Actor, get_current_actor, require_actor_patient_access
 from fastapi import APIRouter, Depends, HTTPException
-from models import GuideResult, OcrResult
+from models import GuideResult, MedicalRecord, OcrResult
 from sqlmodel import Session, select
 
 router = APIRouter(prefix="/rag", tags=["RAG"])
@@ -197,8 +198,20 @@ def ping():
 
 
 @router.post("/test/{record_id}")
-async def stub_generate_guide(record_id: int, session: Session = Depends(get_session)):
-    """RAG만 따로 테스트하고 싶을 때 쓰는 엔드포인트 (실제 흐름은 POST /records 사용)"""
+async def stub_generate_guide(
+    record_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """RAG만 따로 테스트하고 싶을 때 쓰는 엔드포인트 (실제 흐름은 POST /records 사용)
+
+    [2026-07-15] 인가 검증 없이 record_id만으로 누구나 타인 처방전의 가이드를 생성할 수
+    있던 IDOR을 다른 라우터(ocr_router 등)와 동일한 require_actor_patient_access 패턴으로 막음(REQ-031)."""
+    record = session.get(MedicalRecord, record_id)
+    if not record:
+        raise HTTPException(404, "처방전을 찾을 수 없어요")
+    await asyncio.to_thread(require_actor_patient_access, record.patient_id, actor, session)
+
     try:
         guide = await run_rag(record_id, session)
     except ValueError as e:
