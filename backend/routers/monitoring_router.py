@@ -173,13 +173,11 @@ def delete_patient(
 # ══════════════════════════════════════════
 class CaregiverCreate(BaseModel):
     name: str
-    # [2026-07-16 추가] frontend/src/pages/SignUp.tsx가 실제로 보내는 값은 "guardian"
-    # (보호자)과 "organization"(단체·기관) 둘뿐이다. 회원가입 화면이 먼저 "개인"/"단체·기관"을
-    # 고르게 하는데, caregiver(요양보호사)/life_support_worker(생활지원사)/social_worker
-    # (사회복지사)는 실제 직군은 있어도 이 개인/기관 구분에서 전부 "단체·기관"(organization)
-    # 클라이언트 그룹으로 뭉뚱그려진다 — relation_type 값으로 세분화되지 않는다(자세한 배경은
-    # models.py의 Caregiver.relation_type 주석 참고). DB 컬럼도 그냥 VARCHAR라 검증 없이는
-    # 오타/임의 값이 그대로 저장됐다 — Literal로 실제 사용값만 허용.
+    # [2026-07-16 추가] 직접 가입 화면(frontend/src/pages/SignUp.tsx)이 보내는 값은
+    # guardian(개인)과 organization(단체·기관) 둘뿐이다. 초대 흐름은
+    # care_router.InvitationCreate에서 Connect.tsx의 4개 관계값
+    # (guardian/caregiver/life_support_worker/social_worker)을 별도로 검증한다.
+    # DB 컬럼은 VARCHAR라 검증 없이는 오타/임의 값이 그대로 저장되므로 입력 스키마에서 막는다.
     relation_type: Literal["guardian", "organization"] = "guardian"
     phone: str | None = None  # [7/8 추가] 회원가입 연락처
     email: str | None = None  # [7/8 추가] 회원가입 "아이디"(개인) / "담당자 이메일"(단체)
