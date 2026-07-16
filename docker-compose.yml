@@ -12,6 +12,13 @@ services:
       dockerfile: backend/Dockerfile
     volumes:
       - .:/workspace
+      # frontend의 node_modules와 동일한 이유 — 바인드마운트가 이미지에 이미 설치된
+      # .venv를 덮어써서, 컨테이너 시작마다 uv sync가 torch/CUDA 등 수 GB를 매번 다시
+      # 받고 있었다(호스트에 .venv가 없거나 다른 경로를 가리키면 통째로 재생성됨).
+      # [2026-07-16] 더 심각하게는, 호스트 쪽 backend/.venv가 실제로 존재하면 바인드
+      # 마운트가 그 위에 컨테이너의 .venv로 덮어써버려 호스트에서 쓰던 venv 자체가
+      # 깨졌다 — 익명 볼륨으로 제외해서 호스트 .venv를 보호한다.
+      - /workspace/.venv
     ports:
       - "8000:8000"
     restart: unless-stopped

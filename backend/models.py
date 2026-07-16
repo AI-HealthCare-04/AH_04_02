@@ -35,6 +35,7 @@ Day 2에 각자 자기 테이블을 검토하고 필요하면 컬럼을 고쳐�
 from datetime import datetime
 from typing import Optional
 
+from sqlalchemy import Column, Text
 from sqlmodel import Field, SQLModel
 
 from core.security import decrypt_pii, encrypt_pii, hash_phone
@@ -201,7 +202,10 @@ class MedicalRecord(SQLModel, table=True):
     patient_id: int = Field(foreign_key="patients.id")  # [7/6 추가] 이 처방전이 누구 것인지
     image_path: str  # 저장된 이미지 파일 경로
     status: str = Field(default="processing")  # processing / review_required / completed / failed
-    raw_text: Optional[str] = None  # OCR 원문 (완료 후 기록)
+    # [2026-07-16] MySQL은 SQLModel의 기본 str 컬럼을 varchar(255)로 만들어서, 실제 OCR
+    # 원문(255자를 쉽게 넘김)을 저장할 때 "Data too long" 에러로 처방전 인식이 통째로
+    # 실패했다 — SQLite는 길이 제한이 없어 로컬 테스트에서는 안 보였던 버그.
+    raw_text: Optional[str] = Field(default=None, sa_column=Column(Text))  # OCR 원문 (완료 후 기록)
     failure_reason: Optional[str] = None  # 실패 시 사유
     created_at: datetime = Field(default_factory=datetime.now)
     # [7/9 추가] 보호자가 대신 업로드한 경우에만 채워짐 — 본인이 직접 올렸으면 None
@@ -238,9 +242,12 @@ class GuideResult(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     record_id: int = Field(foreign_key="medical_records.id")
     # SQLite엔 JSON 타입이 없어서 문자열로 저장: json.dumps()로 넣고 json.loads()로 꺼냄
-    medication_guide: str
-    lifestyle_guide: str
-    source_refs: str = "[]"
+    # [2026-07-16] raw_text와 동일한 이유로 Text 명시 — 기본 str이면 MySQL에서 varchar(255)가
+    # 되어 실제 가이드 JSON(255자를 훨씩 넘김) 저장이 실패/잘림. 어제 멘토링에서 나온
+    # "가이드 콘텐츠가 부족하다"는 문제의 원인 중 하나였을 가능성이 높다.
+    medication_guide: str = Field(sa_column=Column(Text, nullable=False))
+    lifestyle_guide: str = Field(sa_column=Column(Text, nullable=False))
+    source_refs: str = Field(default="[]", sa_column=Column(Text))
     created_at: datetime = Field(default_factory=datetime.now)
 
 
