@@ -38,6 +38,8 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "ruff>=0.11",
+    "ty>=0.0.59",
     "pillow>=10.0",       # generate_mock_*.py 스크립트 + TesseractOCRProvider 폴백
     "pytesseract>=0.3",   # TesseractOCRProvider CLOVA 장애 폴백 (시스템: brew install tesseract)
 ]
