@@ -38,7 +38,14 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "pillow>=10.0",       # generate_mock_*.py 스크립트 + TesseractOCRProvider 폴백
+    "pytesseract>=0.3",   # TesseractOCRProvider CLOVA 장애 폴백 (시스템: brew install tesseract)
 ]
+
+[tool.ty.environment]
+# rag/, backend/, backend/scripts/는 venv 외부의 내부 패키지 경로
+# (rag.config, services.langfuse_tracing, purge_expired_accounts 등 unresolved-import 방지)
+extra-paths = ["rag", "backend", "backend/scripts"]
 
 [tool.ruff]
 target-version = "py313"
