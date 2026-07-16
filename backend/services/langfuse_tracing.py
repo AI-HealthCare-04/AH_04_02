@@ -10,9 +10,9 @@ from __future__ import annotations
 import os
 import re
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
-from typing import Any, Iterator
-
+from typing import Any
 
 _PHONE_RE = re.compile(r"01[016789][-\s.]?\d{3,4}[-\s.]?\d{4}")
 _RRN_RE = re.compile(r"\d{6}[-\s]?[1-8]\d{6}")

@@ -13,10 +13,10 @@ from unittest.mock import patch
 from routers.chat_router import (
     _build_on_demand_dur_context,
     _extract_dur_candidate_drug_names,
+    _menu_map_text,
     _retrieve_chat_rag_context,
     _service_info_text,
     _should_answer_from_dur_only,
-    _menu_map_text,
     _summarize_lifestyle_guide,
     _summarize_medication_guide,
     _summarize_source_refs,
