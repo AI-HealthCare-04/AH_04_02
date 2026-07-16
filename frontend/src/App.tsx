@@ -3,6 +3,7 @@ import Footer from "./components/Footer";
 import ChatFab from "./components/ChatFab";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
+import ResetPassword from "./pages/ResetPassword";
 import SignUp from "./pages/SignUp";
 import Connect from "./pages/Connect";
 import Upload from "./pages/Upload";
@@ -45,6 +46,7 @@ function App() {
         <Route element={<Layout />}>
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/register" element={<SignUp />} />
           <Route path="/connect" element={<Connect />} />
           <Route path="/upload" element={<Upload />} />

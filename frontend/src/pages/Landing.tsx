@@ -36,6 +36,7 @@ export default function Landing() {
   const [meds, setMeds] = useState<Medication[]>([]);
   const [logs, setLogs] = useState<MedicationLogEntry[]>([]);
   const [notifSettings, setNotifSettings] = useState<NotificationSettings | null>(null);
+  const [savingId, setSavingId] = useState<string | null>(null);
   const loggedIn = isLoggedIn();
 
   // [7/14] "최신 안내" 섹션을 처방전 등록으로 실제 등록된 약품·알림 일정(오늘자)과 연결 —
@@ -82,11 +83,14 @@ export default function Landing() {
   const afternoonMeds = meds.filter((m) => Number(m.time.slice(0, 2)) >= 12);
 
   const handleTake = async (id: string) => {
+    setSavingId(id);
     try {
       await checkIntake(id, "taken");
       setMeds((prev) => prev.map((m) => (m.id === id ? { ...m, status: "taken" } : m)));
     } catch {
       // 랜딩 페이지 미리보기 카드라 실패해도 조용히 무시 — 실제 체크는 대시보드에서 다시 가능
+    } finally {
+      setSavingId(null);
     }
   };
 
@@ -113,10 +117,10 @@ export default function Landing() {
                     </span>
                     <button
                       style={{ ...styles.periodMedBtn, ...(done ? styles.periodMedBtnDone : {}) }}
-                      disabled={done}
+                      disabled={done || savingId === m.id}
                       onClick={() => handleTake(m.id)}
                     >
-                      {done ? "완료" : "체크"}
+                      {done ? "완료" : savingId === m.id ? "확인 중..." : "체크"}
                     </button>
                   </div>
                 );

@@ -206,6 +206,9 @@ class MedicalRecord(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.now)
     # [7/9 추가] 보호자가 대신 업로드한 경우에만 채워짐 — 본인이 직접 올렸으면 None
     uploaded_by_caregiver_id: Optional[int] = Field(default=None, foreign_key="caregivers.id")
+    # [2026-07-16 추가] 등록내역 삭제 기능 — PatientMedication.deleted_at과 동일한 soft-delete
+    # 관례. OCR·가이드 등 연결 데이터를 실제로 지우지 않고 목록/조회에서만 감춘다.
+    deleted_at: Optional[datetime] = Field(default=None)
 
 
 # ── OCR 추출 결과 (약품 1개 = 1행, 담당: 권순현) ──

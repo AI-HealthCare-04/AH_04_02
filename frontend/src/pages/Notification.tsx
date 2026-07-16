@@ -31,6 +31,7 @@ export default function Notification() {
   const [careLocked, setCareLocked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [savingKey, setSavingKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (patientId == null) return;
@@ -55,11 +56,14 @@ export default function Notification() {
 
     const next = { ...settings, [key]: !settings[key] };
     setSettings(next); // 낙관적 업데이트
+    setSavingKey(key);
     try {
       await updateNotificationSettings(patientId, { [key]: next[key] });
     } catch {
       setSettings(settings); // 실패 시 롤백
       setError("저장하지 못했어요.");
+    } finally {
+      setSavingKey(null);
     }
   };
 
@@ -92,7 +96,7 @@ export default function Notification() {
                     </p>
                   )}
                 </div>
-                <Toggle on={settings[key]} onChange={() => toggle(key)} disabled={locked} />
+                <Toggle on={settings[key]} onChange={() => toggle(key)} disabled={locked || savingKey === key} />
               </div>
             ))}
           </div>

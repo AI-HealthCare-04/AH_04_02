@@ -106,6 +106,13 @@ export default function Login() {
               <button type="submit" disabled={loading} style={styles.submitBtn}>
                 {loading ? "로그인 중..." : "로그인"}
               </button>
+              <button
+                type="button"
+                onClick={() => navigate("/reset-password")}
+                style={{ ...styles.backBtn, textAlign: "center" as const, alignSelf: "center" }}
+              >
+                비밀번호를 잊으셨나요?
+              </button>
             </form>
           )}
 

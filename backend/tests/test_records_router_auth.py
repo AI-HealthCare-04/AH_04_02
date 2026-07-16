@@ -181,6 +181,45 @@ class TestRemoveMedication:
 
 
 # ──────────────────────────────────────────────────────────────
+# DELETE /records/{record_id}
+# ──────────────────────────────────────────────────────────────
+
+class TestDeleteRecord:
+    def test_owner_ok_and_soft_deleted(self, client: TestClient, session: Session):
+        cg = _make_caregiver(session, "cgDelRec")
+        pt = _make_patient(session, "ptDelRec")
+        _link(session, cg, pt)
+        rec = _make_record(session, pt.id, status="completed")
+        headers = {"Authorization": f"Bearer {_token(cg.id, 'caregiver')}"}
+        r = client.delete(f"/records/{rec.id}", headers=headers)
+        assert r.status_code == 200
+
+        # 목록/상세 조회에서 제외되는지 (soft-delete)
+        assert client.get("/records", params={"patient_id": pt.id}, headers=headers).json() == []
+        r_get = client.get(f"/records/{rec.id}", headers=headers)
+        assert r_get.status_code == 404
+
+    def test_other_403(self, client: TestClient, session: Session):
+        cg_owner = _make_caregiver(session, "cgDelRecOwner")
+        cg_other = _make_caregiver(session, "cgDelRecOther")
+        pt = _make_patient(session, "ptDelRecOther")
+        _link(session, cg_owner, pt)
+        rec = _make_record(session, pt.id)
+        headers = {"Authorization": f"Bearer {_token(cg_other.id, 'caregiver')}"}
+        r = client.delete(f"/records/{rec.id}", headers=headers)
+        assert r.status_code == 403
+
+    def test_already_deleted_404(self, client: TestClient, session: Session):
+        cg = _make_caregiver(session, "cgDelRecTwice")
+        pt = _make_patient(session, "ptDelRecTwice")
+        _link(session, cg, pt)
+        rec = _make_record(session, pt.id)
+        headers = {"Authorization": f"Bearer {_token(cg.id, 'caregiver')}"}
+        assert client.delete(f"/records/{rec.id}", headers=headers).status_code == 200
+        assert client.delete(f"/records/{rec.id}", headers=headers).status_code == 404
+
+
+# ──────────────────────────────────────────────────────────────
 # POST /records/{record_id}/confirm  (RAG 없이 stub)
 # ──────────────────────────────────────────────────────────────
 

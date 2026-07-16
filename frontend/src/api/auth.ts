@@ -14,3 +14,26 @@ export async function login(identifier: string, password: string) {
   const { data } = await monitoringClient.post<LoginResponse>("/auth/login", { identifier, password });
   return data;
 }
+
+// ── 비밀번호 재설정 [2026-07-15] 3단계: request(임시번호 발송) → verify(임시번호 확인,
+// reset_token 발급) → confirm(새 비밀번호 설정). 백엔드는 REQ-039(PR #48)에서 구현됨. ──
+export async function requestPasswordReset(identifier: string) {
+  const { data } = await monitoringClient.post<{ message: string }>("/auth/password-reset/request", { identifier });
+  return data;
+}
+
+export async function verifyPasswordReset(identifier: string, code: string) {
+  const { data } = await monitoringClient.post<{ reset_token: string }>("/auth/password-reset/verify", {
+    identifier,
+    code,
+  });
+  return data;
+}
+
+export async function confirmPasswordReset(resetToken: string, newPassword: string) {
+  const { data } = await monitoringClient.post<{ message: string }>("/auth/password-reset/confirm", {
+    reset_token: resetToken,
+    new_password: newPassword,
+  });
+  return data;
+}

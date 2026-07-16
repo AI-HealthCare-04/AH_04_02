@@ -22,5 +22,14 @@ os.environ.setdefault("SECRET_KEY", "test-only-jwt-secret-do-not-use-in-prod")
 # 자체 in-memory 엔진+dependency_overrides를 쓰므로 이건 순전히 startup 부작용 방지용).
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("DATABASE_URL", "sqlite://")
+# [2026-07-15 추가] main.py가 나중에(테스트가 main을 import할 때) load_dotenv()를 호출하는데,
+# 개발자 로컬 backend/.env에 실제로 DATABASE_SSL_REQUIRED=true 등이 켜져 있으면 그 값을
+# 이 프로세스의 os.environ에 심어버린다(load_dotenv는 이미 있는 키는 안 건드리므로 여기서
+# 빈 문자열로 먼저 채워서 "막아둔다" — pop()으로 지우기만 하면 나중에 load_dotenv가 다시
+# 채워버림). test_database_env.py가 서브프로세스에 os.environ을 그대로 물려주는 방식이라,
+# 이 값이 남아있으면 "SSL 관련 값이 아예 없는 조합"을 재현하는 테스트가 개발자 로컬 .env
+# 내용에 따라 깨진다.
+os.environ.setdefault("DATABASE_SSL_REQUIRED", "")
+os.environ.setdefault("DATABASE_SSL_CA", "")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))

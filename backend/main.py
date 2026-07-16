@@ -60,6 +60,7 @@ app = FastAPI(
 _DEV_ORIGINS = [
     "http://localhost:5173", "http://127.0.0.1:5173",
     "http://localhost:5174", "http://127.0.0.1:5174",  # [7/10] 별도 포트 미리보기 서버(backend-dev/frontend-dev)
+    "http://localhost:5175", "http://127.0.0.1:5175",  # [2026-07-15] 로컬 SQLite 전용 미리보기(backend-dev-local/frontend-dev-local)
 ]
 _extra_origins = [o.strip() for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()]
 

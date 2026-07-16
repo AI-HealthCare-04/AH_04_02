@@ -13,6 +13,7 @@ schedule_v6의 "동기 방식" 원칙 그대로: 폴링도 스트리밍도 없�
 from __future__ import annotations
 import asyncio
 import json
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
@@ -250,6 +251,7 @@ def list_records(
     records = session.exec(
         select(MedicalRecord)
         .where(MedicalRecord.patient_id == patient_id)
+        .where(MedicalRecord.deleted_at.is_(None))
         .order_by(MedicalRecord.created_at.desc())
     ).all()
 
@@ -268,6 +270,28 @@ def list_records(
             }
         )
     return summaries
+
+
+@router.delete("/{record_id}")
+def delete_record(
+    record_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """
+    [2026-07-16 추가] 등록내역(처방전 기록) 삭제 — 멘토링에서 지적된 "등록내역 삭제 기능
+    필요" 항목. OcrResult/GuideResult 등 연결 데이터는 그대로 두고 soft-delete만 하며
+    (PatientMedication.deleted_at과 동일한 관례), 목록/상세 조회에서만 제외한다.
+    """
+    record = session.get(MedicalRecord, record_id)
+    if not record or record.deleted_at is not None:
+        raise HTTPException(404, "해당 기록을 찾을 수 없어요")
+    require_actor_patient_access(record.patient_id, actor, session)
+
+    record.deleted_at = datetime.now()
+    session.add(record)
+    session.commit()
+    return {"message": "삭제됐어요"}
 
 
 class MedicationCorrection(BaseModel):
@@ -366,7 +390,7 @@ def get_record(
 ):
     """새로고침 등으로 결과 화면을 다시 열었을 때 재조회용 (Processing에서 받은 데이터가 없을 때 대비)"""
     record = session.get(MedicalRecord, record_id)
-    if not record:
+    if not record or record.deleted_at is not None:
         raise HTTPException(404, "해당 기록을 찾을 수 없어요")
     require_actor_patient_access(record.patient_id, actor, session)
 

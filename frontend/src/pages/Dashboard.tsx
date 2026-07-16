@@ -24,6 +24,7 @@ export default function Dashboard() {
   // 떠서 혼란만 준다. 환자 본인 로그인(caregiver_id 없음)일 때만 보여준다.
   const [showBanner, setShowBanner] = useState(!getCurrentCaregiverId());
   const [recentRecords, setRecentRecords] = useState<RecordSummary[]>([]);
+  const [savingId, setSavingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (patientId == null) return;
@@ -40,6 +41,7 @@ export default function Dashboard() {
     // 먼저 화면부터 낙관적으로 바꾸고, 실패하면 되돌림 (버튼 반응성 위해)
     const prev = meds;
     setMeds((cur) => cur.map((m) => (m.id === id ? { ...m, status } : m)));
+    setSavingId(id);
 
     try {
       if (status === "pending") {
@@ -49,6 +51,8 @@ export default function Dashboard() {
       }
     } catch {
       setMeds(prev); // 실패 시 원래 상태로 롤백
+    } finally {
+      setSavingId(null);
     }
   };
 
@@ -113,6 +117,7 @@ export default function Dashboard() {
                       key={s}
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => updateStatus(med.id, s)}
+                      disabled={savingId === med.id}
                       style={{
                         flex: 1,
                         padding: "12px 0",
@@ -123,7 +128,8 @@ export default function Dashboard() {
                         background: isActive && s === "pending" ? C.terracotta : isActive ? C.bubbleBg : C.white,
                         color: isActive && s === "pending" ? C.white : isActive ? C.terracotta : C.muted,
                         fontWeight: 600,
-                        cursor: "pointer",
+                        cursor: savingId === med.id ? "default" : "pointer",
+                        opacity: savingId === med.id ? 0.6 : 1,
                         fontSize: 14,
                         outline: "none",
                         boxShadow: "none",
