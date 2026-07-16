@@ -103,7 +103,11 @@ class Caregiver(SQLModel, table=True):
     name_encrypted: str = Field(default="")  # [7/9] Patient.name_encrypted와 동일한 원칙 — .name 프로퍼티 참고
     email: Optional[str] = Field(default=None, unique=True, index=True)  # 회원가입 화면의 "아이디" 입력이 여기 저장됨
     hashed_password: Optional[str] = None
-    relation_type: str = "guardian"  # guardian / caregiver / life_support_worker / social_worker / organization
+    # 직접 가입(routers/monitoring_router.py CaregiverCreate)은 guardian/organization만
+    # 허용하고, 보호자 초대(routers/care_router.py InvitationCreate)는 Connect.tsx UI에 맞춰
+    # guardian/caregiver/life_support_worker/social_worker를 허용한다. DB 컬럼 자체는 그냥
+    # VARCHAR라 여기서는 강제 안 되므로, 각 입력 스키마에서 Literal로 검증한다.
+    relation_type: str = "guardian"
     phone_encrypted: Optional[str] = None  # [7/8 추가, 7/9 암호화] 회원가입 연락처
     phone_hash: Optional[str] = Field(default=None, index=True)  # [7/9] 로그인/검색용, 복호화 대상 아님
     birth_date: Optional[str] = None  # [7/8 추가] 생년월일 (자유 텍스트)

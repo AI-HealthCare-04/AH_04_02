@@ -14,7 +14,7 @@ Figma에만 있고 백엔드가 없던 3개 기능을 여기 모았습니다:
 from __future__ import annotations
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -106,7 +106,10 @@ def get_latest_assessment(
 # ══════════════════════════════════════════
 class InvitationCreate(BaseModel):
     patient_id: int
-    relation_type: str = "guardian"
+    # Connect.tsx의 보호자 초대 UI에서 실제로 선택 가능한 4개 값만 허용한다.
+    # 직접 가입(CaregiverCreate)은 guardian/organization 흐름이고, 초대는 현장 돌봄 관계라
+    # caregiver/life_support_worker/social_worker까지 별도로 허용한다.
+    relation_type: Literal["guardian", "caregiver", "life_support_worker", "social_worker"] = "guardian"
     invited_phone: str | None = None
     inviter_caregiver_id: int | None = None
 

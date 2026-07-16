@@ -21,6 +21,7 @@ Dashboard.tsx/Schedule.tsx/Notification.tsx/Records.tsx/Connect.tsx처럼 "보�
 """
 from __future__ import annotations
 from datetime import date, datetime, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -172,7 +173,12 @@ def delete_patient(
 # ══════════════════════════════════════════
 class CaregiverCreate(BaseModel):
     name: str
-    relation_type: str = "guardian"  # guardian / caregiver / life_support_worker / social_worker / organization
+    # [2026-07-16 추가] 직접 가입 화면(frontend/src/pages/SignUp.tsx)이 보내는 값은
+    # guardian(개인)과 organization(단체·기관) 둘뿐이다. 초대 흐름은
+    # care_router.InvitationCreate에서 Connect.tsx의 4개 관계값
+    # (guardian/caregiver/life_support_worker/social_worker)을 별도로 검증한다.
+    # DB 컬럼은 VARCHAR라 검증 없이는 오타/임의 값이 그대로 저장되므로 입력 스키마에서 막는다.
+    relation_type: Literal["guardian", "organization"] = "guardian"
     phone: str | None = None  # [7/8 추가] 회원가입 연락처
     email: str | None = None  # [7/8 추가] 회원가입 "아이디"(개인) / "담당자 이메일"(단체)
     birth_date: str | None = None  # [7/8 추가]
