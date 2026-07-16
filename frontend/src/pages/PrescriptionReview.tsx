@@ -254,38 +254,37 @@ export default function PrescriptionReview() {
         <NavBar isLoggedIn userName="김건강" />
         <div className="flex-1 flex flex-col items-center justify-center px-8">
         <div className="relative mb-8 flex items-center justify-center">
+          {/* 진행률이 90%에서 API 응답까지(최대 1분) 멈춰있어도 계속 도는 링 —
+              멈춘 것처럼 보이지 않게 진행률과 무관하게 항상 회전한다 */}
+          <div
+            className="absolute animate-spin rounded-full"
+            style={{
+              width: 144,
+              height: 144,
+              border: "7px solid transparent",
+              borderTopColor: C.terracotta,
+              borderRightColor: `${C.terracotta}30`,
+            }}
+          />
           <div
             style={{
-              width: 128,
-              height: 128,
+              width: 100,
+              height: 100,
               borderRadius: "50%",
-              background: `conic-gradient(${C.terracotta} ${progress * 3.6}deg, rgba(193,101,61,0.15) ${progress * 3.6}deg)`,
+              background: C.ivory,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              transition: "background 0.25s",
             }}
           >
             <div
+              className="w-16 h-16 rounded-2xl flex items-center justify-center text-[30px]"
               style={{
-                width: 100,
-                height: 100,
-                borderRadius: "50%",
-                background: C.ivory,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
+                background: `linear-gradient(135deg, ${C.terracotta} 0%, #A5522F 100%)`,
+                boxShadow: "0 6px 20px rgba(193,101,61,0.35)",
               }}
             >
-              <div
-                className="w-16 h-16 rounded-2xl flex items-center justify-center text-[30px]"
-                style={{
-                  background: `linear-gradient(135deg, ${C.terracotta} 0%, #A5522F 100%)`,
-                  boxShadow: "0 6px 20px rgba(193,101,61,0.35)",
-                }}
-              >
-                📋
-              </div>
+              📋
             </div>
           </div>
         </div>
@@ -296,6 +295,8 @@ export default function PrescriptionReview() {
           처방전 정보를 분석하고
           <br />
           맞춤 복약 가이드를 생성 중이에요
+          <br />
+          <span style={{ fontWeight: 600 }}>보통 1분 정도 걸려요. 조금만 기다려 주세요</span>
         </p>
         <div className="w-72 mb-6">
           <div className="h-2.5 rounded-full overflow-hidden mb-2" style={{ background: "rgba(30,26,23,0.10)" }}>
