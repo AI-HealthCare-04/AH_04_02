@@ -29,6 +29,7 @@ import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import cast
 
 from core.database import get_session
 from core.dependencies import Actor, get_current_actor, require_actor_patient_access
@@ -214,8 +215,8 @@ async def stub_generate_guide(
     session.get()을 asyncio.to_thread로 감싸는 쪽(이 async 함수 안에서 동기 SQLModel
     호출을 직접 부르면 이벤트 루프를 막는다는 이 파일 상단 docstring의 기존 관례)을 채택.
     """
-    record = await asyncio.to_thread(session.get, MedicalRecord, record_id)
-    if not record:
+    record = cast(MedicalRecord | None, await asyncio.to_thread(session.get, MedicalRecord, record_id))
+    if record is None:
         raise HTTPException(404, "해당 기록을 찾을 수 없어요")
     await asyncio.to_thread(require_actor_patient_access, record.patient_id, actor, session)
 

@@ -252,7 +252,7 @@ def list_records(
     records = session.exec(
         select(MedicalRecord)
         .where(MedicalRecord.patient_id == patient_id)
-        .order_by(MedicalRecord.created_at.desc())
+        .order_by(MedicalRecord.created_at.desc())  # ty: ignore[unresolved-attribute]
     ).all()
 
     summaries = []
@@ -329,10 +329,12 @@ async def confirm_medications(
 
     try:
         guide = await run_rag(record.id, session)
-    except ValueError:
+    except ValueError as exc:
+        _failure_reason = str(exc)  # except 블록 밖에서 e가 삭제되기 전에 캡처
+
         def _mark_failed() -> None:
             record.status = "failed"
-            record.failure_reason = str(e)
+            record.failure_reason = _failure_reason
             session.add(record)
             session.commit()
             session.refresh(record)
@@ -375,6 +377,6 @@ def get_record(
     guide = session.exec(
         select(GuideResult)
         .where(GuideResult.record_id == record_id)
-        .order_by(GuideResult.id.desc())
+        .order_by(GuideResult.id.desc())  # ty: ignore[unresolved-attribute]
     ).first()
     return _build_record_response(record, session, guide)
