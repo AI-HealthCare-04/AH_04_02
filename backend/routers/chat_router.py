@@ -24,6 +24,7 @@ import json
 import os
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 from core.database import get_session
@@ -166,7 +167,7 @@ if _CHAT_PROVIDER == "real":
         _CHAT_LLM_AVAILABLE = False
 
 
-def _summarize_ocr_items(ocr_items: list[OcrResult]) -> list[str]:
+def _summarize_ocr_items(ocr_items: Sequence[OcrResult]) -> list[str]:
     if not ocr_items:
         return []
     lines = []
@@ -588,7 +589,8 @@ def _generate_llm_answer(
     callback_handler = get_langchain_callback_handler()
     invoke_config = {"callbacks": [callback_handler]} if callback_handler else None
     response = chat.invoke(messages, config=invoke_config)
-    return response.content.strip()
+    content = response.content
+    return content.strip() if isinstance(content, str) else str(content)
 
 
 @router.get("/questions")

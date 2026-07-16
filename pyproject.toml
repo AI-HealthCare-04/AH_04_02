@@ -47,6 +47,30 @@ dev = [
 # (rag.config, services.langfuse_tracing, purge_expired_accounts 등 unresolved-import 방지)
 extra-paths = ["rag", "backend", "backend/scripts"]
 
+# ---------------------------------------------------------------------------
+# ty check 잔여 진단 현황 (2026-07-16 기준, 295건)
+#
+# ■ SQLModel/SQLAlchemy ORM 디스크립터 false positive (~130건) — 무시 가능
+#   ty가 SQLModel 컬럼 필드를 Python 기본 타입(int, datetime, bool)으로 추론해서
+#   SQLAlchemy가 런타임에 제공하는 ORM 메서드를 "없다"고 오판:
+#     - Column.desc() / Column.asc()  →  "datetime has no attribute desc"
+#     - Column.in_(...)               →  "int has no attribute in_"
+#     - Column.is_(None)              →  "datetime|None has no attribute is_"
+#     - Model(**kwargs) LaxInt        →  "int|None is not assignable to LaxInt"
+#     - .where(col == val)            →  "bool is not assignable to ColumnElement"
+#   SQLModel/SQLAlchemy는 InstrumentedAttribute 디스크립터로 이 메서드를 동적 제공하며
+#   ty 0.0.59는 이 패턴을 아직 지원하지 않는다. 런타임 동작에는 영향 없음.
+#
+# ■ 실제 수정된 이슈 (6건, 이 커밋에서 처리)
+#   - Sequence[OcrResult] 시그니처 통일 (chat/rag/records router 4곳)
+#   - alembic/env.py url None 체크 추가
+#   - chat_router.py response.content isinstance 타입 가드
+#
+# ■ 추후 처리 대상 (~165건)
+#   - invalid-argument-type: Sequence vs list 잔여, Literal vs str, Union 미검사 등
+#   - unresolved-attribute: result.rowcount, response.content (LangChain), alembic 잔여
+# ---------------------------------------------------------------------------
+
 [tool.ruff]
 target-version = "py313"
 line-length = 100

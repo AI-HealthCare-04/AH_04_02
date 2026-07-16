@@ -27,6 +27,7 @@ import asyncio
 import json
 import os
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 from core.database import get_session
@@ -58,7 +59,7 @@ if _RAG_PROVIDER == "real":
         _RAG_AVAILABLE = False
 
 
-def _fake_guide_payload(ocr_items: list[OcrResult]) -> tuple[dict, dict, list]:
+def _fake_guide_payload(ocr_items: Sequence[OcrResult]) -> tuple[dict, dict, list]:
     """실제 파이프라인 연동 전까지 쓰는 흐름 확인용 가짜 데이터 (Result.tsx가 기대하는 모양)."""
     medication_guide = {
         "drugs": [
@@ -75,7 +76,7 @@ def _fake_guide_payload(ocr_items: list[OcrResult]) -> tuple[dict, dict, list]:
     return medication_guide, lifestyle_guide, source_refs
 
 
-def _generate_via_rag(ocr_items: list[OcrResult]) -> tuple[dict, dict, list] | None:
+def _generate_via_rag(ocr_items: Sequence[OcrResult]) -> tuple[dict, dict, list] | None:
     """rag 실제 파이프라인 호출. 실패하거나 사용 불가하면 None(호출부가 폴백 처리)."""
     if not _RAG_AVAILABLE:
         return None

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Sequence
 
 from core.database import get_session
 from core.dependencies import Actor, get_current_actor, require_actor_patient_access
@@ -39,7 +40,7 @@ _DEFAULT_TIME_SLOTS = {
 }
 
 
-def _create_schedules_from_ocr(record: MedicalRecord, ocr_items: list[OcrResult], session: Session) -> None:
+def _create_schedules_from_ocr(record: MedicalRecord, ocr_items: Sequence[OcrResult], session: Session) -> None:
     for item in ocr_items:
         if not item.drug_name:
             continue
