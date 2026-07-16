@@ -291,6 +291,11 @@ _DUR_ONLY_KEYWORDS = (
     "먹으면 안",
     "먹으면안",
     "안되는",
+    "복용",
+    "같이 복용",
+    "함께 복용",
+    "드셔도",
+    "드시면",
     "같이 먹",
     "함께 먹",
     "상호작용",
@@ -318,6 +323,14 @@ _DUR_QUERY_STOPWORDS = {
     "등록",
     "현재",
     "먹으면",
+    "먹어도",
+    "복용",
+    "복용해도",
+    "드셔도",
+    "드시면",
+    "고령자",
+    "되나요",
+    "괜찮나요",
     "되는",
     "안되는",
     "같이",
@@ -364,6 +377,8 @@ def _asks_for_taboo_list(question_text: str) -> bool:
             "먹으면안되",
             "같이먹으면안",
             "함께먹으면안",
+            "같이복용하면안",
+            "함께복용하면안",
             "병용금기",
             "금기의약품",
             "금기약",
@@ -520,14 +535,9 @@ def _retrieve_chat_rag_context(question_text: str, patient_context_text: str, k:
     if _should_answer_from_dur_only(question_text):
         return []
 
-    query = "\n".join(
-        part
-        for part in (
-            question_text,
-            patient_context_text,
-        )
-        if part and part.strip()
-    )
+    # Langfuse retriever span records query metadata. Do not include stored
+    # patient context here; it can contain diagnoses and medication history.
+    query = question_text.strip()
     if not query:
         return []
 

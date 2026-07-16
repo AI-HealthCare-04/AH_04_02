@@ -9,14 +9,10 @@ from rag.config import settings
 try:
     from services.langfuse_tracing import (
         flush_langfuse,
-        mask_for_langfuse,
         optional_observation,
         update_observation,
     )
 except Exception:  # noqa: BLE001 — rag 단독 실행 시 backend/services가 없어도 RAG는 동작해야 함
-    def mask_for_langfuse(value: str | None) -> str:
-        return value or ""
-
     def optional_observation(**_kwargs):
         from contextlib import nullcontext
 
@@ -114,7 +110,8 @@ def similarity_search(query: str, k: int | None = None, filter: dict | None = No
         as_type="retriever",
         name="retrieve-from-chromadb",
         input={
-            "query": mask_for_langfuse(query),
+            "query_omitted": True,
+            "query_length": len(query or ""),
             "top_k": top_k,
             "filter": filter,
             "collection": settings.CHROMA_COLLECTION_NAME,

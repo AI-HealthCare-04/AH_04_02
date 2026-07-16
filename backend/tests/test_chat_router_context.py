@@ -109,6 +109,9 @@ def test_dur_question_does_not_use_general_kdca_rag_context():
     """병용금기/임부주의 같은 의약품 안전 질문은 질병관리청 건강정보로 보강하지 않는다."""
     assert _should_answer_from_dur_only("이 약 임부금기야?")
     assert _should_answer_from_dur_only("혈압약이랑 같이 먹어도 돼?")
+    assert _should_answer_from_dur_only("와파린이랑 타이레놀 같이 복용해도 되나요?")
+    assert _should_answer_from_dur_only("아스피린과 와파린을 함께 복용해도 괜찮나요?")
+    assert _should_answer_from_dur_only("이 약 드셔도 되나요?")
     assert _retrieve_chat_rag_context("이 약 임부금기야?", "[DUR 임부금기] 테스트약: 임신 3기 주의") == []
 
 

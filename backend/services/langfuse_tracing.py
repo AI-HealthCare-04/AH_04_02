@@ -14,8 +14,8 @@ from contextlib import contextmanager, nullcontext
 from typing import Any, Iterator
 
 
-_PHONE_RE = re.compile(r"01[016789][-\s]?\d{3,4}[-\s]?\d{4}")
-_RRN_RE = re.compile(r"\d{6}[-\s]?[1-4]\d{6}")
+_PHONE_RE = re.compile(r"01[016789][-\s.]?\d{3,4}[-\s.]?\d{4}")
+_RRN_RE = re.compile(r"\d{6}[-\s]?[1-8]\d{6}")
 
 
 def mask_for_langfuse(value: str | None) -> str:
