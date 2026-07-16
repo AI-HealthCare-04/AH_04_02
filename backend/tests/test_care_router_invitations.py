@@ -10,7 +10,8 @@ from unittest.mock import patch
 import models
 import pytest
 from core.security import hash_token
-from routers.care_router import InvitationAccept, accept_invitation
+from pydantic import ValidationError
+from routers.care_router import InvitationAccept, InvitationCreate, accept_invitation
 from sqlmodel import Session, SQLModel, create_engine, select
 
 RAW_TOKEN = "tok123"
@@ -24,7 +25,7 @@ def session():
         yield s
 
 
-def _make_pending_invitation(session: Session) -> models.Invitation:
+def _make_pending_invitation(session: Session, relation_type: str = "guardian") -> models.Invitation:
     patient = models.Patient()
     patient.name = "테스트 환자"
     session.add(patient)
@@ -34,6 +35,7 @@ def _make_pending_invitation(session: Session) -> models.Invitation:
     invitation = models.Invitation(
         patient_id=patient.id,
         token_hash=hash_token(RAW_TOKEN),
+        relation_type=relation_type,
         expires_at=datetime.now() + timedelta(days=7),
     )
     session.add(invitation)
@@ -55,6 +57,23 @@ def test_accept_invitation_commits_caregiver_and_link_together():
         assert len(caregivers) == 1
         assert len(links) == 1
         assert links[0].caregiver_id == caregivers[0].id
+
+
+def test_invitation_create_rejects_arbitrary_relation_type():
+    with pytest.raises(ValidationError):
+        InvitationCreate(patient_id=1, relation_type="totally_arbitrary_garbage_value")
+
+
+def test_accept_invitation_preserves_invitation_relation_type():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        _make_pending_invitation(session, relation_type="life_support_worker")
+
+        accept_invitation(RAW_TOKEN, InvitationAccept(caregiver_name="생활지원사"), session)
+
+        caregiver = session.exec(select(models.Caregiver)).one()
+        assert caregiver.relation_type == "life_support_worker"
 
 
 def test_accept_invitation_rolls_back_caregiver_when_failure_happens_after_creation():
