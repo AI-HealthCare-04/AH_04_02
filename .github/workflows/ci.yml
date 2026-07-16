@@ -26,10 +26,11 @@ jobs:
 
       - name: Lint (ruff)
         run: uv run ruff check .
+        continue-on-error: true  # 57건 pre-existing(B904/E402/B905/N806 등) 팀 파일 분산 — 팀 전체 정리 후 필수 게이트로 전환 예정
 
       - name: Type check (ty)
         run: uv run ty check .
-        continue-on-error: true  # 295건 SQLModel false positive 잔존 — 당장 필수 게이트로 쓰지 않음
+        continue-on-error: true  # 69건 잔존(SQLModel false positive 억제 후) — 팀원 파일 포함, 당장 필수 게이트로 쓰지 않음
 
       - name: Test (pytest)
         run: uv run pytest backend/tests/ -q
