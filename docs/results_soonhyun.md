@@ -649,3 +649,89 @@ TL_27: fileSn=66091 (20MB)    TL_33: fileSn=66098 (22MB) — 1999-2000년
 TL_34: fileSn=66099 (31MB)    TL_38: fileSn=66103 (14MB) — 2003년
 ```
 전체 fileSn 맵핑: aihubshell -mode l -datasetkey 576 으로 재조회 가능 (apikey 필요)
+
+---
+
+## 17. 과제 요구사항 대비 구현 현황
+
+> 작성일: 2026-07-16  
+> 작성자: 권순현  
+> 기준 브랜치: `dev` (HEAD: 078798b)
+
+### 요약 표
+
+| # | 요구사항 | 구분 | 상태 | 비고 |
+|---|----------|------|------|------|
+| 1 | LLM 기반 안내 가이드 생성 | 필수 | ⚠️ 부분 구현 | `RAG_PROVIDER=real` 미설정 시 stub 반환 |
+| 2 | 실시간 챗봇 (SSE 스트리밍) | 필수 | ❌ 미구현 | REQ-021 — 요청-응답 방식으로만 구현됨 |
+| 3 | OCR 기반 의료 정보 인식 | 필수 | ✅ 완료 | CLOVA OCR 연동 전체 파이프라인 완성 |
+| 4 | TTS / 음성 콘텐츠 변환 | 선택 | ❌ 미구현 | REQ-027 — 관련 코드 전무 |
+| 5 | 이미지 분류 기반 복약 분석 | 선택 | ❌ 미구현 | OCR 텍스트 파싱 방식만 존재 |
+| 6 | 알림 기능 | 선택 | ⚠️ 부분 구현 | REQ-026 — 설정 저장만 됨, push 발송 미구현 |
+
+### 항목별 상세
+
+#### 1. LLM 기반 안내 가이드 생성 — ⚠️ 부분 구현
+
+- **구현 위치**: `rag/rag/rag_chain.py`, `backend/routers/rag_router.py`
+- **구현 내용**:
+  - `rag_chain.py`에 `ChatOpenAI` 실제 호출 로직 완성 (`generate_guide`, `generate_guides_from_medications`)
+  - Self-consistency sampling: 기본 3회 LLM 호출 후 best answer 선택
+  - DUR(병용금기/노인주의/연령금기/임부금기) 로컬 CSV 조회 연동
+  - HIRA 약품 마스터 데이터 기반 컨텍스트 구성
+- **미비 사항**:
+  - `.env`에 `RAG_PROVIDER=real` 미설정 시 항상 stub(가짜 데이터) 반환
+  - 기본값은 의도적으로 stub — Result.tsx와 응답 포맷 합의 후 전환 예정
+- **필요 조치**: `OPENAI_API_KEY` + `RAG_PROVIDER=real` 환경 설정 후 통합 테스트
+
+#### 2. 실시간 챗봇 SSE 스트리밍 — ❌ 미구현 (REQ-021)
+
+- **구현 위치**: `backend/routers/chat_router.py`
+- **현재 상태**:
+  - `POST /chat/ask`: 완전한 **동기 요청-응답** 방식 (`def ask(...)`, 비동기 아님)
+  - LLM 호출 방식: `chat.invoke([...])` — streaming=False, 한 번에 전체 응답 반환
+  - `StreamingResponse`, `EventSourceResponse`, `yield`, SSE 관련 코드 전무
+- **요구사항 gap**: REQ-021은 SSE(Server-Sent Events) 기반 실시간 스트리밍 명시
+- **필요 조치**:
+  - `chat.stream()`으로 전환 + `StreamingResponse` + `text/event-stream` 헤더
+  - 프론트엔드 `Chat.tsx`에서 `EventSource` 또는 `fetch` streaming 수신 처리 필요
+
+#### 3. OCR 기반 의료 정보 인식 — ✅ 완료
+
+- **구현 위치**: `backend/routers/ocr_router.py`, `backend/services/`
+- **구현 내용**:
+  - CLOVA OCR API 연동 (`OCR_PROVIDER=clova` 기본값 / `mock` 전환 가능)
+  - `parsing_rules.py`로 약물명·용량·복용법·진단명 파싱
+  - `drug_matcher.py`로 HIRA DB 매칭 (유사도 점수, `MATCH_THRESHOLD` 미달 시 `needs_review=True`)
+  - `drug_reference.py`로 약효분류·적응증 조회 (HIRA/e약은요/ATC 순서)
+  - 타임아웃·연결 오류·HTTP 오류별 에러 처리 (`504/503/502`)
+  - `records_router.py`와 파이프라인 통합 (업로드 → OCR → RAG 가이드 일괄 처리)
+
+#### 4. TTS / 음성 콘텐츠 변환 — ❌ 미구현 (REQ-027)
+
+- `backend/services/`, `frontend/src/` 전체에 TTS·`SpeechSynthesis`·음성 관련 코드 없음
+- 착수 흔적 없음
+
+#### 5. 이미지 분류 기반 복약 분석 — ❌ 미구현
+
+- `backend/services/`에 OCR 파이프라인 외 별도 분류 모델 없음
+- TensorFlow·PyTorch·`model.predict` 등 ML 추론 코드 없음
+- 복약 분석은 CLOVA OCR 텍스트 파싱 방식 하나로만 처리
+
+#### 6. 알림 기능 — ⚠️ 부분 구현 (REQ-026)
+
+- **구현된 부분**:
+  - `NotificationSetting` 모델: `medication_reminder_enabled`, `care_alert_enabled`, `all_push_enabled`, `chatbot_name`
+  - `Notification.tsx`: UI 토글 → API 저장 동작
+- **미구현 부분**:
+  - 실제 push 발송 없음 — FCM, Firebase, Web Push API, Service Worker 코드 전무
+  - 복약 시간 알림 스케줄러 없음
+  - REQ-026a/b/c/d 중 설정 저장(a 일부)만 완료
+
+### 팀 액션 아이템
+
+| 우선순위 | 항목 | 비고 |
+|---------|------|------|
+| 🔴 HIGH | SSE 스트리밍 챗봇 구현 | REQ-021 필수, backend+frontend 동시 작업 필요 |
+| 🟡 MID | RAG_PROVIDER=real 통합 테스트 | 환경변수 설정 + Result.tsx 포맷 합의 |
+| 🟢 LOW | 알림 push 발송 구현 | REQ-026 선택, FCM 또는 Web Push 필요 |

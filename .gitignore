@@ -82,7 +82,10 @@ _*
 # _* 패턴이 __init__.py까지 가리는 것 방지
 !**/__init__.py
 
-# ===== macOS 홈 디렉터리 표준 폴더 (git root=/Users/admin, AH_04_02_soonhyun/·backend/ 제외 안 함) =====
+# ===== 개인 작업 디렉터리 (로컬 메모, 세션별 스크래치) =====
+AH_04_02_soonhyun/
+
+# ===== macOS 홈 디렉터리 표준 폴더 =====
 Desktop/
 Documents/
 Applications/
