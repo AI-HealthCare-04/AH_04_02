@@ -17,7 +17,7 @@ APP_ENV 4단계:
 import os
 
 from sqlalchemy.engine import make_url
-from sqlmodel import SQLModel, Session, create_engine, select
+from sqlmodel import Session, SQLModel, create_engine, select
 
 APP_ENV = os.environ.get("APP_ENV", "local")
 
@@ -114,6 +114,7 @@ def _seed_demo_data() -> None:
     이 데모 데이터가 중복 시도되는 걸 막기 위해 init_db()에서 APP_ENV==local일 때만 호출한다.
     """
     import models
+
     from core.auth import hash_password
 
     with Session(engine) as session:

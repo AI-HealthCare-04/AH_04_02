@@ -7,11 +7,8 @@ test_login_lockout_and_password_reset.py — REQ-039 (2026-07-15 추가)
 from datetime import datetime, timedelta
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, create_engine, select
-from sqlmodel.pool import StaticPool
-
 from core.database import get_session
+from fastapi.testclient import TestClient
 from main import app
 from models import Caregiver, PasswordResetCode
 from routers.auth_router import (
@@ -19,6 +16,8 @@ from routers.auth_router import (
     MAX_FAILED_LOGIN_ATTEMPTS,
     MAX_RESET_CODE_VERIFY_ATTEMPTS,
 )
+from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel.pool import StaticPool
 
 
 @pytest.fixture(name="session")

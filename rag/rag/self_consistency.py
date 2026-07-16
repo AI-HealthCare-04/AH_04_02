@@ -1,5 +1,4 @@
 import numpy as np
-
 from rag.vectorstore import get_embedding_function
 
 

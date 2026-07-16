@@ -8,11 +8,11 @@ dependencies.py — 로그인한 사용자(보호자/환자)를 구하는 공용
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from models import Caregiver, CaregiverPatient, Patient
 from sqlmodel import Session, select
 
 from core.auth import decode_token
 from core.database import get_session
-from models import Caregiver, CaregiverPatient, Patient
 
 security = HTTPBearer()
 

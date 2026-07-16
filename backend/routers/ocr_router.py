@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import sys
 import tempfile
 from pathlib import Path
 
@@ -25,14 +24,15 @@ from sqlmodel import Session, select
 # (uvicorn을 backend/ 폴더에서 실행하면 그 폴더 자체가 이미 import 루트가 됨)
 _ROOT = Path(__file__).parent.parent
 from dotenv import load_dotenv
+
 load_dotenv(_ROOT / ".env")
 
-from services.ocr_interface import get_ocr_provider  # noqa: E402
 from core.database import get_session
 from core.dependencies import Actor, get_current_actor, require_actor_patient_access
-from services.drug_matcher import MATCH_THRESHOLD, match_drug
 from models import MedicalRecord, OcrResult
+from services.drug_matcher import MATCH_THRESHOLD, match_drug
 from services.drug_reference import get_drug_info
+from services.ocr_interface import get_ocr_provider  # noqa: E402
 
 router = APIRouter(prefix="/ocr", tags=["OCR"])
 

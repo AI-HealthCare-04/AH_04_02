@@ -23,8 +23,8 @@ from sqlmodel import Session, select
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import database  # noqa: E402
 import models  # noqa: E402
+from core import database  # noqa: E402
 from core.auth import hash_password  # noqa: E402
 from core.security import normalize_email  # noqa: E402
 
@@ -135,7 +135,7 @@ def main() -> None:
             session.add(record)
             session.commit()
 
-            print(f"  └ 의약품 2건 + 스케줄 1건 + 복약기록 1건 생성 완료")
+            print("  └ 의약품 2건 + 스케줄 1건 + 복약기록 1건 생성 완료")
 
     print("\n=== 시드 완료 ===")
     print(f"로그인 테스트: identifier={SEED_CAREGIVER_EMAIL} 또는 patient 이메일, password={SEED_PASSWORD}")

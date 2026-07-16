@@ -2,7 +2,6 @@ import html
 import re
 
 from langchain_core.documents import Document
-
 from rag.schemas import DRUG_FIELD_LABELS, DrugInfo, KdcaHealthInfoSection, LifestyleGuideline
 
 _TAG_RE = re.compile(r"<[^>]+>")

@@ -11,16 +11,17 @@ schedule_v6의 "동기 방식" 원칙 그대로: 폴링도 스트리밍도 없�
 3) 응답이 오면 그 데이터를 그대로 들고 /result로 이동 (재조회 없음)
 """
 from __future__ import annotations
+
 import asyncio
 import json
 
+from core.database import get_session
+from core.dependencies import Actor, get_current_actor, require_actor_patient_access
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from models import Caregiver, GuideResult, MedicalRecord, MedicationSchedule, OcrResult
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from core.database import get_session
-from core.dependencies import Actor, get_current_actor, require_actor_patient_access
-from models import Caregiver, GuideResult, MedicalRecord, MedicationSchedule, OcrResult, Patient
 from routers.ocr_router import run_ocr
 from routers.rag_router import run_rag
 
@@ -327,7 +328,7 @@ async def confirm_medications(
 
     try:
         guide = await run_rag(record.id, session)
-    except ValueError as e:
+    except ValueError:
         def _mark_failed() -> None:
             record.status = "failed"
             record.failure_reason = str(e)

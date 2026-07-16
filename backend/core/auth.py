@@ -13,7 +13,7 @@ auth.py — 비밀번호 해시 + JWT 발급/검증 (담당: 박소정, 환자 �
 """
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import jwt
 from passlib.context import CryptContext
@@ -43,7 +43,7 @@ def _create_token(subject_id: int, role: str, token_type: str, expires_delta: ti
         "subject_id": subject_id,
         "role": role,  # "caregiver" | "patient"
         "type": token_type,
-        "exp": datetime.now(timezone.utc) + expires_delta,
+        "exp": datetime.now(UTC) + expires_delta,
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -62,7 +62,7 @@ def create_refresh_token(subject_id: int, role: str) -> tuple[str, str]:
         "role": role,
         "type": "refresh",
         "jti": jti,
-        "exp": datetime.now(timezone.utc) + timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES),
+        "exp": datetime.now(UTC) + timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES),
     }
     token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
     return token, jti

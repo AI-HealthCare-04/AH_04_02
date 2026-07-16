@@ -1,7 +1,11 @@
 import argparse
 import json
 
-from rag.chunking import drugs_to_documents, kdca_health_info_sections_to_documents, lifestyle_guidelines_to_documents
+from rag.chunking import (
+    drugs_to_documents,
+    kdca_health_info_sections_to_documents,
+    lifestyle_guidelines_to_documents,
+)
 from rag.kdca_health_info_data import load_kdca_health_info_sections
 from rag.lifestyle_data import load_lifestyle_guidelines
 from rag.mfds_client import fetch_page, search_by_name

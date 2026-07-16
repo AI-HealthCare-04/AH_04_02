@@ -22,13 +22,12 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from sqlmodel import Session, select
-
 from core.database import get_session
 from core.dependencies import Actor, get_current_actor, require_actor_patient_access
+from fastapi import APIRouter, Depends, HTTPException
 from models import MedicationRecord, MedicationSchedule, PatientMedication
+from pydantic import BaseModel
+from sqlmodel import Session, select
 
 router = APIRouter(prefix="/patients", tags=["PatientMedications"])
 

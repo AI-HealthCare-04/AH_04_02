@@ -11,7 +11,7 @@ import ssl
 import sys
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -102,7 +102,7 @@ def main():
             if content is None:
                 failed.append(cntnts_sn)
             else:
-                content["fetched_at"] = datetime.now(timezone.utc).isoformat()
+                content["fetched_at"] = datetime.now(UTC).isoformat()
                 out_f.write(json.dumps(content, ensure_ascii=False) + "\n")
                 out_f.flush()
 

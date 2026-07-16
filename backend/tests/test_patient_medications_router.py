@@ -2,14 +2,13 @@
 test_patient_medications_router.py — /patients/{patient_id}/medications 등 신규 API 테스트 (2026-07-14 추가)
 """
 import pytest
-from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, create_engine
-from sqlmodel.pool import StaticPool
-
 from core.auth import create_access_token
 from core.database import get_session
+from fastapi.testclient import TestClient
 from main import app
 from models import Caregiver, CaregiverPatient, Patient
+from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel.pool import StaticPool
 
 
 @pytest.fixture(name="session")

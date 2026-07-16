@@ -108,7 +108,9 @@ if _CHAT_PROVIDER == "real":
         sys.path.insert(0, str(_RAG_DIR))
 
     try:
-        from langchain_openai import ChatOpenAI  # noqa: F401 — 임포트 가능 여부만 확인(실사용은 지연 임포트)
+        from langchain_openai import (
+            ChatOpenAI,  # noqa: F401 — 임포트 가능 여부만 확인(실사용은 지연 임포트)
+        )
         from rag.config import settings as _rag_settings
 
         _CHAT_LLM_AVAILABLE = bool(_rag_settings.OPENAI_API_KEY)

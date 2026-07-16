@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 생약 약재정보 전체 수집 → herb_reference.csv 생성
 
@@ -78,7 +77,7 @@ def extract_rows(body: dict) -> list[dict]:
 def main():
     service_key = os.environ.get("HERB_API_KEY", "")
     if not service_key:
-        raise EnvironmentError("HERB_API_KEY가 .env에 없습니다.")
+        raise OSError("HERB_API_KEY가 .env에 없습니다.")
 
     print("1페이지 요청 중...")
     data = fetch_page(service_key, 1)

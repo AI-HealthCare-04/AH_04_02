@@ -38,3 +38,26 @@ dependencies = [
 dev = [
     "pytest>=8.0",
 ]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+exclude = [
+    ".venv", "venv", "__pycache__", ".git",
+    "migrations", "alembic",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "N",   # pep8-naming
+]
+ignore = [
+    "E501",  # line-length는 formatter에 위임
+    "B008",  # FastAPI Depends() in default args — 관용 패턴, false positive
+]

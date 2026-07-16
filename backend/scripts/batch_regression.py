@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 24개 목업 이미지 배치 회귀 테스트 — parsing_rules.py 직접 호출 방식
 
@@ -15,8 +14,9 @@ from pathlib import Path
 BACKEND = Path("/Users/admin/backend")
 sys.path.insert(0, str(BACKEND))
 
-from services.parsing_rules import parse_prescription, _detect_format
 from services.drug_reference import get_drug_class
+from services.parsing_rules import _detect_format, parse_prescription
+
 
 # parse_prescription()이 반환하는 drug_class는 parsing_rules.DRUG_CLASS_DICTIONARY(9종)
 # 기반의 lookup_drug_class()만 사용한다.

@@ -22,9 +22,12 @@ def _run(code: str, extra_env: dict) -> subprocess.CompletedProcess:
     import os
 
     # [주의] conftest.py가 이 테스트 프로세스 자체의 os.environ에 DATABASE_URL=sqlite://를
-    # setdefault로 심어둔다 — 그걸 그대로 상속하면 "DATABASE_URL 없음" 케이스를 재현할 수
-    # 없으므로, 서브프로세스 환경에서는 DATABASE_URL/APP_ENV를 명시적으로 지우고 시작한다.
-    env = {k: v for k, v in os.environ.items() if k not in ("DATABASE_URL", "APP_ENV")}
+    # setdefault로 심어둔다. 또 다른 테스트 파일이 `from main import app`하면 main.py의
+    # load_dotenv()가 backend/.env를 os.environ에 주입해서 DATABASE_SSL_REQUIRED=true 등이
+    # 부모 프로세스 환경에 섞인다 — 이것들이 서브프로세스로 누수되면 "SSL 없음" 케이스를
+    # 재현할 수 없으므로, DATABASE_* 변수 전체를 지우고 시작한다.
+    _DB_KEYS = {"DATABASE_URL", "APP_ENV", "DATABASE_SSL_REQUIRED", "DATABASE_SSL_CA"}
+    env = {k: v for k, v in os.environ.items() if k not in _DB_KEYS}
     env.update(_BASE_ENV)
     env.update(extra_env)
     return subprocess.run(

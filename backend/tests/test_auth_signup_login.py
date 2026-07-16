@@ -5,12 +5,11 @@ test_auth_signup_login.py — 회원가입→로그인 흐름, 중복가입, 잘
 핵심 요구사항이었다 — 이 테스트들이 그 계약을 명시적으로 고정한다.
 """
 import pytest
+from core.database import get_session
 from fastapi.testclient import TestClient
+from main import app
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
-
-from core.database import get_session
-from main import app
 
 
 @pytest.fixture(name="session")

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 처방전 raw_text 파싱 규칙
 
@@ -32,7 +31,6 @@ mock_pharmacy_bag_format.png 같이 "약품명/성분 | 복약안내 | 투약량
 import csv
 import re
 from pathlib import Path
-from typing import Optional
 
 # ─────────────────────────────────────────────────────────────
 # 1. 약어 → 한국어 매핑
@@ -166,7 +164,7 @@ def lookup_drug_class(drug_name: str) -> str:
 
 # ── 한방 첩약 보조 함수 ──────────────────────────────────────────
 
-_herb_name_set: Optional[set] = None
+_herb_name_set: set | None = None
 
 
 def _load_herb_names() -> set[str]:

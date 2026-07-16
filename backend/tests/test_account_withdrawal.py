@@ -6,13 +6,12 @@ test_account_withdrawal.py — REQ-035 (2026-07-15 추가)
 from datetime import datetime, timedelta
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, create_engine, select
-from sqlmodel.pool import StaticPool
-
 from core.database import get_session
+from fastapi.testclient import TestClient
 from main import app
 from models import Patient, PrivacyPurgeAudit
+from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel.pool import StaticPool
 
 
 @pytest.fixture(name="session")

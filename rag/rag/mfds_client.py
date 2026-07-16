@@ -3,7 +3,6 @@ import time
 import xml.etree.ElementTree as ET
 
 import requests
-
 from rag.config import settings
 from rag.schemas import DrugInfo, DrugPermitDetail, DrugPermitInfo
 

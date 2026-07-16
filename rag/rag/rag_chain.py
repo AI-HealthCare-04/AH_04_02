@@ -9,7 +9,12 @@ from rag.dur_master import (
     search_usjnt_taboo,
 )
 from rag.hira_master import search_by_product_name as search_hira_by_product_name
-from rag.mfds_client import parse_doc_sections, search_by_name, search_permit_detail, search_permit_info
+from rag.mfds_client import (
+    parse_doc_sections,
+    search_by_name,
+    search_permit_detail,
+    search_permit_info,
+)
 from rag.schemas import (
     DrugPermitInfo,
     DurCaution,

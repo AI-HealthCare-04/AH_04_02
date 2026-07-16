@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 drug_reference.py — HIRA 약가마스터 + e약은요 DB + ATC 패턴 기반 약효 분류 모듈
 
@@ -26,7 +25,6 @@ import logging
 import re
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Optional
 
 _logger = logging.getLogger(__name__)
 
@@ -130,7 +128,7 @@ def _class_from_atc_code(atc_code: str) -> str:
 # ──────────────────────────────────────────────────────────────────
 
 _HIRA_PATH = _BASE / "hira_drug_master_20251031.csv"
-_hira_code_map: Optional[dict] = None
+_hira_code_map: dict | None = None
 _hira_name_df = None
 
 
@@ -278,7 +276,7 @@ def _class_from_atc_pattern(drug_name: str) -> str:
 # ──────────────────────────────────────────────────────────────────
 
 _EMED_PATH = _BASE / "2_e약은요_정리.xlsx"
-_drug_table: Optional[list[dict]] = None
+_drug_table: list[dict] | None = None
 
 _STRIP_RE = re.compile(
     r"\d+(?:\.\d+)?(?:mg|g|ml|밀리그램|그램)"
@@ -345,7 +343,7 @@ def _class_from_efcy(efcy: str) -> str:
     return ""
 
 
-def _lookup_emedinfo(drug_name: str) -> Optional[dict]:
+def _lookup_emedinfo(drug_name: str) -> dict | None:
     norm_name = _normalize_name(drug_name)
     if len(norm_name) < 3:
         return None

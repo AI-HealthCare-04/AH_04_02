@@ -1,11 +1,11 @@
-# -*- coding: utf-8 -*-
 """
 한방 첩약 처방전 목업 생성 — _parse_oriental_format() 파서 검증용.
 '약재명 중량g' 반복 패턴을 포함한 한의원 처방전 형식.
 """
 
-from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageFont
 
 FONT_PATH  = "/System/Library/Fonts/AppleSDGothicNeo.ttc"
 OUTPUT     = Path(__file__).parent / "mock_oriental_prescription.png"
