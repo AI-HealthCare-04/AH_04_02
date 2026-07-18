@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 10개 추가 목업 - 새로운 진료과/상황 커버.
 표준양식(mock_prescription_official.png) 틀 재사용.

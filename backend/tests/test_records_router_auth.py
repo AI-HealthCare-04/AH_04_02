@@ -8,14 +8,13 @@ records_router.py — record_id 기반 엔드포인트 소유권 검증 테스�
 를 보장하는지 확인한다.
 """
 import pytest
+from core.auth import create_access_token
+from core.database import get_session
 from fastapi.testclient import TestClient
+from main import app
+from models import Caregiver, CaregiverPatient, MedicalRecord, OcrResult, Patient
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
-
-from main import app
-from core.database import get_session
-from core.auth import create_access_token
-from models import Caregiver, Patient, CaregiverPatient, MedicalRecord, OcrResult
 
 
 @pytest.fixture(name="session")

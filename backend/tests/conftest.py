@@ -16,6 +16,7 @@ from pathlib import Path
 os.environ.setdefault("PII_ENCRYPTION_KEY", "c7Ka8_mp2rYGAesszwMtAXutMT8rq2SqDyVnhjU6H_8=")  # 테스트 전용 더미 키
 os.environ.setdefault("PII_HASH_SECRET", "test-only-hash-secret-do-not-use-in-prod")
 os.environ.setdefault("SECRET_KEY", "test-only-jwt-secret-do-not-use-in-prod")
+os.environ.setdefault("DATA_GO_KR_SERVICE_KEY", "test-only-data-go-kr-service-key")
 # [2026-07-14 추가] TestClient(app)가 FastAPI startup 이벤트(init_db())를 실제로 실행시키는데,
 # APP_ENV/DATABASE_URL을 안 정해주면 개발자의 진짜 로컬 app.db를 건드릴 수 있다 —
 # 완전히 분리된 in-memory SQLite를 가리키도록 고정한다 (각 테스트 파일의 실제 assertion은

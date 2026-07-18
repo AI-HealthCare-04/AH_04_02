@@ -29,6 +29,7 @@ dependencies = [
     "numpy>=1.26",
     "pymysql>=1.2.0",
     "alembic>=1.18.5",
+    "langfuse>=3.0",
 ]
 
 # backend(routers/chat_router.py)가 rag/를 sys.path에 얹어 같은 프로세스에서 import하므로
@@ -37,4 +38,65 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "ruff>=0.11",
+    "ty>=0.0.59",
+    "pillow>=10.0",       # generate_mock_*.py 스크립트 + TesseractOCRProvider 폴백
+    "pytesseract>=0.3",   # TesseractOCRProvider CLOVA 장애 폴백 (시스템: brew install tesseract)
+]
+
+[tool.ty.environment]
+# rag/, backend/, backend/scripts/는 venv 외부의 내부 패키지 경로
+# (rag.config, services.langfuse_tracing, purge_expired_accounts 등 unresolved-import 방지)
+extra-paths = ["rag", "backend", "backend/scripts"]
+
+[tool.ty.src]
+# alembic 자동생성 버전 파일·일회성 마이그레이션 스크립트는 타입 검사 대상 제외
+# (ty check 대상: routers, services, core, tests, main, rag 패키지만)
+include = [
+    "backend/core/**", "backend/routers/**", "backend/services/**",
+    "backend/tests/**", "backend/main.py",
+    "rag/rag/**", "rag/tests/**",
+]
+
+[tool.ty.rules]
+# SQLModel/SQLAlchemy ORM 디스크립터 false positive 전역 억제
+# LaxInt 패턴 (model.id: int|None → SQLModel constructor int 기대),
+# ColumnElement 패턴 (.where(col==val) → bool로 추론),
+# .order_by(col) → Python 기본 타입으로 추론 등 ~115건이 이 규칙에서 발생.
+# ty 0.0.59는 SQLAlchemy InstrumentedAttribute 디스크립터를 지원하지 않아 생기는 false positive.
+# 런타임 동작에는 영향 없음. ty가 SQLModel 지원을 추가하면 이 줄을 제거할 것.
+"invalid-argument-type" = "ignore"
+
+# ---------------------------------------------------------------------------
+# ty check 잔여 진단 현황 (2026-07-16 기준)
+#   위 설정 적용 후: 73건 (295 - 115 invalid-argument-type - 107 alembic/scripts 제외)
+#
+# ■ 본인 파일 (권순현): records_router.py 3건, rag_router.py 1건
+# ■ 팀원 파일: monitoring 7, auth 7, patient_medications 5, chat 3, care 2, rag_chain 2
+# ■ 테스트: test_purge 13, test_login_lockout 12, test_account_withdrawal 11, 기타 4
+# ■ unresolved-attribute 중 ORM 패턴(.desc/.in_/.is_)은 팀원 파일에 집중 —
+#   팀원 PR 리뷰 시 inline `# ty: ignore[unresolved-attribute]` 추가 권장
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+exclude = [
+    ".venv", "venv", "__pycache__", ".git",
+    "migrations", "alembic",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "N",   # pep8-naming
+]
+ignore = [
+    "E501",  # line-length는 formatter에 위임
+    "B008",  # FastAPI Depends() in default args — 관용 패턴, false positive
 ]

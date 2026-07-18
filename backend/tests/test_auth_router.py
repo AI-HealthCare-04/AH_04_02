@@ -1,8 +1,7 @@
 """_issue_login_response() 회귀 테스트 — PR #22 리뷰에서 발견된 NameError 재발 방지"""
 from fastapi import Response
-from sqlmodel import Session, SQLModel, create_engine
-
 from routers.auth_router import _issue_login_response
+from sqlmodel import Session, SQLModel, create_engine
 
 
 def test_issue_login_response_returns_name_and_id_for_given_subject():

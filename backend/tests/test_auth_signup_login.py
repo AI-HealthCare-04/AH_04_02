@@ -5,12 +5,11 @@ test_auth_signup_login.py — 회원가입→로그인 흐름, 중복가입, 잘
 핵심 요구사항이었다 — 이 테스트들이 그 계약을 명시적으로 고정한다.
 """
 import pytest
+from core.database import get_session
 from fastapi.testclient import TestClient
+from main import app
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
-
-from core.database import get_session
-from main import app
 
 
 @pytest.fixture(name="session")
@@ -113,3 +112,30 @@ class TestAuthFlow:
         """[2026-07-14] POST /auth/signup는 monitoring_router.py와 중복되는 죽은 코드라 제거함."""
         r = client.post("/auth/signup", json={"email": "x@test.com", "password": "pw", "name": "x"})
         assert r.status_code == 404
+
+    def test_caregiver_signup_rejects_relation_type_outside_guardian_or_organization(self, client: TestClient):
+        """[2026-07-16 추가] relation_type이 그냥 VARCHAR라 검증 없이는 임의 값이 저장됐다 —
+        실제로 프론트가 보내는 값(guardian/organization)만 허용하도록 Literal 검증 추가."""
+        r = client.post(
+            "/monitoring/caregivers",
+            json={
+                "name": "잘못된값테스트",
+                "email": "badrole@test.com",
+                "password": "pw123456",
+                "relation_type": "life_support_worker",
+            },
+        )
+        assert r.status_code == 422
+
+    def test_caregiver_signup_accepts_organization_relation_type(self, client: TestClient):
+        r = client.post(
+            "/monitoring/caregivers",
+            json={
+                "name": "행복요양원",
+                "email": "org-ok@test.com",
+                "password": "pw123456",
+                "relation_type": "organization",
+            },
+        )
+        assert r.status_code == 200
+        assert r.json()["relation_type"] == "organization"

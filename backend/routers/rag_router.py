@@ -27,7 +27,9 @@ import asyncio
 import json
 import os
 import sys
+from collections.abc import Sequence
 from pathlib import Path
+from typing import cast
 
 from core.database import get_session
 from core.dependencies import Actor, get_current_actor, require_actor_patient_access
@@ -58,7 +60,7 @@ if _RAG_PROVIDER == "real":
         _RAG_AVAILABLE = False
 
 
-def _fake_guide_payload(ocr_items: list[OcrResult]) -> tuple[dict, dict, list]:
+def _fake_guide_payload(ocr_items: Sequence[OcrResult]) -> tuple[dict, dict, list]:
     """실제 파이프라인 연동 전까지 쓰는 흐름 확인용 가짜 데이터 (Result.tsx가 기대하는 모양)."""
     medication_guide = {
         "drugs": [
@@ -75,7 +77,7 @@ def _fake_guide_payload(ocr_items: list[OcrResult]) -> tuple[dict, dict, list]:
     return medication_guide, lifestyle_guide, source_refs
 
 
-def _generate_via_rag(ocr_items: list[OcrResult]) -> tuple[dict, dict, list] | None:
+def _generate_via_rag(ocr_items: Sequence[OcrResult]) -> tuple[dict, dict, list] | None:
     """rag 실제 파이프라인 호출. 실패하거나 사용 불가하면 None(호출부가 폴백 처리)."""
     if not _RAG_AVAILABLE:
         return None
@@ -213,8 +215,8 @@ async def stub_generate_guide(
     session.get()을 asyncio.to_thread로 감싸는 쪽(이 async 함수 안에서 동기 SQLModel
     호출을 직접 부르면 이벤트 루프를 막는다는 이 파일 상단 docstring의 기존 관례)을 채택.
     """
-    record = await asyncio.to_thread(session.get, MedicalRecord, record_id)
-    if not record:
+    record = cast(MedicalRecord | None, await asyncio.to_thread(session.get, MedicalRecord, record_id))
+    if record is None:
         raise HTTPException(404, "해당 기록을 찾을 수 없어요")
     await asyncio.to_thread(require_actor_patient_access, record.patient_id, actor, session)
 

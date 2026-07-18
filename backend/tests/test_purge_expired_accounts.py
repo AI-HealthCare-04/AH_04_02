@@ -15,7 +15,6 @@ from sqlmodel.pool import StaticPool
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import purge_expired_accounts as purge  # noqa: E402
-
 from core import database
 from core.auth import hash_password
 from models import Patient, PrivacyPurgeAudit

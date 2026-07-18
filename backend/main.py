@@ -23,6 +23,7 @@ schedule_v6에서 시간·인력 상 이번 스프린트 스코프에서 뺐었�
 → http://localhost:8000/docs 열리면 성공
 """
 from __future__ import annotations
+
 import os
 from pathlib import Path
 
@@ -33,10 +34,9 @@ from dotenv import load_dotenv
 # 상태로 실패했다. 라우터 임포트보다 먼저, 여기 한 곳에서만 로드한다.
 load_dotenv(Path(__file__).parent / ".env")
 
+from core.database import init_db, log_db_connection_info
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
-from core.database import init_db, log_db_connection_info
 from routers import (
     auth_router,
     care_router,

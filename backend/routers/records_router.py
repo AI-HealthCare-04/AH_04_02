@@ -11,17 +11,19 @@ schedule_v6의 "동기 방식" 원칙 그대로: 폴링도 스트리밍도 없�
 3) 응답이 오면 그 데이터를 그대로 들고 /result로 이동 (재조회 없음)
 """
 from __future__ import annotations
+
 import asyncio
 import json
+from collections.abc import Sequence
 from datetime import datetime
-
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from pydantic import BaseModel
-from sqlmodel import Session, select
 
 from core.database import get_session
 from core.dependencies import Actor, get_current_actor, require_actor_patient_access
-from models import Caregiver, GuideResult, MedicalRecord, MedicationSchedule, OcrResult, Patient
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from models import Caregiver, GuideResult, MedicalRecord, MedicationSchedule, OcrResult
+from pydantic import BaseModel
+from sqlmodel import Session, select
+
 from routers.ocr_router import run_ocr
 from routers.rag_router import run_rag
 
@@ -39,7 +41,7 @@ _DEFAULT_TIME_SLOTS = {
 }
 
 
-def _create_schedules_from_ocr(record: MedicalRecord, ocr_items: list[OcrResult], session: Session) -> None:
+def _create_schedules_from_ocr(record: MedicalRecord, ocr_items: Sequence[OcrResult], session: Session) -> None:
     for item in ocr_items:
         if not item.drug_name:
             continue
@@ -253,7 +255,7 @@ def list_records(
         select(MedicalRecord)
         .where(MedicalRecord.patient_id == patient_id)
         .where(MedicalRecord.deleted_at.is_(None))
-        .order_by(MedicalRecord.created_at.desc())
+        .order_by(MedicalRecord.created_at.desc())  # ty: ignore[unresolved-attribute]
     ).all()
 
     summaries = []
@@ -354,10 +356,12 @@ async def confirm_medications(
 
     try:
         guide = await run_rag(record.id, session)
-    except ValueError as e:
+    except ValueError as exc:
+        _failure_reason = str(exc)  # except 블록 밖에서 e가 삭제되기 전에 캡처
+
         def _mark_failed() -> None:
             record.status = "failed"
-            record.failure_reason = str(e)
+            record.failure_reason = _failure_reason
             session.add(record)
             session.commit()
             session.refresh(record)
@@ -400,6 +404,6 @@ def get_record(
     guide = session.exec(
         select(GuideResult)
         .where(GuideResult.record_id == record_id)
-        .order_by(GuideResult.id.desc())
+        .order_by(GuideResult.id.desc())  # ty: ignore[unresolved-attribute]
     ).first()
     return _build_record_response(record, session, guide)

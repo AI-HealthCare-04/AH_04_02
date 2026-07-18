@@ -6,12 +6,11 @@
 보호자가 연결된 환자면 거부하도록 고쳤다 — 방금 만든 환자에 본인을 최초 연결하는
 정상 플로우는 그대로 통과해야 한다.
 """
+import models
 import pytest
 from fastapi import HTTPException
-from sqlmodel import Session, SQLModel, create_engine, select
-
-import models
 from routers.monitoring_router import link_caregiver_to_patient
+from sqlmodel import Session, SQLModel, create_engine, select
 
 
 def _make_session():

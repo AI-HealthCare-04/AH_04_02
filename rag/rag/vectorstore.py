@@ -3,8 +3,25 @@ from functools import lru_cache
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
-
 from rag.config import settings
+
+try:
+    from services.langfuse_tracing import (
+        flush_langfuse,
+        optional_observation,
+        update_observation,
+    )
+except Exception:  # noqa: BLE001 — rag 단독 실행 시 backend/services가 없어도 RAG는 동작해야 함
+    def optional_observation(**_kwargs):
+        from contextlib import nullcontext
+
+        return nullcontext(None)
+
+    def update_observation(_observation, **_kwargs) -> None:
+        return None
+
+    def flush_langfuse() -> None:
+        return None
 
 
 @lru_cache(maxsize=1)
@@ -87,7 +104,40 @@ def search_by_item_name(item_name: str) -> list[Document]:
 
 def similarity_search(query: str, k: int | None = None, filter: dict | None = None) -> list[Document]:
     store = get_vectorstore()
-    return store.similarity_search(query, k=k or settings.TOP_K, filter=filter)
+    top_k = k or settings.TOP_K
+    with optional_observation(
+        as_type="retriever",
+        name="retrieve-from-chromadb",
+        input={
+            "query_omitted": True,
+            "query_length": len(query or ""),
+            "top_k": top_k,
+            "filter": filter,
+            "collection": settings.CHROMA_COLLECTION_NAME,
+        },
+    ) as observation:
+        docs = store.similarity_search(query, k=top_k, filter=filter)
+        update_observation(
+            observation,
+            output={
+                "retrieved_count": len(docs),
+                "top_k": top_k,
+                "documents": [
+                    {
+                        "doc_type": doc.metadata.get("doc_type"),
+                        "title": doc.metadata.get("title"),
+                        "source": doc.metadata.get("source"),
+                        "item_name": doc.metadata.get("item_name"),
+                        "field": doc.metadata.get("field") or doc.metadata.get("field_label"),
+                        "disease": doc.metadata.get("disease") or doc.metadata.get("disease_code"),
+                        "category": doc.metadata.get("category"),
+                    }
+                    for doc in docs[:top_k]
+                ],
+            },
+        )
+        flush_langfuse()
+        return docs
 
 
 def search_kdca_health_info(query: str, k: int | None = None) -> list[Document]:

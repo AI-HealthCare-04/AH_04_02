@@ -15,15 +15,11 @@ POST /monitoring/caregivers와 완전히 중복되는 죽은 코드였다(프론
 방지를 위해 제거. 가입은 항상 monitoring_router.py를 통해서만.
 """
 from __future__ import annotations
+
 import logging
 from datetime import datetime, timedelta
 
 import jwt
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
-from pydantic import BaseModel
-from sqlalchemy import update
-from sqlmodel import Session, select
-
 from core.auth import (
     REFRESH_TOKEN_EXPIRE_MINUTES,
     create_access_token,
@@ -38,7 +34,11 @@ from core.database import get_session
 from core.dependencies import Actor, get_current_actor
 from core.email import send_password_reset_email
 from core.security import generate_reset_code, hash_phone, hash_reset_code, normalize_email
-from models import Caregiver, Patient, PasswordResetCode, PrivacyPurgeAudit, RefreshToken
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from models import Caregiver, PasswordResetCode, Patient, PrivacyPurgeAudit, RefreshToken
+from pydantic import BaseModel
+from sqlalchemy import update
+from sqlmodel import Session, select
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 drug_matcher.py — OCR 약품명 유사도 매칭
 

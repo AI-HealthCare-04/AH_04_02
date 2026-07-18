@@ -12,25 +12,25 @@ Figma에만 있고 백엔드가 없던 3개 기능을 여기 모았습니다:
 없는 사람이 링크만 갖고 처리해야 하는 게 기능의 전제라 인증 없이 그대로 둡니다.
 """
 from __future__ import annotations
+
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional
-
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from sqlmodel import Session, select
+from typing import Literal, Optional
 
 from core.database import get_session
 from core.dependencies import Actor, get_current_actor, require_actor_patient_access
 from core.security import hash_token, normalize_phone
+from fastapi import APIRouter, Depends, HTTPException
 from models import (
-    CareLevelAssessment,
     Caregiver,
     CaregiverPatient,
+    CareLevelAssessment,
     Invitation,
     NotificationSetting,
     Patient,
 )
+from pydantic import BaseModel
+from sqlmodel import Session, select
 
 INVITATION_EXPIRE_DAYS = 7
 
@@ -106,7 +106,10 @@ def get_latest_assessment(
 # ══════════════════════════════════════════
 class InvitationCreate(BaseModel):
     patient_id: int
-    relation_type: str = "guardian"
+    # Connect.tsx의 보호자 초대 UI에서 실제로 선택 가능한 4개 값만 허용한다.
+    # 직접 가입(CaregiverCreate)은 guardian/organization 흐름이고, 초대는 현장 돌봄 관계라
+    # caregiver/life_support_worker/social_worker까지 별도로 허용한다.
+    relation_type: Literal["guardian", "caregiver", "life_support_worker", "social_worker"] = "guardian"
     invited_phone: str | None = None
     inviter_caregiver_id: int | None = None
 

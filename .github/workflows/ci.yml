@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+        continue-on-error: true  # 57건 pre-existing(B904/E402/B905/N806 등) 팀 파일 분산 — 팀 전체 정리 후 필수 게이트로 전환 예정
+
+      - name: Type check (ty)
+        run: uv run ty check .
+        continue-on-error: true  # 69건 잔존(SQLModel false positive 억제 후) — 팀원 파일 포함, 당장 필수 게이트로 쓰지 않음
+
+      - name: Test (pytest)
+        run: uv run pytest backend/tests/ -q
+        env:
+          APP_ENV: test
+          DATABASE_URL: sqlite://

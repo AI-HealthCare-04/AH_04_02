@@ -1,7 +1,8 @@
+from pathlib import Path
+
 from rag.chunking import drug_to_documents, kdca_health_info_sections_to_documents
 from rag.kdca_health_info_data import load_kdca_health_info_sections
 from rag.schemas import DrugInfo
-from pathlib import Path
 
 KDCA_FIXTURE_PATH = Path(__file__).parent / "fixtures" / "kdca_healthinfo_sample.jsonl"
 

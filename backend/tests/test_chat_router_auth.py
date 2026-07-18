@@ -9,14 +9,13 @@ POST /chat/ask, GET /chat/history 두 엔드포인트가 모두:
 를 보장하는지 확인한다. test_records_router_auth.py와 동일한 패턴.
 """
 import pytest
+from core.auth import create_access_token
+from core.database import get_session
 from fastapi.testclient import TestClient
+from main import app
+from models import Caregiver, CaregiverPatient, Patient
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
-
-from main import app
-from core.database import get_session
-from core.auth import create_access_token
-from models import Caregiver, Patient, CaregiverPatient
 
 
 @pytest.fixture(name="session")

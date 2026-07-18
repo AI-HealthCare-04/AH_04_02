@@ -30,8 +30,8 @@ from sqlmodel import Session, select
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import database  # noqa: E402
 import models  # noqa: E402
+from core import database  # noqa: E402
 from core.security import encrypt_pii  # noqa: E402
 
 _PURGED_NAME_PLACEHOLDER = "(탈퇴 회원)"

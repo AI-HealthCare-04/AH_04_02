@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 """
@@ -12,15 +11,14 @@ OCR Provider 추상화 레이어
     result = provider.extract("samples/prescription_01.jpg")
 """
 
+import json
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Literal
-import json
-import os
 
-from services.parsing_rules import parse_prescription
 from services.drug_reference import get_drug_class
-
+from services.parsing_rules import parse_prescription
 
 # ------------------------------------------------------------------
 # 1. 출력 스키마 (Day2에 ①②③이 이걸 기준으로 합의·고정 예정)
@@ -225,6 +223,7 @@ class ClovaOCRProvider(OCRProvider):
         import base64
         import time
         import uuid
+
         import requests
 
         ext = os.path.splitext(image_path)[1].lstrip(".").lower() or "jpg"
