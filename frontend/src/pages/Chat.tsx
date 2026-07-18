@@ -3,7 +3,7 @@ import { useLocation } from "react-router-dom";
 import NavBar from "../components/NavBar";
 import { askChat, askChatFreeform, getChatQuestions, type ChatQuestion } from "../api/chat";
 import { getNotificationSettings } from "../api/care";
-import { getCurrentPatientId } from "../lib/session";
+import { getCurrentPatientId, getCurrentUserName } from "../lib/session";
 import { C } from "../theme";
 
 type Message = { role: "user" | "bot"; text: string; source?: string };
@@ -115,7 +115,7 @@ export default function Chat() {
 
   return (
     <div className="h-screen flex flex-col" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName="김건강" />
+      <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl lg:max-w-4xl mx-auto w-full px-4 py-6 flex flex-col flex-1 min-h-0">
         <div className="mb-5 shrink-0">
           <p className="text-[13px] font-bold mb-1" style={{ color: C.terracotta }}>AI 복약 상담</p>

@@ -56,7 +56,7 @@ CASES = [
             ("케이캡 약품명 포함", lambda m, _: any("케이캡" in x["drug_name"] for x in m)),
             # BARE_FREQ_RE 동작 확인: '7 회' → 케이캡(index 0)에 '1일 7회' 배분
             # 가스모틴(index 2)은 글로벌 freq 배분 한계로 빈값 — 알려진 table 포맷 제약
-            ("BARE_FREQ_RE 동작(케이캡 1일 7회)", lambda m, _: any("케이캡" in x["drug_name"] and x["frequency"] == "1일 7회" for x in m)),
+            ("BARE_FREQ_RE 동작(케이캡 1일 7회)", lambda m, _: any("케이캡" in x["drug_name"] and x["frequency"] == "7회" for x in m)),
         ],
         "notes": "비표준 '7 회' 공백 — BARE_FREQ_RE 경로, 가스모틴 freq 빈값은 table 글로벌 배분 한계",
     },
@@ -71,7 +71,7 @@ CASES = [
         "expect_fmt": "table",
         "min_drugs": 3,
         "checks": [
-            ("암로디핀 drug_class", lambda m, _: any(x["drug_name"] == "암로디핀" and "칼슘채널차단제" in x.get("drug_class","") for x in m)),
+            ("암로디핀 drug_class", lambda m, _: any("암로디핀" in x["drug_name"] and "칼슘채널차단제" in x.get("drug_class","") for x in m)),
             ("진단명 추출", lambda _, d: "고혈압" in d),
         ],
         "notes": "",
@@ -87,7 +87,7 @@ CASES = [
         "expect_fmt": "table",
         "min_drugs": 3,
         "checks": [
-            ("로자탄칼륨 freq", lambda m, _: any(x["drug_name"] == "로자탄칼륨" and x["frequency"] == "1일 2회" for x in m)),
+            ("로자탄칼륨 freq", lambda m, _: any("로자탄칼륨" in x["drug_name"] and x["frequency"] == "2회" for x in m)),
         ],
         "notes": "기울어진/흐린 이미지 — raw_text는 정상 CLOVA 출력 가정",
     },
@@ -117,7 +117,7 @@ CASES = [
         "expect_fmt": "table",
         "min_drugs": 3,
         "checks": [
-            ("메트포르민 freq 1일 2회", lambda m, _: any(x["drug_name"] == "메트포르민" and x["frequency"] == "1일 2회" for x in m)),
+            ("메트포르민 freq 1일 2회", lambda m, _: any("메트포르민" in x["drug_name"] and x["frequency"] == "2회" for x in m)),
         ],
         "notes": "스탬프 겹침 노이즈는 이미지 레이어 — raw_text 파싱에는 영향 없음",
     },
@@ -147,7 +147,7 @@ CASES = [
         "expect_fmt": "list",
         "min_drugs": 2,
         "checks": [
-            ("아모클란 freq 1일 3회", lambda m, _: any("아모클란" in x["drug_name"] and x["frequency"] == "1일 3회" for x in m)),
+            ("아모클란 freq 1일 3회", lambda m, _: any("아모클란" in x["drug_name"] and x["frequency"] == "3회" for x in m)),
         ],
         "notes": "이지엔6프로 drug_class 빈값 알려진 한계(ATC 미등재)",
     },
@@ -191,7 +191,7 @@ CASES = [
         "expect_fmt": "list",
         "min_drugs": 3,
         "checks": [
-            ("자낙스 freq 1일 2회", lambda m, _: any("자낙스" in x["drug_name"] and x["frequency"] == "1일 2회" for x in m)),
+            ("자낙스 freq 1일 2회", lambda m, _: any("자낙스" in x["drug_name"] and x["frequency"] == "2회" for x in m)),
             ("진단명 F41.1", lambda _, d: "F41.1" in d or "범불안" in d),
         ],
         "notes": "F41.1 코드 오분할 수정됨(_split_by_number lookbehind)",
@@ -266,7 +266,7 @@ CASES = [
         "expect_fmt": "official",
         "min_drugs": 3,
         "checks": [
-            ("메트포르민 freq 1일 2회", lambda m, _: any("메트포르민" in x["drug_name"] and x["frequency"] == "1일 2회" for x in m)),
+            ("메트포르민 freq 1일 2회", lambda m, _: any("메트포르민" in x["drug_name"] and x["frequency"] == "2회" for x in m)),
             ("진단명 당뇨병", lambda _, d: "당뇨병" in d),
         ],
         "notes": "퇴원 처방전 — official 포맷 일수 90일",
@@ -328,8 +328,8 @@ CASES = [
         "expect_fmt": "official",
         "min_drugs": 4,
         "checks": [
-            ("세레콕시브 freq 1일 2회", lambda m, _: any("세레콕시브" in x["drug_name"] and x["frequency"] == "1일 2회" for x in m)),
-            ("에페리손 freq 1일 3회", lambda m, _: any("에페리손" in x["drug_name"] and x["frequency"] == "1일 3회" for x in m)),
+            ("세레콕시브 freq 1일 2회", lambda m, _: any("세레콕시브" in x["drug_name"] and x["frequency"] == "2회" for x in m)),
+            ("에페리손 freq 1일 3회", lambda m, _: any("에페리손" in x["drug_name"] and x["frequency"] == "3회" for x in m)),
             ("진단명 무릎관절증", lambda _, d: "무릎관절증" in d),
         ],
         "notes": "",
@@ -345,7 +345,7 @@ CASES = [
         "expect_fmt": "official",
         "min_drugs": 4,
         "checks": [
-            ("아목시실린 freq 1일 3회", lambda m, _: any("아목시실린" in x["drug_name"] and x["frequency"] == "1일 3회" for x in m)),
+            ("아목시실린 freq 1일 3회", lambda m, _: any("아목시실린" in x["drug_name"] and x["frequency"] == "3회" for x in m)),
             ("오메프라졸 freq 추출(BARE_FREQ)", lambda m, _: any("오메프라졸" in x["drug_name"] and x["frequency"] for x in m)),
         ],
         "notes": "Day5 수정: BARE_FREQ_RE·seg_clean 확장으로 오메프라졸·덱사메타손 freq 복원",
@@ -363,8 +363,8 @@ CASES = [
         "expect_fmt": "abbrev",
         "min_drugs": 3,
         "checks": [
-            ("세레브렉스 bid→1일 2회", lambda m, _: any("세레브렉스" in x["drug_name"] and x["frequency"] == "1일 2회" for x in m)),
-            ("졸피뎀 qd→1일 1회", lambda m, _: any("졸피뎀" in x["drug_name"] and x["frequency"] == "1일 1회" for x in m)),
+            ("세레브렉스 bid→1일 2회", lambda m, _: any("세레브렉스" in x["drug_name"] and x["frequency"] == "2회" for x in m)),
+            ("졸피뎀 qd→1일 1회", lambda m, _: any("졸피뎀" in x["drug_name"] and x["frequency"] == "1회" for x in m)),
             ("진단명 골관절염", lambda _, d: "골관절염" in d),
         ],
         "notes": "",
@@ -381,7 +381,7 @@ CASES = [
         "expect_fmt": "abbrev",
         "min_drugs": 2,
         "checks": [
-            ("메트포르민 bid→1일 2회", lambda m, _: any("메트포르민" in x["drug_name"] and x["frequency"] == "1일 2회" for x in m)),
+            ("메트포르민 bid→1일 2회", lambda m, _: any("메트포르민" in x["drug_name"] and x["frequency"] == "2회" for x in m)),
         ],
         "notes": "영문 PascalCase 약품명은 5자+ 매칭(Amlodipine ✓, Rosuvastatin ✓)",
     },
@@ -398,7 +398,7 @@ CASES = [
         "min_drugs": 12,
         "checks": [
             ("12약재 전량", lambda m, _: len(m) == 12),
-            ("days 20첩", lambda m, _: m[0]["days"] == "20첩" if m else False),
+            ("days 20첩", lambda m, _: m[0]["total_days"] == "20첩" if m else False),
             ("drug_class 한방 첩약", lambda m, _: all("한방 첩약" in x.get("drug_class","") for x in m)),
         ],
         "notes": "72cf011 수정: freq 소비 후 days 탐색으로 days=20첩 정상 파싱",

@@ -10,7 +10,7 @@ interface NavBarProps {
 }
 
 const NAV_ITEMS = [
-  { label: "처방전 등록", to: "/upload" },
+  { label: "처방 약 등록", to: "/upload" },
   { label: "복약 일정", to: "/schedule" },
   { label: "등록내역", to: "/records" },
   { label: "복약기록", to: "/monitoring" },

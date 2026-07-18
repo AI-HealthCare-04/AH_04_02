@@ -39,11 +39,11 @@ from typing import Optional
 # ─────────────────────────────────────────────────────────────
 
 FREQ_ABBREV_MAP: dict = {
-    "qd":  "1일 1회",
-    "od":  "1일 1회",
-    "bid": "1일 2회",
-    "tid": "1일 3회",
-    "qid": "1일 4회",
+    "qd":  "1회",
+    "od":  "1회",
+    "bid": "2회",
+    "tid": "3회",
+    "qid": "4회",
     "prn": "필요시",
     "hs":  "취침 전",
     "ac":  "식전",
@@ -76,16 +76,20 @@ DRUG_NAME_RE = re.compile(
     #   — '연질' 앞 lookahead로 '오메가3연질캡슐'에서 3이 연질을 삼키는 것을 방지
     r"(?<![가-힣\d])([가-힣A-Za-z]{2,}(?:\d+(?!연질)[가-힣A-Za-z]{2,})?(?:\d+)?(?:연질)?(?:정|캡슐|주|산|시럽|액|크림|연고|로션|겔|패취)"
     r"|(?-i:[A-Z][a-zA-Z]{4,})(?=\s+\d))"  # 영문 PascalCase 5자+, 바로 뒤에 숫자(용량/횟수) 필수
-    r"(\d+(?:\.\d+)?(?:mg|g|ml|%))?"
+    # [2026-07-18] "정 5mg"처럼 띄어쓴 용량도 이름에 붙게 허용
+    # [2026-07-19] "50/1000mg"같은 복합제 용량(성분 두 개를 슬래시로 묶고 단위는 한 번만
+    # 표기)도 통째로 붙게 허용
+    r"\s?(\d+(?:\.\d+)?(?:\s*/\s*\d+(?:\.\d+)?)?(?:mg|g|ml|%))?"
     r"(?:\([^)]+\))?",
     re.IGNORECASE,
 )
 
-DOSAGE_RE       = re.compile(r"(\d+(?:\.\d+)?)\s*(mg|g|ml|%)", re.IGNORECASE)
+# [2026-07-19] "50/1000mg"(복합제, 예: 글리메피리드/메트포르민)처럼 슬래시로 묶인 두 성분
+# 용량도 하나로 인식 — 뒷 숫자에 붙은 단위 하나만 mg/g/ml/%로 보고, 앞 숫자는 그대로 살린다.
+DOSAGE_RE       = re.compile(r"(\d+(?:\.\d+)?(?:\s*/\s*\d+(?:\.\d+)?)?)\s*(mg|g|ml|%)", re.IGNORECASE)
 KOR_FREQ_RE     = re.compile(r"(?:1\s*일|하루)\s*(\d+)\s*(?:회|번)")  # 1 일 3 회 같은 비표준 공백 허용
 BARE_FREQ_RE    = re.compile(r"(?<!\d)(\d+)\s*회(?!\s*[가-힣\)])")
 ABBREV_FREQ_RE  = re.compile(r"\b(qd|od|bid|tid|qid|prn|hs|ac|pc)\b", re.IGNORECASE)
-MEAL_RE         = re.compile(r"식전|식후")  # 한국어 식사 타이밍 직접 표현 ("식후 30분", "아침 식전" 등)
 DAYS_KOR_RE     = re.compile(r"(\d+)\s*일\s*분")
 DAYS_ABBREV_RE  = re.compile(r"#\s*(\d+)")
 DIAGNOSIS_KOR_RE  = re.compile(r"진단(?:명)?\s*[:：]\s*([^\[\n■]+?)(?=\s+\d+[.)]\s+|[\[\n■]|\Z)")
@@ -106,23 +110,45 @@ _ORIENTAL_DAYS_RE = re.compile(r"(\d+)\s*첩")
 
 def extract_dosage(text: str) -> str:
     m = DOSAGE_RE.search(text)
-    return f"{m.group(1)}{m.group(2)}" if m else ""
+    if not m:
+        return ""
+    # "50 / 1000mg"처럼 슬래시 앞뒤에 공백이 있어도 "50/1000mg"로 통일해서 저장한다.
+    return f"{m.group(1).replace(' ', '')}{m.group(2)}"
+
+
+def _dm_dosage(dm: "re.Match") -> str:
+    """DRUG_NAME_RE 매치의 트레일링 용량 그룹(group 2)을 "50/1000mg"처럼 공백 없이 반환.
+    그룹이 없으면(용량이 이름에 안 붙어 나온 경우) 빈 문자열."""
+    if not dm.group(2):
+        return ""
+    return dm.group(2).replace(" ", "")
 
 
 def extract_frequency(text: str) -> str:
-    """한국어 횟수 우선, 없으면 약어, 없으면 식사타이밍, 없으면 단독 N회 패턴."""
+    """한국어 횟수 우선, 없으면 약어, 없으면 식사타이밍, 없으면 단독 N회 패턴.
+
+    [2026-07-18] "1일" 접두어는 뺀다 — 프론트 라벨이 "1일 투약횟수"라 값에서
+    또 반복하면 "1일 1일 1회"처럼 겹쳐 보인다. 값은 "1회"/"2회"만 담는다.
+
+    [2026-07-18] 식전/식후(MEAL_RE) 폴백은 제거했다 — "1일 투약횟수"는 하루에 몇 번
+    먹는지(횟수)를 묻는 필드인데, 식전/식후는 언제 먹는지(타이밍)라 전혀 다른 정보다.
+    명시적인 횟수를 못 찾았으면 "식후"를 억지로 끼워맞추지 말고 빈 값으로 남겨서
+    사용자가 직접 채우게 한다(모르는 걸 아는 척 지어내지 않음).
+    """
     m = KOR_FREQ_RE.search(text)
     if m:
-        return f"1일 {m.group(1)}회"
+        return f"{m.group(1)}회"
     m = ABBREV_FREQ_RE.search(text)
     if m:
-        return FREQ_ABBREV_MAP.get(m.group(1).lower(), m.group(1))
-    m = MEAL_RE.search(text)
-    if m:
-        return m.group(0)
+        mapped = FREQ_ABBREV_MAP.get(m.group(1).lower(), m.group(1))
+        # prn/hs/ac/pc는 횟수가 아니라 타이밍/조건이라("필요시"/"취침 전"/"식전"/"식후")
+        # 위와 같은 이유로 여기서도 걸러낸다 — 진짜 횟수(qd/od/bid/tid/qid)만 반환.
+        if mapped.endswith("회"):
+            return mapped
+        return ""
     m = BARE_FREQ_RE.search(text)
     if m:
-        return f"1일 {m.group(1)}회"
+        return f"{m.group(1)}회"
     return ""
 
 
@@ -197,7 +223,7 @@ def _extract_oriental_frequency(text: str) -> str:
     m = _ORIENTAL_FREQ_RE.search(text)
     if m:
         unit = "첩" if "첩" in m.group(0) else "회"
-        return f"1일 {m.group(1)}{unit}"
+        return f"{m.group(1)}{unit}"
     return extract_frequency(text)
 
 
@@ -232,12 +258,6 @@ def _detect_format(text: str) -> str:
 # 6. 포맷별 파서
 # ─────────────────────────────────────────────────────────────
 
-def _drug_name_only(form_str: str) -> str:
-    """'암로디핀정' → '암로디핀', '오메가3연질캡슐' → '오메가3', '데스오웬크림' → '데스오웬'."""
-    result = re.sub(r"(?:연질)?(?:정|캡슐|주|산|시럽|액|크림|연고|로션|겔|패취)$", "", form_str)
-    return result if result else form_str
-
-
 def _split_by_number(text: str) -> list:
     """'1) ...\n2) ...' 또는 '1. ... 2. ...' 형식을 번호 기준으로 분리."""
     return [s.strip() for s in re.split(r"(?<![A-Za-z가-힣])\d+\s*[).](?!\d)", text) if s.strip()]
@@ -247,7 +267,7 @@ def _parse_official_format(text: str) -> list:
     """공식 처방전 포맷: [급여/비급여][코드] 약품명 1회량 1일횟수 일수"""
     segments = re.split(r"\[(?:급여|비급여)\]\[\w+\]", text)
 
-    all_freqs = [f"1일 {n}회" for n in KOR_FREQ_RE.findall(text)]
+    all_freqs = [f"{n}회" for n in KOR_FREQ_RE.findall(text)]
     all_codes = extract_drug_code_list(text)
 
     results = []
@@ -257,8 +277,11 @@ def _parse_official_format(text: str) -> list:
         dm = DRUG_NAME_RE.search(seg)
         if not dm:
             continue
-        drug_name = _drug_name_only(dm.group(1))
-        dosage = dm.group(2) or extract_dosage(seg)
+        dosage = _dm_dosage(dm) or extract_dosage(seg)
+        # [2026-07-18] 약품명에 제형(정/캡슐 등)과 용량을 그대로 남긴다 — "암로디핀"이
+        # 아니라 "암로디핀정 5mg"까지가 그 약을 특정하는 실제 이름이라, e약은요·HIRA
+        # 매칭에도 이쪽이 더 정확하다.
+        drug_name = dm.group(1) + (f" {_dm_dosage(dm)}" if dm.group(2) else "")
 
         post_raw = seg[dm.end():]
         post = post_raw.split("■")[0]
@@ -281,9 +304,9 @@ def _parse_official_format(text: str) -> list:
                 # ③ 숫자 컬럼 없거나 모두 범위 초과 시 all_freqs 폴백
                 #    (CLOVA 컬럼 그룹 출력: 약품명 전체→횟수 전체 순으로 출력되는 경우)
                 if len(col_nums) >= 2 and 0 < int(col_nums[1]) <= 6:
-                    freq = f"1일 {col_nums[1]}회"
+                    freq = f"{col_nums[1]}회"
                 elif len(col_nums) >= 1 and 0 < int(col_nums[0]) <= 6:
-                    freq = f"1일 {col_nums[0]}회"
+                    freq = f"{col_nums[0]}회"
                 elif drug_idx < len(all_freqs):
                     freq = all_freqs[drug_idx]
 
@@ -295,7 +318,7 @@ def _parse_official_format(text: str) -> list:
             "drug_code":  drug_code,
             "dosage":     dosage,
             "frequency":  freq,
-            "days":       days,
+            "total_days": days,
             "drug_class": lookup_drug_class(drug_name),
         })
         drug_idx += 1
@@ -312,13 +335,13 @@ def _parse_abbrev_format(text: str) -> list:
         dm = DRUG_NAME_RE.search(item)
         if not dm:
             continue
-        drug_name = _drug_name_only(dm.group(1))
+        drug_name = dm.group(1) + (f" {_dm_dosage(dm)}" if dm.group(2) else "")
         results.append({
             "drug_name":  drug_name,
             "drug_code":  "",
-            "dosage":     dm.group(2) or extract_dosage(item),
+            "dosage":     _dm_dosage(dm) or extract_dosage(item),
             "frequency":  extract_frequency(item),
-            "days":       extract_days(item),
+            "total_days": extract_days(item),
             "drug_class": lookup_drug_class(drug_name),
         })
     return results
@@ -331,13 +354,13 @@ def _parse_list_format(text: str) -> list:
         dm = DRUG_NAME_RE.search(item)
         if not dm:
             continue
-        drug_name = _drug_name_only(dm.group(1))
+        drug_name = dm.group(1) + (f" {_dm_dosage(dm)}" if dm.group(2) else "")
         results.append({
             "drug_name":  drug_name,
             "drug_code":  "",
-            "dosage":     dm.group(2) or extract_dosage(item),
+            "dosage":     _dm_dosage(dm) or extract_dosage(item),
             "frequency":  extract_frequency(item),
-            "days":       extract_days(item),
+            "total_days": extract_days(item),
             "drug_class": lookup_drug_class(drug_name),
         })
     return results
@@ -363,7 +386,7 @@ def _parse_oriental_format(text: str) -> list:
             "drug_code":  "",
             "dosage":     f"{weight}g",
             "frequency":  freq,
-            "days":       days,
+            "total_days": days,
             "drug_class": "한방 첩약" if in_ref else "한방 첩약(미확인)",
         })
     return results
@@ -380,11 +403,11 @@ def _parse_table_format(text: str) -> list:
     kor_spans: list[tuple[int, int]] = []
     freq_entries: list[tuple[int, int, str]] = []  # (start, end, freq_str)
     for m in re.finditer(r"(?:1\s*일|하루)\s*(\d+)\s*(?:회|번)", text):
-        freq_entries.append((m.start(), m.end(), f"1일 {m.group(1)}회"))
+        freq_entries.append((m.start(), m.end(), f"{m.group(1)}회"))
         kor_spans.append((m.start(), m.end()))
     for m in BARE_FREQ_RE.finditer(text):
         if not any(s <= m.start() < e for s, e in kor_spans):
-            freq_entries.append((m.start(), m.end(), f"1일 {m.group(1)}회"))
+            freq_entries.append((m.start(), m.end(), f"{m.group(1)}회"))
     freq_entries.sort()
     frequencies = [freq for _, _, freq in freq_entries]
 
@@ -398,13 +421,13 @@ def _parse_table_format(text: str) -> list:
 
     results = []
     for i, dm in enumerate(drug_matches):
-        drug_name = _drug_name_only(dm.group(1))
+        drug_name = dm.group(1) + (f" {_dm_dosage(dm)}" if dm.group(2) else "")
         results.append({
             "drug_name":  drug_name,
             "drug_code":  "",
-            "dosage":     dm.group(2) or "",
+            "dosage":     _dm_dosage(dm),
             "frequency":  frequencies[i] if i < len(frequencies) else "",
-            "days":       f"{day_nums[i]}일" if i < len(day_nums) else "",
+            "total_days": f"{day_nums[i]}일" if i < len(day_nums) else "",
             "drug_class": lookup_drug_class(drug_name),
         })
     return results

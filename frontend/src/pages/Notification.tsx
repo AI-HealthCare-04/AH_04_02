@@ -7,7 +7,7 @@ import {
   type NotificationSettings,
 } from "../api/care";
 import { getPatientCaregivers } from "../api/monitoring";
-import { useGuardedPatientId } from "../lib/session";
+import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
 
 function Toggle({ on, onChange, disabled = false }: { on: boolean; onChange: () => void; disabled?: boolean }) {
@@ -75,7 +75,7 @@ export default function Notification() {
 
   return (
     <div className="min-h-screen bg-[#FAF6F1]">
-      <NavBar isLoggedIn userName="김건강" />
+      <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-xl mx-auto px-6 sm:px-8 py-10">
         <h1 className="text-[26px] font-black text-[#1E1A17] mb-1">알림 설정</h1>
         <p className="text-[14px] text-[#8A7E75] mb-7">받고 싶은 알림을 선택하세요.</p>

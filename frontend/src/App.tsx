@@ -5,6 +5,7 @@ import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import ResetPassword from "./pages/ResetPassword";
 import SignUp from "./pages/SignUp";
+import MealTimeCheck from "./pages/MealTimeCheck";
 import Connect from "./pages/Connect";
 import Upload from "./pages/Upload";
 import Processing from "./pages/Processing";
@@ -48,6 +49,7 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/register" element={<SignUp />} />
+          <Route path="/meal-check" element={<MealTimeCheck />} />
           <Route path="/connect" element={<Connect />} />
           <Route path="/upload" element={<Upload />} />
           <Route path="/processing" element={<Processing />} />

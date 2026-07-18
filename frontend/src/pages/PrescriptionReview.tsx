@@ -12,11 +12,13 @@ import {
   type RecordResult,
 } from "../api/records";
 import { C } from "../theme";
+import { getCurrentUserName } from "../lib/session";
 
 const FIELDS: { key: keyof OcrMedication; label: string }[] = [
   { key: "drug_name", label: "약품명" },
-  { key: "dosage", label: "용량" },
-  { key: "frequency", label: "복용횟수" },
+  { key: "dosage", label: "1회 투약량" },
+  { key: "frequency", label: "1일 투약횟수" },
+  { key: "total_days", label: "총 투약일수" },
   { key: "diagnosis", label: "진단명" },
   { key: "drug_class", label: "약효분류" },
 ];
@@ -40,11 +42,14 @@ function computeIssues(m: OcrMedication, drugNameOk: boolean | undefined): Field
     issues.push({ field: "drug_name", message: "약품명이 비어있어요. 입력해주세요." });
   }
   if (m.dosage.trim() && !isDosageValid(m.dosage)) {
-    issues.push({ field: "dosage", message: "용량 형식이 잘못됐어요 (예: 500mg처럼 단위를 함께 입력)." });
+    issues.push({ field: "dosage", message: "1회 투약량 형식이 잘못됐어요 (예: 500mg, 1정처럼 단위를 함께 입력)." });
   } else if (!m.dosage.trim()) {
-    issues.push({ field: "dosage", message: "용량이 비어있어요. 입력해주세요." });
+    issues.push({ field: "dosage", message: "1회 투약량이 비어있어요. 입력해주세요." });
   }
-  (["frequency", "diagnosis", "drug_class"] as const).forEach((f) => {
+  // [2026-07-18] 약효분류는 OCR로 못 잡는 경우가 많아 필수에서 제외 — 비어있어도 확인 완료로
+  // 넘어갈 수 있다. 총 투약일수도 같은 이유로 필수가 아니다.
+  // [2026-07-19] 진단명도 같은 이유로 필수에서 제외 — OCR이 진단명을 못 뽑는 처방전이 많다.
+  (["frequency"] as const).forEach((f) => {
     if (!m[f].trim()) {
       issues.push({ field: f, message: `${FIELDS.find((x) => x.key === f)?.label}이 비어있어요. 입력해주세요.` });
     }
@@ -232,6 +237,7 @@ export default function PrescriptionReview() {
           drug_name: e.drug_name.trim(),
           dosage: e.dosage.trim(),
           frequency: e.frequency.trim(),
+          total_days: e.total_days.trim(),
           diagnosis: e.diagnosis.trim(),
           drug_class: e.drug_class.trim(),
         };
@@ -251,7 +257,7 @@ export default function PrescriptionReview() {
   if (generating) {
     return (
       <div className="fixed inset-0 z-50 flex flex-col" style={{ background: C.ivory }}>
-        <NavBar isLoggedIn userName="김건강" />
+        <NavBar isLoggedIn userName={getCurrentUserName()} />
         <div className="flex-1 flex flex-col items-center justify-center px-8">
         <div className="relative mb-8 flex items-center justify-center">
           {/* 진행률이 90%에서 API 응답까지(최대 1분) 멈춰있어도 계속 도는 링 —
@@ -344,7 +350,7 @@ export default function PrescriptionReview() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName="김건강" />
+      <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         {loading ? (
           <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>

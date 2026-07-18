@@ -84,6 +84,21 @@ class PatientPublic(BaseModel):
     sms_enabled: bool = False
     email_opt_in: bool = False
     created_at: datetime
+    breakfast_time: str | None = None
+    breakfast_regular: bool | None = None
+    lunch_time: str | None = None
+    lunch_regular: bool | None = None
+    dinner_time: str | None = None
+    dinner_regular: bool | None = None
+
+
+class MealTimesUpdate(BaseModel):
+    breakfast_time: str | None = None
+    breakfast_regular: bool | None = None
+    lunch_time: str | None = None
+    lunch_regular: bool | None = None
+    dinner_time: str | None = None
+    dinner_regular: bool | None = None
 
 
 @router.post("/patients", response_model=PatientPublic)
@@ -136,6 +151,28 @@ def update_patient(
     session: Session = Depends(get_session),
 ):
     require_patient_access(patient_id, caregiver, session)
+    patient = session.get(Patient, patient_id)
+    if not patient:
+        raise HTTPException(404, "해당 환자를 찾을 수 없어요")
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(patient, key, value)
+    session.add(patient)
+    session.commit()
+    session.refresh(patient)
+    return patient
+
+
+@router.put("/patients/{patient_id}/meal-times", response_model=PatientPublic)
+def update_meal_times(
+    patient_id: int,
+    payload: MealTimesUpdate,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """[2026-07-16 추가] 회원가입 직후 자가진단 설문(MealTimeCheck.tsx) 저장용.
+    환자 본인 로그인 직후(가입 흐름) 호출되므로 caregiver 전용이 아니라 actor 기반 인가를 쓴다
+    (update_patient처럼 caregiver 전용이면 환자 본인 토큰으로는 호출할 수 없다)."""
+    require_actor_patient_access(patient_id, actor, session)
     patient = session.get(Patient, patient_id)
     if not patient:
         raise HTTPException(404, "해당 환자를 찾을 수 없어요")

@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Search, FileText, ChevronRight, Trash2 } from "lucide-react";
 import NavBar from "../components/NavBar";
 import { deleteRecord, listRecords, type RecordSummary } from "../api/records";
-import { getCurrentPatientId } from "../lib/session";
+import { getCurrentPatientId, getCurrentUserName } from "../lib/session";
 import { C } from "../theme";
 
 const STATUS_LABEL: Record<RecordSummary["status"], { text: string; bg: string; color: string }> = {
@@ -52,7 +52,7 @@ export default function Records() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName="김건강" />
+      <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <h1 className="text-[26px] font-black mb-1" style={{ color: C.dark }}>등록내역</h1>
         <p className="text-[14px] mb-7" style={{ color: C.muted }}>

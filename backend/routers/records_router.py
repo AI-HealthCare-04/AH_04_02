@@ -75,6 +75,7 @@ def _build_record_response(record: MedicalRecord, session: Session, guide: Guide
                 "drug_code": item.drug_code,
                 "dosage": item.dosage,
                 "frequency": item.frequency,
+                "total_days": item.total_days,
                 "diagnosis": item.diagnosis,
                 "drug_class": item.drug_class,
                 "confidence": item.confidence,
@@ -299,6 +300,7 @@ class MedicationCorrection(BaseModel):
     drug_name: str
     dosage: str
     frequency: str
+    total_days: str = ""  # [2026-07-18 추가] 총 투약일수
     diagnosis: str
     drug_class: str
 
@@ -340,6 +342,7 @@ async def confirm_medications(
             item.drug_name = correction.drug_name
             item.dosage = correction.dosage
             item.frequency = correction.frequency
+            item.total_days = correction.total_days
             item.diagnosis = correction.diagnosis
             item.drug_class = correction.drug_class
             item.review_required = False

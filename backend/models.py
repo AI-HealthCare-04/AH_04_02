@@ -73,6 +73,15 @@ class Patient(SQLModel, table=True):
     # withdraw/cancel로 취소 가능(둘 다 None으로 되돌림).
     deactivated_at: Optional[datetime] = None
     deletion_scheduled_at: Optional[datetime] = None
+    # [2026-07-16 추가] 회원가입 직후 자가진단 설문(식사 시간) — MedicationSchedule의
+    # dose_timing(식전/식후) 알림 시각을 정할 때 이 식사 시간을 기준으로 삼기 위함.
+    # time_slot과 동일한 관례로 "HH:MM" 문자열, 시간 자체를 안 채우면 None.
+    breakfast_time: Optional[str] = None
+    breakfast_regular: Optional[bool] = None
+    lunch_time: Optional[str] = None
+    lunch_regular: Optional[bool] = None
+    dinner_time: Optional[str] = None
+    dinner_regular: Optional[bool] = None
 
     @property
     def name(self) -> str:
@@ -223,8 +232,9 @@ class OcrResult(SQLModel, table=True):
     record_id: int = Field(foreign_key="medical_records.id")
     drug_name: str
     drug_code: str = ""  # [7/6 추가] HIRA 약가마스터 매칭용 코드 (ocr_interface.py의 OCRResult와 동기화)
-    dosage: str = ""       # 미인식이면 빈 문자열
-    frequency: str = ""
+    dosage: str = ""       # 미인식이면 빈 문자열 (1회 투약량 — 예: "5mg", "1정")
+    frequency: str = ""    # 1일 투여횟수 (예: "1일 3회")
+    total_days: str = ""   # [2026-07-18 추가] 총 투약일수 (예: "30일")
     diagnosis: str = ""
     drug_class: str = ""
     confidence: float = 0.0  # 0.0 ~ 1.0

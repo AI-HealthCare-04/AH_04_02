@@ -54,12 +54,17 @@ def drug_info(drug_name: str):
     """
     result = get_drug_info(drug_name)
     efficacy = result["efficacy"]
+    # [2026-07-19 수정] matched_name(PrescriptionReview.tsx가 "이 약품명이 실제로 맞는지"
+    # 판단하는 값)은 get_drug_info()의 atc_pattern/fallback이 아니라 match_drug()의 유사도
+    # 점수로 판정한다. atc_pattern/fallback은 "이름에 특정 키워드가 포함되는가"만 보는
+    # 부분일치라 "졸피뎀아무말"처럼 실제 이름 뒤에 엉뚱한 말을 붙여도 "졸피뎀" 부분만으로
+    # 통과해버린다. match_drug()은 (용량 표기를 정규화한 뒤) 전체 문자열 유사도를 보므로
+    # 이런 "일부만 맞고 나머지는 틀린" 입력을 실제로 걸러낸다 — run_ocr()에서 이미 같은
+    # 기준(MATCH_THRESHOLD)으로 review_required를 정하던 로직 재사용.
+    _, score = match_drug(drug_name)
     return {
         "drug_name": drug_name,
-        # [7/9 수정] "or drug_name" 폴백 때문에 매칭 실패("암로디민" 같은 오타)도 항상
-        # non-null로 나가서, 프론트(PrescriptionReview.tsx)의 "실제 존재하는 약인지"
-        # 검증이 무력화되고 있었다 — HIRA/e약은요 매칭 실패 시엔 그대로 null로 내려준다.
-        "matched_name": result["matched_item"] or None,
+        "matched_name": drug_name if score >= MATCH_THRESHOLD else None,
         "drug_class": result["drug_class"],
         "indication": efficacy.strip() if efficacy else efficacy,
     }
@@ -188,6 +193,7 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
                 frequency=med.frequency,
                 diagnosis=med.diagnosis,
                 drug_class=med.drug_class,
+                total_days=med.total_days,
                 confidence=med.confidence,
                 review_required=ocr_result.review_required,
                 matched_drug_name=matched_name,

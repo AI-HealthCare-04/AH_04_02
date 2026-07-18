@@ -7,6 +7,7 @@ export interface OcrMedication {
   drug_name: string;
   dosage: string;
   frequency: string;
+  total_days: string;
   diagnosis: string;
   drug_class: string;
   confidence: number;
@@ -189,6 +190,7 @@ export interface MedicationCorrection {
   drug_name: string;
   dosage: string;
   frequency: string;
+  total_days: string;
   diagnosis: string;
   drug_class: string;
 }

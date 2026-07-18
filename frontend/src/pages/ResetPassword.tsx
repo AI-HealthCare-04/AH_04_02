@@ -64,12 +64,17 @@ export default function ResetPassword() {
   };
 
   return (
-    <div style={styles.page}>
+    <div
+      className="min-h-screen"
+      style={{ background: C.ivory, fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" }}
+    >
       <NavBar />
-      <main style={styles.main}>
-        <div style={styles.header}>
-          <h1 style={styles.title}>비밀번호 찾기</h1>
-          <p style={styles.subtitle}>
+      <main className="max-w-[480px] mx-auto px-5 pt-10 pb-16 flex flex-col items-center sm:px-6 sm:pt-[60px] sm:pb-20">
+        <div className="text-center mb-8 sm:mb-9">
+          <h1 className="text-[26px] sm:text-[32px] font-bold mb-2 tracking-[-0.5px]" style={{ color: C.dark }}>
+            비밀번호 찾기
+          </h1>
+          <p className="text-[15px] sm:text-base" style={{ color: C.muted }}>
             {step === "identifier" && "가입하신 이메일 또는 전화번호를 입력해 주세요"}
             {step === "code" && "가입 이메일로 보낸 6자리 인증코드를 입력해 주세요"}
             {step === "password" && "새 비밀번호를 설정해 주세요"}
@@ -77,10 +82,13 @@ export default function ResetPassword() {
           </p>
         </div>
 
-        <div style={styles.card}>
+        <div
+          className="w-full rounded-2xl px-5 py-6 sm:px-6 sm:py-7"
+          style={{ background: C.white, boxShadow: "0 2px 16px rgba(0,0,0,0.06)", border: "1px solid rgba(30,26,23,0.12)" }}
+        >
           {step === "identifier" && (
             <form
-              style={styles.form}
+              className="flex flex-col gap-2.5"
               onSubmit={(e) => {
                 e.preventDefault();
                 handleRequestCode();
@@ -91,11 +99,17 @@ export default function ResetPassword() {
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
                 placeholder="이메일 또는 전화번호"
-                style={styles.input}
+                className="w-full px-4 py-3.5 text-[15px] rounded-[10px] outline-none box-border"
+                style={{ color: C.dark, background: C.ivory, border: "1.5px solid rgba(30,26,23,0.12)" }}
                 autoComplete="username"
               />
-              {error && <p style={styles.errorText}>{error}</p>}
-              <button type="submit" disabled={loading || !identifier.trim()} style={styles.submitBtn}>
+              {error && <p className="text-[13px] py-1" style={{ color: C.danger }}>{error}</p>}
+              <button
+                type="submit"
+                disabled={loading || !identifier.trim()}
+                className="w-full py-3.5 text-[15px] font-bold rounded-[10px] border-none cursor-pointer"
+                style={{ color: C.white, background: C.terracotta }}
+              >
                 {loading ? "요청 중..." : "인증코드 받기"}
               </button>
             </form>
@@ -103,29 +117,36 @@ export default function ResetPassword() {
 
           {step === "code" && (
             <form
-              style={styles.form}
+              className="flex flex-col gap-2.5"
               onSubmit={(e) => {
                 e.preventDefault();
                 handleVerifyCode();
               }}
             >
-              {notice && <p style={styles.noticeText}>{notice}</p>}
+              {notice && <p className="text-[13px] py-1 leading-normal" style={{ color: C.muted }}>{notice}</p>}
               <input
                 type="text"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 placeholder="6자리 인증코드"
                 maxLength={6}
-                style={styles.input}
+                className="w-full px-4 py-3.5 text-[15px] rounded-[10px] outline-none box-border"
+                style={{ color: C.dark, background: C.ivory, border: "1.5px solid rgba(30,26,23,0.12)" }}
                 autoComplete="one-time-code"
               />
-              {error && <p style={styles.errorText}>{error}</p>}
-              <button type="submit" disabled={loading || !code.trim()} style={styles.submitBtn}>
+              {error && <p className="text-[13px] py-1" style={{ color: C.danger }}>{error}</p>}
+              <button
+                type="submit"
+                disabled={loading || !code.trim()}
+                className="w-full py-3.5 text-[15px] font-bold rounded-[10px] border-none cursor-pointer"
+                style={{ color: C.white, background: C.terracotta }}
+              >
                 {loading ? "확인 중..." : "확인"}
               </button>
               <button
                 type="button"
-                style={styles.linkBtn}
+                className="mt-1 p-2 text-[13px] bg-transparent border-none cursor-pointer underline"
+                style={{ color: C.muted }}
                 onClick={() => {
                   setStep("identifier");
                   setCode("");
@@ -139,7 +160,7 @@ export default function ResetPassword() {
 
           {step === "password" && (
             <form
-              style={styles.form}
+              className="flex flex-col gap-2.5"
               onSubmit={(e) => {
                 e.preventDefault();
                 handleConfirmPassword();
@@ -150,7 +171,8 @@ export default function ResetPassword() {
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="새 비밀번호"
-                style={styles.input}
+                className="w-full px-4 py-3.5 text-[15px] rounded-[10px] outline-none box-border"
+                style={{ color: C.dark, background: C.ivory, border: "1.5px solid rgba(30,26,23,0.12)" }}
                 autoComplete="new-password"
               />
               <input
@@ -158,17 +180,19 @@ export default function ResetPassword() {
                 value={newPasswordConfirm}
                 onChange={(e) => setNewPasswordConfirm(e.target.value)}
                 placeholder="새 비밀번호 확인"
-                style={styles.input}
+                className="w-full px-4 py-3.5 text-[15px] rounded-[10px] outline-none box-border"
+                style={{ color: C.dark, background: C.ivory, border: "1.5px solid rgba(30,26,23,0.12)" }}
                 autoComplete="new-password"
               />
               {newPassword && newPasswordConfirm && newPassword !== newPasswordConfirm && (
-                <p style={styles.errorText}>비밀번호가 일치하지 않아요.</p>
+                <p className="text-[13px] py-1" style={{ color: C.danger }}>비밀번호가 일치하지 않아요.</p>
               )}
-              {error && <p style={styles.errorText}>{error}</p>}
+              {error && <p className="text-[13px] py-1" style={{ color: C.danger }}>{error}</p>}
               <button
                 type="submit"
                 disabled={loading || !newPassword || newPassword !== newPasswordConfirm}
-                style={styles.submitBtn}
+                className="w-full py-3.5 text-[15px] font-bold rounded-[10px] border-none cursor-pointer"
+                style={{ color: C.white, background: C.terracotta }}
               >
                 {loading ? "저장 중..." : "비밀번호 재설정"}
               </button>
@@ -176,9 +200,13 @@ export default function ResetPassword() {
           )}
 
           {step === "done" && (
-            <div style={styles.form}>
-              <p style={styles.doneText}>새 비밀번호로 로그인해 주세요.</p>
-              <button style={styles.submitBtn} onClick={() => navigate("/login")}>
+            <div className="flex flex-col gap-2.5">
+              <p className="text-[14px] text-center mb-2" style={{ color: C.muted }}>새 비밀번호로 로그인해 주세요.</p>
+              <button
+                className="w-full py-3.5 text-[15px] font-bold rounded-[10px] border-none cursor-pointer"
+                style={{ color: C.white, background: C.terracotta }}
+                onClick={() => navigate("/login")}
+              >
                 로그인하러 가기
               </button>
             </div>
@@ -188,62 +216,3 @@ export default function ResetPassword() {
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  page: { minHeight: "100vh", background: C.ivory, fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" },
-  main: {
-    maxWidth: 480,
-    margin: "0 auto",
-    padding: "60px 24px 80px",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-  },
-  header: { textAlign: "center", marginBottom: 36 },
-  title: { fontSize: 32, fontWeight: 700, color: C.dark, marginBottom: 8, letterSpacing: "-0.5px" },
-  subtitle: { fontSize: 16, color: C.muted },
-  card: {
-    width: "100%",
-    background: C.white,
-    borderRadius: 16,
-    padding: "28px 24px",
-    boxShadow: "0 2px 16px rgba(0,0,0,0.06)",
-    border: "1px solid rgba(30,26,23,0.12)",
-  },
-  form: { display: "flex", flexDirection: "column" as const, gap: 10 },
-  input: {
-    width: "100%",
-    padding: "14px 16px",
-    fontSize: 15,
-    color: C.dark,
-    background: C.ivory,
-    border: "1.5px solid rgba(30,26,23,0.12)",
-    borderRadius: 10,
-    outline: "none",
-    boxSizing: "border-box" as const,
-  },
-  submitBtn: {
-    width: "100%",
-    padding: "14px",
-    fontSize: 15,
-    fontWeight: 700,
-    color: C.white,
-    background: C.terracotta,
-    border: "none",
-    borderRadius: 10,
-    cursor: "pointer",
-  },
-  linkBtn: {
-    marginTop: 4,
-    padding: "8px",
-    fontSize: 13,
-    color: C.muted,
-    background: "transparent",
-    border: "none",
-    cursor: "pointer",
-    textDecoration: "underline",
-  },
-  errorText: { fontSize: 13, color: C.danger, padding: "4px 0" },
-  noticeText: { fontSize: 13, color: C.muted, padding: "4px 0", lineHeight: 1.5 },
-  doneText: { fontSize: 14, color: C.muted, textAlign: "center" as const, marginBottom: 8 },
-};
