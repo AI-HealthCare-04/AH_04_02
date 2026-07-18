@@ -30,7 +30,15 @@ from pathlib import Path
 from core.database import get_session
 from core.dependencies import Actor, get_current_actor, require_actor_patient_access
 from fastapi import APIRouter, Depends, HTTPException
-from models import ChatMessage, GuideResult, MedicalRecord, NotificationSetting, OcrResult, Patient
+from models import (
+    ChatMessage,
+    GuideResult,
+    MedicalRecord,
+    NotificationSetting,
+    OcrResult,
+    Patient,
+    PatientMedication,
+)
 from pydantic import BaseModel
 from services.langfuse_tracing import (
     flush_langfuse,
@@ -61,6 +69,64 @@ PRESET_QUESTIONS = [
         "answer": "어지러움, 발진, 심한 속쓰림 등 평소와 다른 증상이 나타나면 복용을 멈추고 가까운 병원이나 약국에 문의해 주세요. 증상이 심하면 바로 응급실을 방문하세요.",
     },
 ]
+
+# [2026-07-19 추가] PRESET_QUESTIONS는 완전히 고정된 값이라, 앱을 켤 때마다 누구에게나
+# 항상 똑같은 질문(특히 q1 "이 약 식사 전에 먹어도 되나요?")이 뜬다는 게 팀 회의에서
+# "매번 같은 기본 질문이 뜨는 버그처럼 보인다"고 지적됨 — 실제로는 캐시/상태 버그가
+# 아니라 이 리스트 자체가 정적이라 생기는 현상이었다(docs/status-report 참고). 환자가
+# 실제로 등록한 약 이름을 넣어 질문을 생성하도록 바꿔서, 매번 똑같이 느껴지는 문제와
+# "이 챗봇이 내 약을 실제로 아는지" 둘 다 개선한다.
+_DYNAMIC_QUESTION_TEMPLATES: list[tuple[str, str, str]] = [
+    (
+        "meal_timing",
+        "{drug} 식사 전후 언제 먹어야 하나요?",
+        "{drug}은 약마다 복용 시점이 달라요. 처방전에 표시된 복용법을 꼭 확인하시고, 헷갈리면 처방하신 의사나 약사에게 확인해 주세요.",
+    ),
+    (
+        "side_effect",
+        "{drug} 복용 중 부작용이 있으면 어떻게 하나요?",
+        "{drug} 복용 중 어지러움, 발진, 심한 속쓰림처럼 평소와 다른 증상이 나타나면 복용을 멈추고 가까운 병원이나 약국에 문의해 주세요. 증상이 심하면 바로 응급실을 방문하세요.",
+    ),
+    (
+        "interaction",
+        "{drug}을 다른 약과 같이 먹어도 되나요?",
+        "{drug}을 다른 약과 함께 드실 때는 조합에 따라 주의가 필요할 수 있어요. 정확한 상호작용은 처방하신 의사나 약사에게 확인하시는 게 가장 안전해요.",
+    ),
+]
+
+
+def _patient_registered_drug_names(patient_id: int, session: Session, limit: int = 3) -> list[str]:
+    """환자가 실제로 등록·확정한 약 이름 — '내 약 등록'(PatientMedication, 사용자 확정값)을
+    우선하고, 없으면 최근 처방전 OCR 결과로 폴백한다(_latest_ocr_drug_names는 아래 정의됨,
+    이 함수보다 먼저 호출되는 곳이 없어 순서 문제 없음)."""
+    meds = session.exec(
+        select(PatientMedication)
+        .where(PatientMedication.patient_id == patient_id)
+        .where(PatientMedication.is_active == True)  # noqa: E712
+        .where(PatientMedication.deleted_at.is_(None))
+        .order_by(PatientMedication.created_at.desc())
+    ).all()
+    names = [m.medication_name for m in meds if m.medication_name]
+    if names:
+        return names[:limit]
+    return _latest_ocr_drug_names(patient_id, session)[:limit]
+
+
+def _build_dynamic_questions(patient_id: int, session: Session) -> list[dict]:
+    """환자가 등록한 약이 하나도 없으면(신규 가입 직후 등) 기존 고정 질문으로 폴백한다 —
+    실제로 참고할 약이 없는 상태에서 억지로 약 이름을 지어내지 않기 위함."""
+    drug_names = _patient_registered_drug_names(patient_id, session, limit=1)
+    if not drug_names:
+        return PRESET_QUESTIONS
+    drug_name = drug_names[0]
+    return [
+        {
+            "id": f"dyn:{key}:{drug_name}",
+            "text": text_tpl.format(drug=drug_name),
+            "answer": answer_tpl.format(drug=drug_name),
+        }
+        for key, text_tpl, answer_tpl in _DYNAMIC_QUESTION_TEMPLATES
+    ]
 
 CHAT_SYSTEM_PROMPT = """\
 당신은 고령 만성질환 환자와 보호자를 위한 복약 상담 챗봇입니다.
@@ -594,9 +660,18 @@ def _generate_llm_answer(
 
 
 @router.get("/questions")
-def list_questions():
-    """Chat.tsx의 추천 질문 버튼에 쓸 목록"""
-    return [{"id": q["id"], "text": q["text"]} for q in PRESET_QUESTIONS]
+def list_questions(
+    patient_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """Chat.tsx의 추천 질문 버튼에 쓸 목록 — 환자가 등록한 약이 있으면 그 약 기반으로
+    동적 생성하고(_build_dynamic_questions), 없으면 고정 질문(PRESET_QUESTIONS)으로
+    폴백한다. [2026-07-19 추가] patient_id를 받게 되면서 다른 환자 정보 유추에 악용되지
+    않도록 require_actor_patient_access로 막는다(다른 인가된 엔드포인트와 동일 패턴)."""
+    require_actor_patient_access(patient_id, actor, session)
+    questions = _build_dynamic_questions(patient_id, session)
+    return [{"id": q["id"], "text": q["text"]} for q in questions]
 
 
 class ChatAsk(BaseModel):
@@ -616,7 +691,13 @@ def ask(payload: ChatAsk, actor: Actor = Depends(get_current_actor), session: Se
         raise HTTPException(404, "해당 환자를 찾을 수 없어요")
 
     if payload.question_id:
-        match = next((q for q in PRESET_QUESTIONS if q["id"] == payload.question_id), None)
+        # [2026-07-19 추가] question_id가 이제 동적 질문("dyn:...")일 수도 있어서, 그 환자
+        # 기준으로 목록을 다시 만들어 찾는다 — 매번 재생성하지만 같은 입력(환자의 등록 약)에
+        # 대해서는 결정적이라(_build_dynamic_questions에 랜덤 요소 없음) 안정적으로 일치한다.
+        candidates = _build_dynamic_questions(payload.patient_id, session)
+        match = next((q for q in candidates if q["id"] == payload.question_id), None)
+        if not match:
+            match = next((q for q in PRESET_QUESTIONS if q["id"] == payload.question_id), None)
         if not match:
             raise HTTPException(404, "존재하지 않는 질문이에요")
         question_id, question_text = match["id"], match["text"]

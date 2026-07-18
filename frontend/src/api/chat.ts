@@ -12,8 +12,10 @@ export interface ChatAnswer {
   answer_source?: string; // "llm" | "preset" | "unsupported" | "*_fallback (...)" 등 — 화면 하단에 작게 표시
 }
 
-export async function getChatQuestions() {
-  const { data } = await monitoringClient.get<ChatQuestion[]>("/chat/questions");
+export async function getChatQuestions(patientId: number) {
+  const { data } = await monitoringClient.get<ChatQuestion[]>("/chat/questions", {
+    params: { patient_id: patientId },
+  });
   return data;
 }
 

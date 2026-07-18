@@ -58,7 +58,7 @@ export default function Chat() {
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    getChatQuestions().then(setQuestions).catch(() => setQuestions([]));
+    getChatQuestions(patientId).then(setQuestions).catch(() => setQuestions([]));
     getNotificationSettings(patientId)
       .then((s) => setChatbotName(s.chatbot_name || DEFAULT_CHATBOT_NAME))
       .catch(() => setChatbotName(DEFAULT_CHATBOT_NAME));
