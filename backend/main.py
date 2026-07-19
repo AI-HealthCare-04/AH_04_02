@@ -24,6 +24,9 @@ schedule_v6에서 시간·인력 상 이번 스프린트 스코프에서 뺐었�
 """
 from __future__ import annotations
 
+import asyncio
+import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -31,9 +34,12 @@ from dotenv import load_dotenv
 # [7/11] .env 로드가 ocr_router.py 안에만 있어서, auth_router(→models→security.py가
 # 기동 시점에 PII_ENCRYPTION_KEY를 요구함)가 먼저 임포트되면 .env가 아직 안 읽힌
 # 상태로 실패했다. 라우터 임포트보다 먼저, 여기 한 곳에서만 로드한다.
+# (asyncio/logging/contextlib는 순수 표준 라이브러리라 .env 유무와 무관하므로 위로 옮겼다 —
+# .env를 실제로 필요로 하는 core.database/core.scheduler/routers만 아래에 남겨둔다.)
 load_dotenv(Path(__file__).parent / ".env")
 
 from core.database import init_db, log_db_connection_info
+from core.scheduler import reminder_loop, scheduler_enabled
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routers import (
@@ -47,10 +53,43 @@ from routers import (
     records_router,
 )
 
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """서버 시작 시 어느 DB에 붙었는지 로그로 남기고, local/test면 테이블 자동 생성
+    (development/production은 Alembic migration으로 관리 — database.py 참고).
+
+    [2026-07-19] 기존 @app.on_event("startup")을 lifespan으로 옮기면서 스케줄러
+    (core/scheduler.py) 기동을 함께 추가했다 — on_event와 lifespan을 동시에 등록하면
+    FastAPI가 lifespan만 쓰고 on_event를 무시하므로, 반드시 이 함수 안에서 기존
+    init_db() 호출까지 그대로 감싸야 한다(따로 두면 로컬/테스트 DB 테이블이 하나도
+    안 생기는 회귀가 생김 — backend/tests/conftest.py가 이 startup 부작용에 의존).
+    """
+    log_db_connection_info()
+    init_db()
+
+    task: asyncio.Task | None = None
+    if scheduler_enabled():
+        task = asyncio.create_task(reminder_loop())
+        logger.info("복약 알림 스케줄러 시작됨 (SCHEDULER_ENABLED)")
+
+    yield
+
+    if task is not None:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
 app = FastAPI(
     title="건강동행 API",
     description="3인 체제 v6 — SQLite + 동기 방식",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # 프론트(Vite 개발서버)에서 호출 허용
@@ -64,14 +103,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-def on_startup() -> None:
-    """서버 시작 시 어느 DB에 붙었는지 로그로 남기고, local/test면 테이블 자동 생성
-    (development/production은 Alembic migration으로 관리 — database.py 참고)"""
-    log_db_connection_info()
-    init_db()
 
 
 @app.get("/", tags=["Health"])

@@ -99,9 +99,11 @@ export default function Dashboard() {
                 <span style={{
                   ...styles.statusBadge,
                   ...(med.status === "taken" ? { background: `${C.success}30`, color: C.successText } :
-                      med.status === "skipped" ? { background: C.bubbleBg, color: C.muted } : {})
+                      med.status === "skipped" ? { background: C.bubbleBg, color: C.muted } :
+                      med.status === "missed" ? { background: `${C.danger}20`, color: C.danger } : {})
                 }}>
-                  {med.status === "taken" ? "복용완료" : med.status === "skipped" ? "건너뜀" : "미복용"}
+                  {med.status === "taken" ? "복용완료" : med.status === "skipped" ? "건너뜀" :
+                   med.status === "missed" ? "놓침" : "미복용"}
                 </span>
               </div>
               <div style={styles.medActions}>

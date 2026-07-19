@@ -530,21 +530,31 @@ export default function PrescriptionReview() {
                       </div>
                     </div>
 
+                    {/* [2026-07-19 추가, REQ-048] 이 화면은 항상 record.status === "review_required"
+                        상태에서만 보이고(위 353번째 줄 가드), 가이드는 confirmMedications() 확정 후에야
+                        생성되므로 지금 이 시점엔 record.guide가 사실상 항상 null이다 — 그래도 "가이드
+                        존재 여부"를 status로 추측하지 않고 record.guide(GET /records/{id}가 이미 내려주는
+                        값, 새 API 불필요)로 직접 판단한다. 요구사항_정의서 REQ-048: 가이드가 있을 때만
+                        챗봇 진입 버튼을 노출하고, 없으면 안내 문구만 보여준다(스키마 확장 없음). */}
                     {!isDone && (
                       <div
                         className="flex items-center justify-between gap-4 px-5 py-4 rounded-2xl mt-3"
                         style={{ background: "#FBF8F3", border: "1px solid rgba(30,26,23,0.09)" }}
                       >
                         <p className="text-[13px] font-medium" style={{ color: C.dark }}>
-                          약품명을 찾기 어려우신가요? AI 챗봇이 도와드릴게요
+                          {record.guide
+                            ? "약품명을 찾기 어려우신가요? AI 챗봇이 도와드릴게요"
+                            : "복약 가이드가 생성되면 AI 챗봇으로 질문할 수 있어요"}
                         </p>
-                        <button
-                          onClick={() => navigate("/chat")}
-                          className="shrink-0 px-4 py-2.5 rounded-full text-white font-bold text-[13px] hover:opacity-88 transition-all whitespace-nowrap"
-                          style={{ background: C.terracotta }}
-                        >
-                          챗봇에게 물어보기 💬
-                        </button>
+                        {record.guide && (
+                          <button
+                            onClick={() => navigate("/chat", { state: { diagnosis: record.guide!.lifestyle_guide.diagnosis } })}
+                            className="shrink-0 px-4 py-2.5 rounded-full text-white font-bold text-[13px] hover:opacity-88 transition-all whitespace-nowrap"
+                            style={{ background: C.terracotta }}
+                          >
+                            챗봇에게 물어보기 💬
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
