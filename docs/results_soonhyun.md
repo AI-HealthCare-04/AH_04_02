@@ -735,3 +735,13 @@ TL_34: fileSn=66099 (31MB)    TL_38: fileSn=66103 (14MB) — 2003년
 | 🔴 HIGH | SSE 스트리밍 챗봇 구현 | REQ-021 필수, backend+frontend 동시 작업 필요 |
 | 🟡 MID | RAG_PROVIDER=real 통합 테스트 | 환경변수 설정 + Result.tsx 포맷 합의 |
 | 🟢 LOW | 알림 push 발송 구현 | REQ-026 선택, FCM 또는 Web Push 필요 |
+
+## [코드 품질 도구 도입 - PR #51 관련 정정 안내]
+
+PR #51은 브랜치 설정 실수(head=dev, base=main)로 닫았으나, ruff/ty/CI 관련 코드는 이전 커밋들로 이미 dev에 반영되어 있습니다.
+
+- ruff: 305→57건. 현재 CI에서 continue-on-error로 설정되어 참고용입니다 (57건 정리 후 필수 전환 예정)
+- ty: 322→69건. 마찬가지로 참고용입니다
+- pytest만 실패시 CI를 막습니다
+
+관련 커밋: 94578b4, 2000e72, 8b57801, fe92be6, 53f6e99, 3ab3c28, 17cad49
