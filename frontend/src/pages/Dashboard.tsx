@@ -36,7 +36,13 @@ export default function Dashboard() {
       .catch(() => {});
   }, [patientId]);
 
+  // [2026-07-20] "missed"는 스케줄러가 자동으로 판정하는 상태라 사용자가 직접 누를 수 있는
+  // 버튼이 없다(아래 버튼 3개는 taken/pending/skipped뿐) — 그래도 이 함수의 status 매개변수
+  // 타입은 Medication.status와 맞춰 IntakeStatus 전체를 받으므로, "missed"가 들어오면
+  // checkIntake(taken/skipped만 허용)로 보내지 않도록 방어적으로 막아둔다.
   const updateStatus = async (id: string, status: IntakeStatus) => {
+    if (status === "missed") return;
+
     // 먼저 화면부터 낙관적으로 바꾸고, 실패하면 되돌림 (버튼 반응성 위해)
     const prev = meds;
     setMeds((cur) => cur.map((m) => (m.id === id ? { ...m, status } : m)));
@@ -107,7 +113,11 @@ export default function Dashboard() {
                 </span>
               </div>
               <div style={styles.medActions}>
-                {(["taken", "pending", "skipped"] as IntakeStatus[]).map((s) => {
+                {/* [2026-07-20] "missed"는 스케줄러가 자동 판정하는 상태라 사용자가 직접 누르는
+                    버튼이 아니다 — 이 배열을 IntakeStatus[]로 캐스팅하면 s가 "missed"까지
+                    포함하게 되어 다음 줄 checkIntake(taken/skipped만 허용)·labels 룩업이 깨진다.
+                    `as const`로 정확히 이 3개 리터럴로만 좁혀둔다. */}
+                {(["taken", "pending", "skipped"] as const).map((s) => {
                   const isActive = med.status === s;
                   const labels = { taken: "복용했어요", pending: "아직이요", skipped: "건너뛸게요" };
                   return (
