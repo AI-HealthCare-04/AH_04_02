@@ -46,6 +46,13 @@ export default function DrugDetail() {
       .catch(() => setDrugInfo(null));
   }, [schedule]);
 
+  const hasPatientSummary = !!(
+    drugInfo?.patient_summary &&
+    (drugInfo.patient_summary.must_check.length ||
+      drugInfo.patient_summary.tell_doctor.length ||
+      drugInfo.patient_summary.avoid_together.length)
+  );
+
   // 모니터링(보호자용) 화면에서만 오는 경로라, 여기서 체크하면 "보호자가 대신" 기록으로 남깁니다.
   const handleCheck = async (status: "taken" | "skipped") => {
     if (!scheduleId || checking) return;
@@ -150,34 +157,80 @@ export default function DrugDetail() {
                 않아서, rag/ 패키지의 e약은요·DUR live API를 약품명만으로 온디맨드 보강
                 조회한다(GET /ocr/drug-info, ocr_router.py의 _fetch_rag_drug_detail) —
                 미등재 약품이거나 조회 실패 시엔 필드별로 null이라 아래에서 조건부 렌더링. */}
-            {drugInfo?.precautions && (
-              <div className="rounded-2xl p-6 mb-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
-                <div className="flex items-center gap-2.5 mb-3">
-                  <span className="text-[18px]">⚠️</span>
-                  <h2 className="text-[15px] font-black" style={{ color: C.dark }}>주의사항</h2>
-                </div>
-                <p className="text-[14px] leading-relaxed whitespace-pre-line" style={{ color: C.dark }}>{drugInfo.precautions}</p>
-              </div>
-            )}
+            {/* [2026-07-20 추가] 허가사항/e약은요 원문은 의료 전문용어라 환자가 그대로 읽기
+                어렵다 — LLM이 "꼭 확인/의사·약사에게 알려주세요/함께 피할 것" 3분류로 쉽게
+                요약해둔 게 있으면 그걸 우선 보여주고, 없으면(LLM 미사용/실패) 원문 카드로
+                폴백한다. */}
+            {hasPatientSummary ? (
+              <>
+                {!!drugInfo?.patient_summary?.must_check.length && (
+                  <div className="rounded-2xl p-6 mb-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
+                    <div className="flex items-center gap-2.5 mb-3">
+                      <span className="text-[18px]">⚠️</span>
+                      <h2 className="text-[15px] font-black" style={{ color: C.dark }}>꼭 확인하세요</h2>
+                    </div>
+                    {drugInfo.patient_summary.must_check.map((line, i) => (
+                      <p key={i} className="text-[14px] leading-relaxed mb-2 last:mb-0" style={{ color: C.dark }}>• {line}</p>
+                    ))}
+                  </div>
+                )}
 
-            {drugInfo?.side_effects && (
-              <div className="rounded-2xl p-6 mb-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
-                <div className="flex items-center gap-2.5 mb-3">
-                  <span className="text-[18px]">🤕</span>
-                  <h2 className="text-[15px] font-black" style={{ color: C.dark }}>부작용</h2>
-                </div>
-                <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>{drugInfo.side_effects}</p>
-              </div>
-            )}
+                {!!drugInfo?.patient_summary?.tell_doctor.length && (
+                  <div className="rounded-2xl p-6 mb-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
+                    <div className="flex items-center gap-2.5 mb-3">
+                      <span className="text-[18px]">💬</span>
+                      <h2 className="text-[15px] font-black" style={{ color: C.dark }}>의사·약사에게 알려주세요</h2>
+                    </div>
+                    {drugInfo.patient_summary.tell_doctor.map((line, i) => (
+                      <p key={i} className="text-[14px] leading-relaxed mb-2 last:mb-0" style={{ color: C.dark }}>• {line}</p>
+                    ))}
+                  </div>
+                )}
 
-            {drugInfo?.interactions && (
-              <div className="rounded-2xl p-6 mb-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
-                <div className="flex items-center gap-2.5 mb-3">
-                  <span className="text-[18px]">🔀</span>
-                  <h2 className="text-[15px] font-black" style={{ color: C.dark }}>약물 상호작용</h2>
-                </div>
-                <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>{drugInfo.interactions}</p>
-              </div>
+                {!!drugInfo?.patient_summary?.avoid_together.length && (
+                  <div className="rounded-2xl p-6 mb-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
+                    <div className="flex items-center gap-2.5 mb-3">
+                      <span className="text-[18px]">🚫</span>
+                      <h2 className="text-[15px] font-black" style={{ color: C.dark }}>함께 조심하세요</h2>
+                    </div>
+                    {drugInfo.patient_summary.avoid_together.map((line, i) => (
+                      <p key={i} className="text-[14px] leading-relaxed mb-2 last:mb-0" style={{ color: C.dark }}>• {line}</p>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                {drugInfo?.precautions && (
+                  <div className="rounded-2xl p-6 mb-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
+                    <div className="flex items-center gap-2.5 mb-3">
+                      <span className="text-[18px]">⚠️</span>
+                      <h2 className="text-[15px] font-black" style={{ color: C.dark }}>주의사항</h2>
+                    </div>
+                    <p className="text-[14px] leading-relaxed whitespace-pre-line" style={{ color: C.dark }}>{drugInfo.precautions}</p>
+                  </div>
+                )}
+
+                {drugInfo?.side_effects && (
+                  <div className="rounded-2xl p-6 mb-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
+                    <div className="flex items-center gap-2.5 mb-3">
+                      <span className="text-[18px]">🤕</span>
+                      <h2 className="text-[15px] font-black" style={{ color: C.dark }}>부작용</h2>
+                    </div>
+                    <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>{drugInfo.side_effects}</p>
+                  </div>
+                )}
+
+                {drugInfo?.interactions && (
+                  <div className="rounded-2xl p-6 mb-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
+                    <div className="flex items-center gap-2.5 mb-3">
+                      <span className="text-[18px]">🔀</span>
+                      <h2 className="text-[15px] font-black" style={{ color: C.dark }}>약물 상호작용</h2>
+                    </div>
+                    <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>{drugInfo.interactions}</p>
+                  </div>
+                )}
+              </>
             )}
 
             {drugInfo?.storage && (
@@ -205,7 +258,8 @@ export default function DrugDetail() {
               </div>
             )}
 
-            {!drugInfo?.precautions &&
+            {!hasPatientSummary &&
+              !drugInfo?.precautions &&
               !drugInfo?.side_effects &&
               !drugInfo?.interactions &&
               !drugInfo?.storage &&

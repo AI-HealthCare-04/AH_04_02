@@ -210,6 +210,14 @@ export interface DurCaution {
   extra: string | null;
 }
 
+/** [2026-07-20 추가] precautions~interactions 원문(허가사항/e약은요)을 환자용 쉬운 말
+ * 3분류로 요약한 값 — LLM 미사용/실패 시 null(화면은 원문 카드로 폴백). */
+export interface PatientPrecautionSummary {
+  must_check: string[]; // 이런 증상이 있으면 즉시 병원·약사에게
+  tell_doctor: string[]; // 복용 전 의사·약사에게 미리 알려야 하는 것
+  avoid_together: string[]; // 이 약과 함께 피해야 하는 것
+}
+
 /** 약물상세(DrugInfo.tsx/DrugDetail.tsx) 화면의 약효분류·적응증 표시용.
  * [2026-07-20 추가] precautions~dur_cautions는 rag/ 패키지의 e약은요·DUR live API로
  * 온디맨드 보강 조회한 값 — 미등재 약품이거나 조회 실패 시 null/빈 배열로 내려온다. */
@@ -223,6 +231,7 @@ export interface DrugIndicationInfo {
   interactions: string | null;
   storage: string | null;
   dur_cautions: DurCaution[];
+  patient_summary: PatientPrecautionSummary | null;
 }
 
 export async function getDrugIndication(drugName: string) {
