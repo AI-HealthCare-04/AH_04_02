@@ -203,12 +203,26 @@ export async function confirmMedications(recordId: number, medications: Medicati
   return data;
 }
 
-/** 약물상세(DrugInfo.tsx/DrugDetail.tsx) 화면의 약효분류·적응증 표시용 */
+/** DUR 노인주의/연령금기/임부금기 — "약 하나" 자체의 속성(다른 약과 무관하게 표시됨) */
+export interface DurCaution {
+  category: string;
+  detail: string | null;
+  extra: string | null;
+}
+
+/** 약물상세(DrugInfo.tsx/DrugDetail.tsx) 화면의 약효분류·적응증 표시용.
+ * [2026-07-20 추가] precautions~dur_cautions는 rag/ 패키지의 e약은요·DUR live API로
+ * 온디맨드 보강 조회한 값 — 미등재 약품이거나 조회 실패 시 null/빈 배열로 내려온다. */
 export interface DrugIndicationInfo {
   drug_name: string;
   matched_name: string | null;
   drug_class: string;
   indication: string | null;
+  precautions: string | null;
+  side_effects: string | null;
+  interactions: string | null;
+  storage: string | null;
+  dur_cautions: DurCaution[];
 }
 
 export async function getDrugIndication(drugName: string) {

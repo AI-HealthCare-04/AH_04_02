@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -34,6 +35,15 @@ from services.drug_matcher import MATCH_THRESHOLD, match_drug
 from services.drug_reference import get_drug_info
 from services.ocr_interface import get_ocr_provider  # noqa: E402
 
+# [2026-07-20 추가, 담당: 김영혜] /drug-info(DrugDetail.tsx)에 사용상의 주의사항·부작용·
+# 상호작용·보관법을 채워주기 위해 rag/ 패키지의 e약은요·DUR 클라이언트를 재사용한다.
+# chat_router.py의 온디맨드 DUR 조회와 동일한 패턴 — HIRA/e약은요 정적 파일
+# (services/drug_reference.py)엔 이 필드들이 애초에 없어서(품목 매칭·분류 전용) 새
+# 데이터 소스가 필요했다.
+_RAG_DIR = Path(__file__).resolve().parent.parent.parent / "rag"
+if _RAG_DIR.is_dir() and str(_RAG_DIR) not in sys.path:
+    sys.path.insert(0, str(_RAG_DIR))
+
 router = APIRouter(prefix="/ocr", tags=["OCR"])
 
 _ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
@@ -45,23 +55,91 @@ def ping():
     return {"status": "ok", "owner": "권순현"}
 
 
+def _fetch_rag_drug_detail(drug_name: str) -> dict:
+    """e약은요(주의사항/부작용/상호작용/보관법)와 DUR(노인주의/연령금기/임부금기)을
+    live API로 보강 조회한다. chat_router.py의 온디맨드 DUR 조회와 동일한 패턴 —
+    특정 PROVIDER 플래그와 무관하게 항상 시도하고, 조회어가 안 걸리거나
+    DATA_GO_KR_SERVICE_KEY 미설정·네트워크 실패 등 어떤 이유로든 실패해도 이 엔드포인트
+    전체가 500이 되지 않도록 각 호출을 개별로 조용히 폴백시킨다.
+
+    병용금기(search_usjnt_taboo)는 "약 하나"가 아니라 "약 A + 약 B" 관계 정보라 이
+    단일 약품 조회와 성격이 달라 여기서는 제외했다(처방전 전체 컨텍스트가 있는
+    chat_router.py의 DUR 보강조회 쪽 몫으로 남겨둠).
+    """
+    precautions: str | None = None
+    side_effects: str | None = None
+    interactions: str | None = None
+    storage: str | None = None
+
+    try:
+        from rag.mfds_client import search_by_name
+
+        hits = search_by_name(drug_name, num_of_rows=1)
+        if hits:
+            hit = hits[0]
+            parts = []
+            if hit.atpn_warn_qesitm:
+                parts.append(f"[경고] {hit.atpn_warn_qesitm.strip()}")
+            if hit.atpn_qesitm:
+                parts.append(hit.atpn_qesitm.strip())
+            precautions = "\n\n".join(parts) or None
+            side_effects = hit.se_qesitm.strip() if hit.se_qesitm else None
+            interactions = hit.intrc_qesitm.strip() if hit.intrc_qesitm else None
+            storage = hit.deposit_method_qesitm.strip() if hit.deposit_method_qesitm else None
+    except Exception:  # noqa: BLE001 — 키 미설정/네트워크 실패/미등재 약품명 등 어떤 이유로든 조용히 폴백
+        pass
+
+    dur_cautions: list[dict] = []
+    try:
+        from rag.dur_master import search_age_taboo, search_elderly_caution, search_pregnancy_taboo
+
+        raw_cautions = [
+            *search_elderly_caution(drug_name, num_of_rows=20),
+            *search_age_taboo(drug_name, num_of_rows=20),
+            *search_pregnancy_taboo(drug_name, num_of_rows=20),
+        ]
+        dur_cautions = [
+            {"category": c.category, "detail": c.detail, "extra": c.extra} for c in raw_cautions
+        ]
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {
+        "precautions": precautions,
+        "side_effects": side_effects,
+        "interactions": interactions,
+        "storage": storage,
+        "dur_cautions": dur_cautions,
+    }
+
+
 @router.get("/drug-info")
 def drug_info(drug_name: str):
     """
     [7/8] 약물상세 화면(DrugInfo.tsx/DrugDetail.tsx)의 "약효분류·적응증" 표시용 —
     OCR 세션과 무관하게 약품명만으로 다시 조회하는 stateless 조회입니다.
     get_drug_info()이 HIRA/e약은요/ATC/폴백 순으로 조회하는 로직을 재사용합니다.
+
+    [2026-07-20 추가] DrugDetail.tsx(복약 일정 기반, OCR 기록과 연결 안 됨)가 주의사항
+    등을 표시할 방법이 아예 없었던 문제 — rag/ 패키지 live API로 보강 조회한 필드들을
+    함께 내려준다(_fetch_rag_drug_detail 참고).
     """
     result = get_drug_info(drug_name)
     efficacy = result["efficacy"]
+    # [7/9 수정] "or drug_name" 폴백 때문에 매칭 실패("암로디민" 같은 오타)도 항상
+    # non-null로 나가서, 프론트(PrescriptionReview.tsx)의 "실제 존재하는 약인지"
+    # 검증이 무력화되고 있었다 — HIRA/e약은요 매칭 실패 시엔 그대로 null로 내려준다.
+    matched_name = result["matched_item"] or None
+    # matched_item은 match_source == "emed"일 때만 진짜 e약은요 정식명이다 — 그 외
+    # (hira_code의 "코드:..." 같은 검색 불가 값 포함)엔 원본 조회어를 그대로 쓴다.
+    lookup_name = matched_name if result["match_source"] == "emed" else drug_name
+    rag_detail = _fetch_rag_drug_detail(lookup_name)
     return {
         "drug_name": drug_name,
-        # [7/9 수정] "or drug_name" 폴백 때문에 매칭 실패("암로디민" 같은 오타)도 항상
-        # non-null로 나가서, 프론트(PrescriptionReview.tsx)의 "실제 존재하는 약인지"
-        # 검증이 무력화되고 있었다 — HIRA/e약은요 매칭 실패 시엔 그대로 null로 내려준다.
-        "matched_name": result["matched_item"] or None,
+        "matched_name": matched_name,
         "drug_class": result["drug_class"],
         "indication": efficacy.strip() if efficacy else efficacy,
+        **rag_detail,
     }
 
 
