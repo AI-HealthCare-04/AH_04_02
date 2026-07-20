@@ -103,6 +103,37 @@ class TestImmediateRevocation:
         assert r.status_code == 200
         assert r.json()["status"] == "revoked"
 
+    def test_immediate_revoke_last_link_returns_should_alert_now_true(
+        self, client: TestClient, session: Session
+    ):
+        """즉시 해제로 마지막 active 연결이 끊기면 should_alert_now=True (REQ-007a, 김영혜 지적)."""
+        cg, pt = _make_caregiver(session), _make_patient(session)
+        link = _link(session, cg, pt)
+        _assess(session, pt, "independent")
+
+        r = client.delete(f"/trust/relations/{link.id}", headers=_cg_headers(cg))
+
+        assert r.status_code == 200
+        body = r.json()
+        assert body["status"] == "revoked"
+        assert body["should_alert_now"] is True
+
+    def test_immediate_revoke_with_remaining_link_returns_should_alert_now_false(
+        self, client: TestClient, session: Session
+    ):
+        """즉시 해제 후 다른 active 연결이 남아있으면 should_alert_now=False."""
+        cg1, cg2, pt = _make_caregiver(session), _make_caregiver(session), _make_patient(session)
+        link1 = _link(session, cg1, pt)
+        _link(session, cg2, pt)  # 두 번째 보호자 연결
+        _assess(session, pt, "independent")
+
+        r = client.delete(f"/trust/relations/{link1.id}", headers=_cg_headers(cg1))
+
+        assert r.status_code == 200
+        body = r.json()
+        assert body["status"] == "revoked"
+        assert body["should_alert_now"] is False
+
 
 # ── 승인 대기 ──────────────────────────────────────────────
 

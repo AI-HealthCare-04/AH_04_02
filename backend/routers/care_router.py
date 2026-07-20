@@ -267,6 +267,7 @@ class TrustRevocationResult(BaseModel):
     status: str
     revoked_at: datetime | None = None
     revocation_requested_by: int | None = None
+    should_alert_now: bool = False  # REQ-007a: 즉시 해제 후 마지막 연결이면 True
 
 
 @router.delete("/trust/relations/{trust_id}", response_model=TrustRevocationResult)
@@ -310,6 +311,17 @@ def dissolve_trust_relation(
     session.commit()
     session.refresh(link)
 
+    # 즉시 해제(revoked)일 때만 마지막 연결 여부 확인 — pending은 아직 active 유지
+    should_alert = False
+    if link.status == "revoked":
+        remaining_active = session.exec(
+            select(CaregiverPatient)
+            .where(CaregiverPatient.patient_id == link.patient_id)
+            .where(CaregiverPatient.status == "active")
+        ).all()
+        patient = session.get(Patient, link.patient_id)
+        should_alert = (not remaining_active) and bool(patient) and _should_alert_now(patient)
+
     return TrustRevocationResult(
         trust_id=link.id,
         patient_id=link.patient_id,
@@ -317,6 +329,7 @@ def dissolve_trust_relation(
         status=link.status,
         revoked_at=link.revoked_at,
         revocation_requested_by=link.revocation_requested_by,
+        should_alert_now=should_alert,
     )
 
 
