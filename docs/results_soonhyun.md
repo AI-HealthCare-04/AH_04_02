@@ -756,3 +756,49 @@ PR #51은 브랜치 설정 실수(head=dev, base=main)로 닫았으나, ruff/ty/
 - **변경 후**: `/(\d+\/\d+|\d+\.?\d*)\s*(mg|g|ml|mcg|iu|정|캡슐|포|밀리그램|그램)/i`
 - **추가 지원**: `1/2정`, `0.5mg`, `2.5mg` 등 분수·소수 표기
 - **제외 범위**: 유니코드 분수기호(½ 등) — 실제 발생 가능성 낮아 이번 수정 범위에서 제외, 추후 실제 사례 발견 시 대응
+
+---
+
+## REQ-004 돌봄관계 해제 승인 절차 + REQ-007a 재표시 억제 구현 (2026-07-20)
+
+> 브랜치: `feat/req-004-dissolution-approval`
+
+### 구현 내용
+
+#### REQ-004 — care_level 기반 해제 절차
+
+| 엔드포인트 | 설명 |
+|-----------|------|
+| `DELETE /trust/relations/{trust_id}` | care_level에 따라 즉시 해제 또는 승인 대기로 분기 |
+| `POST /trust/relations/{trust_id}/revocation-approval` | 제3자 승인/거부 처리 |
+
+- `independent` / `guardian_check` → 즉시 `status="revoked"`, `revoked_at` 기록
+- `third_party_needed` → `status="revocation_pending"`, `revocation_requested_by` 기록 (요청자가 보호자인 경우)
+- 본인 요청 본인 승인 방지: `role=="caregiver"` 이고 `revocation_requested_by == subject.id` → 403
+
+#### REQ-007a — 보호자 연결 권유 안내 30일 재표시 억제
+
+- `Patient.caregiver_alert_dismissed_at: datetime | None` 필드 추가
+- 마지막 활성 연결 해제 후 `should_alert_now` 계산:
+  - `dismissed_at is None` → True
+  - `dismissed_at + 30d < now()` → True (30일 경과)
+  - 그 외 → False (30일 이내 억제)
+- 서비스 차단 없이 권유 안내만 제어
+
+### Migration 체인
+
+```
+9250cdf36945 → a1f3e8b2c047 → c3d5f9a1e082 → d4e7b2c0f195 (head)
+```
+
+- `a1f3e8b2c047`: CaregiverPatient에 `status`, `revoked_at`, `revocation_requested_by` 추가
+- `c3d5f9a1e082`: Patient에 `needs_caregiver_alert BOOLEAN` 추가 (중간 단계)
+- `d4e7b2c0f195`: `needs_caregiver_alert` DROP → `caregiver_alert_dismissed_at DATETIME` 교체
+
+### 검증
+
+| 항목 | 결과 |
+|------|------|
+| pytest 전체 | **188/188 통과** |
+| 24개 목업 배치 | **40/40 통과** |
+| alembic heads | 단일 head `d4e7b2c0f195` 정상 |

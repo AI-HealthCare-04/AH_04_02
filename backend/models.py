@@ -80,6 +80,10 @@ class Patient(SQLModel, table=True):
     lunch_regular: bool | None = None
     dinner_time: str | None = None
     dinner_regular: bool | None = None
+    # [2026-07-20 추가, REQ-007a] 보호자 연결 권유 안내를 사용자가 마지막으로 닫은 시각.
+    # None이거나 기록된 시각 + 30일 < now()이면 "지금 안내를 표시해야 한다"고 판단.
+    # 서비스 차단 없이 안내만 표시하는 용도 — should_alert_now는 API에서 계산해 반환.
+    caregiver_alert_dismissed_at: datetime | None = Field(default=None)
 
     @property
     def name(self) -> str:
