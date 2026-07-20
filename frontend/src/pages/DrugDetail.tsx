@@ -16,6 +16,7 @@ export default function DrugDetail() {
   const [schedule, setSchedule] = useState<Schedule | null>(stateSchedule ?? null);
   const [logs, setLogs] = useState<MedicationLogEntry[]>([]);
   const [drugInfo, setDrugInfo] = useState<DrugIndicationInfo | null>(null);
+  const [drugInfoLoading, setDrugInfoLoading] = useState(false);
   const [loading, setLoading] = useState(!stateSchedule);
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(false);
@@ -41,9 +42,14 @@ export default function DrugDetail() {
 
   useEffect(() => {
     if (!schedule) return;
+    // [2026-07-21 추가] e약은요/허가정보/DUR live 조회(_fetch_rag_drug_detail)는 후보 이름별로
+    // 순차 API 호출이 여러 번 걸려 수 초가 걸릴 수 있다 — drugInfo가 null인 로딩 중과
+    // "조회했지만 없음"을 구분 못 해서, 로딩 중에도 "확인하지 못했어요"가 먼저 보이던 문제.
+    setDrugInfoLoading(true);
     getDrugIndication(schedule.drug_name)
       .then(setDrugInfo)
-      .catch(() => setDrugInfo(null));
+      .catch(() => setDrugInfo(null))
+      .finally(() => setDrugInfoLoading(false));
   }, [schedule]);
 
   const hasPatientSummary = !!(
@@ -161,7 +167,16 @@ export default function DrugDetail() {
                 어렵다 — LLM이 "꼭 확인/의사·약사에게 알려주세요/함께 피할 것" 3분류로 쉽게
                 요약해둔 게 있으면 그걸 우선 보여주고, 없으면(LLM 미사용/실패) 원문 카드로
                 폴백한다. */}
-            {hasPatientSummary ? (
+            {drugInfoLoading ? (
+              <div className="rounded-2xl p-6 mb-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
+                <div className="flex items-center gap-2.5">
+                  <span className="text-[18px] animate-pulse">⏳</span>
+                  <p className="text-[13px]" style={{ color: C.muted }}>
+                    주의사항·부작용·약물 상호작용·보관 방법을 조회하는 중이에요...
+                  </p>
+                </div>
+              </div>
+            ) : hasPatientSummary ? (
               <>
                 {!!drugInfo?.patient_summary?.must_check.length && (
                   <div className="rounded-2xl p-6 mb-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
@@ -258,7 +273,8 @@ export default function DrugDetail() {
               </div>
             )}
 
-            {!hasPatientSummary &&
+            {!drugInfoLoading &&
+              !hasPatientSummary &&
               !drugInfo?.precautions &&
               !drugInfo?.side_effects &&
               !drugInfo?.interactions &&

@@ -272,8 +272,8 @@ FAKE_KDCA_DOC = Document(
 )
 
 
-def test_build_context_falls_back_to_kdca_when_curated_lifestyle_has_no_match():
-    """등록된 4개 질환에 없는 진단명이면 질병관리청 건강정보 전체 수집분에서 유사도 검색으로 보강한다."""
+def test_build_context_uses_kdca_as_primary_lifestyle_source():
+    """[2026-07-21] 질병관리청 건강정보(실제 수집분)를 생활습관 안내의 최우선 소스로 조회한다."""
     with (
         patch("rag.rag_chain.search_by_item_name", return_value=[FAKE_DOC]),
         patch("rag.rag_chain.search_by_disease", return_value=[]),
@@ -324,17 +324,38 @@ def test_build_context_falls_back_to_kdca_for_osteoporosis_not_in_curated_alias_
     assert "체중 부하 운동" in lifestyle_item["text"]
 
 
-def test_build_context_skips_kdca_fallback_when_curated_lifestyle_found():
-    """등록된 4개 질환으로 이미 생활지침을 찾았으면 질병관리청 전체 검색은 호출하지 않는다."""
+def test_build_context_prefers_kdca_over_curated_lifestyle_when_both_match():
+    """[2026-07-21] curated(학회 요약, 미검증 2차 가공 데이터)에도 매칭이 있어도, 질병관리청
+    검색에서 이미 찾았으면 그걸 쓰고 curated 조회는 아예 하지 않는다."""
     with (
         patch("rag.rag_chain.search_by_item_name", return_value=[FAKE_DOC]),
-        patch("rag.rag_chain.search_by_disease", return_value=[FAKE_LIFESTYLE_DOC]),
-        patch("rag.rag_chain.search_kdca_health_info") as mock_kdca_search,
+        patch("rag.rag_chain.search_kdca_health_info", return_value=[FAKE_KDCA_DOC]) as mock_kdca_search,
+        patch("rag.rag_chain.search_by_disease") as mock_search_disease,
         patch("rag.rag_chain.search_hira_by_product_name", return_value=[]),
     ):
-        _build_context("암로디핀정5밀리그램", situation=None, diagnosis="고혈압 있음")
+        context_items = _build_context("암로디핀정5밀리그램", situation=None, diagnosis="고혈압 있음")
 
-    mock_kdca_search.assert_not_called()
+    mock_kdca_search.assert_called_once_with("고혈압 있음", k=3)
+    mock_search_disease.assert_not_called()
+    lifestyle_item = next(item for item in context_items if item["kind"] == "lifestyle")
+    assert lifestyle_item["source_ref"].source == "질병관리청 국가건강정보포털"
+
+
+def test_build_context_falls_back_to_curated_lifestyle_when_kdca_has_no_match():
+    """등록된 4개 질환이어도, 질병관리청 검색에서 못 찾을 때만 curated 학회 요약으로 보강한다."""
+    with (
+        patch("rag.rag_chain.search_by_item_name", return_value=[FAKE_DOC]),
+        patch("rag.rag_chain.search_kdca_health_info", return_value=[]) as mock_kdca_search,
+        patch("rag.rag_chain.search_by_disease", return_value=[FAKE_LIFESTYLE_DOC]) as mock_search_disease,
+        patch("rag.rag_chain.search_hira_by_product_name", return_value=[]),
+    ):
+        context_items = _build_context("암로디핀정5밀리그램", situation=None, diagnosis="고혈압 있음")
+
+    mock_kdca_search.assert_called_once_with("고혈압 있음", k=3)
+    mock_search_disease.assert_called_once_with("hypertension")
+    lifestyle_item = next(item for item in context_items if item["kind"] == "lifestyle")
+    assert lifestyle_item["source_ref"].guideline_id == "htn-diet-1"
+    assert lifestyle_item["source_ref"].disease == "고혈압"
 
 
 def test_build_context_skips_kdca_fallback_without_diagnosis():

@@ -11,6 +11,7 @@ export default function DrugInfo() {
 
   const [record, setRecord] = useState<RecordResult | null>(null);
   const [drugInfo, setDrugInfo] = useState<DrugIndicationInfo | null>(null);
+  const [drugInfoLoading, setDrugInfoLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -33,9 +34,14 @@ export default function DrugInfo() {
 
   useEffect(() => {
     if (!med) return;
+    // [2026-07-21 추가] e약은요/허가정보/DUR live 조회(_fetch_rag_drug_detail)는 후보 이름별로
+    // 순차 API 호출이 여러 번 걸려 수 초가 걸릴 수 있다 — drugInfo가 null인 로딩 중과
+    // "조회했지만 없음"을 구분 못 해서, 로딩 중에도 "등록된 정보가 없어요"가 먼저 보이던 문제.
+    setDrugInfoLoading(true);
     getDrugIndication(med.drug_name)
       .then(setDrugInfo)
-      .catch(() => setDrugInfo(null));
+      .catch(() => setDrugInfo(null))
+      .finally(() => setDrugInfoLoading(false));
   }, [med]);
 
   const hasPatientSummary = !!(
@@ -135,12 +141,19 @@ export default function DrugInfo() {
                     <h2 className="text-[15px] font-black" style={{ color: C.dark }}>주의사항</h2>
                   </div>
                   <p className="text-[14px] leading-relaxed whitespace-pre-line" style={{ color: C.dark }}>
-                    {drugInfo?.precautions || "등록된 주의사항이 없어요."}
+                    {drugInfoLoading ? "조회하는 중이에요..." : (drugInfo?.precautions || "등록된 주의사항이 없어요.")}
                   </p>
                 </div>
               ) : null}
 
-              {hasPatientSummary ? (
+              {drugInfoLoading ? (
+                <div className="rounded-2xl p-6" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-[18px] animate-pulse">⏳</span>
+                    <p className="text-[13px]" style={{ color: C.muted }}>부작용·약물 상호작용·보관 방법을 조회하는 중이에요...</p>
+                  </div>
+                </div>
+              ) : hasPatientSummary ? (
                 <>
                   {!!drugInfo?.patient_summary?.must_check.length && (
                     <div className="rounded-2xl p-6" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
@@ -227,7 +240,7 @@ export default function DrugInfo() {
                 </div>
               )}
 
-              {!hasPatientSummary && !drugInfo?.side_effects && !drugInfo?.interactions && !drugInfo?.storage && !drugInfo?.dur_cautions?.length && (
+              {!drugInfoLoading && !hasPatientSummary && !drugInfo?.side_effects && !drugInfo?.interactions && !drugInfo?.storage && !drugInfo?.dur_cautions?.length && (
                 <div className="rounded-2xl p-6" style={{ background: "#F5F2ED" }}>
                   <p className="text-[13px]" style={{ color: C.muted }}>
                     부작용·약물 상호작용·보관 방법 정보를 아직 확인하지 못했어요.

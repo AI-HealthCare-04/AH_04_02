@@ -279,29 +279,17 @@ def _build_context(
                 }
             )
 
+    # [2026-07-21 버그수정] data/lifestyle_guidelines.json(4개 질환 curated set)은 실제로는
+    # 대한고혈압학회/대한당뇨병학회/한국지질·동맥경화학회/대한신장학회 등 학회 진료지침을
+    # AI 챗봇 요약 대화로 정리한 2차 가공 데이터다(README_rag.md에 "실제 서비스 반영 전 원문과
+    # 반드시 대조 검증"이 필요하다고 명시된 미검증 상태) — 11건 중 단 2건만 질병관리청을
+    # 인용하고 당뇨병/이상지질혈증/만성콩팥병은 질병관리청 인용이 아예 없다. 생활습관(음식/
+    # 운동/주의사항) 안내는 질병관리청 국가건강정보포털 실제 수집분(search_kdca_health_info)을
+    # 최우선 소스로 삼고, 그걸로 못 찾을 때만 이 curated 학회 요약으로 보강한다.
     lifestyle_found = False
-    for disease_code in _resolve_disease_codes(diagnosis):
-        for doc in search_by_disease(disease_code):
-            lifestyle_found = True
-            context_items.append(
-                {
-                    "kind": "lifestyle",
-                    "text": doc.page_content,
-                    "source_ref": LifestyleSourceRef(
-                        guideline_id=doc.metadata["guideline_id"],
-                        disease=doc.metadata["disease"],
-                        category=doc.metadata["category"],
-                        source=doc.metadata["source"],
-                    ),
-                }
-            )
-
-    # data/lifestyle_guidelines.json은 4개 만성질환만 사람이 손으로 정리한 것이라
-    # 그 목록에 없는 진단명은 위 루프가 항상 0건이다. 663건 전체를 알아서 등록할 수는
-    # 없으니(REQ-015~019 범위 확장), 이럴 때만 질병관리청 국가건강정보포털 전체
-    # 수집분(KdcaHealthInfoSection)에서 임베딩 유사도로 보강한다.
-    if not lifestyle_found and diagnosis:
+    if diagnosis:
         for doc in search_kdca_health_info(diagnosis, k=3):
+            lifestyle_found = True
             context_items.append(
                 {
                     "kind": "lifestyle",
@@ -314,6 +302,22 @@ def _build_context(
                     ),
                 }
             )
+
+    if not lifestyle_found:
+        for disease_code in _resolve_disease_codes(diagnosis):
+            for doc in search_by_disease(disease_code):
+                context_items.append(
+                    {
+                        "kind": "lifestyle",
+                        "text": doc.page_content,
+                        "source_ref": LifestyleSourceRef(
+                            guideline_id=doc.metadata["guideline_id"],
+                            disease=doc.metadata["disease"],
+                            category=doc.metadata["category"],
+                            source=doc.metadata["source"],
+                        ),
+                    }
+                )
 
     for idx, item in enumerate(context_items, start=1):
         item["idx"] = idx
