@@ -22,7 +22,7 @@ const FIELDS: { key: keyof OcrMedication; label: string }[] = [
 ];
 
 // 용량엔 반드시 숫자+단위가 같이 있어야 함 (예: "500mg") — "500"처럼 단위 빠진 OCR 오류를 잡아냄
-const DOSAGE_RE = /\d+\s*(mg|g|ml|mcg|iu|정|캡슐|포|밀리그램|그램)/i;
+const DOSAGE_RE = /(\d+\/\d+|\d+\.?\d*)\s*(mg|g|ml|mcg|iu|정|캡슐|포|밀리그램|그램)/i;
 function isDosageValid(dosage: string) {
   return DOSAGE_RE.test(dosage.trim());
 }
