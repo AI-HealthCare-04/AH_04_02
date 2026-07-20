@@ -18,7 +18,8 @@ export default function Records() {
   const [searchParams] = useSearchParams();
   const patientId = Number(searchParams.get("patient_id")) || getCurrentPatientId();
   const [records, setRecords] = useState<RecordSummary[]>([]);
-  const [search, setSearch] = useState("");
+  // [2026-07-20] 내비바 통합검색창에서 /records?search=...로 넘어오는 경우 초기값으로 반영
+  const [search, setSearch] = useState(searchParams.get("search") ?? "");
   const [dateFilter, setDateFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
