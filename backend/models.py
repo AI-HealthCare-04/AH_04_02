@@ -168,6 +168,12 @@ class CaregiverPatient(SQLModel, table=True):
     caregiver_id: int = Field(foreign_key="caregivers.id")
     patient_id: int = Field(foreign_key="patients.id")
     created_at: datetime = Field(default_factory=datetime.now)
+    # [2026-07-20 추가, REQ-004] 연결 해제 상태 관리
+    # active: 정상 연결 / revocation_pending: third_party_needed 환자의 해제 승인 대기
+    # / revoked: 해제 완료
+    status: str = Field(default="active")
+    revoked_at: datetime | None = Field(default=None)
+    revocation_requested_by: int | None = Field(default=None, foreign_key="caregivers.id")
 
 
 # ── 비밀번호 재설정 임시코드 [2026-07-15 추가, REQ-039] ──
