@@ -224,8 +224,10 @@ export default function SignUp() {
         localStorage.removeItem("caregiver_id");
         // [7/13] 환자 본인도 가입 직후 로그인해 토큰을 받는다 — Dashboard/Schedule/
         // Notification 등 공유 화면의 인가된 API 호출에 필요 (issue #28).
-        const { access_token } = await login(phone.trim(), password);
+        const { access_token, name: loggedInName } = await login(phone.trim(), password);
         localStorage.setItem("access_token", access_token);
+        // [2026-07-19 추가] NavBar가 화면마다 "김건강"으로 하드코딩돼있던 문제 수정
+        localStorage.setItem("user_name", loggedInName);
       } else if (memberType === "personal") {
         await createCaregiver({
           name: name.trim(),
@@ -240,9 +242,10 @@ export default function SignUp() {
         });
         // [7/10] 가입 직후엔 토큰이 없어서 다음 화면(PatientManagement.tsx)의 인가된
         // API 호출이 401 나던 문제 — 방금 만든 계정으로 바로 로그인해 토큰을 받는다.
-        const { access_token, caregiver_id } = await login(phone.trim(), password);
+        const { access_token, caregiver_id, name: loggedInName } = await login(phone.trim(), password);
         localStorage.setItem("access_token", access_token);
         localStorage.setItem("caregiver_id", String(caregiver_id));
+        localStorage.setItem("user_name", loggedInName);
       } else {
         await createCaregiver({
           name: orgName.trim(),
@@ -259,9 +262,10 @@ export default function SignUp() {
           manager_name: managerName.trim(),
           manager_phone: managerPhone.trim(),
         });
-        const { access_token, caregiver_id } = await login(managerPhone.trim(), password);
+        const { access_token, caregiver_id, name: loggedInName } = await login(managerPhone.trim(), password);
         localStorage.setItem("access_token", access_token);
         localStorage.setItem("caregiver_id", String(caregiver_id));
+        localStorage.setItem("user_name", loggedInName);
       }
       setDone(true);
     } catch {
@@ -271,7 +275,9 @@ export default function SignUp() {
     }
   };
 
-  const nextRoute = memberType === "personal" && pRole === "patient" ? "/dashboard" : "/patients";
+  // [2026-07-16] 환자 본인 가입 직후엔 대시보드 전에 식사 시간 체크리스트를 먼저 물어본다
+  // (복약 알림 시각 설정에 쓰임) — 보호자/기관 가입은 아직 케어할 환자가 없어서 해당 없음.
+  const nextRoute = memberType === "personal" && pRole === "patient" ? "/meal-check" : "/patients";
   const nextLabel = memberType === "personal" && pRole === "patient" ? "시작하기" : "환자 등록하러 가기";
   const mm = String(Math.floor(timer / 60)).padStart(2, "0");
   const ss = String(timer % 60).padStart(2, "0");

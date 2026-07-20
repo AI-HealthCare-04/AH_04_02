@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import NavBar from "../components/NavBar";
 import { getNotificationSettings, updateNotificationSettings, type NotificationSettings } from "../api/care";
-import { applyFontScale, getFontScale, useGuardedPatientId, type FontScale } from "../lib/session";
+import { applyFontScale, getCurrentUserName, getFontScale, type FontScale, useGuardedPatientId } from "../lib/session";
 
 const DEFAULT_CHATBOT_NAME = "약콩이";
 
@@ -19,6 +19,7 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (patientId == null) return;
@@ -35,12 +36,15 @@ export default function Settings() {
     if (!settings || patientId == null) return;
     const name = chatbotName.trim() || DEFAULT_CHATBOT_NAME;
     setChatbotName(name);
+    setSaving(true);
     try {
       await updateNotificationSettings(patientId, { chatbot_name: name });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch {
       setError("저장하지 못했어요.");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -51,7 +55,7 @@ export default function Settings() {
 
   return (
     <div className="min-h-screen bg-[#FAF6F1]">
-      <NavBar isLoggedIn userName="김건강" />
+      <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-xl mx-auto px-6 sm:px-8 py-10">
         <h1 className="text-[26px] font-black text-[#1E1A17] mb-1">화면·챗봇 설정</h1>
         <p className="text-[14px] text-[#8A7E75] mb-7">챗봇 이름과 글자 크기를 원하는 대로 바꿀 수 있어요.</p>
@@ -74,9 +78,10 @@ export default function Settings() {
               />
               <button
                 onClick={saveChatbotName}
-                className="px-5 py-3 rounded-xl text-white font-bold text-[14px] shrink-0 bg-[#C1653D] hover:opacity-88 transition-all"
+                disabled={saving}
+                className="px-5 py-3 rounded-xl text-white font-bold text-[14px] shrink-0 bg-[#C1653D] hover:opacity-88 transition-all disabled:opacity-60"
               >
-                저장
+                {saving ? "저장 중..." : "저장"}
               </button>
             </div>
             {saved && <p className="text-[12px] font-semibold text-[#4A7A47] mt-2">✓ 저장됐어요</p>}

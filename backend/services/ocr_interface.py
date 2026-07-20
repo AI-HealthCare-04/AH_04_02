@@ -27,11 +27,12 @@ from services.parsing_rules import parse_prescription
 @dataclass
 class MedicationItem:
     drug_name: str
-    dosage: str            # 예: "500mg"
-    frequency: str         # 예: "1일 3회"
+    dosage: str            # 예: "500mg" (1회 투약량)
+    frequency: str         # 예: "3회" (1일 투약횟수 — "1일"은 라벨에 있어 값엔 안 넣음)
     diagnosis: str          # 예: "고혈압"
     drug_class: str = ""    # 약효분류, 예: "이뇨제"
     drug_code: str = ""     # [급여/비급여][코드] 패턴에서 추출한 코드
+    total_days: str = ""    # [2026-07-18 추가] 총 투약일수, 예: "30일"
     confidence: float = 0.0  # 0.0 ~ 1.0
 
 
@@ -70,6 +71,7 @@ def _build_medications(raw_text: str, confidence: float) -> list:
             diagnosis=diagnosis,
             drug_class=m.get("drug_class") or get_drug_class(m["drug_name"]),
             drug_code=m.get("drug_code", ""),
+            total_days=m.get("total_days", ""),
             confidence=confidence,
         )
         for m in meds
@@ -173,17 +175,19 @@ class MockOCRProvider(OCRProvider):
                 MedicationItem(
                     drug_name="암로디민 5mg",
                     dosage="5mg",
-                    frequency="1일 1회",
+                    frequency="1회",
                     diagnosis="고혈압",
                     drug_class="칼슘채널차단제",
+                    total_days="30일",
                     confidence=confidences[0],
                 ),
                 MedicationItem(
                     drug_name="메트포르민 500mg",
                     dosage="500",
-                    frequency="1일 2회",
+                    frequency="2회",
                     diagnosis="제2형 당뇨병",
                     drug_class="당뇨병용제(비구아니드)",
+                    total_days="30일",
                     confidence=confidences[1],
                 ),
             ],

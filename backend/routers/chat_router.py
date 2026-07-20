@@ -172,7 +172,6 @@ MENU_MAP: list[dict[str, str]] = [
     {"name": "복약 일정", "path": "/schedule", "desc": "하루 복용 시간표 확인 및 복용 체크"},
     {"name": "알림 설정", "path": "/notification", "desc": "복약 알림 켜고 끄기"},
     {"name": "복약 대시보드", "path": "/dashboard", "desc": "오늘의 복약 현황 요약"},
-    {"name": "자가진단", "path": "/check", "desc": "간단한 건강 자가진단"},
     {"name": "마이페이지", "path": "/mypage", "desc": "내 정보·계정 설정"},
     {"name": "환자 관리", "path": "/patients", "desc": "(보호자용) 돌보는 환자 등록·관리"},
     {"name": "보호자 연결", "path": "/connect", "desc": "환자-보호자 연결/연결 해제"},

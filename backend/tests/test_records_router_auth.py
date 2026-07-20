@@ -12,7 +12,7 @@ from core.auth import create_access_token
 from core.database import get_session
 from fastapi.testclient import TestClient
 from main import app
-from models import Caregiver, CaregiverPatient, MedicalRecord, OcrResult, Patient
+from models import Caregiver, CaregiverPatient, MedicalRecord, MedicationSchedule, OcrResult, Patient
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
 
@@ -177,6 +177,70 @@ class TestRemoveMedication:
         headers = {"Authorization": f"Bearer {_token(cg_other.id, 'caregiver')}"}
         r = client.delete(f"/records/{rec.id}/medications/{ocr2.id}", headers=headers)
         assert r.status_code == 403
+
+
+# ──────────────────────────────────────────────────────────────
+# DELETE /records/{record_id}
+# ──────────────────────────────────────────────────────────────
+
+class TestDeleteRecord:
+    def test_owner_ok_and_soft_deleted(self, client: TestClient, session: Session):
+        cg = _make_caregiver(session, "cgDelRec")
+        pt = _make_patient(session, "ptDelRec")
+        _link(session, cg, pt)
+        rec = _make_record(session, pt.id, status="completed")
+        headers = {"Authorization": f"Bearer {_token(cg.id, 'caregiver')}"}
+        r = client.delete(f"/records/{rec.id}", headers=headers)
+        assert r.status_code == 200
+
+        # 목록/상세 조회에서 제외되는지 (soft-delete)
+        assert client.get("/records", params={"patient_id": pt.id}, headers=headers).json() == []
+        r_get = client.get(f"/records/{rec.id}", headers=headers)
+        assert r_get.status_code == 404
+
+    def test_other_403(self, client: TestClient, session: Session):
+        cg_owner = _make_caregiver(session, "cgDelRecOwner")
+        cg_other = _make_caregiver(session, "cgDelRecOther")
+        pt = _make_patient(session, "ptDelRecOther")
+        _link(session, cg_owner, pt)
+        rec = _make_record(session, pt.id)
+        headers = {"Authorization": f"Bearer {_token(cg_other.id, 'caregiver')}"}
+        r = client.delete(f"/records/{rec.id}", headers=headers)
+        assert r.status_code == 403
+
+    def test_deleting_record_deactivates_its_schedules(self, client: TestClient, session: Session):
+        """[2026-07-20 추가] 리뷰에서 발견 — record_id로 연결된 자동 생성 일정이 삭제 후에도
+        active로 남아 대시보드/스케줄러 알림에 계속 떴다. 삭제 시 같이 비활성화되는지 확인."""
+        cg = _make_caregiver(session, "cgDelSched")
+        pt = _make_patient(session, "ptDelSched")
+        _link(session, cg, pt)
+        rec = _make_record(session, pt.id, status="completed")
+
+        linked = MedicationSchedule(patient_id=pt.id, drug_name="테스트약", time_slot="09:00", record_id=rec.id)
+        unrelated = MedicationSchedule(patient_id=pt.id, drug_name="직접등록약", time_slot="09:00")
+        session.add(linked)
+        session.add(unrelated)
+        session.commit()
+        session.refresh(linked)
+        session.refresh(unrelated)
+
+        headers = {"Authorization": f"Bearer {_token(cg.id, 'caregiver')}"}
+        r = client.delete(f"/records/{rec.id}", headers=headers)
+        assert r.status_code == 200
+
+        session.refresh(linked)
+        session.refresh(unrelated)
+        assert linked.active is False
+        assert unrelated.active is True  # 이 처방전과 무관한 일정은 그대로 유지
+
+    def test_already_deleted_404(self, client: TestClient, session: Session):
+        cg = _make_caregiver(session, "cgDelRecTwice")
+        pt = _make_patient(session, "ptDelRecTwice")
+        _link(session, cg, pt)
+        rec = _make_record(session, pt.id)
+        headers = {"Authorization": f"Bearer {_token(cg.id, 'caregiver')}"}
+        assert client.delete(f"/records/{rec.id}", headers=headers).status_code == 200
+        assert client.delete(f"/records/{rec.id}", headers=headers).status_code == 404
 
 
 # ──────────────────────────────────────────────────────────────
