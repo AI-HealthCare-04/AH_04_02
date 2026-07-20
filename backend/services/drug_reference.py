@@ -448,8 +448,17 @@ def get_drug_class(drug_name: str, drug_code: str = "") -> str:
 def get_drug_name_list() -> list[str]:
     """drug_matcher.py에서 재사용할 기준 약품명 목록 반환.
 
-    HIRA 약가마스터 한글상품명 + e약은요 정규화 이름 + 하드코딩 폴백 키
-    를 합쳐서 중복 제거한 리스트를 돌려준다. 데이터 파일이 없으면 하드코딩만 반환.
+    HIRA 약가마스터 한글상품명 + e약은요 정규화 이름을 합쳐서 중복 제거한 리스트를
+    돌려준다. 데이터 파일이 없으면 빈 리스트에 가까울 수 있다.
+
+    [2026-07-20 버그수정] 예전엔 _HARDCODED_FALLBACK.keys()도 여기 합쳐서 매칭
+    후보로 썼다 — 그런데 그 사전은 get_drug_class()의 "약효분류 부분일치용" 키일 뿐,
+    실제 완전한 제품명이 아니다(예: "메트포르민"은 성분명, 실제 제품명은
+    "글루코파지정500mg" 등). OCR이 "메트포르민정500mg"을 읽으면 이 사전의
+    "메트포르민"과 유사도 0.9 이상으로 높게 매칭돼(needs_review=False),
+    OcrResult.display_name이 원문(전체명)보다 정보가 적은 성분명을 오히려 우선
+    표시해버렸다. 약효분류 판정(_class_from_fallback)은 그대로 이 사전을 쓰되,
+    "이 약의 정확한 전체 제품명" 판정에는 더 이상 이 사전을 후보로 넣지 않는다.
     """
     names: list[str] = []
     _load_hira()
@@ -458,7 +467,6 @@ def get_drug_name_list() -> list[str]:
     for entry in _load_drug_table():
         if entry["norm"]:
             names.append(entry["norm"])
-    names.extend(_HARDCODED_FALLBACK.keys())
     seen: set[str] = set()
     result: list[str] = []
     for name in names:
