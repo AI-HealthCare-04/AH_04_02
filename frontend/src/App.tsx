@@ -20,6 +20,7 @@ import Records from "./pages/Records";
 import PrescriptionDetail from "./pages/PrescriptionDetail";
 import PrescriptionReview from "./pages/PrescriptionReview";
 import MedGuide from "./pages/MedGuide";
+import MedGuideList from "./pages/MedGuideList";
 import MyPage from "./pages/MyPage";
 import Settings from "./pages/Settings";
 import PatientManagement from "./pages/PatientManagement";
@@ -61,6 +62,7 @@ function App() {
           <Route path="/schedule" element={<Schedule />} />
           <Route path="/notification" element={<Notification />} />
           <Route path="/records" element={<Records />} />
+          <Route path="/guides" element={<MedGuideList />} />
           <Route path="/records/:recordId" element={<PrescriptionDetail />} />
           <Route path="/records/:recordId/review" element={<PrescriptionReview />} />
           <Route path="/records/:recordId/guide" element={<MedGuide />} />
