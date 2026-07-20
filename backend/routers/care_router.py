@@ -398,6 +398,45 @@ def approve_revocation(
     )
 
 
+class DismissAlertResult(BaseModel):
+    patient_id: int
+    caregiver_alert_dismissed_at: datetime
+    next_alert_at: datetime  # dismissed_at + 30일
+
+
+@router.post("/trust/relations/{trust_id}/dismiss-alert", response_model=DismissAlertResult)
+def dismiss_caregiver_alert(
+    trust_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """[REQ-007a] 보호자 연결 권유 안내 닫기 — 30일간 재표시 억제.
+
+    사용자가 "닫기"를 누르면 Patient.caregiver_alert_dismissed_at을 현재 시각으로 갱신한다.
+    _should_alert_now()는 dismissed_at + 30일이 지나야 다시 True를 반환한다."""
+    link = session.get(CaregiverPatient, trust_id)
+    if not link:
+        raise HTTPException(404, "존재하지 않는 연결이에요")
+
+    require_actor_patient_access(link.patient_id, actor, session)
+
+    patient = session.get(Patient, link.patient_id)
+    if not patient:
+        raise HTTPException(404, "환자 정보를 찾을 수 없어요")
+
+    patient.caregiver_alert_dismissed_at = datetime.now()
+    session.add(patient)
+    session.commit()
+    session.refresh(patient)
+
+    dismissed_at = patient.caregiver_alert_dismissed_at
+    return DismissAlertResult(
+        patient_id=patient.id,
+        caregiver_alert_dismissed_at=dismissed_at,
+        next_alert_at=dismissed_at + timedelta(days=30),
+    )
+
+
 # ══════════════════════════════════════════
 # 4. 알림 설정 (NotificationSetting)
 # ══════════════════════════════════════════
