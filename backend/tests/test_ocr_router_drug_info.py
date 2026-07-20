@@ -145,22 +145,49 @@ class TestDrugInfoDegradedGracefully:
         assert data["dur_cautions"] == []
 
 
-class TestDrugInfoLookupNameSelection:
-    def test_non_emed_match_source_uses_raw_drug_name_for_rag_lookup(self):
-        """HIRA 코드 매칭 등 emed가 아닌 경로에서 matched_item이 검색 불가능한 값
-        (예: "코드:123")이어도 rag 조회는 원본 drug_name으로 나가야 한다."""
+class TestDrugInfoMatchedNameValidation:
+    """[2026-07-20, PR #52 기준 정렬] matched_name은 get_drug_info()의 matched_item이
+    아니라 match_drug()의 유사도 점수로 판정한다 — "졸피뎀아무말"처럼 실제 이름 뒤에
+    엉뚱한 말을 붙인 입력을 get_drug_info()의 atc_pattern/fallback(키워드 부분일치)은
+    통과시키지만 match_drug()의 전체 문자열 유사도는 걸러낸다는 게 PR #52의 요지 —
+    그 기준을 그대로 재사용한다."""
+
+    def test_high_similarity_score_confirms_drug_name_itself(self):
         with (
-            patch(
-                "routers.ocr_router.get_drug_info",
-                return_value={
-                    "drug_name": "케이캡정50mg",
-                    "drug_class": "위산분비억제제",
-                    "efficacy": "",
-                    "match_source": "hira_name",
-                    "matched_item": "케이캡정50mg",
-                    "atc_code": "A02BC",
-                },
-            ),
+            patch("routers.ocr_router.match_drug", return_value=("무관한매칭명", 0.95)),
+            patch("rag.mfds_client.search_permit_detail", return_value=[]),
+            patch("rag.mfds_client.search_by_name", return_value=[]),
+            patch("rag.dur_master.search_elderly_caution", return_value=[]),
+            patch("rag.dur_master.search_age_taboo", return_value=[]),
+            patch("rag.dur_master.search_pregnancy_taboo", return_value=[]),
+            patch("routers.ocr_router._summarize_precautions_for_patient", return_value=None),
+        ):
+            r = client.get("/ocr/drug-info", params={"drug_name": "암로디핀정5mg"})
+
+        # matched_name은 match_drug()이 찾아준 다른 이름이 아니라 검증된 원본 drug_name 그대로다.
+        assert r.json()["matched_name"] == "암로디핀정5mg"
+
+    def test_low_similarity_score_below_threshold_returns_null(self):
+        """"졸피뎀아무말"처럼 일부만 맞는 입력 — 키워드 부분일치라면 통과했겠지만
+        전체 유사도 기준으로는 걸러져야 한다."""
+        with (
+            patch("routers.ocr_router.match_drug", return_value=("졸피뎀정10mg", 0.4)),
+            patch("rag.mfds_client.search_permit_detail", return_value=[]),
+            patch("rag.mfds_client.search_by_name", return_value=[]),
+            patch("rag.dur_master.search_elderly_caution", return_value=[]),
+            patch("rag.dur_master.search_age_taboo", return_value=[]),
+            patch("rag.dur_master.search_pregnancy_taboo", return_value=[]),
+            patch("routers.ocr_router._summarize_precautions_for_patient", return_value=None),
+        ):
+            r = client.get("/ocr/drug-info", params={"drug_name": "졸피뎀아무말"})
+
+        assert r.json()["matched_name"] is None
+
+    def test_rag_lookup_always_uses_raw_drug_name_regardless_of_match_result(self):
+        """matched_name이 항상 drug_name 자체이거나 None이라, "더 정확한 이름으로 바꿔서
+        조회"할 대상이 없다 — rag/DUR 조회는 검증 결과와 무관하게 원본으로 그대로 나간다."""
+        with (
+            patch("routers.ocr_router.match_drug", return_value=("전혀다른약", 0.1)),
             patch("rag.mfds_client.search_permit_detail", return_value=[]) as mock_permit,
             patch("rag.mfds_client.search_by_name", return_value=[]) as mock_search,
             patch("rag.dur_master.search_elderly_caution", return_value=[]),

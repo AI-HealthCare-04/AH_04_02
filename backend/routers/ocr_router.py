@@ -217,16 +217,24 @@ def drug_info(drug_name: str):
     """
     result = get_drug_info(drug_name)
     efficacy = result["efficacy"]
-    # [7/9 수정] "or drug_name" 폴백 때문에 매칭 실패("암로디민" 같은 오타)도 항상
-    # non-null로 나가서, 프론트(PrescriptionReview.tsx)의 "실제 존재하는 약인지"
-    # 검증이 무력화되고 있었다 — HIRA/e약은요 매칭 실패 시엔 그대로 null로 내려준다.
-    matched_name = result["matched_item"] or None
-    # matched_item은 match_source == "emed"일 때만 진짜 e약은요 정식명이다 — 그 외
-    # (hira_code의 "코드:..." 같은 검색 불가 값 포함)엔 원본 조회어를 그대로 쓴다.
-    lookup_name = matched_name if result["match_source"] == "emed" else drug_name
-    rag_detail = _fetch_rag_drug_detail(lookup_name)
+    # [2026-07-19 PR #52 기준 정렬] matched_name(PrescriptionReview.tsx가 "이 약품명이
+    # 실제로 맞는지" 판단하는 값)은 get_drug_info()의 matched_item이 아니라 match_drug()의
+    # 유사도 점수로 판정한다 — PR #52에서 이미 이렇게 바뀐 걸 그대로 따른다. get_drug_info()의
+    # atc_pattern/fallback 단계는 "이름에 특정 키워드가 포함되는가"만 보는 부분일치라
+    # "졸피뎀아무말"처럼 실제 이름 뒤에 엉뚱한 말을 붙여도 통과해버리는데, match_drug()은
+    # (용량 표기를 정규화한 뒤) 전체 문자열 유사도를 보므로 이런 입력을 실제로 걸러낸다
+    # (run_ocr()이 review_required를 정할 때 쓰는 것과 동일한 기준, MATCH_THRESHOLD).
+    #
+    # PR #52 이전엔 matched_item이 "hira_name 등에서 찾은 다른(더 정확한) 이름"일 수 있어서
+    # rag 조회어를 matched_item으로 바꿔치기했지만, 이 기준으로는 matched_name이 항상
+    # drug_name 그 자체(검증 통과) 또는 None(검증 실패)이라 그런 대체가 의미 없어졌다 —
+    # rag/DUR 조회는 검증 결과와 무관하게 원본 drug_name으로 그대로 시도한다(실패해도
+    # _fetch_rag_drug_detail이 이미 null/빈 값으로 조용히 폴백).
+    _, score = match_drug(drug_name)
+    matched_name = drug_name if score >= MATCH_THRESHOLD else None
+    rag_detail = _fetch_rag_drug_detail(drug_name)
     patient_summary = _summarize_precautions_for_patient(
-        lookup_name, rag_detail["precautions"], rag_detail["side_effects"], rag_detail["interactions"]
+        drug_name, rag_detail["precautions"], rag_detail["side_effects"], rag_detail["interactions"]
     )
     return {
         "drug_name": drug_name,
