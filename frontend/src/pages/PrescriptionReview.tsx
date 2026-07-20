@@ -34,9 +34,9 @@ type FieldIssue = { field: keyof OcrMedication; message: string };
 // [7/9] 신뢰도(review_required)와 무관하게 항상 확인 화면을 거치므로, "어떤 항목이 문제인지"는
 // OCR의 overall_confidence가 아니라 실제 필드 값(약품명 매칭 여부·용량 형식·빈 칸)으로 판단한다.
 // 초기 로드 시(비동기 검증 전)와 렌더링 시 양쪽에서 같은 기준을 써야 해서 순수 함수로 분리했다.
-function computeIssues(m: OcrMedication, drugNameOk: boolean | undefined): FieldIssue[] {
+function computeIssues(m: OcrMedication, drugNameOk: boolean | undefined, nameOverridden = false): FieldIssue[] {
   const issues: FieldIssue[] = [];
-  if (drugNameOk === false) {
+  if (drugNameOk === false && !nameOverridden) {
     issues.push({ field: "drug_name", message: "약품명이 올바르지 않아요. 처방전의 철자를 다시 확인해주세요." });
   } else if (!m.drug_name.trim()) {
     issues.push({ field: "drug_name", message: "약품명이 비어있어요. 입력해주세요." });
@@ -75,6 +75,10 @@ export default function PrescriptionReview() {
   const [confirmed, setConfirmed] = useState<Set<number>>(new Set());
   // 약품명이 실제 존재하는 약인지(e약은요/HIRA 매칭) — key: 항목 id, undefined면 아직 조회 전
   const [drugNameOk, setDrugNameOk] = useState<Record<number, boolean>>({});
+  // [2026-07-20 추가] 참조 DB에 없는 실제 약(복합제 등, "알려진 제한사항" 참고)까지
+  // match_drug()가 다 잡아내진 못한다 — 사용자가 직접 확인했다고 재확인한 항목은
+  // drugNameOk=false여도 막지 않는다. 이름을 다시 수정하면(handleBlur) 새로 검증하도록 해제.
+  const [nameOverride, setNameOverride] = useState<Record<number, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [addingItem, setAddingItem] = useState(false);
@@ -127,7 +131,16 @@ export default function PrescriptionReview() {
   };
 
   const fieldIssues = (item: OcrMedication): FieldIssue[] =>
-    computeIssues(edited[item.id] ?? item, drugNameOk[item.id]);
+    computeIssues(edited[item.id] ?? item, drugNameOk[item.id], nameOverride[item.id]);
+
+  // 약품명 자동 검증에 안 걸리는 실제 약(복합제 등)을 사용자가 직접 확인했을 때 쓰는 override.
+  const confirmDrugNameAnyway = (id: number) => {
+    setNameOverride((prev) => ({ ...prev, [id]: true }));
+    const m = edited[id];
+    if (m && computeIssues(m, drugNameOk[id], true).length === 0) {
+      setConfirmed((prev) => new Set([...prev, id]));
+    }
+  };
 
   // 항목의 모든 칸을 채운 채로 "그 항목을 완전히 벗어나면"(blur) 자동으로 "확인 완료" 처리합니다.
   // 약품명은 다시 입력했으면 e약은요/HIRA 재조회로 실제 존재하는 약인지 확인하고,
@@ -140,7 +153,10 @@ export default function PrescriptionReview() {
     if (!m) return;
 
     let nameOk = drugNameOk[id];
+    let overridden = nameOverride[id];
     if (field === "drug_name") {
+      overridden = false; // 이름을 다시 고쳤으니 예전 override는 무효 — 새 값으로 다시 검증
+      setNameOverride((prev) => ({ ...prev, [id]: false }));
       try {
         const info = await getDrugIndication(m.drug_name);
         nameOk = info.matched_name !== null;
@@ -154,7 +170,7 @@ export default function PrescriptionReview() {
     if (relatedTarget instanceof Node && container?.contains(relatedTarget)) return;
 
     const current = edited[id];
-    if (computeIssues(current, nameOk).length === 0) {
+    if (computeIssues(current, nameOk, overridden).length === 0) {
       setConfirmed((prev) => new Set([...prev, id]));
     }
   };
@@ -486,6 +502,20 @@ export default function PrescriptionReview() {
                               이 항목은 문제없이 인식됐어요. 필요하면 내용을 직접 수정해주세요.
                             </p>
                           )}
+                        </div>
+                      )}
+
+                      {/* [2026-07-20 추가] 복합제 등 참조 DB에 없는 실제 약은 자동 검증을 통과하지
+                          못할 수 있다 — 사용자가 실제 약이 맞다고 직접 확인하면 진행할 수 있게 함. */}
+                      {!isDone && drugNameOk[item.id] === false && (
+                        <div className="mx-5 mt-2 mb-1">
+                          <button
+                            onClick={() => confirmDrugNameAnyway(item.id)}
+                            className="text-[12px] font-bold px-3 py-1.5 rounded-full transition-all hover:opacity-80"
+                            style={{ background: "rgba(30,26,23,0.06)", color: C.dark }}
+                          >
+                            철자를 확인했고, 이 약품명이 맞아요
+                          </button>
                         </div>
                       )}
 

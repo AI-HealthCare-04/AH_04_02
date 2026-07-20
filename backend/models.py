@@ -288,6 +288,11 @@ class MedicationSchedule(SQLModel, table=True):
     # JSON 배열 문자열(예: '["mon","wed","fri"]') — SQLite엔 JSON 타입이 없어 문자열로 저장
     # (guide_results.source_refs와 동일한 관례).
     days_of_week: str | None = None
+    # [2026-07-20 추가] 처방전에서 자동 생성된 일정(records_router.py의 _create_schedules_
+    # from_ocr)만 이 값을 채운다 — 처방전을 soft-delete할 때 관련 일정도 같이 비활성화하기
+    # 위해 필요(안 그러면 삭제한 처방전의 약이 대시보드/알림에 계속 남는다). monitoring_router.py
+    # 로 직접 만든 일정은 처방전과 무관하니 그대로 None.
+    record_id: int | None = Field(default=None, foreign_key="medical_records.id", index=True)
 
 
 # ── 복약 기록 (담당: 박소정) ──

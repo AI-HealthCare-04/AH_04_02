@@ -52,6 +52,8 @@ def _create_schedules_from_ocr(record: MedicalRecord, ocr_items: Sequence[OcrRes
                     drug_name=item.drug_name,
                     time_slot=slot,
                     memo="처방전에서 자동 등록됨 — 시간·식전후 여부는 확인 후 수정해주세요",
+                    # [2026-07-20 추가] 이 처방전을 나중에 삭제할 때 같이 비활성화할 수 있도록 연결.
+                    record_id=record.id,
                 )
             )
     session.commit()
@@ -285,6 +287,10 @@ def delete_record(
     [2026-07-16 추가] 등록내역(처방전 기록) 삭제 — 멘토링에서 지적된 "등록내역 삭제 기능
     필요" 항목. OcrResult/GuideResult 등 연결 데이터는 그대로 두고 soft-delete만 하며
     (PatientMedication.deleted_at과 동일한 관례), 목록/상세 조회에서만 제외한다.
+
+    [2026-07-20 추가] 이 처방전에서 자동 생성된 복약 일정(MedicationSchedule.record_id로
+    연결됨)도 함께 비활성화한다 — 안 그러면 "삭제한" 처방전의 약이 대시보드/스케줄러
+    알림에 계속 남아있게 된다(리뷰에서 발견).
     """
     record = session.get(MedicalRecord, record_id)
     if not record or record.deleted_at is not None:
@@ -293,6 +299,14 @@ def delete_record(
 
     record.deleted_at = datetime.now()
     session.add(record)
+
+    schedules = session.exec(
+        select(MedicationSchedule).where(MedicationSchedule.record_id == record_id)
+    ).all()
+    for schedule in schedules:
+        schedule.active = False
+        session.add(schedule)
+
     session.commit()
     return {"message": "삭제됐어요"}
 
