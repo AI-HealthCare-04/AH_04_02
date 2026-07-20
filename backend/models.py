@@ -177,7 +177,11 @@ class CaregiverPatient(SQLModel, table=True):
     # / revoked: 해제 완료
     status: str = Field(default="active")
     revoked_at: datetime | None = Field(default=None)
-    revocation_requested_by: int | None = Field(default=None, foreign_key="caregivers.id")
+    # revocation_requested_by: 요청자 ID (caregiver일 때는 caregivers.id, patient일 때는 patients.id)
+    # FK를 caregivers.id로 고정하면 환자 요청을 표현 못 해서 FK 없이 앱 레벨 검증만 사용한다.
+    revocation_requested_by: int | None = Field(default=None)
+    # requested_by_role: 요청자가 caregiver인지 patient인지 구분 — 자기승인 가드에 사용
+    requested_by_role: str | None = Field(default=None)  # "caregiver" | "patient"
 
 
 # ── 비밀번호 재설정 임시코드 [2026-07-15 추가, REQ-039] ──

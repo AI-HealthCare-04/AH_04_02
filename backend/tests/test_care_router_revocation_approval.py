@@ -1,12 +1,14 @@
 """POST /trust/relations/{trust_id}/revocation-approval — REQ-004 해제 승인/거부 테스트.
 
-6개 시나리오:
+8개 시나리오:
 1. 정상 승인 (approve=True) → revoked
 2. 정상 거부 (approve=False) → active 복원
-3. 본인이 본인 요청 승인 시도 → 403
+3. 본인이 본인 요청 승인 시도 (보호자) → 403
 4. pending 아닌 상태에서 승인 시도 → 409
 5. 무관한 보호자가 승인 시도 → 403
 6. 마지막 연결 해제 시 should_alert_now=True (REQ-007a, dismissed_at=None 기준)
+7. 환자가 요청 → 같은 환자가 승인 시도 → 403 (CRITICAL 수정, pecs0310 리뷰)
+8. 환자가 요청 → 보호자가 승인 → 200 (정상 경로)
 """
 import pytest
 from core.auth import create_access_token
@@ -64,12 +66,20 @@ def _link(session: Session, cg: Caregiver, pt: Patient, status: str = "active") 
     return lnk
 
 
-def _pending_link(session: Session, requester: Caregiver, pt: Patient) -> CaregiverPatient:
+def _pending_link(
+    session: Session,
+    requester: Caregiver,
+    pt: Patient,
+    *,
+    requested_by_role: str = "caregiver",
+    requested_by_id: int | None = None,
+) -> CaregiverPatient:
     lnk = CaregiverPatient(
         caregiver_id=requester.id,
         patient_id=pt.id,
         status="revocation_pending",
-        revocation_requested_by=requester.id,
+        revocation_requested_by=requested_by_id if requested_by_id is not None else requester.id,
+        requested_by_role=requested_by_role,
     )
     session.add(lnk)
     session.commit()
@@ -117,9 +127,10 @@ def test_reject_restores_active(client: TestClient, session: Session):
     assert body["status"] == "active"
     assert body["revoked_at"] is None
 
-    # DB에서 revocation_requested_by도 초기화됐는지 확인
+    # DB에서 revocation_requested_by / requested_by_role 모두 초기화됐는지 확인
     session.refresh(pending)
     assert pending.revocation_requested_by is None
+    assert pending.requested_by_role is None
 
 
 # ── 3. 본인이 본인 요청 승인 → 403 ────────────────────────
@@ -214,3 +225,44 @@ def test_alert_reappears_after_30_days(client: TestClient, session: Session):
 
     assert r.status_code == 200
     assert r.json()["should_alert_now"] is True
+
+
+# ── 7. 환자 요청 → 같은 환자 승인 시도 → 403 (CRITICAL, pecs0310 리뷰) ──────
+
+def test_patient_self_approval_forbidden(client: TestClient, session: Session):
+    """환자가 본인 요청한 해제를 본인이 승인 시도 → 403.
+
+    기존 가드는 role=="caregiver"만 검사해서 환자 경로를 통과시켰다 — 이 테스트가 그 버그를
+    재현하고, 수정 후 403으로 막히는지 검증한다 (pecs0310 CRITICAL 리뷰 재현 시나리오).
+    """
+    cg = _caregiver(session)
+    pt = _patient(session)
+    # 환자가 요청한 pending 상태 — requested_by_role="patient", revocation_requested_by=pt.id
+    pending = _pending_link(
+        session, cg, pt,
+        requested_by_role="patient",
+        requested_by_id=pt.id,
+    )
+
+    # 같은 환자가 승인 시도
+    r = client.post(URL.format(pending.id), json={"approve": True}, headers=_headers(pt.id, "patient"))
+
+    assert r.status_code == 403
+
+
+# ── 8. 환자 요청 → 보호자가 승인 → 200 (정상 경로) ──────────────────────────
+
+def test_caregiver_approves_patient_request(client: TestClient, session: Session):
+    """환자가 요청한 해제를 보호자가 승인 → 200 revoked."""
+    cg = _caregiver(session)
+    pt = _patient(session)
+    pending = _pending_link(
+        session, cg, pt,
+        requested_by_role="patient",
+        requested_by_id=pt.id,
+    )
+
+    r = client.post(URL.format(pending.id), json={"approve": True}, headers=_headers(cg.id, "caregiver"))
+
+    assert r.status_code == 200
+    assert r.json()["status"] == "revoked"

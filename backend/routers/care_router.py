@@ -301,10 +301,10 @@ def dissolve_trust_relation(
     if care_level in ("independent", "guardian_check"):
         link.status = "revoked"
         link.revoked_at = datetime.now()
-    else:  # third_party_needed
+    else:  # third_party_needed — 요청자 role·id를 항상 기록 (환자/보호자 무관)
         link.status = "revocation_pending"
-        if role == "caregiver":
-            link.revocation_requested_by = subject.id
+        link.revocation_requested_by = subject.id
+        link.requested_by_role = role  # "caregiver" | "patient"
 
     session.add(link)
     session.commit()
@@ -362,7 +362,8 @@ def approve_revocation(
         raise HTTPException(409, f"승인 대상이 아닌 연결이에요 (현재 상태: {link.status})")
 
     role, subject = actor
-    if role == "caregiver" and link.revocation_requested_by == subject.id:
+    # 요청자 본인은 role과 무관하게 승인 불가 (caregiver가 요청해도, patient가 요청해도)
+    if link.revocation_requested_by == subject.id and link.requested_by_role == role:
         raise HTTPException(403, "본인이 요청한 해제는 본인이 승인할 수 없어요")
 
     if payload.approve:
@@ -377,6 +378,7 @@ def approve_revocation(
     else:
         link.status = "active"
         link.revocation_requested_by = None
+        link.requested_by_role = None
         remaining_active = [True]  # 복원됐으므로 최소 1개 active
 
     session.add(link)
