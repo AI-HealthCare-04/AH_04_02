@@ -172,9 +172,10 @@ export async function removeMedicationItem(recordId: number, medicationId: numbe
 }
 
 /** 등록내역 목록 (RecordsPage) */
-export async function listRecords(patientId: number) {
+export async function listRecords(patientId: number, signal?: AbortSignal) {
   const { data } = await monitoringClient.get<RecordSummary[]>("/records", {
     params: { patient_id: patientId },
+    signal,
   });
   return data;
 }

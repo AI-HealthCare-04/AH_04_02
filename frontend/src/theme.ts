@@ -11,7 +11,7 @@ export const C = {
   ivory: "#FAF6F1",
   white: "#FFFFFF",
   dark: "#1E1A17",
-  muted: "#8A7E75",
+  muted: "#6E6259", // [2026-07-20] #8A7E75는 흰/아이보리 배경 대비 3.95:1로 WCAG AA(4.5:1) 미달 — 같은 웜브라운 톤에서 명도만 낮춤(5.9:1)
   bubbleBg: "#F4F0EA",
   success: "#8FAE8B",
   successText: "#4A7A47", // success(#8FAE8B)는 작은 텍스트엔 대비가 약해서, 흰 배경 위 텍스트는 이 진한 초록을 씀
@@ -19,4 +19,6 @@ export const C = {
   warningBg: "rgba(224, 138, 91, 0.10)",
   warningBorder: "rgba(224, 138, 91, 0.25)",
   warningText: "#7A4B28",
+  shadowCard: "0 1px 2px rgba(30,26,23,0.04), 0 6px 20px rgba(30,26,23,0.09)",
+  shadowDropdown: "0 8px 24px rgba(30,26,23,0.14)",
 } as const;

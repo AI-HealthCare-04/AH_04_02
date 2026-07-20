@@ -258,3 +258,7 @@ class GuideResponse(BaseModel):
     ocr_confidence: float | None = Field(
         default=None, description="OCR 개별 인식 신뢰도 원본 (generate_guide_from_medication 경유 시에만 채워짐)"
     )
+    cached: bool = Field(default=False, description="True이면 DB 캐시에서 반환된 결과 (REQ-020)")
+    cache_expires_at: str | None = Field(
+        default=None, description="캐시 만료 시각 ISO-8601 문자열 (cached=True 일 때만 채워짐)"
+    )

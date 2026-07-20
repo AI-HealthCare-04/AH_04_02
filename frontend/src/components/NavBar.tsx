@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
+import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ChevronDown, ChevronRight, Menu, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Menu, Pill, Search, X } from "lucide-react";
 import { C } from "../theme";
 
 interface NavBarProps {
@@ -9,43 +10,34 @@ interface NavBarProps {
   variant?: "light" | "dark";
 }
 
-const NAV_ITEMS = [
+// [2026-07-20] 별도 "더 보기" 화살표 하나에 전부 몰아두던 방식 대신, 상단 메뉴 각각에
+// 마우스를 올리면 그 메뉴 바로 아래로 관련 하위 항목이 드롭다운되도록 변경 — 알림류는
+// 오늘의 복약 아래, 기록류는 등록내역 아래로 그룹 분리. 복약 가이드는 하위 항목에서
+// 상단 메뉴로 승격, 처방 약 등록은 맨 왼쪽으로 이동.
+const NAV_ITEMS: { label: string; to: string; children?: { label: string; to: string }[] }[] = [
   { label: "처방 약 등록", to: "/upload" },
-  { label: "복약 일정", to: "/schedule" },
-  { label: "등록내역", to: "/records" },
-  { label: "복약기록", to: "/monitoring" },
+  {
+    label: "오늘의 복약",
+    to: "/dashboard",
+    children: [
+      { label: "복약 알림", to: "/schedule" },
+      { label: "알림 설정", to: "/notification" },
+    ],
+  },
+  { label: "복약 가이드", to: "/guides" },
+  {
+    label: "등록내역",
+    to: "/records",
+    children: [{ label: "복약기록", to: "/monitoring" }],
+  },
 ];
 
-// [7/14] 풋터에 있던 3개 카테고리를 그대로 옮겨온 것 — 매 페이지 하단까지 스크롤해야
-// 보이던 메뉴를 상단 드롭다운에서 바로 접근하게 함. 항목·중복 여부는 풋터와 동일하게 유지.
-const MENU_GROUPS: { title: string; items: { label: string; to: string }[] }[] = [
-  {
-    title: "복약 안내",
-    items: [
-      { label: "오늘의 복약", to: "/dashboard" },
-      { label: "복용 기록", to: "/monitoring" },
-      { label: "약품 정보", to: "/records" },
-      { label: "복약 알림", to: "/notification" },
-    ],
-  },
-  {
-    title: "생활 습관",
-    items: [
-      { label: "운동 가이드", to: "/records" },
-      { label: "식단 관리", to: "/records" },
-      { label: "수면 개선", to: "/records" },
-      { label: "정신 건강", to: "/records" },
-    ],
-  },
-  {
-    title: "알림 설정",
-    items: [
-      { label: "알림 관리", to: "/notification" },
-      { label: "알림 내역", to: "/notification" },
-      { label: "시간 설정", to: "/schedule" },
-    ],
-  },
-];
+// [2026-07-20] 통합검색에서 "알림설정", "가이드"처럼 메뉴 이름 일부만 쳐도 해당 메뉴로
+// 바로 이동할 수 있게 — 상단 메뉴+하위 항목을 한 겹으로 펼친 검색 대상 목록.
+const ALL_MENU_ENTRIES: { label: string; to: string }[] = NAV_ITEMS.flatMap((item) => [
+  { label: item.label, to: item.to },
+  ...(item.children ?? []),
+]);
 
 /**
  * [7/8 업그레이드] 기존엔 로고만 있고 메뉴 링크는 실제로 동작하지 않았음.
@@ -58,14 +50,22 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
   const dark = variant === "dark";
   const textColor = dark ? C.white : C.dark;
   const [isOpen, setIsOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [hoveredTo, setHoveredTo] = useState<string | null>(null);
+  const [allOpen, setAllOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
+  const allMenuRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
+  const trimmedQuery = searchQuery.trim();
+  const menuMatches = trimmedQuery ? ALL_MENU_ENTRIES.filter((e) => e.label.includes(trimmedQuery)) : [];
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setIsOpen(false);
-        setMenuOpen(false);
+        setHoveredTo(null);
+        setAllOpen(false);
+        setSearchFocused(false);
       }
     };
     document.addEventListener("keydown", onKey);
@@ -84,15 +84,40 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  // 드롭다운 바깥 클릭 시 닫기
+  // [2026-07-20] 항목별 호버 드롭다운과 달리 이건 클릭으로 열고 닫으므로, 바깥을
+  // 클릭했을 때도 닫히게 해야 한다 (호버 드롭다운은 mouseleave로 이미 처리됨).
   useEffect(() => {
-    if (!menuOpen) return;
-    const onClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    if (!allOpen) return;
+    const onClickOutside = (e: MouseEvent) => {
+      if (allMenuRef.current && !allMenuRef.current.contains(e.target as Node)) {
+        setAllOpen(false);
+      }
     };
-    document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
-  }, [menuOpen]);
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [allOpen]);
+
+  useEffect(() => {
+    if (!searchFocused) return;
+    const onClickOutside = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setSearchFocused(false);
+      }
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [searchFocused]);
+
+  const goToRecordsSearch = (q: string) => {
+    if (!q) return;
+    navigate(`/records?search=${encodeURIComponent(q)}`);
+    setSearchFocused(false);
+  };
+
+  const handleSearch = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    goToRecordsSearch(trimmedQuery);
+  };
 
   return (
     <>
@@ -103,7 +128,7 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
         <div className="max-w-7xl mx-auto px-6 sm:px-10 h-16 flex items-center justify-between gap-4">
           <Link to="/" className="flex items-center gap-2 shrink-0">
             <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: C.terracotta }}>
-              <span className="text-white text-sm">💊</span>
+              <Pill className="w-4 h-4 text-white" strokeWidth={2.4} />
             </div>
             <span className="text-xl font-black whitespace-nowrap" style={{ color: textColor }}>건강동행</span>
           </Link>
@@ -111,56 +136,148 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
           {isLoggedIn && (
             <nav className="hidden lg:flex items-center gap-6 min-w-0">
               {NAV_ITEMS.map((item) => (
-                <Link
+                <div
                   key={item.to}
-                  to={item.to}
-                  className="text-[15px] font-medium whitespace-nowrap transition-opacity hover:opacity-60"
-                  style={{ color: textColor }}
+                  className="relative"
+                  onMouseEnter={() => item.children && setHoveredTo(item.to)}
+                  onMouseLeave={() => item.children && setHoveredTo(null)}
                 >
-                  {item.label}
-                </Link>
+                  <Link
+                    to={item.to}
+                    className="text-[15px] font-medium whitespace-nowrap transition-opacity hover:opacity-60"
+                    style={{ color: textColor }}
+                  >
+                    {item.label}
+                  </Link>
+
+                  {/* [2026-07-20] "더 보기" 화살표 하나로 몰아둔 드롭다운 대신, 각 메뉴에 마우스를
+                      올리면 그 메뉴 바로 아래로 관련 하위 항목이 드롭다운되도록 변경. */}
+                  {item.children && hoveredTo === item.to && (
+                    <div className="absolute top-full left-1/2 -translate-x-1/2 pt-3 -mt-px">
+                      <div
+                        className="rounded-2xl p-4 flex flex-col gap-2.5 min-w-[140px]"
+                        style={{ background: C.white, border: "1px solid rgba(30,26,23,0.10)", boxShadow: C.shadowDropdown }}
+                      >
+                        {item.children.map((child) => (
+                          <Link
+                            key={child.to}
+                            to={child.to}
+                            onClick={() => setHoveredTo(null)}
+                            className="text-[14px] font-medium whitespace-nowrap transition-opacity hover:opacity-60"
+                            style={{ color: C.dark }}
+                          >
+                            {child.label}
+                          </Link>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               ))}
 
-              <div className="relative" ref={menuRef}>
+              {/* [2026-07-20] 항목별 호버 드롭다운과 별개로, 전체 메뉴를 한 번에 보고 싶을 때를
+                  위한 통합 드롭다운 — 클릭으로 열고 닫음(호버 아님), 바깥 클릭/ESC로 닫힘. */}
+              <div className="relative" ref={allMenuRef}>
                 <button
-                  onClick={() => setMenuOpen((v) => !v)}
-                  aria-expanded={menuOpen}
-                  className="flex items-center gap-1 text-[15px] font-medium whitespace-nowrap transition-opacity hover:opacity-60"
+                  onClick={() => setAllOpen((v) => !v)}
+                  aria-expanded={allOpen}
+                  aria-label="전체 메뉴"
+                  className="flex items-center justify-center w-8 h-8 rounded-full transition-opacity hover:opacity-60"
                   style={{ color: textColor }}
                 >
-                  전체메뉴
-                  <ChevronDown className={`w-4 h-4 transition-transform ${menuOpen ? "rotate-180" : ""}`} />
+                  <ChevronDown className={`w-5 h-5 transition-transform ${allOpen ? "rotate-180" : ""}`} />
                 </button>
 
-                {menuOpen && (
-                  <div
-                    className="absolute top-full left-1/2 -translate-x-1/2 mt-3 rounded-2xl p-6 flex gap-10 shadow-lg"
-                    style={{ background: C.white, border: "1px solid rgba(30,26,23,0.10)" }}
-                  >
-                    {MENU_GROUPS.map((group) => (
-                      <div key={group.title} className="min-w-[120px]">
-                        <p className="text-[12px] font-bold mb-3 whitespace-nowrap" style={{ color: C.muted }}>
-                          {group.title}
-                        </p>
-                        <div className="flex flex-col gap-2.5">
-                          {group.items.map((item) => (
+                {allOpen && (
+                  <div className="absolute top-full right-0 pt-3 -mt-px">
+                    <div
+                      className="rounded-2xl p-4 flex flex-col gap-1 min-w-[160px]"
+                      style={{ background: C.white, border: "1px solid rgba(30,26,23,0.10)", boxShadow: C.shadowDropdown }}
+                    >
+                      {NAV_ITEMS.map((item) => (
+                        <div key={item.to}>
+                          <Link
+                            to={item.to}
+                            onClick={() => setAllOpen(false)}
+                            className="block py-1.5 text-[14px] font-medium whitespace-nowrap transition-opacity hover:opacity-60"
+                            style={{ color: C.dark }}
+                          >
+                            {item.label}
+                          </Link>
+                          {item.children?.map((child) => (
                             <Link
-                              key={item.label}
-                              to={item.to}
-                              onClick={() => setMenuOpen(false)}
-                              className="text-[14px] font-medium whitespace-nowrap transition-opacity hover:opacity-60"
-                              style={{ color: C.dark }}
+                              key={child.to}
+                              to={child.to}
+                              onClick={() => setAllOpen(false)}
+                              className="block py-1.5 pl-3 text-[13px] font-medium whitespace-nowrap transition-opacity hover:opacity-60"
+                              style={{ color: C.muted }}
                             >
-                              {item.label}
+                              {child.label}
                             </Link>
                           ))}
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
             </nav>
+          )}
+
+          {isLoggedIn && (
+            <div className="hidden lg:block relative shrink-0 w-48" ref={searchRef}>
+              <form onSubmit={handleSearch} className="flex items-center relative">
+                <Search className="absolute left-3 w-4 h-4 pointer-events-none" style={{ color: C.muted }} />
+                <input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onFocus={() => setSearchFocused(true)}
+                  placeholder="통합 검색"
+                  aria-label="통합 검색"
+                  className="w-full pl-9 pr-3 py-2 rounded-full border text-[13px] outline-none bg-white"
+                  style={{ borderColor: "rgba(30,26,23,0.15)" }}
+                />
+              </form>
+
+              {/* [2026-07-20] "알림설정", "가이드"처럼 메뉴 이름 일부만 쳐도 바로 이동할 수
+                  있도록, 등록내역 검색과 별개로 메뉴 이름도 실시간으로 함께 찾아 보여준다. */}
+              {searchFocused && trimmedQuery && (
+                <div className="absolute top-full left-0 right-0 pt-2">
+                  <div
+                    className="rounded-2xl p-2 flex flex-col gap-0.5 max-h-72 overflow-y-auto"
+                    style={{ background: C.white, border: "1px solid rgba(30,26,23,0.10)", boxShadow: C.shadowDropdown }}
+                  >
+                    {menuMatches.length > 0 && (
+                      <>
+                        <p className="px-3 pt-1 pb-0.5 text-[11px] font-bold" style={{ color: C.muted }}>메뉴</p>
+                        {menuMatches.map((m) => (
+                          <Link
+                            key={m.to}
+                            to={m.to}
+                            onClick={() => {
+                              setSearchFocused(false);
+                              setSearchQuery("");
+                            }}
+                            className="px-3 py-2 rounded-xl text-[13px] font-medium whitespace-nowrap transition-opacity hover:opacity-60"
+                            style={{ color: C.dark }}
+                          >
+                            {m.label}
+                          </Link>
+                        ))}
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => goToRecordsSearch(trimmedQuery)}
+                      className="px-3 py-2 rounded-xl text-left text-[13px] font-medium transition-opacity hover:opacity-60"
+                      style={{ color: C.terracotta }}
+                    >
+                      등록내역에서 "{trimmedQuery}" 검색
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
           <div className="flex items-center gap-3 shrink-0">
@@ -220,33 +337,26 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
             style={{ background: "rgba(255,255,255,0.97)", borderColor: "rgba(30,26,23,0.10)" }}
           >
             {NAV_ITEMS.map((item) => (
-              <Link
-                key={item.to}
-                to={item.to}
-                className="text-[15px] font-medium whitespace-nowrap transition-opacity hover:opacity-60 py-3 border-b last:border-0"
-                style={{ color: C.dark, borderColor: "rgba(30,26,23,0.08)" }}
-                onClick={() => setIsOpen(false)}
-              >
-                {item.label}
-              </Link>
-            ))}
-
-            {MENU_GROUPS.map((group) => (
-              <div key={group.title} className="py-3 border-b" style={{ borderColor: "rgba(30,26,23,0.08)" }}>
-                <p className="text-[12px] font-bold mb-2" style={{ color: C.muted }}>{group.title}</p>
-                <div className="flex flex-col gap-2">
-                  {group.items.map((item) => (
-                    <Link
-                      key={item.label}
-                      to={item.to}
-                      className="text-[15px] font-medium whitespace-nowrap transition-opacity hover:opacity-60"
-                      style={{ color: C.dark }}
-                      onClick={() => setIsOpen(false)}
-                    >
-                      {item.label}
-                    </Link>
-                  ))}
-                </div>
+              <div key={item.to} className="border-b last:border-0" style={{ borderColor: "rgba(30,26,23,0.08)" }}>
+                <Link
+                  to={item.to}
+                  className="block text-[15px] font-medium whitespace-nowrap transition-opacity hover:opacity-60 py-3"
+                  style={{ color: C.dark }}
+                  onClick={() => setIsOpen(false)}
+                >
+                  {item.label}
+                </Link>
+                {item.children?.map((child) => (
+                  <Link
+                    key={child.to}
+                    to={child.to}
+                    className="block text-[14px] font-medium whitespace-nowrap transition-opacity hover:opacity-60 py-2.5 pl-4"
+                    style={{ color: C.muted }}
+                    onClick={() => setIsOpen(false)}
+                  >
+                    {child.label}
+                  </Link>
+                ))}
               </div>
             ))}
           </nav>
