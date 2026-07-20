@@ -23,7 +23,7 @@ import sqlmodel  # [2026-07-14] SQLModel 커스텀 컬럼 타입(AutoString 등)
 
 # revision identifiers, used by Alembic.
 revision: str = 'bfc3d4e49682'
-down_revision: Union[str, Sequence[str], None] = '9250cdf36945'
+down_revision: Union[str, Sequence[str], None] = '66c32a201ba5'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
