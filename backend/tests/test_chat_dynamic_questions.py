@@ -8,7 +8,11 @@ docs/status-report 참고). 환자가 실제 등록한 약 기반으로 질문�
 GET /chat/questions의 IDOR 보호, (3) POST /ask가 동적 question_id를 정상 해석하는지를
 검증한다.
 """
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
 import pytest
+import routers.chat_router as chat_router
 from core.auth import create_access_token
 from core.database import get_session
 from fastapi.testclient import TestClient
@@ -21,9 +25,30 @@ from models import (
     Patient,
     PatientMedication,
 )
-from routers.chat_router import PRESET_QUESTIONS, _build_dynamic_questions
+from routers.chat_router import PRESET_QUESTIONS, _build_dynamic_questions, _build_patient_context
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
+
+
+def _install_mock_llm(monkeypatch: pytest.MonkeyPatch, answer: str) -> MagicMock:
+    """_CHAT_LLM_AVAILABLE=True(실 LLM 사용 조건)를 흉내내고 ChatOpenAI를 가짜로 바꿔
+    실제 호출 없이 호출 여부/호출 인자만 검증한다. 반환값으로 assert_(not_)called()."""
+    import langchain_openai
+
+    response = MagicMock()
+    response.content = answer
+    instance = MagicMock()
+    instance.invoke.return_value = response
+    chat_cls = MagicMock(return_value=instance)
+
+    monkeypatch.setattr(langchain_openai, "ChatOpenAI", chat_cls)
+    monkeypatch.setattr(chat_router, "_CHAT_LLM_AVAILABLE", True)
+    monkeypatch.setattr(
+        chat_router, "_rag_settings",
+        SimpleNamespace(OPENAI_MODEL="gpt-test", OPENAI_API_KEY="test-key"),
+        raising=False,
+    )
+    return chat_cls
 
 
 @pytest.fixture(name="session")
@@ -184,3 +209,109 @@ class TestAskWithDynamicQuestionId:
             "/chat/ask", json={"patient_id": pt.id, "question_id": "dyn:meal_timing:없는약"}, headers=headers
         )
         assert r.status_code == 404
+
+
+class TestAskLlmGating:
+    """버그1(/ask): preset/dynamic 고정 답변이 매칭되면 _CHAT_LLM_AVAILABLE이 True여도
+    LLM을 호출하지 않고 고정 답변을 그대로 내보내야 한다. LLM은 freeform일 때만."""
+
+    def test_preset_question_does_not_call_llm_even_when_available(
+        self, client: TestClient, session: Session, monkeypatch: pytest.MonkeyPatch
+    ):
+        chat_cls = _install_mock_llm(monkeypatch, "이건 LLM 답변이면 안 됩니다")
+        pt = _make_patient(session, "presetGatePat")
+        headers = {"Authorization": f"Bearer {_token(pt.id, 'patient')}"}
+
+        r = client.post("/chat/ask", json={"patient_id": pt.id, "question_id": "q1"}, headers=headers)
+        assert r.status_code == 200
+
+        chat_cls.assert_not_called()
+        body = r.json()
+        assert body["answer_source"] == "preset"
+        assert body["answer"] == PRESET_QUESTIONS[0]["answer"]
+
+    def test_dynamic_question_does_not_call_llm_even_when_available(
+        self, client: TestClient, session: Session, monkeypatch: pytest.MonkeyPatch
+    ):
+        chat_cls = _install_mock_llm(monkeypatch, "LLM 답변이면 안 됩니다")
+        pt = _make_patient(session, "dynGatePat")
+        session.add(
+            PatientMedication(
+                patient_id=pt.id, medication_name="메트포르민정500mg", source_type="manual",
+                verification_status="user_confirmed",
+            )
+        )
+        session.commit()
+        headers = {"Authorization": f"Bearer {_token(pt.id, 'patient')}"}
+        dyn_id = client.get("/chat/questions", params={"patient_id": pt.id}, headers=headers).json()[0]["id"]
+
+        r = client.post("/chat/ask", json={"patient_id": pt.id, "question_id": dyn_id}, headers=headers)
+        assert r.status_code == 200
+
+        chat_cls.assert_not_called()
+        body = r.json()
+        assert body["answer_source"] == "preset"
+        assert "메트포르민정500mg" in body["answer"]
+
+    def test_freeform_question_calls_llm(
+        self, client: TestClient, session: Session, monkeypatch: pytest.MonkeyPatch
+    ):
+        chat_cls = _install_mock_llm(monkeypatch, "자유질문에 대한 LLM 답변")
+        pt = _make_patient(session, "freeformGatePat")
+        headers = {"Authorization": f"Bearer {_token(pt.id, 'patient')}"}
+
+        r = client.post(
+            "/chat/ask", json={"patient_id": pt.id, "question": "이 앱은 뭐하는 앱이야?"}, headers=headers
+        )
+        assert r.status_code == 200
+
+        chat_cls.assert_called()  # freeform은 여전히 LLM 호출(회귀 방지)
+        body = r.json()
+        assert body["answer_source"].startswith("llm")
+        assert body["answer"] == "자유질문에 대한 LLM 답변"
+
+
+class TestPatientContextIncludesRegisteredMeds:
+    """버그2: 처방전 OCR 없이 '내 약 등록'(PatientMedication)만 한 환자도 그 약 이름이
+    LLM 컨텍스트에 들어가야 한다(예전엔 _build_patient_context가 PatientMedication을
+    아예 안 봐서 "등록된 처방전 정보가 없습니다"만 넘어갔다)."""
+
+    def test_build_patient_context_includes_registered_medication_without_ocr(self, session: Session):
+        pt = _make_patient(session, "ctxMedPat")
+        session.add(
+            PatientMedication(
+                patient_id=pt.id, medication_name="로수바스타틴정10mg", source_type="manual",
+                verification_status="user_confirmed",
+            )
+        )
+        session.commit()
+
+        context = _build_patient_context(pt.id, session)
+        assert "로수바스타틴정10mg" in context
+        assert context != "아직 등록된 처방전 정보가 없습니다."
+
+    def test_freeform_passes_registered_drug_name_to_llm(
+        self, client: TestClient, session: Session, monkeypatch: pytest.MonkeyPatch
+    ):
+        chat_cls = _install_mock_llm(monkeypatch, "LLM 답변")
+        pt = _make_patient(session, "ctxLlmPat")
+        session.add(
+            PatientMedication(
+                patient_id=pt.id, medication_name="로수바스타틴정10mg", source_type="manual",
+                verification_status="user_confirmed",
+            )
+        )
+        session.commit()
+        headers = {"Authorization": f"Bearer {_token(pt.id, 'patient')}"}
+
+        r = client.post(
+            "/chat/ask", json={"patient_id": pt.id, "question": "내가 먹는 약 알려줘"}, headers=headers
+        )
+        assert r.status_code == 200
+        chat_cls.assert_called()
+
+        # ChatOpenAI().invoke(messages, ...) 호출 인자에 등록 약 이름이 들어있는지 확인
+        instance = chat_cls.return_value
+        messages = instance.invoke.call_args.args[0]
+        prompt_text = "\n".join(m["content"] for m in messages)
+        assert "로수바스타틴정10mg" in prompt_text
