@@ -14,7 +14,7 @@ from routers.chat_router import (
     _build_on_demand_dur_context,
     _extract_dur_candidate_drug_names,
     _menu_map_text,
-    _retrieve_chat_rag_context,
+    _retrieve_chat_rag_docs,
     _service_info_text,
     _should_answer_from_dur_only,
     _summarize_lifestyle_guide,
@@ -112,7 +112,7 @@ def test_dur_question_does_not_use_general_kdca_rag_context():
     assert _should_answer_from_dur_only("와파린이랑 타이레놀 같이 복용해도 되나요?")
     assert _should_answer_from_dur_only("아스피린과 와파린을 함께 복용해도 괜찮나요?")
     assert _should_answer_from_dur_only("이 약 드셔도 되나요?")
-    assert _retrieve_chat_rag_context("이 약 임부금기야?", "[DUR 임부금기] 테스트약: 임신 3기 주의") == []
+    assert _retrieve_chat_rag_docs("이 약 임부금기야?") == []
 
 
 def test_extract_dur_candidate_includes_unregistered_drug_mentioned_in_question():

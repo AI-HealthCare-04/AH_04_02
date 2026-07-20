@@ -1,4 +1,5 @@
 import { monitoringClient } from "./monitoringClient";
+import type { SourceRef } from "./records";
 
 export interface ChatQuestion {
   id: string;
@@ -20,6 +21,9 @@ const CHAT_STREAM_BASE_URL = import.meta.env.VITE_MONITORING_API_URL || "http://
 
 export interface ChatStreamDoneEvent {
   answer_source: string;
+  // [2026-07-20 추가] 실제 ChromaDB에서 검색된 문서 인용 — answer_source(생성 "방법" 라벨,
+  // 예: "llm (gpt-4o-mini)")와는 별개로, 실제 근거 문서 title/source가 여기 담긴다.
+  source_refs?: SourceRef[];
   created_at: string;
   partial: boolean;
 }

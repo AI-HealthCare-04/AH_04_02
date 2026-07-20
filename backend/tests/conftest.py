@@ -13,6 +13,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 os.environ.setdefault("PII_ENCRYPTION_KEY", "c7Ka8_mp2rYGAesszwMtAXutMT8rq2SqDyVnhjU6H_8=")  # 테스트 전용 더미 키
 os.environ.setdefault("PII_HASH_SECRET", "test-only-hash-secret-do-not-use-in-prod")
 os.environ.setdefault("SECRET_KEY", "test-only-jwt-secret-do-not-use-in-prod")
@@ -34,3 +36,22 @@ os.environ.setdefault("DATABASE_SSL_REQUIRED", "")
 os.environ.setdefault("DATABASE_SSL_CA", "")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+
+@pytest.fixture(autouse=True)
+def _reset_chat_llm_available(monkeypatch: pytest.MonkeyPatch):
+    """[2026-07-20 추가] routers/chat_router.py의 _CHAT_LLM_AVAILABLE은 모듈 import
+    시점에 한 번만 CHAT_PROVIDER/rag.config.settings.OPENAI_API_KEY로 계산되는 전역
+    변수다 — 개발자 로컬 backend/.env에 CHAT_PROVIDER=real과 실 OPENAI_API_KEY가 있으면
+    그 값 그대로 고정돼, 프리셋/동적 질문 테스트가 실제 GPT를 호출해버렸다(answer_source가
+    "preset"/"unsupported"가 아니라 "llm (gpt-4o-mini)"로 나와 실패).
+
+    함수 스코프 autouse로 매 테스트 시작 시 False로 되돌린다 — monkeypatch가 테스트당
+    공유되는 함수 스코프 fixture라, 실 LLM 경로를 직접 검증하려는 개별 테스트가 같은
+    monkeypatch로 `monkeypatch.setattr(chat_router, "_CHAT_LLM_AVAILABLE", True)`를
+    호출하면 이 fixture보다 나중에 실행되어 그 테스트 안에서만 이긴다(세션 스코프였다면
+    override가 다음 테스트로 새어나갈 위험이 있어 함수 스코프를 택함). raising=False는
+    이 속성이 아직 없는 극단적 상황에서도 conftest 자체가 깨지지 않게 하는 방어."""
+    import routers.chat_router as chat_router
+
+    monkeypatch.setattr(chat_router, "_CHAT_LLM_AVAILABLE", False, raising=False)

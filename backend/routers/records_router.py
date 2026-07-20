@@ -50,7 +50,11 @@ def _create_schedules_from_ocr(record: MedicalRecord, ocr_items: Sequence[OcrRes
             session.add(
                 MedicationSchedule(
                     patient_id=record.patient_id,
-                    drug_name=item.drug_name,
+                    # [2026-07-20 버그수정] 예전엔 item.drug_name(축약명, 예: "암로디핀")을
+                    # 그대로 썼다 — Dashboard.tsx/Schedule.tsx가 이 값을 표시하므로 환자가
+                    # 매일 보는 화면에 짧은 이름이 노출되고 있었다. _build_record_response와
+                    # 동일한 규칙(item.display_name)으로 통일.
+                    drug_name=item.display_name,
                     time_slot=slot,
                     memo="처방전에서 자동 등록됨 — 시간·식전후 여부는 확인 후 수정해주세요",
                     # [2026-07-20 추가] 이 처방전을 나중에 삭제할 때 같이 비활성화할 수 있도록 연결.
@@ -76,18 +80,9 @@ def _build_record_response(record: MedicalRecord, session: Session, guide: Guide
         "medications": [
             {
                 "id": item.id,  # [7/8 추가] 처방전확인 화면에서 항목별 수정 시 식별용
-                # [2026-07-20 추가] OCR 파싱은 형태(정/캡슐 등)를 일부러 잘라내고 저장한다
-                # (drug_matcher 매칭용, services/parsing_rules.py의 _drug_name_only 참고) —
-                # 그래서 item.drug_name은 "암로디핀" 같은 축약명이다. drug_matcher가 이미
-                # 정확한 전체 제품명(matched_drug_name, 예: "암로디핀정5mg")을 찾아뒀는데
-                # 지금까지 화면에 안 쓰고 있었다. 확신 있게 매칭됐을 때(needs_review=False)만
-                # 대표 표시값으로 쓴다 — 매칭이 불확실하면 파싱된 원본을 보여줘야
-                # 사용자가 직접 확인/수정할 수 있다.
-                "drug_name": (
-                    item.matched_drug_name
-                    if item.matched_drug_name and not item.needs_review
-                    else item.drug_name
-                ),
+                # [2026-07-20] item.display_name — 확신 있게 매칭됐을 때(needs_review=False)만
+                # matched_drug_name(전체 제품명)을 대표 표시값으로 쓴다(models.py 참고).
+                "drug_name": item.display_name,
                 "drug_code": item.drug_code,
                 "dosage": item.dosage,
                 "frequency": item.frequency,

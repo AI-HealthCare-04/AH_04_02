@@ -595,12 +595,18 @@ def _build_on_demand_dur_context(question_text: str, registered_drug_names: list
     return lines
 
 
-def _retrieve_chat_rag_context(question_text: str, patient_context_text: str, k: int = 3) -> list[str]:
-    """챗봇 자유질문에도 ChromaDB 근거를 붙인다.
+def _retrieve_chat_rag_docs(question_text: str) -> list:
+    """챗봇 자유질문의 실제 ChromaDB 근거 문서를 검색한다.
 
     처방전 등록 시 생성된 GuideResult만 읽으면 이미 저장된 요약에는 답할 수 있지만,
     Langfuse에서 실제 retrieval이 보이지 않고 최신 ChromaDB 근거도 다시 확인하지 못한다.
-    조회 실패는 챗봇 전체 실패로 보지 않고 빈 참고자료로 처리한다.
+    조회 실패는 챗봇 전체 실패로 보지 않고 빈 리스트로 처리한다.
+
+    [2026-07-20] 예전엔 이 함수가 LLM 프롬프트용 문자열만 만들고 실제 검색된 문서 정보
+    (title/source/item_name)를 API 응답에 전혀 안 내려줬다 — 프론트가 answer_source("llm
+    (gpt-4o-mini)" 등, 생성 "방법" 라벨일 뿐)를 "출처"로 오인해 보여주고 있었다. 이제
+    Document 자체를 반환해서 호출부가 프롬프트용 문자열(_rag_docs_to_prompt_lines)과
+    실제 인용 데이터(_rag_docs_to_source_refs) 양쪽을 같은 조회 결과에서 만든다.
     """
     if _should_answer_from_dur_only(question_text):
         return []
@@ -614,10 +620,12 @@ def _retrieve_chat_rag_context(question_text: str, patient_context_text: str, k:
     try:
         from rag.vectorstore import similarity_search
 
-        docs = similarity_search(query[:1000], k=k)
+        return similarity_search(query[:1000], k=3)
     except Exception:  # noqa: BLE001 — RAG 조회 실패 시에도 챗봇 답변 폴백/LLM 답변은 유지
         return []
 
+
+def _rag_docs_to_prompt_lines(docs: list) -> list[str]:
     lines = []
     for idx, doc in enumerate(docs, start=1):
         title = doc.metadata.get("title") or doc.metadata.get("item_name") or doc.metadata.get("disease") or "자료"
@@ -625,6 +633,28 @@ def _retrieve_chat_rag_context(question_text: str, patient_context_text: str, k:
         label = f"{title} / {source}" if source else title
         lines.append(f"[{idx}] {label}\n{doc.page_content}")
     return lines
+
+
+def _rag_docs_to_source_refs(docs: list) -> list[dict]:
+    """실제 검색된 문서의 title/source/item_name 등을 프론트에서 확인할 수 있는 형태로
+    변환한다. frontend/src/api/records.ts의 기존 SourceRef 타입/formatSourceRef와 필드명을
+    맞춰 재사용한다(의약품 인용에 이미 쓰이는 관례 — 새 타입 안 만듦)."""
+    refs = []
+    for doc in docs:
+        ref = {
+            k: v
+            for k, v in {
+                "item_name": doc.metadata.get("item_name"),
+                "field": doc.metadata.get("field_label") or doc.metadata.get("field"),
+                "disease": doc.metadata.get("disease") or doc.metadata.get("title"),
+                "category": doc.metadata.get("category"),
+                "source": doc.metadata.get("source"),
+            }.items()
+            if v
+        }
+        if ref:
+            refs.append(ref)
+    return refs
 
 
 def _build_chat_messages(
@@ -694,16 +724,25 @@ def _resolve_question(payload: ChatAsk, session: Session) -> tuple[str, str, str
     raise HTTPException(422, "question_id 또는 question 중 하나는 필요해요")
 
 
-def _gather_llm_inputs(patient_id: int, question_text: str, session: Session) -> tuple[str, list[str], list[str], str]:
-    """환자 컨텍스트 + DUR 보강조회 + RAG 근거 + 챗봇 이름을 모은다 — /ask, /ask/stream 공용.
-    DUR/RAG는 리스트로 반환해 호출부가 각자 필요한 형태(개수 집계 vs 그냥 join)로 쓴다."""
+def _gather_llm_inputs(
+    patient_id: int, question_text: str, session: Session
+) -> tuple[str, list[str], list[str], str, list[dict]]:
+    """환자 컨텍스트 + DUR 보강조회 + RAG 근거 + 챗봇 이름 + RAG 인용 데이터를 모은다 —
+    /ask, /ask/stream 공용. DUR/RAG는 리스트로 반환해 호출부가 각자 필요한 형태(개수 집계
+    vs 그냥 join)로 쓴다.
+
+    [2026-07-20 추가] rag_refs — 실제 검색된 문서(title/source/item_name)를 API 응답의
+    source_refs로 내려주기 위해 한 번의 조회(_retrieve_chat_rag_docs)에서 프롬프트용
+    문자열과 함께 만든다(중복 조회 없음)."""
     context_text = _build_patient_context(patient_id, session)
     registered_drug_names = _latest_ocr_drug_names(patient_id, session)
     dur_context_lines = _build_on_demand_dur_context(question_text, registered_drug_names)
-    rag_context_lines = _retrieve_chat_rag_context(question_text, context_text)
+    rag_docs = _retrieve_chat_rag_docs(question_text)
+    rag_context_lines = _rag_docs_to_prompt_lines(rag_docs)
+    rag_refs = _rag_docs_to_source_refs(rag_docs)
     setting = session.get(NotificationSetting, patient_id)
     bot_name = setting.chatbot_name if setting else "약콩이"
-    return context_text, dur_context_lines, rag_context_lines, bot_name
+    return context_text, dur_context_lines, rag_context_lines, bot_name, rag_refs
 
 
 def _sse_event(data: dict) -> str:
@@ -748,6 +787,7 @@ def ask(payload: ChatAsk, actor: Actor = Depends(get_current_actor), session: Se
     context_line_count = 0
     rag_context_count = 0
     dur_context_count = 0
+    source_refs: list[dict] = []
 
     with optional_observation(
         as_type="span",
@@ -762,7 +802,7 @@ def ask(payload: ChatAsk, actor: Actor = Depends(get_current_actor), session: Se
     ) as trace:
         if _CHAT_LLM_AVAILABLE:
             try:
-                context_text, dur_context_lines, rag_context_lines, bot_name = _gather_llm_inputs(
+                context_text, dur_context_lines, rag_context_lines, bot_name, source_refs = _gather_llm_inputs(
                     payload.patient_id, question_text, session
                 )
                 context_line_count = len([line for line in context_text.splitlines() if line.strip()])
@@ -792,6 +832,7 @@ def ask(payload: ChatAsk, actor: Actor = Depends(get_current_actor), session: Se
                     update_observation(generation, output={"answer": mask_for_langfuse(answer_text)})
             except Exception as exc:  # noqa: BLE001 — LLM 실패해도 챗봇 자체는 응답해야 함
                 answer_text, answer_source = fallback_answer, f"{fallback_source}_fallback ({type(exc).__name__})"
+                source_refs = []  # 실제 표시되는 답변은 폴백 문구라 방금 조회한 인용은 무관함
 
         update_observation(
             trace,
@@ -820,6 +861,7 @@ def ask(payload: ChatAsk, actor: Actor = Depends(get_current_actor), session: Se
         "question": question_text,
         "answer": answer_text,
         "answer_source": answer_source,
+        "source_refs": source_refs,
         "created_at": msg.created_at.isoformat(),
     }
 
@@ -849,6 +891,7 @@ async def ask_stream(
 
     async def _stream():
         answer_text, answer_source = fallback_answer, fallback_source
+        source_refs: list[dict] = []
         chunks: list[str] = []
         started_ms = now_ms()
 
@@ -868,7 +911,7 @@ async def ask_stream(
                     from langchain_openai import ChatOpenAI
                     from rag.config import settings as rag_settings
 
-                    context_text, dur_lines, rag_lines, bot_name = await asyncio.to_thread(
+                    context_text, dur_lines, rag_lines, bot_name, source_refs = await asyncio.to_thread(
                         _gather_llm_inputs, patient_id, question_text, session
                     )
                     messages = _build_chat_messages(
@@ -897,6 +940,7 @@ async def ask_stream(
                         answer_source = f"llm_partial ({type(exc).__name__})"
                     else:
                         answer_text, answer_source = fallback_answer, f"{fallback_source}_fallback ({type(exc).__name__})"
+                        source_refs = []  # 실제 표시되는 답변은 폴백 문구라 방금 조회한 인용은 무관함
                         yield _sse_event({"delta": answer_text})
             else:
                 yield _sse_event({"delta": answer_text})
@@ -923,6 +967,7 @@ async def ask_stream(
             {
                 "done": True,
                 "answer_source": answer_source,
+                "source_refs": source_refs,
                 "created_at": created_at,
                 "partial": answer_source.startswith("llm_partial"),
             }

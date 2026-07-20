@@ -260,6 +260,17 @@ class OcrResult(SQLModel, table=True):
     match_score: float = 0.0       # drug_matcher: SequenceMatcher 유사도 (0~1)
     needs_review: bool = False     # drug_matcher: match_score < 0.7 이면 True (review_required와 별개)
 
+    @property
+    def display_name(self) -> str:
+        """화면 표시·RAG/DUR 조회에 쓸 이름 — 확신 있게 매칭됐으면(matched_drug_name,
+        needs_review=False) 그 정확한 전체명을, 아니면 원문(drug_name)을 그대로 쓴다.
+        drug_name/matched_drug_name 자체의 의미는 그대로 유지하고(원문 vs 매칭명 분리),
+        "어느 걸 보여줄지"만 이 한 곳에서 판단해 records_router.py/rag_router.py가
+        각자 다른 규칙을 쓰는 걸 막는다."""
+        if self.matched_drug_name and not self.needs_review:
+            return self.matched_drug_name
+        return self.drug_name
+
 
 # ── RAG 가이드 결과 (담당: 김영혜) ──
 class GuideResult(SQLModel, table=True):
