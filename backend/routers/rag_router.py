@@ -49,10 +49,17 @@ GUIDE_CACHE_TTL_DAYS = int(os.environ.get("GUIDE_CACHE_TTL_DAYS", "7"))
 
 
 def _make_cache_key(ocr_items: Sequence[OcrResult], data_version: str) -> str:
-    """진단명·정규화 약물조합·출처 버전 → SHA-256 캐시 키."""
-    drug_names = sorted(item.drug_name or "" for item in ocr_items)
+    """진단명·약물조합(이름+용량+복용법+약효분류)·출처 버전 → SHA-256 캐시 키.
+
+    용량/복용법이 다른 환자가 같은 키를 공유하지 않도록 dosage/frequency/drug_class를
+    포함한다 — pecs0310 HIGH 리뷰 반영.
+    """
     diagnoses = sorted({item.diagnosis or "" for item in ocr_items})
-    raw = "|".join(diagnoses) + "|" + ",".join(drug_names) + "|" + data_version
+    drug_parts = sorted(
+        f"{item.drug_name or ''}:{item.dosage or ''}:{item.frequency or ''}:{item.drug_class or ''}"
+        for item in ocr_items
+    )
+    raw = "|".join(diagnoses) + "|" + ",".join(drug_parts) + "|" + data_version
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -253,10 +260,16 @@ async def run_rag(record_id: int, session: Session) -> tuple[GuideResult, bool, 
             result = await asyncio.to_thread(_generate_via_rag, ocr_items)
         medication_guide, lifestyle_guide, source_refs = result or _fake_guide_payload(ocr_items)
         from_cache = False
-        cache_expires_at = await asyncio.to_thread(
-            _save_cache, cache_key, ocr_items, GUIDE_DATA_VERSION,
-            medication_guide, lifestyle_guide, source_refs, session,
-        )
+        # stub 모드(가짜 데이터)는 캐시에 저장하지 않는다 — RAG_PROVIDER=real 전환 후
+        # 같은 키로 히트돼 가짜 데이터가 실제 결과처럼 반환되는 문제를 방지한다.
+        # pecs0310 HIGH 리뷰 반영.
+        if _RAG_AVAILABLE:
+            cache_expires_at: datetime | None = await asyncio.to_thread(
+                _save_cache, cache_key, ocr_items, GUIDE_DATA_VERSION,
+                medication_guide, lifestyle_guide, source_refs, session,
+            )
+        else:
+            cache_expires_at = None
 
     guide = GuideResult(
         record_id=record_id,

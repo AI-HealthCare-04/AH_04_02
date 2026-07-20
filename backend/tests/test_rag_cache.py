@@ -191,11 +191,11 @@ def _run(coro):
 
 
 def test_run_rag_first_call_not_cached(session: Session):
-    """첫 요청 → cached=False, GuideCache에 엔트리 생성."""
+    """첫 요청(real 모드) → cached=False, GuideCache에 엔트리 생성."""
     _, _, rec, _ = _setup_record(session)
 
-    with patch("routers.rag_router._RAG_AVAILABLE", False), \
-         patch("routers.rag_router._fake_guide_payload", return_value=_FAKE_PAYLOAD):
+    with patch("routers.rag_router._RAG_AVAILABLE", True), \
+         patch("routers.rag_router._generate_via_rag", MagicMock(return_value=_FAKE_PAYLOAD)):
         from routers.rag_router import run_rag
         guide, from_cache, expires_at = _run(run_rag(rec.id, session))
 
@@ -206,22 +206,22 @@ def test_run_rag_first_call_not_cached(session: Session):
 
 
 def test_run_rag_second_call_cached(session: Session):
-    """같은 조합 재요청 → cached=True, _fake_guide_payload 재호출 없음."""
+    """real 모드 두 번째 요청 → cached=True."""
     _, _, rec, _ = _setup_record(session)
 
-    fake_fn = MagicMock(return_value=_FAKE_PAYLOAD)
-    with patch("routers.rag_router._RAG_AVAILABLE", False), \
-         patch("routers.rag_router._fake_guide_payload", fake_fn):
+    mock_gen = MagicMock(return_value=_FAKE_PAYLOAD)
+    with patch("routers.rag_router._RAG_AVAILABLE", True), \
+         patch("routers.rag_router._generate_via_rag", mock_gen):
         from routers.rag_router import run_rag
-        _run(run_rag(rec.id, session))          # 1st — miss
+        _run(run_rag(rec.id, session))                          # 1st — miss, save
         guide, from_cache, _ = _run(run_rag(rec.id, session))  # 2nd — hit
 
     assert from_cache is True
-    assert fake_fn.call_count == 1  # 재호출 없음
+    assert mock_gen.call_count == 1  # LLM 재호출 없음
 
 
 def test_run_rag_expired_cache_regenerates(session: Session):
-    """만료 캐시 → cached=False, 재생성·재저장."""
+    """만료된 캐시 + real 모드 → cached=False, 재생성·재저장."""
     _, _, rec, items = _setup_record(session)
     key = _make_cache_key(items, GUIDE_DATA_VERSION)
 
@@ -234,8 +234,8 @@ def test_run_rag_expired_cache_regenerates(session: Session):
     ))
     session.commit()
 
-    with patch("routers.rag_router._RAG_AVAILABLE", False), \
-         patch("routers.rag_router._fake_guide_payload", return_value=_FAKE_PAYLOAD):
+    with patch("routers.rag_router._RAG_AVAILABLE", True), \
+         patch("routers.rag_router._generate_via_rag", MagicMock(return_value=_FAKE_PAYLOAD)):
         from routers.rag_router import run_rag
         guide, from_cache, _ = _run(run_rag(rec.id, session))
 
@@ -246,7 +246,7 @@ def test_run_rag_expired_cache_regenerates(session: Session):
 
 
 def test_run_rag_different_combination_separate_cache(session: Session):
-    """약물 조합이 다르면 별도 캐시 엔트리가 생성된다."""
+    """약물 조합이 다르면 real 모드에서 별도 캐시 엔트리가 생성된다."""
     cg, pt, rec, _ = _setup_record(session)
 
     rec2 = MedicalRecord(patient_id=pt.id, image_path="t2.jpg", status="pending")
@@ -257,8 +257,8 @@ def test_run_rag_different_combination_separate_cache(session: Session):
     session.add(item2)
     session.commit()
 
-    with patch("routers.rag_router._RAG_AVAILABLE", False), \
-         patch("routers.rag_router._fake_guide_payload", return_value=_FAKE_PAYLOAD):
+    with patch("routers.rag_router._RAG_AVAILABLE", True), \
+         patch("routers.rag_router._generate_via_rag", MagicMock(return_value=_FAKE_PAYLOAD)):
         from routers.rag_router import run_rag
         _, from_cache1, _ = _run(run_rag(rec.id, session))
         _, from_cache2, _ = _run(run_rag(rec2.id, session))
@@ -268,3 +268,67 @@ def test_run_rag_different_combination_separate_cache(session: Session):
     entries = session.exec(select(GuideCache)).all()
     assert len(entries) == 2
     assert entries[0].cache_key != entries[1].cache_key
+
+
+# ── pecs0310 HIGH 리뷰 반영 ───────────────────────────────────────────────────
+
+def test_make_cache_key_differs_by_dosage(session: Session):
+    """같은 약이라도 dosage가 다르면 캐시 키가 달라야 한다 (pecs0310 HIGH)."""
+    _, _, rec, _ = _setup_record(session)
+
+    item_500 = OcrResult(
+        record_id=rec.id, drug_name="메트포르민정", diagnosis="당뇨",
+        dosage="500mg", confidence=0.9, review_required=False,
+    )
+    item_1000 = OcrResult(
+        record_id=rec.id, drug_name="메트포르민정", diagnosis="당뇨",
+        dosage="1000mg", confidence=0.9, review_required=False,
+    )
+    session.add(item_500)
+    session.add(item_1000)
+    session.commit()
+    session.refresh(item_500)
+    session.refresh(item_1000)
+
+    key_500 = _make_cache_key([item_500], GUIDE_DATA_VERSION)
+    key_1000 = _make_cache_key([item_1000], GUIDE_DATA_VERSION)
+    assert key_500 != key_1000
+
+
+def test_run_rag_stub_mode_does_not_save_cache(session: Session):
+    """stub 모드(_RAG_AVAILABLE=False) → GuideCache에 저장하지 않고 expires_at=None (pecs0310 HIGH)."""
+    _, _, rec, _ = _setup_record(session)
+
+    with patch("routers.rag_router._RAG_AVAILABLE", False), \
+         patch("routers.rag_router._fake_guide_payload", return_value=_FAKE_PAYLOAD):
+        from routers.rag_router import run_rag
+        guide, from_cache, expires_at = _run(run_rag(rec.id, session))
+
+    assert from_cache is False
+    assert expires_at is None                                  # stub은 TTL 없음
+    entries = session.exec(select(GuideCache)).all()
+    assert len(entries) == 0                                   # DB에 저장 안 됨
+
+
+def test_run_rag_stub_then_real_no_cache_hit(session: Session):
+    """stub 실행 후 real 전환 시 캐시 히트 없이 새로 생성된다 (pecs0310 HIGH)."""
+    _, _, rec, _ = _setup_record(session)
+
+    # Step 1: stub 모드로 한 번 실행 → 저장 없음
+    with patch("routers.rag_router._RAG_AVAILABLE", False), \
+         patch("routers.rag_router._fake_guide_payload", return_value=_FAKE_PAYLOAD):
+        from routers.rag_router import run_rag
+        _run(run_rag(rec.id, session))
+
+    entries_after_stub = session.exec(select(GuideCache)).all()
+    assert len(entries_after_stub) == 0  # stub은 저장 안 했음
+
+    # Step 2: real 모드로 전환 → 캐시 미스이므로 새로 생성
+    mock_gen = MagicMock(return_value=_FAKE_PAYLOAD)
+    with patch("routers.rag_router._RAG_AVAILABLE", True), \
+         patch("routers.rag_router._generate_via_rag", mock_gen):
+        guide, from_cache, expires_at = _run(run_rag(rec.id, session))
+
+    assert from_cache is False           # stub 결과가 캐시 히트로 오인돼선 안 됨
+    assert expires_at is not None        # real 결과는 저장됨
+    assert mock_gen.call_count == 1
