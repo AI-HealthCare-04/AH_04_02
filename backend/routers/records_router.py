@@ -465,7 +465,7 @@ async def confirm_medications(
     await asyncio.to_thread(_apply_corrections)
 
     try:
-        guide = await run_rag(record.id, session)
+        guide, _from_cache, _cache_expires_at = await run_rag(record.id, session)
     except ValueError as exc:
         _failure_reason = str(exc)  # except 블록 밖에서 e가 삭제되기 전에 캡처
 
