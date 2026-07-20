@@ -316,7 +316,200 @@ def list_invitations(
 
 
 # ══════════════════════════════════════════
-# 3. 알림 설정 (NotificationSetting)
+# 3. 돌봄관계 해제 (Trust Relation Dissolution, REQ-004)
+# ══════════════════════════════════════════
+class TrustRevocationResult(BaseModel):
+    trust_id: int
+    patient_id: int
+    caregiver_id: int
+    status: str
+    revoked_at: datetime | None = None
+    revocation_requested_by: int | None = None
+    should_alert_now: bool = False  # REQ-007a: 즉시 해제 후 마지막 연결이면 True
+
+
+@router.delete("/trust/relations/{trust_id}", response_model=TrustRevocationResult)
+def dissolve_trust_relation(
+    trust_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """[REQ-004] 보호자-환자 돌봄관계 해제 요청.
+
+    care_level=independent/guardian_check → 즉시 revoked.
+    care_level=third_party_needed → 제3자 승인 필요, revocation_pending으로 전환.
+    평가 이력이 없으면 independent로 간주해 즉시 해제한다."""
+    link = session.get(CaregiverPatient, trust_id)
+    if not link:
+        raise HTTPException(404, "존재하지 않는 연결이에요")
+
+    require_actor_patient_access(link.patient_id, actor, session)
+
+    if link.status != "active":
+        raise HTTPException(409, f"이미 {link.status} 상태인 연결이에요")
+
+    assessment = session.exec(
+        select(CareLevelAssessment)
+        .where(CareLevelAssessment.patient_id == link.patient_id)
+        .order_by(CareLevelAssessment.evaluated_at.desc())
+    ).first()
+
+    care_level = assessment.care_level if assessment else "independent"
+    role, subject = actor
+
+    if care_level in ("independent", "guardian_check"):
+        link.status = "revoked"
+        link.revoked_at = datetime.now()
+    else:  # third_party_needed — 요청자 role·id를 항상 기록 (환자/보호자 무관)
+        link.status = "revocation_pending"
+        link.revocation_requested_by = subject.id
+        link.requested_by_role = role  # "caregiver" | "patient"
+
+    session.add(link)
+    session.commit()
+    session.refresh(link)
+
+    # 즉시 해제(revoked)일 때만 마지막 연결 여부 확인 — pending은 아직 active 유지
+    should_alert = False
+    if link.status == "revoked":
+        remaining_active = session.exec(
+            select(CaregiverPatient)
+            .where(CaregiverPatient.patient_id == link.patient_id)
+            .where(CaregiverPatient.status == "active")
+        ).all()
+        patient = session.get(Patient, link.patient_id)
+        should_alert = (not remaining_active) and bool(patient) and _should_alert_now(patient)
+
+    return TrustRevocationResult(
+        trust_id=link.id,
+        patient_id=link.patient_id,
+        caregiver_id=link.caregiver_id,
+        status=link.status,
+        revoked_at=link.revoked_at,
+        revocation_requested_by=link.revocation_requested_by,
+        should_alert_now=should_alert,
+    )
+
+
+class RevocationApprovalRequest(BaseModel):
+    approve: bool
+
+
+class RevocationApprovalResult(BaseModel):
+    trust_id: int
+    patient_id: int
+    caregiver_id: int
+    status: str
+    revoked_at: datetime | None = None
+    should_alert_now: bool = False
+
+
+def _should_alert_now(patient: Patient) -> bool:
+    """REQ-007a: dismissed_at이 None이거나 30일이 지났으면 안내를 표시해야 한다."""
+    if patient.caregiver_alert_dismissed_at is None:
+        return True
+    return patient.caregiver_alert_dismissed_at + timedelta(days=30) < datetime.now()
+
+
+@router.post("/trust/relations/{trust_id}/revocation-approval", response_model=RevocationApprovalResult)
+def approve_revocation(
+    trust_id: int,
+    payload: RevocationApprovalRequest,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """[REQ-004] third_party_needed 환자의 해제 승인/거부.
+
+    approve=True  → status='revoked', revoked_at 기록.
+                    남은 active 연결이 0명이면 should_alert_now=True 반환(REQ-007a).
+    approve=False → status='active'로 복원(해제 거부)."""
+    link = session.get(CaregiverPatient, trust_id)
+    if not link:
+        raise HTTPException(404, "존재하지 않는 연결이에요")
+
+    require_actor_patient_access(link.patient_id, actor, session)
+
+    if link.status != "revocation_pending":
+        raise HTTPException(409, f"승인 대상이 아닌 연결이에요 (현재 상태: {link.status})")
+
+    role, subject = actor
+    # 요청자 본인은 role과 무관하게 승인 불가 (caregiver가 요청해도, patient가 요청해도)
+    if link.revocation_requested_by == subject.id and link.requested_by_role == role:
+        raise HTTPException(403, "본인이 요청한 해제는 본인이 승인할 수 없어요")
+
+    if payload.approve:
+        link.status = "revoked"
+        link.revoked_at = datetime.now()
+        # autoflush가 link 변경을 DB에 반영한 뒤 조회하므로 현재 link는 포함되지 않음
+        remaining_active = session.exec(
+            select(CaregiverPatient)
+            .where(CaregiverPatient.patient_id == link.patient_id)
+            .where(CaregiverPatient.status == "active")
+        ).all()
+    else:
+        link.status = "active"
+        link.revocation_requested_by = None
+        link.requested_by_role = None
+        remaining_active = [True]  # 복원됐으므로 최소 1개 active
+
+    session.add(link)
+    session.commit()
+    session.refresh(link)
+
+    patient = session.get(Patient, link.patient_id)
+    should_alert = (not remaining_active) and bool(patient) and _should_alert_now(patient)
+
+    return RevocationApprovalResult(
+        trust_id=link.id,
+        patient_id=link.patient_id,
+        caregiver_id=link.caregiver_id,
+        status=link.status,
+        revoked_at=link.revoked_at,
+        should_alert_now=should_alert,
+    )
+
+
+class DismissAlertResult(BaseModel):
+    patient_id: int
+    caregiver_alert_dismissed_at: datetime
+    next_alert_at: datetime  # dismissed_at + 30일
+
+
+@router.post("/trust/relations/{trust_id}/dismiss-alert", response_model=DismissAlertResult)
+def dismiss_caregiver_alert(
+    trust_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """[REQ-007a] 보호자 연결 권유 안내 닫기 — 30일간 재표시 억제.
+
+    사용자가 "닫기"를 누르면 Patient.caregiver_alert_dismissed_at을 현재 시각으로 갱신한다.
+    _should_alert_now()는 dismissed_at + 30일이 지나야 다시 True를 반환한다."""
+    link = session.get(CaregiverPatient, trust_id)
+    if not link:
+        raise HTTPException(404, "존재하지 않는 연결이에요")
+
+    require_actor_patient_access(link.patient_id, actor, session)
+
+    patient = session.get(Patient, link.patient_id)
+    if not patient:
+        raise HTTPException(404, "환자 정보를 찾을 수 없어요")
+
+    patient.caregiver_alert_dismissed_at = datetime.now()
+    session.add(patient)
+    session.commit()
+    session.refresh(patient)
+
+    dismissed_at = patient.caregiver_alert_dismissed_at
+    return DismissAlertResult(
+        patient_id=patient.id,
+        caregiver_alert_dismissed_at=dismissed_at,
+        next_alert_at=dismissed_at + timedelta(days=30),
+    )
+
+
+# ══════════════════════════════════════════
+# 4. 알림 설정 (NotificationSetting)
 # ══════════════════════════════════════════
 class NotificationUpdate(BaseModel):
     medication_reminder_enabled: bool | None = None
