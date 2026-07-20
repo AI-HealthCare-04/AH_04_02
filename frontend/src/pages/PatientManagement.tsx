@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronLeft, Plus, Search, X } from "lucide-react";
 import NavBar from "../components/NavBar";
-import { createPatient, deletePatient, getCaregiverPatients, linkCaregiverPatient, type Patient } from "../api/monitoring";
+import InvitePatientPanel from "../components/InvitePatientPanel";
+import { deletePatient, getCaregiverPatients, type Patient } from "../api/monitoring";
 import { getCurrentCaregiverId } from "../lib/session";
 import { C } from "../theme";
 
@@ -13,11 +14,7 @@ export default function PatientManagement() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [modalOpen, setModalOpen] = useState(false);
-
-  const [name, setName] = useState("");
-  const [note, setNote] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
 
   const load = async () => {
     if (!caregiverId) {
@@ -38,24 +35,12 @@ export default function PatientManagement() {
     load();
   }, []);
 
-  const filtered = patients.filter((p) => !search || p.name.includes(search));
+  // 케어하는 환자가 아직 없으면(첫 로그인 온보딩) 연결 패널을 바로 펼쳐 보여준다.
+  useEffect(() => {
+    if (!loading && patients.length === 0) setShowInvite(true);
+  }, [loading, patients.length]);
 
-  const save = async () => {
-    if (!name.trim() || !caregiverId) return;
-    setSaving(true);
-    try {
-      const patient = await createPatient({ name: name.trim(), note: note.trim() || undefined });
-      await linkCaregiverPatient(caregiverId, patient.id);
-      setModalOpen(false);
-      setName("");
-      setNote("");
-      await load();
-    } catch {
-      setError("환자를 등록하지 못했어요.");
-    } finally {
-      setSaving(false);
-    }
-  };
+  const filtered = patients.filter((p) => !search || p.name.includes(search));
 
   const remove = async (id: number) => {
     if (!window.confirm("이 환자 정보를 삭제할까요? 연결된 일정·기록에 영향을 줄 수 있어요.")) return;
@@ -93,14 +78,20 @@ export default function PatientManagement() {
               교육 관리
             </button>
             <button
-              onClick={() => setModalOpen(true)}
+              onClick={() => setShowInvite((v) => !v)}
               className="flex items-center gap-2 px-5 py-3 rounded-full text-white font-bold text-[14px]"
               style={{ background: C.terracotta }}
             >
-              <Plus className="w-4 h-4" /> 환자 등록
+              <Plus className="w-4 h-4" /> 환자 연결
             </button>
           </div>
         </div>
+
+        {showInvite && caregiverId && (
+          <div className="mb-6">
+            <InvitePatientPanel caregiverId={caregiverId} onCreated={load} />
+          </div>
+        )}
 
         <div className="relative mb-6">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: C.muted }} />
@@ -168,52 +159,6 @@ export default function PatientManagement() {
           )}
         </div>
       </main>
-
-      {modalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center px-4"
-          style={{ background: "rgba(30,26,23,0.5)" }}
-          onClick={() => setModalOpen(false)}
-        >
-          <div className="bg-white rounded-2xl p-7 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-[19px] font-black mb-5" style={{ color: C.dark }}>환자 등록</h3>
-
-            <label className="block text-[12px] font-bold uppercase tracking-wide mb-2" style={{ color: C.muted }}>이름</label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="예: 김건강"
-              className="w-full px-4 py-3 rounded-xl border border-black/12 text-[14px] outline-none mb-4"
-            />
-
-            <label className="block text-[12px] font-bold uppercase tracking-wide mb-2" style={{ color: C.muted }}>특이사항 (선택)</label>
-            <input
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="예: 혼자 거주, 거동 불편"
-              className="w-full px-4 py-3 rounded-xl border border-black/12 text-[14px] outline-none mb-6"
-            />
-
-            <div className="flex gap-3">
-              <button
-                onClick={() => setModalOpen(false)}
-                className="flex-1 py-3 rounded-full font-bold text-[14px] border-2 border-black/12"
-                style={{ color: C.dark }}
-              >
-                취소
-              </button>
-              <button
-                onClick={save}
-                disabled={saving || !name.trim()}
-                className="flex-1 py-3 rounded-full font-bold text-[14px] text-white disabled:opacity-50"
-                style={{ background: C.terracotta }}
-              >
-                {saving ? "저장 중..." : "등록"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

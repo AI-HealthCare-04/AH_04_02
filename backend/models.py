@@ -384,7 +384,11 @@ class MedicationRecord(SQLModel, table=True):
     __tablename__ = "medication_records"
 
     id: int | None = Field(default=None, primary_key=True)
-    patient_medication_id: int = Field(foreign_key="patient_medications.id", index=True)
+    # [2026-07-20 변경] OCR 기반 스케줄은 PatientMedication이 없으므로 nullable —
+    # schedule_id와 patient_medication_id 중 최소 하나는 있어야 한다(불변식, DB 레벨 제약은 아님).
+    patient_medication_id: int | None = Field(
+        default=None, foreign_key="patient_medications.id", index=True
+    )
     schedule_id: int | None = Field(default=None, foreign_key="medication_schedules.id")
     scheduled_at: datetime | None = None
     taken_at: datetime | None = None  # 실제 복용 시간, 아직 안 먹었으면 None
@@ -392,6 +396,10 @@ class MedicationRecord(SQLModel, table=True):
     verification_method: str = "self_report"  # self_report / caregiver / photo / device
     evidence_image_url: str | None = None
     memo: str | None = None
+    # [2026-07-20 추가] MedicationLog와 동일한 필드명/타입 — 체크인 기록을 이 테이블로
+    # 일원화하면서 "누가 체크했는지"(환자 본인 patient vs 보호자 대신 caregiver)를 보존한다.
+    confirmed_by_type: str | None = None
+    confirmed_by_caregiver_id: int | None = Field(default=None, foreign_key="caregivers.id")
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
@@ -423,7 +431,8 @@ class Invitation(SQLModel, table=True):
     __tablename__ = "invitations"
 
     id: int | None = Field(default=None, primary_key=True)
-    patient_id: int = Field(foreign_key="patients.id")
+    # 보호자→환자 초대(relation_type="patient")는 아직 환자 계정이 없어 nullable — 수락 시점에 채워진다.
+    patient_id: int | None = Field(default=None, foreign_key="patients.id")
     inviter_caregiver_id: int | None = Field(default=None, foreign_key="caregivers.id")
     relation_type: str = "guardian"
     invited_phone_encrypted: str | None = None

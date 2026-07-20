@@ -54,7 +54,8 @@ export interface InvitationInfo {
 }
 
 export async function createInvitation(payload: {
-  patient_id: number;
+  // 보호자→환자 초대(relation_type="patient")는 아직 환자 계정이 없어 patient_id 없이 보낸다.
+  patient_id?: number;
   relation_type: string;
   invited_phone?: string;
   inviter_caregiver_id?: number;
@@ -70,7 +71,17 @@ export async function getInvitation(token: string) {
 
 export async function acceptInvitation(
   token: string,
-  payload: { caregiver_name: string; caregiver_id?: number; phone?: string }
+  payload: {
+    // relation_type != "patient" (환자→보호자 초대) 수락용
+    caregiver_name?: string;
+    caregiver_id?: number;
+    phone?: string;
+    // relation_type == "patient" (보호자→환자 초대) 수락용 — 실제 환자 계정 가입 정보
+    patient_name?: string;
+    patient_email?: string;
+    patient_password?: string;
+    patient_phone?: string;
+  }
 ) {
   const { data } = await monitoringClient.post(`/invitations/${token}/accept`, payload);
   return data;

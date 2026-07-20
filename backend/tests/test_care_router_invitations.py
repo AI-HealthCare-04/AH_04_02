@@ -11,7 +11,12 @@ import models
 import pytest
 from core.security import hash_token
 from pydantic import ValidationError
-from routers.care_router import InvitationAccept, InvitationCreate, accept_invitation
+from routers.care_router import (
+    InvitationAccept,
+    InvitationCreate,
+    accept_invitation,
+    create_invitation,
+)
 from sqlmodel import Session, SQLModel, create_engine, select
 
 RAW_TOKEN = "tok123"
@@ -74,6 +79,153 @@ def test_accept_invitation_preserves_invitation_relation_type():
 
         caregiver = session.exec(select(models.Caregiver)).one()
         assert caregiver.relation_type == "life_support_worker"
+
+
+def _make_caregiver(session: Session, name: str = "김보호") -> models.Caregiver:
+    caregiver = models.Caregiver(relation_type="guardian")
+    caregiver.name = name
+    session.add(caregiver)
+    session.commit()
+    session.refresh(caregiver)
+    return caregiver
+
+
+def _make_pending_patient_invitation(
+    session: Session, inviter: models.Caregiver, invited_phone: str | None = None
+) -> models.Invitation:
+    """보호자→환자 초대(relation_type="patient") — 아직 환자 계정이 없어 patient_id=None."""
+    invitation = models.Invitation(
+        patient_id=None,
+        inviter_caregiver_id=inviter.id,
+        token_hash=hash_token(RAW_TOKEN),
+        relation_type="patient",
+        expires_at=datetime.now() + timedelta(days=7),
+    )
+    if invited_phone:
+        invitation.invited_phone = invited_phone
+    session.add(invitation)
+    session.commit()
+    session.refresh(invitation)
+    return invitation
+
+
+def test_create_patient_invitation_needs_no_patient_id():
+    """(a) relation_type="patient" 초대는 patient_id 없이 생성돼야 한다."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        caregiver = _make_caregiver(session)
+
+        result = create_invitation(
+            InvitationCreate(relation_type="patient", inviter_caregiver_id=caregiver.id),
+            ("caregiver", caregiver),
+            session,
+        )
+
+        assert "token" in result
+        invitation = session.exec(select(models.Invitation)).one()
+        assert invitation.patient_id is None
+        assert invitation.relation_type == "patient"
+        assert invitation.inviter_caregiver_id == caregiver.id
+
+
+def test_create_patient_invitation_requires_own_caregiver_id():
+    """다른 보호자 id를 inviter로 넣어 초대하려 하면 403."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        me = _make_caregiver(session, "나")
+        other = _make_caregiver(session, "남")
+
+        with pytest.raises(Exception) as exc:
+            create_invitation(
+                InvitationCreate(relation_type="patient", inviter_caregiver_id=other.id),
+                ("caregiver", me),
+                session,
+            )
+        assert getattr(exc.value, "status_code", None) == 403
+
+
+def test_accept_patient_invitation_creates_real_patient_and_link():
+    """(b) 보호자→환자 초대를 수락하면 로그인 가능한(hashed_password 있는) Patient가 생기고
+    inviter 보호자와의 CaregiverPatient 연결도 함께 생성된다."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        caregiver = _make_caregiver(session)
+        _make_pending_patient_invitation(session, caregiver)
+
+        result = accept_invitation(
+            RAW_TOKEN,
+            InvitationAccept(
+                patient_name="환자본인",
+                patient_email="patient@example.com",
+                patient_password="secret123",
+                patient_phone="010-1234-5678",
+            ),
+            session,
+        )
+
+        patient = session.exec(select(models.Patient)).one()
+        assert result["patient_id"] == patient.id
+        assert result["status"] == "accepted"
+        assert patient.name == "환자본인"
+        assert patient.hashed_password is not None  # 실제 로그인 가능한 계정
+
+        link = session.exec(select(models.CaregiverPatient)).one()
+        assert link.caregiver_id == caregiver.id
+        assert link.patient_id == patient.id
+
+        invitation = session.exec(select(models.Invitation)).one()
+        assert invitation.status == "accepted"
+        assert invitation.patient_id == patient.id
+
+
+def test_accept_patient_invitation_requires_patient_name():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        caregiver = _make_caregiver(session)
+        _make_pending_patient_invitation(session, caregiver)
+
+        with pytest.raises(Exception) as exc:
+            accept_invitation(RAW_TOKEN, InvitationAccept(patient_password="x"), session)
+        assert getattr(exc.value, "status_code", None) == 400
+
+
+def test_accept_patient_invitation_requires_matching_phone_when_invited_phone_set():
+    """[2026-07-20 보안수정] relation_type="patient" 분기가 REQ-003 전화번호 검증보다
+    먼저 return해서, invited_phone이 지정된 초대인데도 아무 번호로나(혹은 번호 없이)
+    수락해 계정을 만들 수 있었다 — 링크만 탈취하면 본인 인증 없이 통과되던 문제."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        caregiver = _make_caregiver(session)
+        _make_pending_patient_invitation(session, caregiver, invited_phone="010-1234-5678")
+
+        with pytest.raises(Exception) as exc:
+            accept_invitation(
+                RAW_TOKEN,
+                InvitationAccept(patient_name="환자본인", patient_phone="010-9999-9999"),
+                session,
+            )
+        assert getattr(exc.value, "status_code", None) == 403
+        assert session.exec(select(models.Patient)).all() == []
+
+
+def test_accept_patient_invitation_succeeds_with_matching_phone():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        caregiver = _make_caregiver(session)
+        _make_pending_patient_invitation(session, caregiver, invited_phone="010-1234-5678")
+
+        result = accept_invitation(
+            RAW_TOKEN,
+            InvitationAccept(patient_name="환자본인", patient_phone="010-1234-5678"),
+            session,
+        )
+        assert result["status"] == "accepted"
 
 
 def test_accept_invitation_rolls_back_caregiver_when_failure_happens_after_creation():

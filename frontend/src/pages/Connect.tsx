@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 import { Phone, User, AlertCircle } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import NavBar from "../components/NavBar";
+import InvitePatientPanel, { buildSmsHref } from "../components/InvitePatientPanel";
 import {
   createInvitation,
   listInvitations,
   type InvitationSummary,
 } from "../api/care";
 import { getPatientCaregivers, unlinkCaregiverPatient, type Caregiver } from "../api/monitoring";
-import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
+import { getCurrentCaregiverId, getCurrentUserName, useGuardedPatientId } from "../lib/session";
 
 type RelationType = "guardian" | "caregiver" | "life_support_worker" | "social_worker";
 
@@ -18,23 +20,10 @@ const RELATION_LABEL: Record<RelationType, string> = {
   social_worker: "사회복지사",
 };
 
-// 장식용 가짜 QR — 실제 QR 생성 라이브러리 없이 시각 효과만 (기존 Figma 디자인 그대로)
-function FakeQR() {
-  const cells = Array.from({ length: 441 }, (_, i) => (i * 7 + Math.floor(i / 21)) % 3 === 0);
-  return (
-    <div
-      className="grid gap-[1.5px] p-2.5 bg-white rounded-xl"
-      style={{ gridTemplateColumns: "repeat(21, 1fr)", width: 160, height: 160 }}
-    >
-      {cells.map((on, i) => (
-        <div key={i} className={on ? "bg-[#1E1A17] rounded-[1px]" : ""} />
-      ))}
-    </div>
-  );
-}
-
 export default function Connect() {
   const patientId = useGuardedPatientId();
+  // 보호자류 로그인이면(값이 있으면) "환자 연결하기" 패널을 추가로 보여준다.
+  const caregiverId = getCurrentCaregiverId();
 
   const [phone, setPhone] = useState("");
   const [relationType, setRelationType] = useState<RelationType>("guardian");
@@ -80,7 +69,6 @@ export default function Connect() {
         invited_phone: phone || undefined,
       });
       setInviteUrl(window.location.origin + created.invite_url);
-      setPhone("");
       await loadConnections(patientId);
     } catch {
       setError("초대를 보내지 못했어요.");
@@ -119,7 +107,17 @@ export default function Connect() {
           </div>
         )}
 
-        {/* 초대하기 */}
+        {/* 환자 연결하기 (보호자류 로그인일 때만) */}
+        {caregiverId != null && (
+          <div className="mb-6">
+            <InvitePatientPanel
+              caregiverId={caregiverId}
+              onCreated={() => patientId != null && loadConnections(patientId)}
+            />
+          </div>
+        )}
+
+        {/* 초대하기 (이미 담당 중인 환자에 다른 보호자·요양보호사를 추가로 초대) */}
         <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
           <h2 className="text-[16px] font-black text-[#1E1A17] mb-4">초대하기</h2>
 
@@ -170,18 +168,26 @@ export default function Connect() {
                 <div className="rounded-xl px-4 py-3 bg-[#FAF6F1] border border-[rgba(30,26,23,0.08)]">
                   <p className="text-[12px] font-bold text-[#8A7E75] mb-1">생성된 초대 링크</p>
                   <p className="text-[13px] break-all text-[#1E1A17]">{inviteUrl}</p>
-                  <p className="text-[11px] text-[#8A7E75] mt-1">
-                    실제 문자 발송 기능은 아직 없어요 — 이 링크를 직접 전달해 주세요.
-                  </p>
                 </div>
               )}
-              <button
-                onClick={handleInvite}
-                disabled={sending}
-                className="w-full py-3.5 rounded-full text-white font-bold text-[16px] bg-[#C1653D] disabled:opacity-60"
-              >
-                {sending ? "전송 중..." : "초대 만들기"}
-              </button>
+              {!inviteUrl ? (
+                <button
+                  onClick={handleInvite}
+                  disabled={sending}
+                  className="w-full py-3.5 rounded-full text-white font-bold text-[16px] bg-[#C1653D] disabled:opacity-60"
+                >
+                  {sending ? "전송 중..." : "초대 만들기"}
+                </button>
+              ) : (
+                <a
+                  href={buildSmsHref(phone, inviteUrl)}
+                  className={`block w-full py-3.5 rounded-full text-center text-white font-bold text-[16px] bg-[#C1653D] ${
+                    phone.trim() ? "" : "opacity-60 pointer-events-none"
+                  }`}
+                >
+                  문자 앱으로 보내기
+                </a>
+              )}
             </div>
           )}
 
@@ -225,10 +231,10 @@ export default function Connect() {
               ) : (
                 <>
                   <p className="text-[13px] text-center text-[#8A7E75]">
-                    QR은 지금 시각효과용 이미지예요 — 아래 링크를 스캐너에 직접 입력해 확인하세요.
+                    이 QR을 스캔하면 초대 링크로 이동해요.
                   </p>
-                  <div className="p-4 rounded-2xl bg-[#FAF6F1] border-2 border-[rgba(30,26,23,0.08)]">
-                    <FakeQR />
+                  <div className="p-4 rounded-2xl bg-white border-2 border-[rgba(30,26,23,0.08)]">
+                    <QRCodeSVG value={inviteUrl} size={160} />
                   </div>
                   <p className="text-[12px] font-mono break-all text-center text-[#1E1A17]">{inviteUrl}</p>
                 </>
