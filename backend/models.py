@@ -80,6 +80,10 @@ class Patient(SQLModel, table=True):
     lunch_regular: bool | None = None
     dinner_time: str | None = None
     dinner_regular: bool | None = None
+    # [2026-07-20 추가, REQ-007a] 보호자 연결 권유 안내를 사용자가 마지막으로 닫은 시각.
+    # None이거나 기록된 시각 + 30일 < now()이면 "지금 안내를 표시해야 한다"고 판단.
+    # 서비스 차단 없이 안내만 표시하는 용도 — should_alert_now는 API에서 계산해 반환.
+    caregiver_alert_dismissed_at: datetime | None = Field(default=None)
 
     @property
     def name(self) -> str:
@@ -168,6 +172,16 @@ class CaregiverPatient(SQLModel, table=True):
     caregiver_id: int = Field(foreign_key="caregivers.id")
     patient_id: int = Field(foreign_key="patients.id")
     created_at: datetime = Field(default_factory=datetime.now)
+    # [2026-07-20 추가, REQ-004] 연결 해제 상태 관리
+    # active: 정상 연결 / revocation_pending: third_party_needed 환자의 해제 승인 대기
+    # / revoked: 해제 완료
+    status: str = Field(default="active")
+    revoked_at: datetime | None = Field(default=None)
+    # revocation_requested_by: 요청자 ID (caregiver일 때는 caregivers.id, patient일 때는 patients.id)
+    # FK를 caregivers.id로 고정하면 환자 요청을 표현 못 해서 FK 없이 앱 레벨 검증만 사용한다.
+    revocation_requested_by: int | None = Field(default=None)
+    # requested_by_role: 요청자가 caregiver인지 patient인지 구분 — 자기승인 가드에 사용
+    requested_by_role: str | None = Field(default=None)  # "caregiver" | "patient"
 
 
 # ── 비밀번호 재설정 임시코드 [2026-07-15 추가, REQ-039] ──
@@ -482,3 +496,22 @@ class ChatMessage(SQLModel, table=True):
     question_text: str
     answer_text: str
     created_at: datetime = Field(default_factory=datetime.now)
+
+
+# ── 가이드 결과 캐시 (REQ-020) ──
+# 진단명·약물조합·출처 데이터 버전을 SHA-256 해시로 캐시 키를 만들어,
+# 동일 조합의 반복 요청에서 LLM 재호출 없이 저장된 결과를 반환한다.
+# TTL = 7일(기본). data_version 변경 시 사실상 새 키가 생성돼 구 캐시는 자연 만료된다.
+class GuideCache(SQLModel, table=True):
+    __tablename__ = "guide_cache"
+
+    id: int | None = Field(default=None, primary_key=True)
+    # SHA-256(diagnosis + "|" + sorted drug_names + "|" + data_version)
+    cache_key: str = Field(unique=True, index=True)
+    diagnosis: str | None = None
+    drug_names: str = Field(default="[]", sa_column=Column(Text))  # JSON 배열
+    data_version: str
+    # (medication_guide, lifestyle_guide, source_refs) 튜플을 JSON 직렬화해 저장
+    guide_result: str = Field(sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=datetime.now)
+    expires_at: datetime
