@@ -12,7 +12,9 @@ records_router.py(실제 업로드→OCR→가이드 한 번에 처리) 양쪽�
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -34,6 +36,15 @@ from services.drug_matcher import MATCH_THRESHOLD, match_drug
 from services.drug_reference import get_drug_info
 from services.ocr_interface import get_ocr_provider  # noqa: E402
 
+# [2026-07-20 추가, 담당: 김영혜] /drug-info(DrugDetail.tsx)에 사용상의 주의사항·부작용·
+# 상호작용·보관법을 채워주기 위해 rag/ 패키지의 e약은요·DUR 클라이언트를 재사용한다.
+# chat_router.py의 온디맨드 DUR 조회와 동일한 패턴 — HIRA/e약은요 정적 파일
+# (services/drug_reference.py)엔 이 필드들이 애초에 없어서(품목 매칭·분류 전용) 새
+# 데이터 소스가 필요했다.
+_RAG_DIR = Path(__file__).resolve().parent.parent.parent / "rag"
+if _RAG_DIR.is_dir() and str(_RAG_DIR) not in sys.path:
+    sys.path.insert(0, str(_RAG_DIR))
+
 router = APIRouter(prefix="/ocr", tags=["OCR"])
 
 _ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
@@ -45,28 +56,193 @@ def ping():
     return {"status": "ok", "owner": "권순현"}
 
 
+def _fetch_rag_drug_detail(drug_name: str) -> dict:
+    """e약은요(주의사항/부작용/상호작용/보관법)와 DUR(노인주의/연령금기/임부금기)을
+    live API로 보강 조회한다. chat_router.py의 온디맨드 DUR 조회와 동일한 패턴 —
+    특정 PROVIDER 플래그와 무관하게 항상 시도하고, 조회어가 안 걸리거나
+    DATA_GO_KR_SERVICE_KEY 미설정·네트워크 실패 등 어떤 이유로든 실패해도 이 엔드포인트
+    전체가 500이 되지 않도록 각 호출을 개별로 조용히 폴백시킨다.
+
+    병용금기(search_usjnt_taboo)는 "약 하나"가 아니라 "약 A + 약 B" 관계 정보라 이
+    단일 약품 조회와 성격이 달라 여기서는 제외했다(처방전 전체 컨텍스트가 있는
+    chat_router.py의 DUR 보강조회 쪽 몫으로 남겨둠).
+    """
+    precautions: str | None = None
+    side_effects: str | None = None
+    interactions: str | None = None
+    storage: str | None = None
+
+    precaution_parts: list[str] = []
+
+    # [2026-07-20] "사용상의 주의사항"이라는 정확한 명칭의 필드는 e약은요(atpn_qesitm,
+    # 그냥 "주의사항"으로 라벨링됨)가 아니라 허가정보 상세(search_permit_detail의
+    # nb_doc_data)에 있다 — mfds_client.py에 이미 "제품허가정보로 사용상의 주의사항
+    # 조회 가능한지 확인 요청"이라는 주석까지 있는, 이 목적으로 만들어진 함수다. 처음에
+    # 이걸 빠뜨리고 e약은요 필드만 썼었다 — 공식 허가사항 원문을 우선 소스로 추가한다.
+    try:
+        from rag.mfds_client import parse_doc_sections, search_permit_detail
+
+        permit_hits = search_permit_detail(drug_name, num_of_rows=1)
+        if permit_hits and permit_hits[0].nb_doc_data:
+            sections = parse_doc_sections(permit_hits[0].nb_doc_data)
+            for title, text in sections:
+                precaution_parts.append(f"[사용상의 주의사항 - {title}] {text}" if title else text)
+    except Exception:  # noqa: BLE001 — 키 미설정/네트워크 실패/미등재 약품명 등 어떤 이유로든 조용히 폴백
+        pass
+
+    try:
+        from rag.mfds_client import search_by_name
+
+        hits = search_by_name(drug_name, num_of_rows=1)
+        if hits:
+            hit = hits[0]
+            if hit.atpn_warn_qesitm:
+                precaution_parts.append(f"[경고] {hit.atpn_warn_qesitm.strip()}")
+            if hit.atpn_qesitm:
+                precaution_parts.append(hit.atpn_qesitm.strip())
+            side_effects = hit.se_qesitm.strip() if hit.se_qesitm else None
+            interactions = hit.intrc_qesitm.strip() if hit.intrc_qesitm else None
+            storage = hit.deposit_method_qesitm.strip() if hit.deposit_method_qesitm else None
+    except Exception:  # noqa: BLE001 — 키 미설정/네트워크 실패/미등재 약품명 등 어떤 이유로든 조용히 폴백
+        pass
+
+    precautions = "\n\n".join(precaution_parts) or None
+
+    dur_cautions: list[dict] = []
+    try:
+        from rag.dur_master import search_age_taboo, search_elderly_caution, search_pregnancy_taboo
+
+        raw_cautions = [
+            *search_elderly_caution(drug_name, num_of_rows=20),
+            *search_age_taboo(drug_name, num_of_rows=20),
+            *search_pregnancy_taboo(drug_name, num_of_rows=20),
+        ]
+        dur_cautions = [
+            {"category": c.category, "detail": c.detail, "extra": c.extra} for c in raw_cautions
+        ]
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {
+        "precautions": precautions,
+        "side_effects": side_effects,
+        "interactions": interactions,
+        "storage": storage,
+        "dur_cautions": dur_cautions,
+    }
+
+
+# [2026-07-20 추가] 허가사항/e약은요 원문(_fetch_rag_drug_detail)은 의료 전문 용어가 많고
+# 길어서 고령 환자가 그대로 읽기 어렵다 — chat_router.py/rag_chain.py와 동일하게
+# ChatOpenAI + JSON 모드로 환자용 쉬운 말 요약을 만든다. 원문은 그대로 유지하고(내부/폴백용),
+# 화면에는 이 요약을 우선 노출한다.
+_PATIENT_SUMMARY_SYSTEM_PROMPT = """\
+당신은 고령 만성질환 환자를 위한 복약 안내문 작성자입니다. [원문]은 식약처 허가사항·
+e약은요의 사용상의 주의사항/경고/부작용/상호작용 원문입니다. 환자가 이해하기 쉬운 말로
+바꿔 아래 3개 항목으로 나눠 정리하세요.
+
+규칙:
+- 어려운 의학 용어는 쉬운 말로 풀어씁니다.
+- 원문에 없는 위험을 새로 만들어내지 않습니다 — 원문에 없으면 그 항목은 빈 배열로 둡니다.
+- 환자가 바로 행동할 수 있게 씁니다(예: "이런 증상이 있으면 복용을 멈추고 병원에 가세요").
+- 너무 겁주지 말고, 필요하면 의사·약사 상담을 안내합니다.
+- 각 항목은 짧은 문장 1개로, 배열 하나당 최대 4개까지만 담습니다.
+- 반드시 아래 JSON 형식으로만 답하세요:
+  {"must_check": ["..."], "tell_doctor": ["..."], "avoid_together": ["..."]}
+- must_check: 복용 중 이런 증상이 있으면 즉시 병원·약사에게 연락해야 하는 것(알레르기 반응,
+  응급 증상 등)
+- tell_doctor: 복용 전 의사·약사에게 미리 알려야 하는 본인 상태(간·신장 질환, 임신 등)
+- avoid_together: 이 약과 함께 피해야 하는 것(음식·음주·다른 약 등)
+"""
+
+
+def _summarize_precautions_for_patient(
+    drug_name: str, precautions: str | None, side_effects: str | None, interactions: str | None
+) -> dict | None:
+    """원문 3종을 환자용 3분류(꼭 확인/의사·약사에게 알려주세요/함께 피할 것)로 요약한다.
+    LLM 실패/키 미설정/원문 자체가 없음 등 어떤 이유로든 실패하면 None — 호출부가 기존
+    원문 카드로 폴백한다(chat_router.py의 LLM 실패 시 폴백과 동일한 원칙)."""
+    if not precautions and not side_effects and not interactions:
+        return None
+
+    try:
+        from langchain_openai import ChatOpenAI
+        from rag.config import settings as rag_settings
+
+        if not rag_settings.OPENAI_API_KEY:
+            return None
+
+        raw_text = "\n\n".join(
+            part
+            for part in [
+                f"[사용상의 주의사항/경고]\n{precautions}" if precautions else None,
+                f"[부작용]\n{side_effects}" if side_effects else None,
+                f"[상호작용]\n{interactions}" if interactions else None,
+            ]
+            if part
+        )
+        chat = ChatOpenAI(
+            model=rag_settings.OPENAI_MODEL,
+            api_key=rag_settings.OPENAI_API_KEY,
+            temperature=0.3,
+            model_kwargs={"response_format": {"type": "json_object"}},
+        )
+        response = chat.invoke(
+            [
+                {"role": "system", "content": _PATIENT_SUMMARY_SYSTEM_PROMPT},
+                {"role": "user", "content": f"약품명: {drug_name}\n\n[원문]\n{raw_text}"},
+            ]
+        )
+        content = response.content if isinstance(response.content, str) else str(response.content)
+        data = json.loads(content)
+        return {
+            "must_check": [str(x) for x in (data.get("must_check") or [])][:4],
+            "tell_doctor": [str(x) for x in (data.get("tell_doctor") or [])][:4],
+            "avoid_together": [str(x) for x in (data.get("avoid_together") or [])][:4],
+        }
+    except Exception:  # noqa: BLE001 — LLM 실패/키 미설정/JSON 파싱 실패 등 어떤 이유로든 원문 폴백
+        return None
+
+
 @router.get("/drug-info")
 def drug_info(drug_name: str):
     """
     [7/8] 약물상세 화면(DrugInfo.tsx/DrugDetail.tsx)의 "약효분류·적응증" 표시용 —
     OCR 세션과 무관하게 약품명만으로 다시 조회하는 stateless 조회입니다.
     get_drug_info()이 HIRA/e약은요/ATC/폴백 순으로 조회하는 로직을 재사용합니다.
+
+    [2026-07-20 추가] DrugDetail.tsx(복약 일정 기반, OCR 기록과 연결 안 됨)가 주의사항
+    등을 표시할 방법이 아예 없었던 문제 — rag/ 패키지 live API로 보강 조회한 필드들을
+    함께 내려준다(_fetch_rag_drug_detail 참고).
     """
     result = get_drug_info(drug_name)
     efficacy = result["efficacy"]
-    # [2026-07-19 수정] matched_name(PrescriptionReview.tsx가 "이 약품명이 실제로 맞는지"
-    # 판단하는 값)은 get_drug_info()의 atc_pattern/fallback이 아니라 match_drug()의 유사도
-    # 점수로 판정한다. atc_pattern/fallback은 "이름에 특정 키워드가 포함되는가"만 보는
-    # 부분일치라 "졸피뎀아무말"처럼 실제 이름 뒤에 엉뚱한 말을 붙여도 "졸피뎀" 부분만으로
-    # 통과해버린다. match_drug()은 (용량 표기를 정규화한 뒤) 전체 문자열 유사도를 보므로
-    # 이런 "일부만 맞고 나머지는 틀린" 입력을 실제로 걸러낸다 — run_ocr()에서 이미 같은
-    # 기준(MATCH_THRESHOLD)으로 review_required를 정하던 로직 재사용.
+    # [2026-07-19 PR #52 기준 정렬] matched_name(PrescriptionReview.tsx가 "이 약품명이
+    # 실제로 맞는지" 판단하는 값)은 get_drug_info()의 matched_item이 아니라 match_drug()의
+    # 유사도 점수로 판정한다 — PR #52에서 이미 이렇게 바뀐 걸 그대로 따른다. get_drug_info()의
+    # atc_pattern/fallback 단계는 "이름에 특정 키워드가 포함되는가"만 보는 부분일치라
+    # "졸피뎀아무말"처럼 실제 이름 뒤에 엉뚱한 말을 붙여도 통과해버리는데, match_drug()은
+    # (용량 표기를 정규화한 뒤) 전체 문자열 유사도를 보므로 이런 입력을 실제로 걸러낸다
+    # (run_ocr()이 review_required를 정할 때 쓰는 것과 동일한 기준, MATCH_THRESHOLD).
+    #
+    # PR #52 이전엔 matched_item이 "hira_name 등에서 찾은 다른(더 정확한) 이름"일 수 있어서
+    # rag 조회어를 matched_item으로 바꿔치기했지만, 이 기준으로는 matched_name이 항상
+    # drug_name 그 자체(검증 통과) 또는 None(검증 실패)이라 그런 대체가 의미 없어졌다 —
+    # rag/DUR 조회는 검증 결과와 무관하게 원본 drug_name으로 그대로 시도한다(실패해도
+    # _fetch_rag_drug_detail이 이미 null/빈 값으로 조용히 폴백).
     _, score = match_drug(drug_name)
+    matched_name = drug_name if score >= MATCH_THRESHOLD else None
+    rag_detail = _fetch_rag_drug_detail(drug_name)
+    patient_summary = _summarize_precautions_for_patient(
+        drug_name, rag_detail["precautions"], rag_detail["side_effects"], rag_detail["interactions"]
+    )
     return {
         "drug_name": drug_name,
-        "matched_name": drug_name if score >= MATCH_THRESHOLD else None,
+        "matched_name": matched_name,
         "drug_class": result["drug_class"],
         "indication": efficacy.strip() if efficacy else efficacy,
+        **rag_detail,
+        "patient_summary": patient_summary,
     }
 
 

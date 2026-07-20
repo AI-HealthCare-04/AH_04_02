@@ -75,7 +75,18 @@ def _build_record_response(record: MedicalRecord, session: Session, guide: Guide
         "medications": [
             {
                 "id": item.id,  # [7/8 추가] 처방전확인 화면에서 항목별 수정 시 식별용
-                "drug_name": item.drug_name,
+                # [2026-07-20 추가] OCR 파싱은 형태(정/캡슐 등)를 일부러 잘라내고 저장한다
+                # (drug_matcher 매칭용, services/parsing_rules.py의 _drug_name_only 참고) —
+                # 그래서 item.drug_name은 "암로디핀" 같은 축약명이다. drug_matcher가 이미
+                # 정확한 전체 제품명(matched_drug_name, 예: "암로디핀정5mg")을 찾아뒀는데
+                # 지금까지 화면에 안 쓰고 있었다. 확신 있게 매칭됐을 때(needs_review=False)만
+                # 대표 표시값으로 쓴다 — 매칭이 불확실하면 파싱된 원본을 보여줘야
+                # 사용자가 직접 확인/수정할 수 있다.
+                "drug_name": (
+                    item.matched_drug_name
+                    if item.matched_drug_name and not item.needs_review
+                    else item.drug_name
+                ),
                 "drug_code": item.drug_code,
                 "dosage": item.dosage,
                 "frequency": item.frequency,
