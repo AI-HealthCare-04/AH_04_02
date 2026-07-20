@@ -11,8 +11,9 @@ _HARDCODED_FALLBACK(services/drug_reference.py)은 get_drug_class()의 "약효�
 """
 from unittest.mock import patch
 
+import pandas as pd
 import services.drug_reference as drug_reference
-from services.drug_reference import _HARDCODED_FALLBACK, get_drug_name_list
+from services.drug_reference import _HARDCODED_FALLBACK, _clean_product_name, get_drug_name_list
 
 
 def test_get_drug_name_list_excludes_hardcoded_fallback_keys():
@@ -46,3 +47,50 @@ def test_metformin_ocr_text_does_not_match_bare_ingredient_name():
         _, score = match_drug("메트포르민정500mg")
 
     assert score < MATCH_THRESHOLD
+
+
+def test_clean_product_name_strips_parenthetical_ingredient_suffix():
+    assert _clean_product_name("태극암로디핀정(암로디핀말레산염)") == "태극암로디핀정"
+    assert _clean_product_name("타이레놀정500밀리그람(아세트아미노펜)") == "타이레놀정500밀리그람"
+    assert _clean_product_name("낙센정(나프록센)") == "낙센정"
+    assert _clean_product_name("암로사정10밀리그램") == "암로사정10밀리그램"  # 괄호 없으면 그대로
+
+
+def test_get_drug_name_list_uses_full_emed_item_name_not_over_stripped_norm():
+    """[재현] entry["norm"](drug_reference.py 자체 약효분류용, 용량·제형까지 제거)이
+    아니라 entry["item_name"](원본 전체 품목명)이 후보로 쓰여야 한다."""
+    fake_table = [
+        {"item_name": "휴온스암로디핀정5mg", "norm": "휴온스암로디핀", "efcy": ""},
+    ]
+    with (
+        patch("services.drug_reference._load_hira"),
+        patch.object(drug_reference, "_hira_name_df", None),
+        patch("services.drug_reference._load_drug_table", return_value=fake_table),
+    ):
+        names = get_drug_name_list()
+
+    assert "휴온스암로디핀정5mg" in names
+    assert "휴온스암로디핀" not in names
+
+
+def test_match_drug_prefers_exact_prefix_match_over_similar_length_wrong_brand():
+    """[실제 재현] "태극암로디핀정(암로디핀말레산염)"이 후보 풀에 있을 때, OCR이
+    "태극암로디핀정"을 읽으면 그 항목과 정확히 매칭돼야 한다 — 예전엔
+    SequenceMatcher.ratio()가 괄호 부기 때문에 길이 차이로 점수를 깎아서, 우연히
+    총 길이가 비슷한 완전히 다른 브랜드("파마킹암로디핀정")가 더 높은 점수로 이겼다."""
+    from services.drug_matcher import match_drug
+
+    fake_df = pd.DataFrame(
+        {"한글상품명": ["태극암로디핀정(암로디핀말레산염)", "파마킹암로디핀정"]}
+    )
+    with (
+        patch("services.drug_reference._load_hira"),
+        patch.object(drug_reference, "_hira_name_df", fake_df),
+        patch("services.drug_reference._load_drug_table", return_value=[]),
+        patch("services.drug_matcher._cached_names", None),
+        patch("services.drug_matcher._cached_norm_names", None),
+    ):
+        name, score = match_drug("태극암로디핀정")
+
+    assert name == "태극암로디핀정"
+    assert score == 1.0

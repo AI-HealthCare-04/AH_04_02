@@ -445,13 +445,34 @@ def get_drug_class(drug_name: str, drug_code: str = "") -> str:
     return ""
 
 
+_PAREN_SUFFIX_RE = re.compile(r"\([^)]*\)")
+
+
+def _clean_product_name(name: str) -> str:
+    """HIRA/e약은요 원문의 괄호 성분명 부기("(암로디핀말레산염)" 등)를 제거한다.
+
+    [2026-07-20 버그수정] difflib.SequenceMatcher.ratio()는 길이 차이에 민감해서,
+    OCR 원문("태극암로디핀정")이 정답 항목("태극암로디핀정(암로디핀말레산염)")의
+    완전한 접두어인데도 괄호 부기 때문에 길이가 훨씬 길어져 점수가 오히려 낮아지고,
+    전혀 다른 브랜드("파마킹암로디핀정" 등, 우연히 총 길이가 비슷한)가 더 높은 점수로
+    이겨버렸다(실제 재현: "태극암로디핀정" vs 정답 0.583, vs 오답 0.667). 비교·표시
+    양쪽에 쓰이는 후보 풀 자체에서 괄호 부기를 미리 제거해 이 길이 왜곡을 없앤다.
+    """
+    return _PAREN_SUFFIX_RE.sub("", name).strip()
+
+
 def get_drug_name_list() -> list[str]:
     """drug_matcher.py에서 재사용할 기준 약품명 목록 반환.
 
-    HIRA 약가마스터 한글상품명 + e약은요 정규화 이름을 합쳐서 중복 제거한 리스트를
-    돌려준다. 데이터 파일이 없으면 빈 리스트에 가까울 수 있다.
+    HIRA 약가마스터 한글상품명 + e약은요 원본 품목명(괄호 성분명 부기는 제거)을
+    합쳐서 중복 제거한 리스트를 돌려준다. 데이터 파일이 없으면 빈 리스트에 가까울 수 있다.
 
-    [2026-07-20 버그수정] 예전엔 _HARDCODED_FALLBACK.keys()도 여기 합쳐서 매칭
+    [2026-07-20 버그수정 1] 예전엔 e약은요 쪽에서 entry["norm"](drug_reference.py
+    자체의 약효분류 판정용으로 용량·제형까지 제거한 이름)을 썼다 — "제품명" 후보로
+    쓰기엔 너무 많이 깎여 있다(예: "휴온스암로디핀정5mg" → "휴온스암로디핀"). 원본
+    entry["item_name"]을 쓰도록 수정.
+
+    [2026-07-20 버그수정 2] 예전엔 _HARDCODED_FALLBACK.keys()도 여기 합쳐서 매칭
     후보로 썼다 — 그런데 그 사전은 get_drug_class()의 "약효분류 부분일치용" 키일 뿐,
     실제 완전한 제품명이 아니다(예: "메트포르민"은 성분명, 실제 제품명은
     "글루코파지정500mg" 등). OCR이 "메트포르민정500mg"을 읽으면 이 사전의
@@ -463,10 +484,10 @@ def get_drug_name_list() -> list[str]:
     names: list[str] = []
     _load_hira()
     if _hira_name_df is not None and not _hira_name_df.empty:
-        names.extend(_hira_name_df["한글상품명"].tolist())
+        names.extend(_clean_product_name(n) for n in _hira_name_df["한글상품명"].tolist())
     for entry in _load_drug_table():
-        if entry["norm"]:
-            names.append(entry["norm"])
+        if entry["item_name"]:
+            names.append(_clean_product_name(entry["item_name"]))
     seen: set[str] = set()
     result: list[str] = []
     for name in names:
