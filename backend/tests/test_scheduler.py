@@ -8,6 +8,7 @@ REQ-026a(정시 알림)/REQ-026c(놓침 감지)/REQ-026d(third_party_needed 공�
 """
 import json
 from datetime import datetime
+from unittest.mock import patch
 
 import pytest
 from core import scheduler
@@ -307,6 +308,86 @@ class TestCoNotification:
         channels = json.loads(log.channels)
         # caregiver_patients row 삽입 순서상 cg1이 먼저 연결됐으므로 cg1이 "최초 연결"이어야 한다.
         assert channels == [f"email:caregiver:{cg1.id}"]
+
+
+class TestDeliveryOrderingAvoidsDuplicateSend:
+    """[2026-07-20 round2, 박소정님 리뷰에서 발견] 예전엔 _deliver()(실제 발송)가
+    NotificationLog 커밋보다 먼저 실행됐다 — 유니크 제약이 "로그 행"의 중복은 막아도
+    "발송 자체"의 중복은 못 막아서, 공유 DB에 동시 tick이 오면 두 프로세스가 각자
+    이메일을 보낼 수 있었다(로그는 하나만 남지만). placeholder 행을 먼저 insert+commit해서
+    유니크 제약으로 선점한 프로세스만 실제 발송하도록 순서를 바꿨다 — _deliver가 불리는
+    시점엔 이미 로그 행이 커밋되어 있어야 한다."""
+
+    def test_reminder_placeholder_committed_before_delivery_attempted(self, session: Session):
+        pt = _make_patient(session)
+        sched = _make_schedule(session, pt, "08:00")
+        now = datetime(2026, 7, 19, 8, 5)
+
+        log_existed_at_delivery_time = []
+        original_deliver = scheduler._deliver
+
+        def _spy_deliver(sess, schedule_arg, patient_arg, kind):
+            existing = sess.exec(
+                select(NotificationLog).where(NotificationLog.schedule_id == schedule_arg.id)
+            ).first()
+            log_existed_at_delivery_time.append(existing is not None)
+            return original_deliver(sess, schedule_arg, patient_arg, kind)
+
+        with patch("core.scheduler._deliver", side_effect=_spy_deliver):
+            scheduler._fire_due_reminders(session, now)
+
+        assert log_existed_at_delivery_time == [True]
+        # placeholder는 최종적으로 실제 발송 결과로 갱신되어야 한다("pending"으로 안 남음).
+        final = session.exec(select(NotificationLog).where(NotificationLog.schedule_id == sched.id)).first()
+        assert final.status != "pending"
+
+    def test_missed_placeholder_committed_before_delivery_attempted(self, session: Session):
+        pt = _make_patient(session)
+        sched = _make_schedule(session, pt, "08:00")
+        now = datetime(2026, 7, 19, 9, 5)
+
+        log_existed_at_delivery_time = []
+        original_deliver = scheduler._deliver
+
+        def _spy_deliver(sess, schedule_arg, patient_arg, kind):
+            existing = sess.exec(
+                select(NotificationLog).where(NotificationLog.schedule_id == schedule_arg.id)
+            ).first()
+            log_existed_at_delivery_time.append(existing is not None)
+            return original_deliver(sess, schedule_arg, patient_arg, kind)
+
+        with patch("core.scheduler._deliver", side_effect=_spy_deliver):
+            scheduler._mark_missed(session, now)
+
+        assert log_existed_at_delivery_time == [True]
+        final = session.exec(select(NotificationLog).where(NotificationLog.schedule_id == sched.id)).first()
+        assert final.status != "pending"
+
+    def test_delivery_not_attempted_when_slot_already_claimed_by_another_process(self, session: Session):
+        """다른 프로세스가 이미 이 (schedule, due_date, time_slot, kind)를 선점(커밋)해둔
+        상태를 시뮬레이션 — placeholder insert가 유니크 제약에 걸려 실패하므로 발송 자체가
+        아예 시도되면 안 된다."""
+        pt = _make_patient(session)
+        sched = _make_schedule(session, pt, "08:00")
+        now = datetime(2026, 7, 19, 8, 5)
+
+        session.add(
+            NotificationLog(
+                schedule_id=sched.id,
+                patient_id=pt.id,
+                due_date="2026-07-19",
+                time_slot="08:00",
+                kind="reminder",
+                status="sent",
+                channels="[]",
+            )
+        )
+        session.commit()
+
+        with patch("core.scheduler._deliver") as mock_deliver:
+            scheduler._fire_due_reminders(session, now)
+
+        mock_deliver.assert_not_called()
 
 
 class TestSchedulerEnabledGate:

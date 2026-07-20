@@ -197,23 +197,37 @@ def _fire_due_reminders(session: Session, now: datetime) -> None:
         patient = session.get(Patient, schedule.patient_id)
         if not patient:
             continue
-        status, channels = _deliver(session, schedule, patient, "reminder")
-        log = NotificationLog(
+
+        # [2026-07-20 round2 수정, 박소정님 리뷰에서 발견] 원래는 _deliver()(실제 이메일
+        # 발송)를 먼저 하고 나서 NotificationLog를 커밋했다 — 그러면 유니크 제약이 "로그
+        # 행"의 중복은 막아도 "발송 자체"의 중복은 못 막는다. 두 서버가 거의 동시에 같은
+        # 틱을 처리하면 둘 다 커밋 전이라 _already_logged 체크를 통과해 각자 이메일을 보낼
+        # 수 있었다(로그는 하나만 남지만 이메일은 두 번 나감). placeholder 행을 먼저
+        # insert+commit해서 유니크 제약으로 "이 틱을 처리할 프로세스"를 먼저 선점하고,
+        # 그 커밋이 성공했을 때만(=선점에 성공했을 때만) 실제 발송한다.
+        placeholder = NotificationLog(
             schedule_id=schedule.id,
             patient_id=schedule.patient_id,
             due_date=today_str,
             time_slot=schedule.time_slot,
             kind="reminder",
-            status=status,
-            channels=json.dumps(channels),
+            status="pending",
+            channels="[]",
         )
-        session.add(log)
+        session.add(placeholder)
         try:
             session.commit()
         except Exception:
-            # [2026-07-19] 공유 DB에 서버 여러 대가 동시에 같은 틱을 처리하다 UniqueConstraint에
-            # 걸리는 경우 — 이미 다른 프로세스가 처리했다는 뜻이니 조용히 넘어간다.
+            # 공유 DB에 서버 여러 대가 동시에 같은 틱을 처리하다 UniqueConstraint에 걸리는
+            # 경우 — 이미 다른 프로세스가 선점했다는 뜻이니 발송하지 않고 조용히 넘어간다.
             session.rollback()
+            continue
+
+        status, channels = _deliver(session, schedule, patient, "reminder")
+        placeholder.status = status
+        placeholder.channels = json.dumps(channels)
+        session.add(placeholder)
+        session.commit()
 
 
 def _mark_missed(session: Session, now: datetime) -> None:
@@ -241,21 +255,30 @@ def _mark_missed(session: Session, now: datetime) -> None:
         patient = session.get(Patient, schedule.patient_id)
         if not patient:
             continue
-        status, channels = _deliver(session, schedule, patient, "missed")
-        log = NotificationLog(
+
+        # [2026-07-20 round2 수정] _fire_due_reminders와 동일한 이유 — placeholder를
+        # 먼저 insert+commit해서 유니크 제약으로 선점한 프로세스만 실제 발송한다.
+        placeholder = NotificationLog(
             schedule_id=schedule.id,
             patient_id=schedule.patient_id,
             due_date=today_str,
             time_slot=schedule.time_slot,
             kind="missed",
-            status=status,
-            channels=json.dumps(channels),
+            status="pending",
+            channels="[]",
         )
-        session.add(log)
+        session.add(placeholder)
         try:
             session.commit()
         except Exception:
             session.rollback()
+            continue
+
+        status, channels = _deliver(session, schedule, patient, "missed")
+        placeholder.status = status
+        placeholder.channels = json.dumps(channels)
+        session.add(placeholder)
+        session.commit()
 
 
 def _tick() -> None:
