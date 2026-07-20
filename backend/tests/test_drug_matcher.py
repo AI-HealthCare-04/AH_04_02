@@ -12,7 +12,6 @@ from unittest.mock import patch
 
 from services.drug_matcher import MATCH_THRESHOLD, _match_normalized, _normalize, match_drug
 
-
 # ── _normalize 단위 테스트 ───────────────────────────────────────────────────
 
 def test_normalize_removes_dosage_unit():
@@ -135,3 +134,26 @@ def test_match_drug_collision_500mg_wins():
 
 def test_match_threshold_constant():
     assert MATCH_THRESHOLD == 0.7
+
+
+# ── [2026-07-20 버그수정] 한글 용량 표기("밀리그램"/"밀리그람") 정규화 ──────────────
+
+def test_normalize_strips_korean_gram_unit_variants():
+    """HIRA 약가마스터가 같은 성분의 다른 용량끼리도 "밀리그램"/"밀리그람" 표기를
+    섞어 쓴다 — 영문 단위(mg/g)만 인식하던 예전 정규식은 이 표기를 전혀 못 지웠다."""
+    assert _normalize("노바스크정5밀리그램") == "노바스크정"
+    assert _normalize("노바스크정5밀리그람") == "노바스크정"
+    assert _normalize("리피토정10밀리그램") == "리피토정"
+
+
+def test_match_drug_prefers_exact_dosage_over_similar_length_wrong_dose():
+    """[실사용 재현] "노바스크정5밀리그램"(OCR 원문)이 정답("노바스크정5밀리그람",
+    표기만 다름)이 아니라 우연히 전체 문자열 유사도가 근소하게 더 높은 다른 용량
+    ("노바스크정2.5밀리그램")으로 오매칭되던 문제 — 용량 숫자가 정확히 일치하는
+    후보를 최우선으로 골라야 한다."""
+    pool = ["노바스크정2.5밀리그램", "노바스크정5밀리그람", "노바스크정10밀리그램"]
+    with patch("services.drug_matcher._names", return_value=pool):
+        with patch("services.drug_matcher._norm_names", return_value=[_normalize(n) for n in pool]):
+            name, score = match_drug("노바스크정5밀리그램")
+    assert name == "노바스크정5밀리그람", f"expected 5mg(그람 표기), got {name!r}"
+    assert score == 1.0
