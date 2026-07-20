@@ -18,12 +18,18 @@ export default function Records() {
   const [searchParams] = useSearchParams();
   const patientId = Number(searchParams.get("patient_id")) || getCurrentPatientId();
   const [records, setRecords] = useState<RecordSummary[]>([]);
-  // [2026-07-20] 내비바 통합검색창에서 /records?search=...로 넘어오는 경우 초기값으로 반영
   const [search, setSearch] = useState(searchParams.get("search") ?? "");
   const [dateFilter, setDateFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  // [2026-07-20] 내비바 통합검색창에서 /records?search=...로 넘어오는 경우 반영 — useState
+  // 초기값만으론 이미 /records에 있을 때(같은 라우트라 리마운트 없이 쿼리스트링만 바뀜)
+  // 반영이 안 돼서 searchParams가 바뀔 때마다 동기화되도록 별도 effect로 분리.
+  useEffect(() => {
+    setSearch(searchParams.get("search") ?? "");
+  }, [searchParams]);
 
   useEffect(() => {
     listRecords(patientId)
