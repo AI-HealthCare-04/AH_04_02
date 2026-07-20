@@ -7,6 +7,7 @@ export interface OcrMedication {
   drug_name: string;
   dosage: string;
   frequency: string;
+  total_days: string;
   diagnosis: string;
   drug_class: string;
   confidence: number;
@@ -178,12 +179,18 @@ export async function listRecords(patientId: number) {
   return data;
 }
 
+/** [2026-07-16 추가] 등록내역 삭제 (soft-delete) — 목록/상세 조회에서 이후 제외됨 */
+export async function deleteRecord(recordId: number) {
+  await monitoringClient.delete(`/records/${recordId}`);
+}
+
 /** 처방전확인 화면 — review_required 항목 수정 후 확정 제출용 */
 export interface MedicationCorrection {
   id: number;
   drug_name: string;
   dosage: string;
   frequency: string;
+  total_days: string;
   diagnosis: string;
   drug_class: string;
 }

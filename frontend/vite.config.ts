@@ -1,10 +1,31 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    VitePWA({
+      registerType: 'autoUpdate',
+      manifest: {
+        name: '건강동행',
+        short_name: '건강동행',
+        description: '복약 안내 서비스 건강동행',
+        theme_color: '#C1653D',
+        background_color: '#FAF6F1',
+        display: 'standalone',
+        start_url: '/',
+        icons: [
+          { src: '/pwa-192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/pwa-512.png', sizes: '512x512', type: 'image/png' },
+          { src: '/pwa-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        ],
+      },
+    }),
+  ],
   server: {
     // [7/13] cloudflared quick tunnel은 매번 랜덤 서브도메인이 나와서 특정 도메인을
     // 하드코딩할 수 없다 — trycloudflare.com 서브도메인 전체만 허용(전체 허용은 아님).

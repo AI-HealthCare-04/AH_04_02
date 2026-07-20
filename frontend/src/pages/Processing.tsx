@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import NavBar from "../components/NavBar";
 import { createRecord } from "../api/records";
 import { C } from "../theme";
+import { getCurrentUserName } from "../lib/session";
 
 const steps = [
   { id: 1, label: "OCR 인식 중", desc: "처방전에서 약품 정보를 읽고 있어요" },
@@ -55,44 +56,50 @@ export default function Processing() {
   }, []);
 
   return (
-    <div style={styles.page}>
-      <NavBar isLoggedIn userName="김건강" />
-      <main style={styles.main}>
-        <div style={styles.card}>
-          <div style={styles.spinner}>⏳</div>
-          <h1 style={styles.title}>분석을 시작할게요</h1>
-          <p style={styles.subtitle}>잠시만 기다려 주세요. 보통 10초 이내에 완료돼요.</p>
+    <div className="min-h-screen" style={{ background: C.ivory, fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" }}>
+      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <main className="max-w-[600px] mx-auto flex flex-col items-center px-5 py-14 sm:px-6 sm:py-20">
+        <div
+          className="w-full border rounded-[20px] p-7 sm:px-10 sm:py-12 text-center"
+          style={{ background: C.white, borderColor: "rgba(30,26,23,0.12)" }}
+        >
+          <div className="text-4xl sm:text-5xl mb-4 sm:mb-5">⏳</div>
+          <h1 className="text-[22px] sm:text-[26px] font-bold mb-2 sm:mb-2.5" style={{ color: C.dark }}>분석을 시작할게요</h1>
+          <p className="text-[14px] sm:text-[15px] mb-8 sm:mb-10" style={{ color: C.muted }}>잠시만 기다려 주세요. 보통 10초 이내에 완료돼요.</p>
 
-          <div style={styles.steps}>
-            {steps.map((step, i) => (
-              <div key={step.id} style={styles.stepRow}>
-                <div style={{
-                  ...styles.stepDot,
-                  ...(i < current ? styles.stepDone : {}),
-                  ...(i === current ? styles.stepActive : {}),
-                }}>
-                  {i < current ? "✓" : step.id}
+          <div className="flex flex-col gap-3 sm:gap-4 text-left mb-8 sm:mb-9">
+            {steps.map((step, i) => {
+              const done = i < current;
+              const active = i === current;
+              return (
+                <div key={step.id} className="flex items-start gap-3 sm:gap-4 px-3.5 py-3.5 sm:px-4 rounded-xl" style={{ background: C.ivory }}>
+                  <div
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-[13px] font-bold shrink-0"
+                    style={{
+                      background: done ? C.success : active ? C.terracotta : C.bubbleBg,
+                      color: done || active ? C.white : C.muted,
+                    }}
+                  >
+                    {done ? "✓" : step.id}
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-[14px] sm:text-[15px] font-semibold mb-0.5" style={{ color: active ? C.dark : C.muted }}>{step.label}</p>
+                    {active && (
+                      <p className="text-[13px] mt-1" style={{ color: C.muted }}>{step.desc}</p>
+                    )}
+                  </div>
+                  <div className="shrink-0">
+                    {done && <span className="text-[12px] font-semibold" style={{ color: C.successText }}>완료</span>}
+                    {active && <span className="text-[12px] font-semibold" style={{ color: C.terracotta }}>진행 중</span>}
+                    {i > current && <span className="text-[12px]" style={{ color: C.muted }}>대기 중</span>}
+                  </div>
                 </div>
-                <div style={styles.stepContent}>
-                  <p style={{
-                    ...styles.stepLabel,
-                    ...(i === current ? styles.stepLabelActive : {}),
-                  }}>{step.label}</p>
-                  {i === current && (
-                    <p style={styles.stepDesc}>{step.desc}</p>
-                  )}
-                </div>
-                <div style={styles.stepStatus}>
-                  {i < current && <span style={styles.statusDone}>완료</span>}
-                  {i === current && <span style={styles.statusActive}>진행 중</span>}
-                  {i > current && <span style={styles.statusWait}>대기 중</span>}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
-          <div style={styles.disclaimer}>
-            <p style={styles.disclaimerText}>
+          <div className="rounded-[10px] px-4 py-3" style={{ background: `${C.terracotta}10`, border: `1px solid ${C.terracotta}25` }}>
+            <p className="text-[13px] leading-relaxed" style={{ color: C.terracotta }}>
               ⚠️ 이 정보는 AI가 생성한 참고용 안내입니다. 정확한 복약 지도는 담당 의사 또는 약사에게 확인하세요.
             </p>
           </div>
@@ -101,27 +108,3 @@ export default function Processing() {
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  page: { minHeight: "100vh", background: C.ivory, fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" },
-  main: { maxWidth: 600, margin: "0 auto", padding: "80px 24px", display: "flex", flexDirection: "column" as const, alignItems: "center" },
-  card: { width: "100%", background: C.white, border: "1px solid rgba(30,26,23,0.12)", borderRadius: 20, padding: "48px 40px", textAlign: "center" as const },
-  spinner: { fontSize: 48, marginBottom: 20 },
-  title: { fontSize: 26, fontWeight: 700, color: C.dark, marginBottom: 10 },
-  subtitle: { fontSize: 15, color: C.muted, marginBottom: 40 },
-  steps: { display: "flex", flexDirection: "column" as const, gap: 16, textAlign: "left" as const, marginBottom: 36 },
-  stepRow: { display: "flex", alignItems: "flex-start", gap: 16, padding: "14px 16px", background: C.ivory, borderRadius: 12 },
-  stepDot: { width: 32, height: 32, borderRadius: "50%", background: C.bubbleBg, color: C.muted, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, flexShrink: 0 },
-  stepDone: { background: C.success, color: C.white },
-  stepActive: { background: C.terracotta, color: C.white },
-  stepContent: { flex: 1 },
-  stepLabel: { fontSize: 15, fontWeight: 600, color: C.muted, marginBottom: 2 },
-  stepLabelActive: { color: C.dark },
-  stepDesc: { fontSize: 13, color: C.muted, marginTop: 4 },
-  stepStatus: { flexShrink: 0 },
-  statusDone: { fontSize: 12, color: C.successText, fontWeight: 600 },
-  statusActive: { fontSize: 12, color: C.terracotta, fontWeight: 600 },
-  statusWait: { fontSize: 12, color: C.muted },
-  disclaimer: { background: `${C.terracotta}10`, border: `1px solid ${C.terracotta}25`, borderRadius: 10, padding: "12px 16px" },
-  disclaimerText: { fontSize: 13, color: C.terracotta, lineHeight: 1.6 },
-};

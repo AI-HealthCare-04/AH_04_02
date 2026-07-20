@@ -23,6 +23,12 @@ export interface Patient {
   sms_enabled: boolean;
   email_opt_in: boolean;
   created_at: string;
+  breakfast_time: string | null;
+  breakfast_regular: boolean | null;
+  lunch_time: string | null;
+  lunch_regular: boolean | null;
+  dinner_time: string | null;
+  dinner_regular: boolean | null;
 }
 
 export interface Caregiver {
@@ -182,6 +188,25 @@ export async function updatePatient(
 
 export async function deletePatient(patientId: number) {
   const { data } = await monitoringClient.delete(`/monitoring/patients/${patientId}`);
+  return data;
+}
+
+/** [2026-07-16 추가] 회원가입 직후 자가진단(식사 시간) 설문 저장 */
+export async function updateMealTimes(
+  patientId: number,
+  payload: {
+    breakfast_time?: string;
+    breakfast_regular?: boolean;
+    lunch_time?: string;
+    lunch_regular?: boolean;
+    dinner_time?: string;
+    dinner_regular?: boolean;
+  }
+) {
+  const { data } = await monitoringClient.put<Patient>(
+    `/monitoring/patients/${patientId}/meal-times`,
+    payload
+  );
   return data;
 }
 

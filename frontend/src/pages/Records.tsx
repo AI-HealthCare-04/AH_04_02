@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Search, FileText, ChevronRight } from "lucide-react";
+import { Search, FileText, ChevronRight, Trash2 } from "lucide-react";
 import NavBar from "../components/NavBar";
-import { listRecords, type RecordSummary } from "../api/records";
-import { getCurrentPatientId } from "../lib/session";
+import { deleteRecord, listRecords, type RecordSummary } from "../api/records";
+import { getCurrentPatientId, getCurrentUserName } from "../lib/session";
 import { C } from "../theme";
 
 const STATUS_LABEL: Record<RecordSummary["status"], { text: string; bg: string; color: string }> = {
@@ -22,6 +22,7 @@ export default function Records() {
   const [dateFilter, setDateFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   useEffect(() => {
     listRecords(patientId)
@@ -29,6 +30,19 @@ export default function Records() {
       .catch(() => setError("등록내역을 불러오지 못했어요."))
       .finally(() => setLoading(false));
   }, [patientId]);
+
+  const handleDelete = async (recordId: number) => {
+    if (deletingId !== null || !window.confirm("이 등록내역을 삭제할까요? 되돌릴 수 없어요.")) return;
+    setDeletingId(recordId);
+    try {
+      await deleteRecord(recordId);
+      setRecords((prev) => prev.filter((r) => r.record_id !== recordId));
+    } catch {
+      setError("삭제하지 못했어요. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const filtered = records.filter(
     (r) =>
@@ -38,7 +52,7 @@ export default function Records() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName="김건강" />
+      <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <h1 className="text-[26px] font-black mb-1" style={{ color: C.dark }}>등록내역</h1>
         <p className="text-[14px] mb-7" style={{ color: C.muted }}>
@@ -89,10 +103,13 @@ export default function Records() {
             {filtered.map((r) => {
               const s = STATUS_LABEL[r.status];
               return (
-                <button
+                <div
                   key={r.record_id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => navigate(`/records/${r.record_id}`)}
-                  className="w-full text-left rounded-2xl p-5 transition-transform hover:-translate-y-0.5"
+                  onKeyDown={(e) => e.key === "Enter" && navigate(`/records/${r.record_id}`)}
+                  className="w-full text-left rounded-2xl p-5 transition-transform hover:-translate-y-0.5 cursor-pointer"
                   style={{ background: C.white, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}
                 >
                   <div className="flex items-start justify-between mb-3">
@@ -109,8 +126,22 @@ export default function Records() {
                         </p>
                       )}
                     </div>
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${C.terracotta}12` }}>
-                      <FileText className="w-5 h-5" style={{ color: C.terracotta }} />
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(r.record_id);
+                        }}
+                        disabled={deletingId === r.record_id}
+                        aria-label="등록내역 삭제"
+                        className="w-9 h-9 rounded-xl flex items-center justify-center disabled:opacity-50"
+                        style={{ background: "rgba(217,79,79,0.10)" }}
+                      >
+                        <Trash2 className="w-4 h-4" style={{ color: "#D94F4F" }} />
+                      </button>
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: `${C.terracotta}12` }}>
+                        <FileText className="w-5 h-5" style={{ color: C.terracotta }} />
+                      </div>
                     </div>
                   </div>
                   <p className="text-[13px] mb-4" style={{ color: C.muted }}>
@@ -124,7 +155,7 @@ export default function Records() {
                       자세히 보기 <ChevronRight className="w-3.5 h-3.5" />
                     </span>
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
