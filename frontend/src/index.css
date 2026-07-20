@@ -1,80 +1,73 @@
 @import "tailwindcss";
 
 /*
- * [7/8 수정] 아래 커스텀 리셋들을 @layer base로 감쌌습니다.
- * Tailwind v4는 @import "tailwindcss"가 theme/base/components/utilities 레이어를 만드는데,
- * 이 파일에 레이어 없이(unlayered) 그냥 CSS를 적으면 "레이어 없는 CSS는 명시성/순서와 무관하게
- * 항상 모든 레이어 CSS를 이긴다"는 CSS Cascade Layers 규칙 때문에,
- * 아래 `* { margin:0; padding:0 }`가 mx-auto/px-*/py-*/mt-*/mb-* 같은 Tailwind 유틸리티를
- * 전부 무력화시키고 있었습니다 (max-w-* + mx-auto로 중앙정렬한 레이아웃이 다 깨져서
- * 화면이 왼쪽으로 몰려 보인 원인). @layer base로 감싸면 Tailwind의 유틸리티 레이어보다
- * 낮은 우선순위로 정상 편입되어 유틸리티 클래스가 다시 이깁니다.
+ * [7/8] 예전엔 여기 커스텀 리셋에 `*, *::before, *::after { margin:0; padding:0 }`가 있었는데,
+ * 레이어 없이(unlayered) 두면 이게 mx-auto/px-*/py-* 같은 Tailwind 유틸리티를 전부 이겨버려서
+ * @layer base로 감싸 우선순위를 낮췄었습니다.
+ * [2026-07-20] 그런데 이 프로젝트 빌드 파이프라인(Docker 컨테이너의 Tailwind v4 + Vite)에서
+ * 이 파일에 "@layer base"를 다시 열어 쓴 블록 전체가 파싱 단계에서 통째로 유실되는 문제를 발견
+ * (배경색·글자색·폰트 등 아무 것도 안 먹힘 — 화면이 멀쩡해 보인 건 각 페이지가 인라인 스타일로
+ * 배경/색을 따로 지정해서 가려졌을 뿐). 원인 규명 대신, 어차피 Tailwind v4 자체 preflight가
+ * box-sizing/margin/padding 리셋을 이미 갖고 있어서 그 중복 규칙을 통째로 지우고, 남은 규칙들은
+ * 전부 유틸리티 클래스와 특이도가 직접 부딪힐 일이 없는 순수 엘리먼트 셀렉터라 레이어 밖에 둬도
+ * 안전합니다 — 그래서 @layer base 래핑 자체를 걷어냈습니다.
  */
-@layer base {
-  *, *::before, *::after {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-  }
+:root {
+  font-size: 16px;
+}
 
+body {
+  font-family: 'Pretendard Variable', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', system-ui, sans-serif;
+  line-height: 1.5;
+  color: #2A2A2A;
+  margin: 0;
+  min-height: 100vh;
+  background: #FAF6F1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+}
+
+img, video {
+  max-width: 100%;
+  height: auto;
+}
+
+button {
+  font-family: inherit;
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus,
+button:focus-visible,
+button:active,
+button:focus-within {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+input, textarea {
+  font-family: inherit;
+}
+
+@media (max-width: 768px) {
   :root {
-    font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', system-ui, sans-serif;
-    font-size: 16px;
-    line-height: 1.5;
-    color: #2A2A2A;
-    background: #FAF6F1;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+    font-size: 15px;
   }
+}
 
-  body {
-    margin: 0;
-    min-height: 100vh;
-    background: #FAF6F1;
-  }
-
-  #root {
-    width: 100%;
-    min-height: 100vh;
-  }
-
-  img, video {
-    max-width: 100%;
-    height: auto;
-  }
-
-  button {
-    font-family: inherit;
-    outline: none !important;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  button:focus,
-  button:focus-visible,
-  button:active,
-  button:focus-within {
-    outline: none !important;
-    box-shadow: none !important;
-  }
-
-  input, textarea {
-    font-family: inherit;
-  }
-
-  @media (max-width: 768px) {
-    :root {
-      font-size: 15px;
-    }
-  }
-
-  /* Grammarly 및 브라우저 기본 포커스링 완전 제거 */
-  *:focus,
-  *:focus-visible,
-  *:focus-within {
-    outline: 0 !important;
-    outline-width: 0 !important;
-    box-shadow: none !important;
-  }
+/* Grammarly 및 브라우저 기본 포커스링 완전 제거 */
+*:focus,
+*:focus-visible,
+*:focus-within {
+  outline: 0 !important;
+  outline-width: 0 !important;
+  box-shadow: none !important;
 }
 
 /* [7/8 추가] 복약 일정 "복용 시간" 휠 피커 스크롤바 숨김 — 유틸리티 클래스와 충돌 없는 전용 셀렉터라 레이어 밖에 둬도 안전함 */
