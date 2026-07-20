@@ -56,15 +56,27 @@ def _norm_names() -> list[str]:
     return _cached_norm_names
 
 
-def _match_normalized(norm_ocr: str, raw_pool: list[str], norm_pool: list[str]) -> tuple[str, float]:
-    """정규화된 문자열로 기준 목록과 매칭, (원본 기준명, score) 반환."""
+def _match_normalized(
+    norm_ocr: str, ocr_text: str, raw_pool: list[str], norm_pool: list[str]
+) -> tuple[str, float]:
+    """정규화된 문자열로 기준 목록과 매칭, (원본 기준명, score) 반환.
+
+    1단계: normalized 문자열로 유사도 점수 계산.
+    동점 시 2단계: 원본 ocr_text vs raw 기준명으로 타이브레이킹 — 같은 성분명 다른
+    용량("메트포르민정250mg"/"메트포르민정500mg")이 동일한 normalized로 뭉쳐질 때
+    원본 문자열에 가장 가까운 항목을 선택한다.
+    """
     close_norm = get_close_matches(norm_ocr, norm_pool, n=5, cutoff=0.3)
     if close_norm:
-        norm_to_raw: dict[str, str] = {}
+        norm_to_raws: dict[str, list[str]] = {}
         for raw, norm in zip(raw_pool, norm_pool):
-            if norm in close_norm and norm not in norm_to_raw:
-                norm_to_raw[norm] = raw
-        candidates = [(norm_to_raw[n], n) for n in close_norm if n in norm_to_raw]
+            if norm in close_norm:
+                norm_to_raws.setdefault(norm, []).append(raw)
+        candidates = [
+            (raw, norm)
+            for norm in close_norm
+            for raw in norm_to_raws.get(norm, [])
+        ]
     else:
         candidates = list(zip(raw_pool[:500], norm_pool[:500]))
 
@@ -73,6 +85,11 @@ def _match_normalized(norm_ocr: str, raw_pool: list[str], norm_pool: list[str]) 
         score = SequenceMatcher(None, norm_ocr, norm_name).ratio()
         if score > best_score:
             best_score, best_name = score, raw_name
+        elif score == best_score and best_name:
+            raw_score = SequenceMatcher(None, ocr_text, raw_name).ratio()
+            prev_raw_score = SequenceMatcher(None, ocr_text, best_name).ratio()
+            if raw_score > prev_raw_score:
+                best_name = raw_name
     return best_name, best_score
 
 
@@ -99,7 +116,7 @@ def match_drug(ocr_text: str) -> tuple[str, float]:
     norm_ocr = _normalize(ocr_text)
     norm_pool = _norm_names()
 
-    best_name, best_score = _match_normalized(norm_ocr, raw_pool, norm_pool)
+    best_name, best_score = _match_normalized(norm_ocr, ocr_text, raw_pool, norm_pool)
 
     # 정규화로 너무 짧아진 경우(예: "엽산 400mcg" → "엽산") 원본도 시도
     if len(norm_ocr) < 3:
