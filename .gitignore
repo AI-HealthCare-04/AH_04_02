@@ -86,26 +86,28 @@ _*
 AH_04_02_soonhyun/
 
 # ===== macOS 홈 디렉터리 표준 폴더 =====
-Desktop/
-Documents/
-Applications/
-Downloads/
-Library/
-Pictures/
-Music/
-Movies/
-Public/
+# 루트 앵커(/) 없이 쓰면 frontend/public/ 같은 하위 폴더까지 대소문자 무시하고 매칭돼서
+# 새로 추가한 파일이 조용히 안 잡히는 문제가 있었음 (예: PWA 아이콘) — 최상위만 매칭하도록 고정
+/Desktop/
+/Documents/
+/Applications/
+/Downloads/
+/Library/
+/Pictures/
+/Music/
+/Movies/
+/Public/
 # 무관 프로젝트/파일
-Pregnancy-Success-Forecaster/
-aimers6th.fertility_patients_pregnancy_success_prediction/
-oz-ai-04-soon/
-docker/
-git/
-project/
-SHOW
-hello.py
-PyCharmMiscProject/
-rag-prototype/
+/Pregnancy-Success-Forecaster/
+/aimers6th.fertility_patients_pregnancy_success_prediction/
+/oz-ai-04-soon/
+/docker/
+/git/
+/project/
+/SHOW
+/hello.py
+/PyCharmMiscProject/
+/rag-prototype/
 
 # ===== 민감 데이터 / 의료정보 (절대 커밋 금지) =====
 data/private/

@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import NavBar from "../components/NavBar";
 import { formatUniqueSourceRefs, getRecord, type RecordResult } from "../api/records";
 import { C } from "../theme";
+import { getCurrentUserName } from "../lib/session";
 
 // ponytail: Figma 원본은 병명 백과사전·시간대별 복약 일정 탭도 있었지만, 백엔드가
 // 그런 데이터(질병 설명 DB, 복용 시간 슬롯)를 안 주기 때문에 실제로 있는 필드
@@ -29,7 +30,7 @@ export default function MedGuide() {
   if (loading) {
     return (
       <div className="min-h-screen" style={{ background: C.ivory }}>
-        <NavBar isLoggedIn userName="김건강" />
+        <NavBar isLoggedIn userName={getCurrentUserName()} />
         <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>
       </div>
     );
@@ -38,7 +39,7 @@ export default function MedGuide() {
   if (error || !result?.guide) {
     return (
       <div className="min-h-screen" style={{ background: C.ivory }}>
-        <NavBar isLoggedIn userName="김건강" />
+        <NavBar isLoggedIn userName={getCurrentUserName()} />
         <div className="rounded-2xl p-10 m-8 text-center" style={{ background: C.white }}>
           <p className="text-[14px]" style={{ color: "#D94F4F" }}>{error || "가이드를 찾을 수 없어요."}</p>
         </div>
@@ -50,7 +51,7 @@ export default function MedGuide() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName="김건강" />
+      <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <button
           onClick={() => navigate(`/records/${result.record_id}`)}

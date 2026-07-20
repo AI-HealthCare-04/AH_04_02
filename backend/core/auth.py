@@ -9,7 +9,9 @@ auth.py — 비밀번호 해시 + JWT 발급/검증 (담당: 박소정, 환자 �
 서로 다른 테이블의 PK라 값이 겹칠 수 있으므로, role 없이 subject_id만으로는
 어느 테이블에서 찾아야 하는지 알 수 없다.
 
-⚠️ SECRET_KEY는 데모용 기본값입니다. 실제 배포 전에는 반드시 .env 등으로 바꾸세요.
+[2026-07-15] SECRET_KEY는 로컬/테스트에서만 데모용 기본값을 쓴다 — development/production은
+DATABASE_URL과 동일하게, 값이 없으면 서버 기동 자체를 거부한다(소스에 그대로 적힌 기본값으로
+JWT를 서명하는 사고를 막기 위함).
 """
 import os
 import uuid
@@ -18,7 +20,16 @@ from datetime import UTC, datetime, timedelta
 import jwt
 from passlib.context import CryptContext
 
-SECRET_KEY = os.environ.get("SECRET_KEY", "change-this-secret-key-before-deploy")
+from core.database import APP_ENV
+
+SECRET_KEY = os.environ.get("SECRET_KEY")
+if not SECRET_KEY:
+    if APP_ENV in ("development", "production"):
+        raise RuntimeError(
+            f"APP_ENV={APP_ENV}인데 SECRET_KEY가 설정되지 않았습니다. "
+            "JWT 서명에 쓰이는 값이라 반드시 강력한 랜덤 값으로 지정해야 합니다."
+        )
+    SECRET_KEY = "change-this-secret-key-before-deploy"  # local/test 전용 기본값
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_MINUTES = 14 * 24 * 60  # 14일

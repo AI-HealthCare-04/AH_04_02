@@ -2,7 +2,9 @@ import { monitoringClient } from "./monitoringClient";
 
 // ── 타입 정의 (monitoring_router.py 응답 형태 그대로) ──
 
-export type IntakeStatus = "taken" | "pending" | "skipped";
+// [2026-07-19 추가] "missed"는 사용자가 직접 누르는 상태가 아니라, 백엔드 스케줄러
+// (core/scheduler.py)가 정시를 훌쩍 넘기고도 체크가 없으면 자동으로 판정하는 상태다.
+export type IntakeStatus = "taken" | "pending" | "skipped" | "missed";
 
 export interface Medication {
   id: string;
@@ -23,6 +25,12 @@ export interface Patient {
   sms_enabled: boolean;
   email_opt_in: boolean;
   created_at: string;
+  breakfast_time: string | null;
+  breakfast_regular: boolean | null;
+  lunch_time: string | null;
+  lunch_regular: boolean | null;
+  dinner_time: string | null;
+  dinner_regular: boolean | null;
 }
 
 export interface Caregiver {
@@ -185,6 +193,25 @@ export async function deletePatient(patientId: number) {
   return data;
 }
 
+/** [2026-07-16 추가] 회원가입 직후 자가진단(식사 시간) 설문 저장 */
+export async function updateMealTimes(
+  patientId: number,
+  payload: {
+    breakfast_time?: string;
+    breakfast_regular?: boolean;
+    lunch_time?: string;
+    lunch_regular?: boolean;
+    dinner_time?: string;
+    dinner_regular?: boolean;
+  }
+) {
+  const { data } = await monitoringClient.put<Patient>(
+    `/monitoring/patients/${patientId}/meal-times`,
+    payload
+  );
+  return data;
+}
+
 /**
  * 복약 일정 생성
  */
@@ -260,13 +287,15 @@ export async function deleteSchedule(scheduleId: number) {
  * 별도 집계 endpoint 없이 최근 N일 로그를 그대로 받아 프론트에서 계산합니다.
  */
 export interface MedicationLogEntry {
-  id: number;
+  // [2026-07-19 변경] "missed" 항목은 실제 체크 기록이 아니라 NotificationLog에서
+  // 합성된 가상 행이라 id가 숫자 PK가 아니고 "missed:12" 형태 문자열이다.
+  id: string;
   schedule_id: number;
   drug_name: string;
   time_slot: string;
-  status: "taken" | "skipped";
+  status: "taken" | "skipped" | "missed";
   checked_at: string;
-  confirmed_by_type: "patient" | "caregiver";
+  confirmed_by_type: "patient" | "caregiver" | "system";
   confirmed_by_name: string;
 }
 

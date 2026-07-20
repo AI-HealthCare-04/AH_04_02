@@ -369,6 +369,7 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
                 frequency=med.frequency,
                 diagnosis=med.diagnosis,
                 drug_class=med.drug_class,
+                total_days=med.total_days,
                 confidence=med.confidence,
                 review_required=ocr_result.review_required,
                 matched_drug_name=matched_name,

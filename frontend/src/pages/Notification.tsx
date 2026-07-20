@@ -7,7 +7,7 @@ import {
   type NotificationSettings,
 } from "../api/care";
 import { getPatientCaregivers } from "../api/monitoring";
-import { useGuardedPatientId } from "../lib/session";
+import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
 
 function Toggle({ on, onChange, disabled = false }: { on: boolean; onChange: () => void; disabled?: boolean }) {
@@ -31,6 +31,7 @@ export default function Notification() {
   const [careLocked, setCareLocked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [savingKey, setSavingKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (patientId == null) return;
@@ -55,11 +56,14 @@ export default function Notification() {
 
     const next = { ...settings, [key]: !settings[key] };
     setSettings(next); // 낙관적 업데이트
+    setSavingKey(key);
     try {
       await updateNotificationSettings(patientId, { [key]: next[key] });
     } catch {
       setSettings(settings); // 실패 시 롤백
       setError("저장하지 못했어요.");
+    } finally {
+      setSavingKey(null);
     }
   };
 
@@ -71,7 +75,7 @@ export default function Notification() {
 
   return (
     <div className="min-h-screen bg-[#FAF6F1]">
-      <NavBar isLoggedIn userName="김건강" />
+      <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-xl mx-auto px-6 sm:px-8 py-10">
         <h1 className="text-[26px] font-black text-[#1E1A17] mb-1">알림 설정</h1>
         <p className="text-[14px] text-[#8A7E75] mb-7">받고 싶은 알림을 선택하세요.</p>
@@ -92,7 +96,7 @@ export default function Notification() {
                     </p>
                   )}
                 </div>
-                <Toggle on={settings[key]} onChange={() => toggle(key)} disabled={locked} />
+                <Toggle on={settings[key]} onChange={() => toggle(key)} disabled={locked || savingKey === key} />
               </div>
             ))}
           </div>

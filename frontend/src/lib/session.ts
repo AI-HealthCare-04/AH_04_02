@@ -15,6 +15,12 @@ export function getCurrentCaregiverId(): number | null {
   return value ? Number(value) : null;
 }
 
+/** [2026-07-19 추가] 로그인/가입 시점에 저장해두는 실제 사용자 이름 — NavBar가 화면마다
+ * "김건강"으로 하드코딩돼있던 문제 수정용. Login.tsx/SignUp.tsx에서 저장한다. */
+export function getCurrentUserName(): string {
+  return localStorage.getItem("user_name") ?? "";
+}
+
 /** [7/14] access_token 존재 여부로 로그인 상태를 판단 — monitoringClient.ts의 401
  * 인터셉터가 이 토큰을 검사하는 것과 동일한 기준. 비로그인 상태에서 인증 필요한
  * API를 호출하면 401 → 강제로 /login 리다이렉트되는 걸 막을 때 이걸로 먼저 가드한다. */

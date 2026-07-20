@@ -41,6 +41,7 @@ from models import (
     MedicalRecord,
     MedicationLog,
     MedicationSchedule,
+    NotificationLog,
     OcrResult,
     Patient,
 )
@@ -85,6 +86,21 @@ class PatientPublic(BaseModel):
     sms_enabled: bool = False
     email_opt_in: bool = False
     created_at: datetime
+    breakfast_time: str | None = None
+    breakfast_regular: bool | None = None
+    lunch_time: str | None = None
+    lunch_regular: bool | None = None
+    dinner_time: str | None = None
+    dinner_regular: bool | None = None
+
+
+class MealTimesUpdate(BaseModel):
+    breakfast_time: str | None = None
+    breakfast_regular: bool | None = None
+    lunch_time: str | None = None
+    lunch_regular: bool | None = None
+    dinner_time: str | None = None
+    dinner_regular: bool | None = None
 
 
 @router.post("/patients", response_model=PatientPublic)
@@ -137,6 +153,28 @@ def update_patient(
     session: Session = Depends(get_session),
 ):
     require_patient_access(patient_id, caregiver, session)
+    patient = session.get(Patient, patient_id)
+    if not patient:
+        raise HTTPException(404, "해당 환자를 찾을 수 없어요")
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(patient, key, value)
+    session.add(patient)
+    session.commit()
+    session.refresh(patient)
+    return patient
+
+
+@router.put("/patients/{patient_id}/meal-times", response_model=PatientPublic)
+def update_meal_times(
+    patient_id: int,
+    payload: MealTimesUpdate,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """[2026-07-16 추가] 회원가입 직후 자가진단 설문(MealTimeCheck.tsx) 저장용.
+    환자 본인 로그인 직후(가입 흐름) 호출되므로 caregiver 전용이 아니라 actor 기반 인가를 쓴다
+    (update_patient처럼 caregiver 전용이면 환자 본인 토큰으로는 호출할 수 없다)."""
+    require_actor_patient_access(patient_id, actor, session)
     patient = session.get(Patient, patient_id)
     if not patient:
         raise HTTPException(404, "해당 환자를 찾을 수 없어요")
@@ -559,9 +597,9 @@ def list_logs(
         c.id: c.name for c in session.exec(select(Caregiver).where(Caregiver.id.in_(caregiver_ids)))
     } if caregiver_ids else {}
 
-    return [
+    entries = [
         {
-            "id": log.id,
+            "id": str(log.id),
             "schedule_id": log.schedule_id,
             "drug_name": schedule_map[log.schedule_id].drug_name,
             "time_slot": schedule_map[log.schedule_id].time_slot,
@@ -576,6 +614,34 @@ def list_logs(
         }
         for log in logs
     ]
+
+    # [2026-07-19 추가, REQ-037 Phase1] core/scheduler.py가 정시를 놓친 걸 감지하면
+    # MedicationLog가 아니라 NotificationLog(kind="missed")에 기록한다(레거시 스키마를
+    # 안 건드리는 read-side 병합 — models.py NotificationLog 주석 참고). 실제 체크 기록이
+    # 이미 있는 (schedule_id, 날짜)는 그 체크가 우선이므로 missed로 겹쳐 넣지 않는다.
+    real_checked_dates = {(log.schedule_id, log.checked_at.date().isoformat()) for log in logs}
+    missed_notifs = session.exec(
+        select(NotificationLog)
+        .where(NotificationLog.kind == "missed")
+        .where(NotificationLog.schedule_id.in_(list(schedule_map.keys())))
+        .where(NotificationLog.fired_at >= since)
+    ).all()
+    entries.extend(
+        {
+            "id": f"missed:{notif.id}",
+            "schedule_id": notif.schedule_id,
+            "drug_name": schedule_map[notif.schedule_id].drug_name,
+            "time_slot": notif.time_slot,
+            "status": "missed",
+            "checked_at": notif.fired_at.isoformat(),
+            "confirmed_by_type": "system",
+            "confirmed_by_name": "자동 감지",
+        }
+        for notif in missed_notifs
+        if (notif.schedule_id, notif.due_date) not in real_checked_dates
+    )
+    entries.sort(key=lambda e: e["checked_at"], reverse=True)
+    return entries
 
 
 # ── Dashboard.tsx가 그대로 쓸 수 있는 오늘자 통합 조회 [7/6: patient_id 필수로 변경] ──
@@ -604,13 +670,26 @@ def get_today(
             .where(MedicationLog.schedule_id == s.id)
             .where(func.date(MedicationLog.checked_at) == today_str)
         ).first()
+        if log:
+            status = log.status
+        else:
+            # [2026-07-19 추가, REQ-037 Phase1] 오늘자 체크가 없으면, 스케줄러가 이미
+            # "놓침"으로 판정해뒀는지 NotificationLog에서 확인한다(MedicationLog 스키마는
+            # 안 건드리는 read-side 병합).
+            missed = session.exec(
+                select(NotificationLog)
+                .where(NotificationLog.schedule_id == s.id)
+                .where(NotificationLog.due_date == today_str)
+                .where(NotificationLog.kind == "missed")
+            ).first()
+            status = "missed" if missed else "pending"
         result.append(
             {
                 "id": str(s.id),
                 "name": s.drug_name,
                 "time": s.time_slot,
                 "note": s.memo or "",
-                "status": log.status if log else "pending",
+                "status": status,
             }
         )
     return result

@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Sequence
+from datetime import datetime
 
 from core.database import get_session
 from core.dependencies import Actor, get_current_actor, require_actor_patient_access
@@ -51,6 +52,8 @@ def _create_schedules_from_ocr(record: MedicalRecord, ocr_items: Sequence[OcrRes
                     drug_name=item.drug_name,
                     time_slot=slot,
                     memo="처방전에서 자동 등록됨 — 시간·식전후 여부는 확인 후 수정해주세요",
+                    # [2026-07-20 추가] 이 처방전을 나중에 삭제할 때 같이 비활성화할 수 있도록 연결.
+                    record_id=record.id,
                 )
             )
     session.commit()
@@ -87,6 +90,7 @@ def _build_record_response(record: MedicalRecord, session: Session, guide: Guide
                 "drug_code": item.drug_code,
                 "dosage": item.dosage,
                 "frequency": item.frequency,
+                "total_days": item.total_days,
                 "diagnosis": item.diagnosis,
                 "drug_class": item.drug_class,
                 "confidence": item.confidence,
@@ -263,6 +267,7 @@ def list_records(
     records = session.exec(
         select(MedicalRecord)
         .where(MedicalRecord.patient_id == patient_id)
+        .where(MedicalRecord.deleted_at.is_(None))
         .order_by(MedicalRecord.created_at.desc())  # ty: ignore[unresolved-attribute]
     ).all()
 
@@ -283,11 +288,46 @@ def list_records(
     return summaries
 
 
+@router.delete("/{record_id}")
+def delete_record(
+    record_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """
+    [2026-07-16 추가] 등록내역(처방전 기록) 삭제 — 멘토링에서 지적된 "등록내역 삭제 기능
+    필요" 항목. OcrResult/GuideResult 등 연결 데이터는 그대로 두고 soft-delete만 하며
+    (PatientMedication.deleted_at과 동일한 관례), 목록/상세 조회에서만 제외한다.
+
+    [2026-07-20 추가] 이 처방전에서 자동 생성된 복약 일정(MedicationSchedule.record_id로
+    연결됨)도 함께 비활성화한다 — 안 그러면 "삭제한" 처방전의 약이 대시보드/스케줄러
+    알림에 계속 남아있게 된다(리뷰에서 발견).
+    """
+    record = session.get(MedicalRecord, record_id)
+    if not record or record.deleted_at is not None:
+        raise HTTPException(404, "해당 기록을 찾을 수 없어요")
+    require_actor_patient_access(record.patient_id, actor, session)
+
+    record.deleted_at = datetime.now()
+    session.add(record)
+
+    schedules = session.exec(
+        select(MedicationSchedule).where(MedicationSchedule.record_id == record_id)
+    ).all()
+    for schedule in schedules:
+        schedule.active = False
+        session.add(schedule)
+
+    session.commit()
+    return {"message": "삭제됐어요"}
+
+
 class MedicationCorrection(BaseModel):
     id: int  # OcrResult.id
     drug_name: str
     dosage: str
     frequency: str
+    total_days: str = ""  # [2026-07-18 추가] 총 투약일수
     diagnosis: str
     drug_class: str
 
@@ -329,6 +369,7 @@ async def confirm_medications(
             item.drug_name = correction.drug_name
             item.dosage = correction.dosage
             item.frequency = correction.frequency
+            item.total_days = correction.total_days
             item.diagnosis = correction.diagnosis
             item.drug_class = correction.drug_class
             item.review_required = False
@@ -381,7 +422,7 @@ def get_record(
 ):
     """새로고침 등으로 결과 화면을 다시 열었을 때 재조회용 (Processing에서 받은 데이터가 없을 때 대비)"""
     record = session.get(MedicalRecord, record_id)
-    if not record:
+    if not record or record.deleted_at is not None:
         raise HTTPException(404, "해당 기록을 찾을 수 없어요")
     require_actor_patient_access(record.patient_id, actor, session)
 

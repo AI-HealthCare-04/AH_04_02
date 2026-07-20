@@ -35,6 +35,7 @@ Day 2에 각자 자기 테이블을 검토하고 필요하면 컬럼을 고쳐�
 from datetime import datetime
 
 from core.security import decrypt_pii, encrypt_pii, hash_phone
+from sqlalchemy import Column, Text, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -70,6 +71,15 @@ class Patient(SQLModel, table=True):
     # withdraw/cancel로 취소 가능(둘 다 None으로 되돌림).
     deactivated_at: datetime | None = None
     deletion_scheduled_at: datetime | None = None
+    # [2026-07-16 추가] 회원가입 직후 자가진단 설문(식사 시간) — MedicationSchedule의
+    # dose_timing(식전/식후) 알림 시각을 정할 때 이 식사 시간을 기준으로 삼기 위함.
+    # time_slot과 동일한 관례로 "HH:MM" 문자열, 시간 자체를 안 채우면 None.
+    breakfast_time: str | None = None
+    breakfast_regular: bool | None = None
+    lunch_time: str | None = None
+    lunch_regular: bool | None = None
+    dinner_time: str | None = None
+    dinner_regular: bool | None = None
 
     @property
     def name(self) -> str:
@@ -203,11 +213,17 @@ class MedicalRecord(SQLModel, table=True):
     patient_id: int = Field(foreign_key="patients.id")  # [7/6 추가] 이 처방전이 누구 것인지
     image_path: str  # 저장된 이미지 파일 경로
     status: str = Field(default="processing")  # processing / review_required / completed / failed
-    raw_text: str | None = None  # OCR 원문 (완료 후 기록)
+    # [2026-07-16] MySQL은 SQLModel의 기본 str 컬럼을 varchar(255)로 만들어서, 실제 OCR
+    # 원문(255자를 쉽게 넘김)을 저장할 때 "Data too long" 에러로 처방전 인식이 통째로
+    # 실패했다 — SQLite는 길이 제한이 없어 로컬 테스트에서는 안 보였던 버그.
+    raw_text: str | None = Field(default=None, sa_column=Column(Text))  # OCR 원문 (완료 후 기록)
     failure_reason: str | None = None  # 실패 시 사유
     created_at: datetime = Field(default_factory=datetime.now)
     # [7/9 추가] 보호자가 대신 업로드한 경우에만 채워짐 — 본인이 직접 올렸으면 None
     uploaded_by_caregiver_id: int | None = Field(default=None, foreign_key="caregivers.id")
+    # [2026-07-16 추가] 등록내역 삭제 기능 — PatientMedication.deleted_at과 동일한 soft-delete
+    # 관례. OCR·가이드 등 연결 데이터를 실제로 지우지 않고 목록/조회에서만 감춘다.
+    deleted_at: datetime | None = Field(default=None)
 
 
 # ── OCR 추출 결과 (약품 1개 = 1행, 담당: 권순현) ──
@@ -218,8 +234,9 @@ class OcrResult(SQLModel, table=True):
     record_id: int = Field(foreign_key="medical_records.id")
     drug_name: str
     drug_code: str = ""  # [7/6 추가] HIRA 약가마스터 매칭용 코드 (ocr_interface.py의 OCRResult와 동기화)
-    dosage: str = ""       # 미인식이면 빈 문자열
-    frequency: str = ""
+    dosage: str = ""       # 미인식이면 빈 문자열 (1회 투약량 — 예: "5mg", "1정")
+    frequency: str = ""    # 1일 투여횟수 (예: "1일 3회")
+    total_days: str = ""   # [2026-07-18 추가] 총 투약일수 (예: "30일")
     diagnosis: str = ""
     drug_class: str = ""
     confidence: float = 0.0  # 0.0 ~ 1.0
@@ -237,9 +254,12 @@ class GuideResult(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     record_id: int = Field(foreign_key="medical_records.id")
     # SQLite엔 JSON 타입이 없어서 문자열로 저장: json.dumps()로 넣고 json.loads()로 꺼냄
-    medication_guide: str
-    lifestyle_guide: str
-    source_refs: str = "[]"
+    # [2026-07-16] raw_text와 동일한 이유로 Text 명시 — 기본 str이면 MySQL에서 varchar(255)가
+    # 되어 실제 가이드 JSON(255자를 훨씩 넘김) 저장이 실패/잘림. 어제 멘토링에서 나온
+    # "가이드 콘텐츠가 부족하다"는 문제의 원인 중 하나였을 가능성이 높다.
+    medication_guide: str = Field(sa_column=Column(Text, nullable=False))
+    lifestyle_guide: str = Field(sa_column=Column(Text, nullable=False))
+    source_refs: str = Field(default="[]", sa_column=Column(Text))
     created_at: datetime = Field(default_factory=datetime.now)
 
 
@@ -268,6 +288,11 @@ class MedicationSchedule(SQLModel, table=True):
     # JSON 배열 문자열(예: '["mon","wed","fri"]') — SQLite엔 JSON 타입이 없어 문자열로 저장
     # (guide_results.source_refs와 동일한 관례).
     days_of_week: str | None = None
+    # [2026-07-20 추가] 처방전에서 자동 생성된 일정(records_router.py의 _create_schedules_
+    # from_ocr)만 이 값을 채운다 — 처방전을 soft-delete할 때 관련 일정도 같이 비활성화하기
+    # 위해 필요(안 그러면 삭제한 처방전의 약이 대시보드/알림에 계속 남는다). monitoring_router.py
+    # 로 직접 만든 일정은 처방전과 무관하니 그대로 None.
+    record_id: int | None = Field(default=None, foreign_key="medical_records.id", index=True)
 
 
 # ── 복약 기록 (담당: 박소정) ──
@@ -282,6 +307,37 @@ class MedicationLog(SQLModel, table=True):
     # [7/9 추가] 이 체크를 누가 했는지 — 환자 본인(patient) vs 보호자 대신(caregiver)
     confirmed_by_type: str = "patient"
     confirmed_by_caregiver_id: int | None = Field(default=None, foreign_key="caregivers.id")
+
+
+# ── 복약 알림 발송 기록 [2026-07-19 추가, REQ-026a/007/026c/026d, 담당: 김영혜] ──
+# core/scheduler.py의 인프로세스 스케줄러가 매 tick마다 "이 스케줄이 이 시각에 이미
+# 처리됐는지"를 판단하는 기준. UniqueConstraint가 실제 중복 방지 장치다 — 서버가
+# 재시작되거나(놓친 tick 따라잡기용 유예 윈도우 있음), 팀원 여러 명이 각자 로컬에서
+# 서버를 띄워 같은 공유 DB를 보더라도(shared-dev-db-setup.md), 같은
+# (schedule_id, due_date, time_slot, kind) 조합은 DB 유니크 제약이 막아줘서 한 번만
+# 처리된다 — 스케줄러 자체의 "정확히 한 번" 보장이 아니라 DB가 최종 중재자.
+# kind를 제약에 포함한 이유: 같은 스케줄/같은 날 "reminder"(정시 알림)와 "missed"
+# (놓침 판정)가 서로 다른 사건이라 둘 다 한 번씩은 남아야 한다.
+class NotificationLog(SQLModel, table=True):
+    __tablename__ = "notification_logs"
+    __table_args__ = (
+        UniqueConstraint("schedule_id", "due_date", "time_slot", "kind", name="uq_notification_instance"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    schedule_id: int = Field(foreign_key="medication_schedules.id", index=True)
+    patient_id: int = Field(foreign_key="patients.id", index=True)
+    due_date: str = Field(index=True)  # "2026-07-19" — date.isoformat(), MedicationLog와 동일 관례
+    time_slot: str  # 발생 시점의 schedule.time_slot 스냅샷 (나중에 스케줄이 바뀌어도 기록은 안 바뀜)
+    kind: str = "reminder"  # reminder(정시 알림) / missed(놓침 판정)
+    # [2026-07-19] "성공적으로 보냈다"와 "이 스케줄은 알림이 꺼져 있어서 일부러 안 보냈다"를
+    # 구분해야 한다 — NotificationSetting.medication_reminder_enabled가 꺼져 있으면
+    # suppressed로 남기고 이메일은 실제로 보내지 않는다(사용자가 끈 알림을 무시하고
+    # 보내면 REQ-026a의 opt-out을 어기는 것이 된다).
+    status: str = "pending"  # pending / sent / suppressed / failed
+    channels: str = "[]"  # JSON 배열, 예: '["inapp","email:patient","email:caregiver:3"]'
+    fired_at: datetime = Field(default_factory=datetime.now)
+    acknowledged_at: datetime | None = None  # 환자가 인앱 알림을 확인 처리하면 채워짐
 
 
 # ── 환자 의약품 등록 [2026-07-14 추가, 담당: 김영혜] ──

@@ -12,11 +12,13 @@ import {
   type RecordResult,
 } from "../api/records";
 import { C } from "../theme";
+import { getCurrentUserName } from "../lib/session";
 
 const FIELDS: { key: keyof OcrMedication; label: string }[] = [
   { key: "drug_name", label: "약품명" },
-  { key: "dosage", label: "용량" },
-  { key: "frequency", label: "복용횟수" },
+  { key: "dosage", label: "1회 투약량" },
+  { key: "frequency", label: "1일 투약횟수" },
+  { key: "total_days", label: "총 투약일수" },
   { key: "diagnosis", label: "진단명" },
   { key: "drug_class", label: "약효분류" },
 ];
@@ -32,19 +34,22 @@ type FieldIssue = { field: keyof OcrMedication; message: string };
 // [7/9] 신뢰도(review_required)와 무관하게 항상 확인 화면을 거치므로, "어떤 항목이 문제인지"는
 // OCR의 overall_confidence가 아니라 실제 필드 값(약품명 매칭 여부·용량 형식·빈 칸)으로 판단한다.
 // 초기 로드 시(비동기 검증 전)와 렌더링 시 양쪽에서 같은 기준을 써야 해서 순수 함수로 분리했다.
-function computeIssues(m: OcrMedication, drugNameOk: boolean | undefined): FieldIssue[] {
+function computeIssues(m: OcrMedication, drugNameOk: boolean | undefined, nameOverridden = false): FieldIssue[] {
   const issues: FieldIssue[] = [];
-  if (drugNameOk === false) {
+  if (drugNameOk === false && !nameOverridden) {
     issues.push({ field: "drug_name", message: "약품명이 올바르지 않아요. 처방전의 철자를 다시 확인해주세요." });
   } else if (!m.drug_name.trim()) {
     issues.push({ field: "drug_name", message: "약품명이 비어있어요. 입력해주세요." });
   }
   if (m.dosage.trim() && !isDosageValid(m.dosage)) {
-    issues.push({ field: "dosage", message: "용량 형식이 잘못됐어요 (예: 500mg처럼 단위를 함께 입력)." });
+    issues.push({ field: "dosage", message: "1회 투약량 형식이 잘못됐어요 (예: 500mg, 1정처럼 단위를 함께 입력)." });
   } else if (!m.dosage.trim()) {
-    issues.push({ field: "dosage", message: "용량이 비어있어요. 입력해주세요." });
+    issues.push({ field: "dosage", message: "1회 투약량이 비어있어요. 입력해주세요." });
   }
-  (["frequency", "diagnosis", "drug_class"] as const).forEach((f) => {
+  // [2026-07-18] 약효분류는 OCR로 못 잡는 경우가 많아 필수에서 제외 — 비어있어도 확인 완료로
+  // 넘어갈 수 있다. 총 투약일수도 같은 이유로 필수가 아니다.
+  // [2026-07-19] 진단명도 같은 이유로 필수에서 제외 — OCR이 진단명을 못 뽑는 처방전이 많다.
+  (["frequency"] as const).forEach((f) => {
     if (!m[f].trim()) {
       issues.push({ field: f, message: `${FIELDS.find((x) => x.key === f)?.label}이 비어있어요. 입력해주세요.` });
     }
@@ -70,6 +75,10 @@ export default function PrescriptionReview() {
   const [confirmed, setConfirmed] = useState<Set<number>>(new Set());
   // 약품명이 실제 존재하는 약인지(e약은요/HIRA 매칭) — key: 항목 id, undefined면 아직 조회 전
   const [drugNameOk, setDrugNameOk] = useState<Record<number, boolean>>({});
+  // [2026-07-20 추가] 참조 DB에 없는 실제 약(복합제 등, "알려진 제한사항" 참고)까지
+  // match_drug()가 다 잡아내진 못한다 — 사용자가 직접 확인했다고 재확인한 항목은
+  // drugNameOk=false여도 막지 않는다. 이름을 다시 수정하면(handleBlur) 새로 검증하도록 해제.
+  const [nameOverride, setNameOverride] = useState<Record<number, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [addingItem, setAddingItem] = useState(false);
@@ -122,7 +131,16 @@ export default function PrescriptionReview() {
   };
 
   const fieldIssues = (item: OcrMedication): FieldIssue[] =>
-    computeIssues(edited[item.id] ?? item, drugNameOk[item.id]);
+    computeIssues(edited[item.id] ?? item, drugNameOk[item.id], nameOverride[item.id]);
+
+  // 약품명 자동 검증에 안 걸리는 실제 약(복합제 등)을 사용자가 직접 확인했을 때 쓰는 override.
+  const confirmDrugNameAnyway = (id: number) => {
+    setNameOverride((prev) => ({ ...prev, [id]: true }));
+    const m = edited[id];
+    if (m && computeIssues(m, drugNameOk[id], true).length === 0) {
+      setConfirmed((prev) => new Set([...prev, id]));
+    }
+  };
 
   // 항목의 모든 칸을 채운 채로 "그 항목을 완전히 벗어나면"(blur) 자동으로 "확인 완료" 처리합니다.
   // 약품명은 다시 입력했으면 e약은요/HIRA 재조회로 실제 존재하는 약인지 확인하고,
@@ -135,7 +153,10 @@ export default function PrescriptionReview() {
     if (!m) return;
 
     let nameOk = drugNameOk[id];
+    let overridden = nameOverride[id];
     if (field === "drug_name") {
+      overridden = false; // 이름을 다시 고쳤으니 예전 override는 무효 — 새 값으로 다시 검증
+      setNameOverride((prev) => ({ ...prev, [id]: false }));
       try {
         const info = await getDrugIndication(m.drug_name);
         nameOk = info.matched_name !== null;
@@ -149,7 +170,7 @@ export default function PrescriptionReview() {
     if (relatedTarget instanceof Node && container?.contains(relatedTarget)) return;
 
     const current = edited[id];
-    if (computeIssues(current, nameOk).length === 0) {
+    if (computeIssues(current, nameOk, overridden).length === 0) {
       setConfirmed((prev) => new Set([...prev, id]));
     }
   };
@@ -232,6 +253,7 @@ export default function PrescriptionReview() {
           drug_name: e.drug_name.trim(),
           dosage: e.dosage.trim(),
           frequency: e.frequency.trim(),
+          total_days: e.total_days.trim(),
           diagnosis: e.diagnosis.trim(),
           drug_class: e.drug_class.trim(),
         };
@@ -251,41 +273,40 @@ export default function PrescriptionReview() {
   if (generating) {
     return (
       <div className="fixed inset-0 z-50 flex flex-col" style={{ background: C.ivory }}>
-        <NavBar isLoggedIn userName="김건강" />
+        <NavBar isLoggedIn userName={getCurrentUserName()} />
         <div className="flex-1 flex flex-col items-center justify-center px-8">
         <div className="relative mb-8 flex items-center justify-center">
+          {/* 진행률이 90%에서 API 응답까지(최대 1분) 멈춰있어도 계속 도는 링 —
+              멈춘 것처럼 보이지 않게 진행률과 무관하게 항상 회전한다 */}
+          <div
+            className="absolute animate-spin rounded-full"
+            style={{
+              width: 144,
+              height: 144,
+              border: "7px solid transparent",
+              borderTopColor: C.terracotta,
+              borderRightColor: `${C.terracotta}30`,
+            }}
+          />
           <div
             style={{
-              width: 128,
-              height: 128,
+              width: 100,
+              height: 100,
               borderRadius: "50%",
-              background: `conic-gradient(${C.terracotta} ${progress * 3.6}deg, rgba(193,101,61,0.15) ${progress * 3.6}deg)`,
+              background: C.ivory,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              transition: "background 0.25s",
             }}
           >
             <div
+              className="w-16 h-16 rounded-2xl flex items-center justify-center text-[30px]"
               style={{
-                width: 100,
-                height: 100,
-                borderRadius: "50%",
-                background: C.ivory,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
+                background: `linear-gradient(135deg, ${C.terracotta} 0%, #A5522F 100%)`,
+                boxShadow: "0 6px 20px rgba(193,101,61,0.35)",
               }}
             >
-              <div
-                className="w-16 h-16 rounded-2xl flex items-center justify-center text-[30px]"
-                style={{
-                  background: `linear-gradient(135deg, ${C.terracotta} 0%, #A5522F 100%)`,
-                  boxShadow: "0 6px 20px rgba(193,101,61,0.35)",
-                }}
-              >
-                📋
-              </div>
+              📋
             </div>
           </div>
         </div>
@@ -296,6 +317,8 @@ export default function PrescriptionReview() {
           처방전 정보를 분석하고
           <br />
           맞춤 복약 가이드를 생성 중이에요
+          <br />
+          <span style={{ fontWeight: 600 }}>보통 1분 정도 걸려요. 조금만 기다려 주세요</span>
         </p>
         <div className="w-72 mb-6">
           <div className="h-2.5 rounded-full overflow-hidden mb-2" style={{ background: "rgba(30,26,23,0.10)" }}>
@@ -343,7 +366,7 @@ export default function PrescriptionReview() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName="김건강" />
+      <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         {loading ? (
           <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>
@@ -482,6 +505,20 @@ export default function PrescriptionReview() {
                         </div>
                       )}
 
+                      {/* [2026-07-20 추가] 복합제 등 참조 DB에 없는 실제 약은 자동 검증을 통과하지
+                          못할 수 있다 — 사용자가 실제 약이 맞다고 직접 확인하면 진행할 수 있게 함. */}
+                      {!isDone && drugNameOk[item.id] === false && (
+                        <div className="mx-5 mt-2 mb-1">
+                          <button
+                            onClick={() => confirmDrugNameAnyway(item.id)}
+                            className="text-[12px] font-bold px-3 py-1.5 rounded-full transition-all hover:opacity-80"
+                            style={{ background: "rgba(30,26,23,0.06)", color: C.dark }}
+                          >
+                            철자를 확인했고, 이 약품명이 맞아요
+                          </button>
+                        </div>
+                      )}
+
                       <div
                         ref={(el) => { itemContainerRefs.current[item.id] = el; }}
                         className="p-6 grid grid-cols-2 gap-4"
@@ -530,21 +567,31 @@ export default function PrescriptionReview() {
                       </div>
                     </div>
 
+                    {/* [2026-07-19 추가, REQ-048] 이 화면은 항상 record.status === "review_required"
+                        상태에서만 보이고(위 353번째 줄 가드), 가이드는 confirmMedications() 확정 후에야
+                        생성되므로 지금 이 시점엔 record.guide가 사실상 항상 null이다 — 그래도 "가이드
+                        존재 여부"를 status로 추측하지 않고 record.guide(GET /records/{id}가 이미 내려주는
+                        값, 새 API 불필요)로 직접 판단한다. 요구사항_정의서 REQ-048: 가이드가 있을 때만
+                        챗봇 진입 버튼을 노출하고, 없으면 안내 문구만 보여준다(스키마 확장 없음). */}
                     {!isDone && (
                       <div
                         className="flex items-center justify-between gap-4 px-5 py-4 rounded-2xl mt-3"
                         style={{ background: "#FBF8F3", border: "1px solid rgba(30,26,23,0.09)" }}
                       >
                         <p className="text-[13px] font-medium" style={{ color: C.dark }}>
-                          약품명을 찾기 어려우신가요? AI 챗봇이 도와드릴게요
+                          {record.guide
+                            ? "약품명을 찾기 어려우신가요? AI 챗봇이 도와드릴게요"
+                            : "복약 가이드가 생성되면 AI 챗봇으로 질문할 수 있어요"}
                         </p>
-                        <button
-                          onClick={() => navigate("/chat")}
-                          className="shrink-0 px-4 py-2.5 rounded-full text-white font-bold text-[13px] hover:opacity-88 transition-all whitespace-nowrap"
-                          style={{ background: C.terracotta }}
-                        >
-                          챗봇에게 물어보기 💬
-                        </button>
+                        {record.guide && (
+                          <button
+                            onClick={() => navigate("/chat", { state: { diagnosis: record.guide!.lifestyle_guide.diagnosis } })}
+                            className="shrink-0 px-4 py-2.5 rounded-full text-white font-bold text-[13px] hover:opacity-88 transition-all whitespace-nowrap"
+                            style={{ background: C.terracotta }}
+                          >
+                            챗봇에게 물어보기 💬
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>

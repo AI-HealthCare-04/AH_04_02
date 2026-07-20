@@ -7,7 +7,7 @@ import {
   type InvitationSummary,
 } from "../api/care";
 import { getPatientCaregivers, unlinkCaregiverPatient, type Caregiver } from "../api/monitoring";
-import { useGuardedPatientId } from "../lib/session";
+import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
 
 type RelationType = "guardian" | "caregiver" | "life_support_worker" | "social_worker";
 
@@ -107,7 +107,7 @@ export default function Connect() {
 
   return (
     <div className="min-h-screen bg-[#FAF6F1]">
-      <NavBar isLoggedIn userName="김건강" />
+      <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <h1 className="text-[26px] font-black text-[#1E1A17] mb-1">보호자·요양보호사 연결 관리</h1>
         <p className="text-[14px] text-[#8A7E75] mb-7">복약 관리를 함께할 사람을 초대하고 관리하세요.</p>
