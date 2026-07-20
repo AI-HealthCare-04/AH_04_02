@@ -20,6 +20,7 @@ monitoring_router.py/care_router.py와 동일한 `get_current_actor`/
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -30,7 +31,16 @@ from pathlib import Path
 from core.database import get_session
 from core.dependencies import Actor, get_current_actor, require_actor_patient_access
 from fastapi import APIRouter, Depends, HTTPException
-from models import ChatMessage, GuideResult, MedicalRecord, NotificationSetting, OcrResult, Patient
+from fastapi.responses import StreamingResponse
+from models import (
+    ChatMessage,
+    GuideResult,
+    MedicalRecord,
+    NotificationSetting,
+    OcrResult,
+    Patient,
+    PatientMedication,
+)
 from pydantic import BaseModel
 from services.langfuse_tracing import (
     flush_langfuse,
@@ -61,6 +71,64 @@ PRESET_QUESTIONS = [
         "answer": "어지러움, 발진, 심한 속쓰림 등 평소와 다른 증상이 나타나면 복용을 멈추고 가까운 병원이나 약국에 문의해 주세요. 증상이 심하면 바로 응급실을 방문하세요.",
     },
 ]
+
+# [2026-07-19 추가] PRESET_QUESTIONS는 완전히 고정된 값이라, 앱을 켤 때마다 누구에게나
+# 항상 똑같은 질문(특히 q1 "이 약 식사 전에 먹어도 되나요?")이 뜬다는 게 팀 회의에서
+# "매번 같은 기본 질문이 뜨는 버그처럼 보인다"고 지적됨 — 실제로는 캐시/상태 버그가
+# 아니라 이 리스트 자체가 정적이라 생기는 현상이었다(docs/status-report 참고). 환자가
+# 실제로 등록한 약 이름을 넣어 질문을 생성하도록 바꿔서, 매번 똑같이 느껴지는 문제와
+# "이 챗봇이 내 약을 실제로 아는지" 둘 다 개선한다.
+_DYNAMIC_QUESTION_TEMPLATES: list[tuple[str, str, str]] = [
+    (
+        "meal_timing",
+        "{drug} 식사 전후 언제 먹어야 하나요?",
+        "{drug}은 약마다 복용 시점이 달라요. 처방전에 표시된 복용법을 꼭 확인하시고, 헷갈리면 처방하신 의사나 약사에게 확인해 주세요.",
+    ),
+    (
+        "side_effect",
+        "{drug} 복용 중 부작용이 있으면 어떻게 하나요?",
+        "{drug} 복용 중 어지러움, 발진, 심한 속쓰림처럼 평소와 다른 증상이 나타나면 복용을 멈추고 가까운 병원이나 약국에 문의해 주세요. 증상이 심하면 바로 응급실을 방문하세요.",
+    ),
+    (
+        "interaction",
+        "{drug}을 다른 약과 같이 먹어도 되나요?",
+        "{drug}을 다른 약과 함께 드실 때는 조합에 따라 주의가 필요할 수 있어요. 정확한 상호작용은 처방하신 의사나 약사에게 확인하시는 게 가장 안전해요.",
+    ),
+]
+
+
+def _patient_registered_drug_names(patient_id: int, session: Session, limit: int = 3) -> list[str]:
+    """환자가 실제로 등록·확정한 약 이름 — '내 약 등록'(PatientMedication, 사용자 확정값)을
+    우선하고, 없으면 최근 처방전 OCR 결과로 폴백한다(_latest_ocr_drug_names는 아래 정의됨,
+    이 함수보다 먼저 호출되는 곳이 없어 순서 문제 없음)."""
+    meds = session.exec(
+        select(PatientMedication)
+        .where(PatientMedication.patient_id == patient_id)
+        .where(PatientMedication.is_active == True)  # noqa: E712
+        .where(PatientMedication.deleted_at.is_(None))
+        .order_by(PatientMedication.created_at.desc())
+    ).all()
+    names = [m.medication_name for m in meds if m.medication_name]
+    if names:
+        return names[:limit]
+    return _latest_ocr_drug_names(patient_id, session)[:limit]
+
+
+def _build_dynamic_questions(patient_id: int, session: Session) -> list[dict]:
+    """환자가 등록한 약이 하나도 없으면(신규 가입 직후 등) 기존 고정 질문으로 폴백한다 —
+    실제로 참고할 약이 없는 상태에서 억지로 약 이름을 지어내지 않기 위함."""
+    drug_names = _patient_registered_drug_names(patient_id, session, limit=1)
+    if not drug_names:
+        return PRESET_QUESTIONS
+    drug_name = drug_names[0]
+    return [
+        {
+            "id": f"dyn:{key}:{drug_name}",
+            "text": text_tpl.format(drug=drug_name),
+            "answer": answer_tpl.format(drug=drug_name),
+        }
+        for key, text_tpl, answer_tpl in _DYNAMIC_QUESTION_TEMPLATES
+    ]
 
 CHAT_SYSTEM_PROMPT = """\
 당신은 고령 만성질환 환자와 보호자를 위한 복약 상담 챗봇입니다.
@@ -559,20 +627,18 @@ def _retrieve_chat_rag_context(question_text: str, patient_context_text: str, k:
     return lines
 
 
-def _generate_llm_answer(
-    question_text: str,
-    context_text: str,
+def _build_chat_messages(
     bot_name: str,
+    context_text: str,
+    question_text: str,
     rag_context_text: str = "",
     dur_context_text: str = "",
-) -> str:
-    from langchain_openai import ChatOpenAI
-    from rag.config import settings as rag_settings
-
-    chat = ChatOpenAI(model=rag_settings.OPENAI_MODEL, api_key=rag_settings.OPENAI_API_KEY, temperature=0.4)
+) -> list[dict]:
+    """/ask(비스트리밍)와 /ask/stream(REQ-021 SSE)이 공유하는 프롬프트 조립 — 전달 방식만
+    다르고 LLM에 주는 내용은 완전히 동일해야 하므로 여기 한 곳에서만 만든다."""
     rag_section = f"\n\n[RAG 참고자료]\n{rag_context_text}" if rag_context_text else ""
     dur_section = f"\n\n[DUR 보강조회]\n{dur_context_text}" if dur_context_text else ""
-    messages = [
+    return [
         {"role": "system", "content": f"당신의 이름은 '{bot_name}'입니다. 이름을 물어보면 이렇게 답하세요.\n\n{CHAT_SYSTEM_PROMPT}"},
         {
             "role": "user",
@@ -585,6 +651,20 @@ def _generate_llm_answer(
             ),
         },
     ]
+
+
+def _generate_llm_answer(
+    question_text: str,
+    context_text: str,
+    bot_name: str,
+    rag_context_text: str = "",
+    dur_context_text: str = "",
+) -> str:
+    from langchain_openai import ChatOpenAI
+    from rag.config import settings as rag_settings
+
+    chat = ChatOpenAI(model=rag_settings.OPENAI_MODEL, api_key=rag_settings.OPENAI_API_KEY, temperature=0.4)
+    messages = _build_chat_messages(bot_name, context_text, question_text, rag_context_text, dur_context_text)
     callback_handler = get_langchain_callback_handler()
     invoke_config = {"callbacks": [callback_handler]} if callback_handler else None
     response = chat.invoke(messages, config=invoke_config)
@@ -592,10 +672,57 @@ def _generate_llm_answer(
     return content.strip() if isinstance(content, str) else str(content)
 
 
+def _resolve_question(payload: ChatAsk, session: Session) -> tuple[str, str, str, str]:
+    """question_id(고정/동적 질문) 또는 question(자유 텍스트) 중 하나를 해석해
+    (question_id, question_text, fallback_answer, fallback_source)를 반환한다.
+    /ask, /ask/stream이 완전히 동일한 해석 규칙을 써야 하므로 여기서 공유한다."""
+    if payload.question_id:
+        candidates = _build_dynamic_questions(payload.patient_id, session)
+        match = next((q for q in candidates if q["id"] == payload.question_id), None)
+        if not match:
+            match = next((q for q in PRESET_QUESTIONS if q["id"] == payload.question_id), None)
+        if not match:
+            raise HTTPException(404, "존재하지 않는 질문이에요")
+        return match["id"], match["text"], match["answer"], "preset"
+    if payload.question and payload.question.strip():
+        return (
+            "freeform",
+            payload.question.strip(),
+            "죄송해요, 지금은 이 질문에 실시간으로 답변드리기 어려워요. 담당 의사나 약사에게 확인해주세요.",
+            "unsupported",
+        )
+    raise HTTPException(422, "question_id 또는 question 중 하나는 필요해요")
+
+
+def _gather_llm_inputs(patient_id: int, question_text: str, session: Session) -> tuple[str, list[str], list[str], str]:
+    """환자 컨텍스트 + DUR 보강조회 + RAG 근거 + 챗봇 이름을 모은다 — /ask, /ask/stream 공용.
+    DUR/RAG는 리스트로 반환해 호출부가 각자 필요한 형태(개수 집계 vs 그냥 join)로 쓴다."""
+    context_text = _build_patient_context(patient_id, session)
+    registered_drug_names = _latest_ocr_drug_names(patient_id, session)
+    dur_context_lines = _build_on_demand_dur_context(question_text, registered_drug_names)
+    rag_context_lines = _retrieve_chat_rag_context(question_text, context_text)
+    setting = session.get(NotificationSetting, patient_id)
+    bot_name = setting.chatbot_name if setting else "약콩이"
+    return context_text, dur_context_lines, rag_context_lines, bot_name
+
+
+def _sse_event(data: dict) -> str:
+    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
 @router.get("/questions")
-def list_questions():
-    """Chat.tsx의 추천 질문 버튼에 쓸 목록"""
-    return [{"id": q["id"], "text": q["text"]} for q in PRESET_QUESTIONS]
+def list_questions(
+    patient_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """Chat.tsx의 추천 질문 버튼에 쓸 목록 — 환자가 등록한 약이 있으면 그 약 기반으로
+    동적 생성하고(_build_dynamic_questions), 없으면 고정 질문(PRESET_QUESTIONS)으로
+    폴백한다. [2026-07-19 추가] patient_id를 받게 되면서 다른 환자 정보 유추에 악용되지
+    않도록 require_actor_patient_access로 막는다(다른 인가된 엔드포인트와 동일 패턴)."""
+    require_actor_patient_access(patient_id, actor, session)
+    questions = _build_dynamic_questions(patient_id, session)
+    return [{"id": q["id"], "text": q["text"]} for q in questions]
 
 
 class ChatAsk(BaseModel):
@@ -614,18 +741,7 @@ def ask(payload: ChatAsk, actor: Actor = Depends(get_current_actor), session: Se
     if not session.get(Patient, payload.patient_id):
         raise HTTPException(404, "해당 환자를 찾을 수 없어요")
 
-    if payload.question_id:
-        match = next((q for q in PRESET_QUESTIONS if q["id"] == payload.question_id), None)
-        if not match:
-            raise HTTPException(404, "존재하지 않는 질문이에요")
-        question_id, question_text = match["id"], match["text"]
-        fallback_answer, fallback_source = match["answer"], "preset"
-    elif payload.question and payload.question.strip():
-        question_id, question_text = "freeform", payload.question.strip()
-        fallback_answer = "죄송해요, 지금은 이 질문에 실시간으로 답변드리기 어려워요. 담당 의사나 약사에게 확인해주세요."
-        fallback_source = "unsupported"
-    else:
-        raise HTTPException(422, "question_id 또는 question 중 하나는 필요해요")
+    question_id, question_text, fallback_answer, fallback_source = _resolve_question(payload, session)
 
     started_ms = now_ms()
     answer_text, answer_source = fallback_answer, fallback_source
@@ -646,17 +762,14 @@ def ask(payload: ChatAsk, actor: Actor = Depends(get_current_actor), session: Se
     ) as trace:
         if _CHAT_LLM_AVAILABLE:
             try:
-                context_text = _build_patient_context(payload.patient_id, session)
+                context_text, dur_context_lines, rag_context_lines, bot_name = _gather_llm_inputs(
+                    payload.patient_id, question_text, session
+                )
                 context_line_count = len([line for line in context_text.splitlines() if line.strip()])
-                registered_drug_names = _latest_ocr_drug_names(payload.patient_id, session)
-                dur_context_lines = _build_on_demand_dur_context(question_text, registered_drug_names)
                 dur_context_count = len(dur_context_lines)
                 dur_context_text = "\n".join(dur_context_lines)
-                rag_context_lines = _retrieve_chat_rag_context(question_text, context_text)
                 rag_context_count = len(rag_context_lines)
                 rag_context_text = "\n\n".join(rag_context_lines)
-                setting = session.get(NotificationSetting, payload.patient_id)
-                bot_name = setting.chatbot_name if setting else "약콩이"
                 with optional_observation(
                     as_type="generation",
                     name="chat-llm-answer",
@@ -709,6 +822,113 @@ def ask(payload: ChatAsk, actor: Actor = Depends(get_current_actor), session: Se
         "answer_source": answer_source,
         "created_at": msg.created_at.isoformat(),
     }
+
+
+@router.post("/ask/stream")
+async def ask_stream(
+    payload: ChatAsk, actor: Actor = Depends(get_current_actor), session: Session = Depends(get_session)
+):
+    """REQ-021 — /ask와 같은 질문·답변 로직이지만 SSE(text/event-stream)로 토큰이 도착하는
+    대로 흘려보낸다. 응답 전체가 완성될 때까지 기다리지 않아도 되므로 체감 응답속도가
+    낮아진다(긴 답변일수록 효과가 큼).
+
+    [2026-07-19] 스트리밍 바디(_stream) 안에서도 이 요청의 Depends(get_session) session을
+    그대로 쓴다 — FastAPI는 StreamingResponse의 body_iterator가 끝까지 소진될 때까지
+    generator 의존성(Depends(get_session))을 정리하지 않으므로 안전하고, 무엇보다
+    이 프로젝트의 모든 라우터 테스트가 의존하는 `app.dependency_overrides[get_session]`
+    패턴과 호환된다(처음엔 core/scheduler.py처럼 별도 Session(engine)을 열었다가, 그러면
+    테스트가 오버라이드한 세션과 완전히 다른 DB를 보게 되어 응답이 통째로 비어버리는 걸
+    확인하고 이 방식으로 되돌렸다).
+    """
+    require_actor_patient_access(payload.patient_id, actor, session)
+    if not session.get(Patient, payload.patient_id):
+        raise HTTPException(404, "해당 환자를 찾을 수 없어요")
+
+    question_id, question_text, fallback_answer, fallback_source = _resolve_question(payload, session)
+    patient_id = payload.patient_id
+
+    async def _stream():
+        answer_text, answer_source = fallback_answer, fallback_source
+        chunks: list[str] = []
+        started_ms = now_ms()
+
+        with optional_observation(
+            as_type="span",
+            name="chat-ask-stream",
+            input={
+                "question": mask_for_langfuse(question_text),
+                "question_id": question_id,
+                "patient_id": patient_id,
+                "chat_provider": _CHAT_PROVIDER,
+                "llm_available": _CHAT_LLM_AVAILABLE,
+            },
+        ) as trace:
+            if _CHAT_LLM_AVAILABLE:
+                try:
+                    from langchain_openai import ChatOpenAI
+                    from rag.config import settings as rag_settings
+
+                    context_text, dur_lines, rag_lines, bot_name = await asyncio.to_thread(
+                        _gather_llm_inputs, patient_id, question_text, session
+                    )
+                    messages = _build_chat_messages(
+                        bot_name, context_text, question_text, "\n\n".join(rag_lines), "\n".join(dur_lines)
+                    )
+                    chat = ChatOpenAI(
+                        model=rag_settings.OPENAI_MODEL, api_key=rag_settings.OPENAI_API_KEY, temperature=0.4
+                    )
+                    callback_handler = get_langchain_callback_handler()
+                    invoke_config = {"callbacks": [callback_handler]} if callback_handler else None
+
+                    async for chunk in chat.astream(messages, config=invoke_config):
+                        piece = chunk.content if isinstance(chunk.content, str) else str(chunk.content)
+                        if piece:
+                            chunks.append(piece)
+                            yield _sse_event({"delta": piece})
+
+                    answer_text = "".join(chunks).strip() or fallback_answer
+                    answer_source = f"llm ({rag_settings.OPENAI_MODEL})"
+                except Exception as exc:  # noqa: BLE001 — 스트리밍 실패해도 뭐라도 답은 남겨야 함
+                    if chunks:
+                        # 이미 실제 답변 일부를 내보낸 뒤 실패한 경우 — 폴백 문구를 이어붙이면
+                        # 서로 다른 두 답이 섞여 보이므로, 지금까지 나간 내용만 최종 답으로
+                        # 확정한다(추가 delta 없이 done 이벤트의 partial=true로만 알림).
+                        answer_text = "".join(chunks).strip()
+                        answer_source = f"llm_partial ({type(exc).__name__})"
+                    else:
+                        answer_text, answer_source = fallback_answer, f"{fallback_source}_fallback ({type(exc).__name__})"
+                        yield _sse_event({"delta": answer_text})
+            else:
+                yield _sse_event({"delta": answer_text})
+
+            update_observation(
+                trace,
+                output={
+                    "answer": mask_for_langfuse(answer_text),
+                    "answer_source": answer_source,
+                    "latency_ms": round(now_ms() - started_ms, 2),
+                },
+            )
+            flush_langfuse()
+
+        msg = ChatMessage(
+            patient_id=patient_id, question_id=question_id, question_text=question_text, answer_text=answer_text
+        )
+        session.add(msg)
+        session.commit()
+        session.refresh(msg)
+        created_at = msg.created_at.isoformat()
+
+        yield _sse_event(
+            {
+                "done": True,
+                "answer_source": answer_source,
+                "created_at": created_at,
+                "partial": answer_source.startswith("llm_partial"),
+            }
+        )
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")
 
 
 @router.get("/history")

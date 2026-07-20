@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import NavBar from "../components/NavBar";
-import { askChat, askChatFreeform, getChatQuestions, type ChatQuestion } from "../api/chat";
+import { askChatFreeformStream, askChatStream, getChatQuestions, type ChatQuestion } from "../api/chat";
 import { getNotificationSettings } from "../api/care";
 import { getCurrentPatientId, getCurrentUserName } from "../lib/session";
 import { C } from "../theme";
@@ -58,7 +58,7 @@ export default function Chat() {
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    getChatQuestions().then(setQuestions).catch(() => setQuestions([]));
+    getChatQuestions(patientId).then(setQuestions).catch(() => setQuestions([]));
     getNotificationSettings(patientId)
       .then((s) => setChatbotName(s.chatbot_name || DEFAULT_CHATBOT_NAME))
       .catch(() => setChatbotName(DEFAULT_CHATBOT_NAME));
@@ -72,21 +72,50 @@ export default function Chat() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
+  // [2026-07-20] /chat/ask/stream(SSE)로 토큰이 도착하는 대로 마지막 bot 메시지에 이어붙인다.
+  // loading이 true인 동안은 askPreset/handleSend 재진입이 막혀 있어(아래 두 함수 진입부의
+  // early return), 스트리밍 중 "마지막 메시지 = 지금 채우고 있는 bot 메시지"라고 안전하게
+  // 가정할 수 있다.
+  const appendToLastBotMessage = (delta: string) => {
+    setMessages((prev) => {
+      const next = [...prev];
+      const last = next[next.length - 1];
+      next[next.length - 1] = { ...last, text: last.text + delta };
+      return next;
+    });
+  };
+
+  const finalizeLastBotMessage = (source: string) => {
+    setMessages((prev) => {
+      const next = [...prev];
+      const last = next[next.length - 1];
+      next[next.length - 1] = { ...last, source };
+      return next;
+    });
+    setLoading(false);
+  };
+
+  const failLastBotMessage = () => {
+    setMessages((prev) => {
+      const next = [...prev];
+      next[next.length - 1] = {
+        role: "bot",
+        text: "죄송해요, 답변을 가져오지 못했어요. 잠시 후 다시 시도해 주세요.",
+      };
+      return next;
+    });
+    setLoading(false);
+  };
+
   const askPreset = async (q: ChatQuestion) => {
     if (loading) return;
-    setMessages((prev) => [...prev, { role: "user", text: q.text }]);
+    setMessages((prev) => [...prev, { role: "user", text: q.text }, { role: "bot", text: "" }]);
     setLoading(true);
-    try {
-      const res = await askChat(patientId, q.id);
-      setMessages((prev) => [...prev, { role: "bot", text: res.answer, source: res.answer_source }]);
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        { role: "bot", text: "죄송해요, 답변을 가져오지 못했어요. 잠시 후 다시 시도해 주세요." },
-      ]);
-    } finally {
-      setLoading(false);
-    }
+    await askChatStream(patientId, q.id, {
+      onDelta: appendToLastBotMessage,
+      onDone: (event) => finalizeLastBotMessage(event.answer_source),
+      onError: failLastBotMessage,
+    });
   };
 
   const handleSend = async () => {
@@ -98,19 +127,13 @@ export default function Chat() {
       askPreset(match);
       return;
     }
-    setMessages((prev) => [...prev, { role: "user", text }]);
+    setMessages((prev) => [...prev, { role: "user", text }, { role: "bot", text: "" }]);
     setLoading(true);
-    try {
-      const res = await askChatFreeform(patientId, text);
-      setMessages((prev) => [...prev, { role: "bot", text: res.answer, source: res.answer_source }]);
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        { role: "bot", text: "죄송해요, 답변을 가져오지 못했어요. 잠시 후 다시 시도해 주세요." },
-      ]);
-    } finally {
-      setLoading(false);
-    }
+    await askChatFreeformStream(patientId, text, {
+      onDelta: appendToLastBotMessage,
+      onDone: (event) => finalizeLastBotMessage(event.answer_source),
+      onError: failLastBotMessage,
+    });
   };
 
   return (
@@ -125,37 +148,46 @@ export default function Chat() {
 
         <div className="rounded-3xl mb-4 flex flex-col overflow-hidden flex-1 min-h-0" style={{ background: C.white, boxShadow: "0 2px 20px rgba(30,26,23,0.07)" }}>
           <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto space-y-5 p-5">
-            {messages.map((m, i) => (
-              <div key={i} className={`flex items-end gap-3 ${m.role === "user" ? "flex-row-reverse" : ""}`}>
-                {m.role === "bot" && (
-                  <div className="flex flex-col items-center gap-0.5 shrink-0">
-                    <div
-                      className="w-9 h-9 rounded-full flex items-center justify-center text-[18px]"
-                      style={{ background: `${C.terracotta}12` }}
-                    >
-                      💊
+            {messages.map((m, i) => {
+              // 스트리밍 첫 토큰이 오기 전(빈 bot placeholder)에는 빈 말풍선 대신 아래
+              // "답변을 준비하고 있어요..." 표시만 보여준다 — 토큰이 도착하면 text가 채워지며
+              // 이 조건이 자연히 꺼지고 말풍선이 그 자리에 나타난다.
+              const isPendingFirstToken = loading && i === messages.length - 1 && m.role === "bot" && m.text === "";
+              if (isPendingFirstToken) return null;
+              return (
+                <div key={i} className={`flex items-end gap-3 ${m.role === "user" ? "flex-row-reverse" : ""}`}>
+                  {m.role === "bot" && (
+                    <div className="flex flex-col items-center gap-0.5 shrink-0">
+                      <div
+                        className="w-9 h-9 rounded-full flex items-center justify-center text-[18px]"
+                        style={{ background: `${C.terracotta}12` }}
+                      >
+                        💊
+                      </div>
+                      <span className="text-[9px] font-bold" style={{ color: C.muted }}>{chatbotName}</span>
                     </div>
-                    <span className="text-[9px] font-bold" style={{ color: C.muted }}>{chatbotName}</span>
-                  </div>
-                )}
-                <div className="max-w-[80%]">
-                  <div
-                    className="px-4 py-3.5 text-[15px] leading-relaxed"
-                    style={{
-                      background: m.role === "user" ? C.terracotta : C.bubbleBg,
-                      color: m.role === "user" ? C.white : C.dark,
-                      borderRadius: m.role === "user" ? "20px 20px 4px 20px" : "20px 20px 20px 4px",
-                    }}
-                  >
-                    {m.text}
-                  </div>
-                  {m.source && (
-                    <p className="text-[11px] mt-1.5 px-1" style={{ color: C.muted }}>{formatAnswerSource(m.source)}</p>
                   )}
+                  <div className="max-w-[80%]">
+                    <div
+                      className="px-4 py-3.5 text-[15px] leading-relaxed"
+                      style={{
+                        background: m.role === "user" ? C.terracotta : C.bubbleBg,
+                        color: m.role === "user" ? C.white : C.dark,
+                        borderRadius: m.role === "user" ? "20px 20px 4px 20px" : "20px 20px 20px 4px",
+                      }}
+                    >
+                      {m.text}
+                    </div>
+                    {m.source && (
+                      <p className="text-[11px] mt-1.5 px-1" style={{ color: C.muted }}>{formatAnswerSource(m.source)}</p>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
-            {loading && <p className="text-[13px] pl-12" style={{ color: C.muted }}>답변을 준비하고 있어요...</p>}
+              );
+            })}
+            {loading && messages[messages.length - 1]?.text === "" && (
+              <p className="text-[13px] pl-12" style={{ color: C.muted }}>답변을 준비하고 있어요...</p>
+            )}
           </div>
 
           {questions.length > 0 && (
