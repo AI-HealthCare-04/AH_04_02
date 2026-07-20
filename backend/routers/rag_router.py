@@ -24,20 +24,83 @@ records_router.py(업로드→OCR→가이드 한번에 처리)가 이 함수를
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import sys
 from collections.abc import Sequence
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import cast
 
 from core.database import get_session
 from core.dependencies import Actor, get_current_actor, require_actor_patient_access
 from fastapi import APIRouter, Depends, HTTPException
-from models import GuideResult, MedicalRecord, OcrResult
+from models import GuideCache, GuideResult, MedicalRecord, OcrResult
 from sqlmodel import Session, select
 
 router = APIRouter(prefix="/rag", tags=["RAG"])
+
+# ── REQ-020 가이드 캐시 설정 ──
+# GUIDE_DATA_VERSION: 출처 데이터(e약은요/HIRA/DUR CSV) 버전 식별자.
+# 이 값이 바뀌면 SHA-256 키가 달라져 기존 캐시가 자연스럽게 무효화된다.
+GUIDE_DATA_VERSION = os.environ.get("GUIDE_DATA_VERSION", "v1.0")
+GUIDE_CACHE_TTL_DAYS = int(os.environ.get("GUIDE_CACHE_TTL_DAYS", "7"))
+
+
+def _make_cache_key(ocr_items: Sequence[OcrResult], data_version: str) -> str:
+    """진단명·정규화 약물조합·출처 버전 → SHA-256 캐시 키."""
+    drug_names = sorted(item.drug_name or "" for item in ocr_items)
+    diagnoses = sorted({item.diagnosis or "" for item in ocr_items})
+    raw = "|".join(diagnoses) + "|" + ",".join(drug_names) + "|" + data_version
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _lookup_cache(cache_key: str, session: Session) -> GuideCache | None:
+    """캐시 조회. 없거나 만료됐으면 None 반환."""
+    entry = session.exec(select(GuideCache).where(GuideCache.cache_key == cache_key)).first()
+    if entry is None or entry.expires_at <= datetime.now():
+        return None
+    return entry
+
+
+def _save_cache(
+    cache_key: str,
+    ocr_items: Sequence[OcrResult],
+    data_version: str,
+    medication_guide: dict,
+    lifestyle_guide: dict,
+    source_refs: list,
+    session: Session,
+) -> datetime:
+    """캐시 저장(upsert). 저장된 만료시각 반환."""
+    expires_at = datetime.now() + timedelta(days=GUIDE_CACHE_TTL_DAYS)
+    drug_names_json = json.dumps(sorted(item.drug_name or "" for item in ocr_items), ensure_ascii=False)
+    diagnosis = "; ".join(sorted({item.diagnosis or "" for item in ocr_items if item.diagnosis})) or None
+    guide_result_json = json.dumps(
+        {"medication_guide": medication_guide, "lifestyle_guide": lifestyle_guide, "source_refs": source_refs},
+        ensure_ascii=False,
+    )
+    existing = session.exec(select(GuideCache).where(GuideCache.cache_key == cache_key)).first()
+    if existing:
+        existing.guide_result = guide_result_json
+        existing.expires_at = expires_at
+        existing.created_at = datetime.now()
+        session.add(existing)
+    else:
+        session.add(
+            GuideCache(
+                cache_key=cache_key,
+                diagnosis=diagnosis,
+                drug_names=drug_names_json,
+                data_version=data_version,
+                guide_result=guide_result_json,
+                expires_at=expires_at,
+            )
+        )
+    session.commit()
+    return expires_at
+
 
 # RAG_PROVIDER=real일 때만 rag 실제 파이프라인을 시도한다 (OCR_PROVIDER와 동일 패턴).
 # 기본값은 항상 기존 가짜 데이터 — 의존성이 설치돼 있다는 사실만으로 동작이 바뀌지 않는다.
@@ -155,28 +218,45 @@ def _generate_via_rag(ocr_items: Sequence[OcrResult]) -> tuple[dict, dict, list]
     return medication_guide, lifestyle_guide, source_refs
 
 
-async def run_rag(record_id: int, session: Session) -> GuideResult:
+async def run_rag(record_id: int, session: Session) -> tuple[GuideResult, bool, datetime | None]:
     """
     OCR 결과로 복약·생활습관 가이드를 생성해 GuideResult로 저장합니다.
+
+    Returns:
+        (guide, cached, cache_expires_at)
+        cached=True이면 DB 캐시 히트 (LLM 미호출). REQ-020.
 
     (medication_guide/lifestyle_guide/source_refs는 SQLite에 JSON 타입이 없어서
      json.dumps()로 문자열로 저장 — 꺼낼 때는 json.loads() 사용)
     """
-    # session.exec()는 동기 SQLModel 호출이라, async def 안에서 그대로 부르면 이벤트
-    # 루프를 막는다 — 아래 _generate_via_rag(LLM/벡터DB 호출)와 동일한 이유로 스레드에서 실행.
     ocr_items = await asyncio.to_thread(
         lambda: session.exec(select(OcrResult).where(OcrResult.record_id == record_id)).all()
     )
     if not ocr_items:
         raise ValueError("해당 record_id의 OCR 결과가 없어요. 먼저 OCR이 실행되어야 합니다.")
 
-    # generate_guides_from_medications는 동기 함수(OpenAI/Chroma 호출)라, 이벤트 루프를
-    # 막지 않도록 스레드에서 실행한다. RAG_PROVIDER=real이 아니면 항상 폴백(가짜 데이터).
-    result = None
-    if _RAG_AVAILABLE:
-        result = await asyncio.to_thread(_generate_via_rag, ocr_items)
+    # ── REQ-020: 캐시 조회 ──
+    cache_key = _make_cache_key(ocr_items, GUIDE_DATA_VERSION)
+    cached_entry = await asyncio.to_thread(_lookup_cache, cache_key, session)
 
-    medication_guide, lifestyle_guide, source_refs = result or _fake_guide_payload(ocr_items)
+    if cached_entry is not None:
+        stored = json.loads(cached_entry.guide_result)
+        medication_guide = stored["medication_guide"]
+        lifestyle_guide = stored["lifestyle_guide"]
+        source_refs = stored["source_refs"]
+        from_cache = True
+        cache_expires_at: datetime | None = cached_entry.expires_at
+    else:
+        # 캐시 미스 — LLM/벡터DB 호출
+        result = None
+        if _RAG_AVAILABLE:
+            result = await asyncio.to_thread(_generate_via_rag, ocr_items)
+        medication_guide, lifestyle_guide, source_refs = result or _fake_guide_payload(ocr_items)
+        from_cache = False
+        cache_expires_at = await asyncio.to_thread(
+            _save_cache, cache_key, ocr_items, GUIDE_DATA_VERSION,
+            medication_guide, lifestyle_guide, source_refs, session,
+        )
 
     guide = GuideResult(
         record_id=record_id,
@@ -184,13 +264,14 @@ async def run_rag(record_id: int, session: Session) -> GuideResult:
         lifestyle_guide=json.dumps(lifestyle_guide, ensure_ascii=False),
         source_refs=json.dumps(source_refs, ensure_ascii=False),
     )
+
     def _save_guide() -> None:
         session.add(guide)
         session.commit()
         session.refresh(guide)
 
     await asyncio.to_thread(_save_guide)
-    return guide
+    return guide, from_cache, cache_expires_at
 
 
 @router.get("/ping")
@@ -221,11 +302,13 @@ async def stub_generate_guide(
     await asyncio.to_thread(require_actor_patient_access, record.patient_id, actor, session)
 
     try:
-        guide = await run_rag(record_id, session)
+        guide, from_cache, cache_expires_at = await run_rag(record_id, session)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
     return {
         "guide_id": guide.id,
+        "cached": from_cache,
+        "cache_expires_at": cache_expires_at.isoformat() if cache_expires_at else None,
         "note": "⚠️ 가짜 데이터입니다 — 실제 RAG 연동 전까지만 사용" if not _RAG_AVAILABLE else "실제 RAG 파이프라인 결과입니다",
     }

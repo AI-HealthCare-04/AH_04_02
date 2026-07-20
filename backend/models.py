@@ -482,3 +482,22 @@ class ChatMessage(SQLModel, table=True):
     question_text: str
     answer_text: str
     created_at: datetime = Field(default_factory=datetime.now)
+
+
+# ── 가이드 결과 캐시 (REQ-020) ──
+# 진단명·약물조합·출처 데이터 버전을 SHA-256 해시로 캐시 키를 만들어,
+# 동일 조합의 반복 요청에서 LLM 재호출 없이 저장된 결과를 반환한다.
+# TTL = 7일(기본). data_version 변경 시 사실상 새 키가 생성돼 구 캐시는 자연 만료된다.
+class GuideCache(SQLModel, table=True):
+    __tablename__ = "guide_cache"
+
+    id: int | None = Field(default=None, primary_key=True)
+    # SHA-256(diagnosis + "|" + sorted drug_names + "|" + data_version)
+    cache_key: str = Field(unique=True, index=True)
+    diagnosis: str | None = None
+    drug_names: str = Field(default="[]", sa_column=Column(Text))  # JSON 배열
+    data_version: str
+    # (medication_guide, lifestyle_guide, source_refs) 튜플을 JSON 직렬화해 저장
+    guide_result: str = Field(sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=datetime.now)
+    expires_at: datetime
