@@ -102,7 +102,7 @@ export default function MonitoringDayLogs() {
                               color: log.status === "taken" ? "#4A7A47" : "#D94F4F",
                             }}
                           >
-                            {log.status === "taken" ? "복용완료" : "건너뜀"}
+                            {log.status === "taken" ? "복용완료" : log.status === "missed" ? "놓침" : "건너뜀"}
                           </span>
                         </td>
                         <td className="px-5 py-3.5 text-[13px]" style={{ color: C.muted }}>{log.confirmed_by_name}</td>

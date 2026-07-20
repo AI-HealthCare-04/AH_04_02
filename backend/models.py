@@ -35,7 +35,7 @@ Day 2에 각자 자기 테이블을 검토하고 필요하면 컬럼을 고쳐�
 from datetime import datetime
 
 from core.security import decrypt_pii, encrypt_pii, hash_phone
-from sqlalchemy import Column, Text
+from sqlalchemy import Column, Text, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -307,6 +307,37 @@ class MedicationLog(SQLModel, table=True):
     # [7/9 추가] 이 체크를 누가 했는지 — 환자 본인(patient) vs 보호자 대신(caregiver)
     confirmed_by_type: str = "patient"
     confirmed_by_caregiver_id: int | None = Field(default=None, foreign_key="caregivers.id")
+
+
+# ── 복약 알림 발송 기록 [2026-07-19 추가, REQ-026a/007/026c/026d, 담당: 김영혜] ──
+# core/scheduler.py의 인프로세스 스케줄러가 매 tick마다 "이 스케줄이 이 시각에 이미
+# 처리됐는지"를 판단하는 기준. UniqueConstraint가 실제 중복 방지 장치다 — 서버가
+# 재시작되거나(놓친 tick 따라잡기용 유예 윈도우 있음), 팀원 여러 명이 각자 로컬에서
+# 서버를 띄워 같은 공유 DB를 보더라도(shared-dev-db-setup.md), 같은
+# (schedule_id, due_date, time_slot, kind) 조합은 DB 유니크 제약이 막아줘서 한 번만
+# 처리된다 — 스케줄러 자체의 "정확히 한 번" 보장이 아니라 DB가 최종 중재자.
+# kind를 제약에 포함한 이유: 같은 스케줄/같은 날 "reminder"(정시 알림)와 "missed"
+# (놓침 판정)가 서로 다른 사건이라 둘 다 한 번씩은 남아야 한다.
+class NotificationLog(SQLModel, table=True):
+    __tablename__ = "notification_logs"
+    __table_args__ = (
+        UniqueConstraint("schedule_id", "due_date", "time_slot", "kind", name="uq_notification_instance"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    schedule_id: int = Field(foreign_key="medication_schedules.id", index=True)
+    patient_id: int = Field(foreign_key="patients.id", index=True)
+    due_date: str = Field(index=True)  # "2026-07-19" — date.isoformat(), MedicationLog와 동일 관례
+    time_slot: str  # 발생 시점의 schedule.time_slot 스냅샷 (나중에 스케줄이 바뀌어도 기록은 안 바뀜)
+    kind: str = "reminder"  # reminder(정시 알림) / missed(놓침 판정)
+    # [2026-07-19] "성공적으로 보냈다"와 "이 스케줄은 알림이 꺼져 있어서 일부러 안 보냈다"를
+    # 구분해야 한다 — NotificationSetting.medication_reminder_enabled가 꺼져 있으면
+    # suppressed로 남기고 이메일은 실제로 보내지 않는다(사용자가 끈 알림을 무시하고
+    # 보내면 REQ-026a의 opt-out을 어기는 것이 된다).
+    status: str = "pending"  # pending / sent / suppressed / failed
+    channels: str = "[]"  # JSON 배열, 예: '["inapp","email:patient","email:caregiver:3"]'
+    fired_at: datetime = Field(default_factory=datetime.now)
+    acknowledged_at: datetime | None = None  # 환자가 인앱 알림을 확인 처리하면 채워짐
 
 
 # ── 환자 의약품 등록 [2026-07-14 추가, 담당: 김영혜] ──

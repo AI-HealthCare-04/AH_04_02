@@ -2,7 +2,9 @@ import { monitoringClient } from "./monitoringClient";
 
 // ── 타입 정의 (monitoring_router.py 응답 형태 그대로) ──
 
-export type IntakeStatus = "taken" | "pending" | "skipped";
+// [2026-07-19 추가] "missed"는 사용자가 직접 누르는 상태가 아니라, 백엔드 스케줄러
+// (core/scheduler.py)가 정시를 훌쩍 넘기고도 체크가 없으면 자동으로 판정하는 상태다.
+export type IntakeStatus = "taken" | "pending" | "skipped" | "missed";
 
 export interface Medication {
   id: string;
@@ -285,13 +287,15 @@ export async function deleteSchedule(scheduleId: number) {
  * 별도 집계 endpoint 없이 최근 N일 로그를 그대로 받아 프론트에서 계산합니다.
  */
 export interface MedicationLogEntry {
-  id: number;
+  // [2026-07-19 변경] "missed" 항목은 실제 체크 기록이 아니라 NotificationLog에서
+  // 합성된 가상 행이라 id가 숫자 PK가 아니고 "missed:12" 형태 문자열이다.
+  id: string;
   schedule_id: number;
   drug_name: string;
   time_slot: string;
-  status: "taken" | "skipped";
+  status: "taken" | "skipped" | "missed";
   checked_at: string;
-  confirmed_by_type: "patient" | "caregiver";
+  confirmed_by_type: "patient" | "caregiver" | "system";
   confirmed_by_name: string;
 }
 

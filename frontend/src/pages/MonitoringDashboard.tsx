@@ -77,7 +77,9 @@ export default function MonitoringDashboard() {
     [logs, now]
   );
   const takenCount = last7.filter((l) => l.status === "taken").length;
-  const missedCount = last7.filter((l) => l.status === "skipped").length;
+  // [2026-07-19] "건너뜀"(사용자가 직접 건너뛴 것)과 "놓침"(스케줄러가 감지한 무응답)을
+  // 합쳐서 이행률 미달로 집계한다 — 이 페이지의 missedCount는 항상 "복용 안 함" 전체를 뜻했다.
+  const missedCount = last7.filter((l) => l.status === "skipped" || l.status === "missed").length;
   const adherence = last7.length > 0 ? Math.round((takenCount / last7.length) * 100) : null;
 
   const dayStatus = useMemo(() => {
@@ -324,7 +326,7 @@ export default function MonitoringDashboard() {
                               color: r.status === "taken" ? "#4A7A47" : "#D94F4F",
                             }}
                           >
-                            {r.status === "taken" ? "복용완료" : "건너뜀"}
+                            {r.status === "taken" ? "복용완료" : r.status === "missed" ? "놓침" : "건너뜀"}
                           </span>
                         </td>
                       </tr>
