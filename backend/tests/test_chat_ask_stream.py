@@ -17,8 +17,39 @@ from core.database import get_session
 from fastapi.testclient import TestClient
 from main import app
 from models import Caregiver, CaregiverPatient, ChatMessage, Patient, PatientMedication
+from routers.chat_router import PRESET_QUESTIONS
 from sqlmodel import Session, SQLModel, create_engine, select
 from sqlmodel.pool import StaticPool
+
+
+def _install_mock_llm(monkeypatch: pytest.MonkeyPatch, answer: str) -> MagicMock:
+    """CHAT_PROVIDER=real / API 키 있음 상태(_CHAT_LLM_AVAILABLE=True)를 mock으로 흉내내고,
+    langchain_openai.ChatOpenAI를 가짜로 바꿔 실제 네트워크 호출 없이 호출 여부만 검증한다.
+    반환한 MagicMock으로 .assert_not_called()/.assert_called() 확인."""
+    import langchain_openai
+
+    response = MagicMock()
+    response.content = answer
+    instance = MagicMock()
+    instance.invoke.return_value = response
+
+    async def _astream(messages, config=None):
+        for piece in answer.split():
+            chunk = MagicMock()
+            chunk.content = piece + " "
+            yield chunk
+
+    instance.astream = _astream
+    chat_cls = MagicMock(return_value=instance)
+
+    monkeypatch.setattr(langchain_openai, "ChatOpenAI", chat_cls)
+    monkeypatch.setattr(chat_router, "_CHAT_LLM_AVAILABLE", True)
+    monkeypatch.setattr(
+        chat_router, "_rag_settings",
+        SimpleNamespace(OPENAI_MODEL="gpt-test", OPENAI_API_KEY="test-key"),
+        raising=False,
+    )
+    return chat_cls
 
 
 @pytest.fixture(name="session")
@@ -225,3 +256,67 @@ class TestSourceRefs:
         r = client.post("/chat/ask", json={"patient_id": pt.id, "question_id": "q1"}, headers=headers)
         assert r.status_code == 200
         assert r.json()["source_refs"] == []
+
+
+class TestAskStreamLlmGating:
+    """버그1(/ask/stream): preset/dynamic 고정 답변이 매칭되면 LLM을 태우지 않고 바로
+    고정 답변을 스트리밍해야 한다. LLM은 freeform 자유입력일 때만 호출."""
+
+    def test_preset_question_does_not_call_llm_even_when_available(
+        self, client: TestClient, session: Session, monkeypatch: pytest.MonkeyPatch
+    ):
+        chat_cls = _install_mock_llm(monkeypatch, "이건 LLM이 만든 답변이면 안 됩니다")
+        pt = _make_patient(session)
+        headers = {"Authorization": f"Bearer {create_access_token(pt.id, 'patient')}"}
+
+        r = client.post("/chat/ask/stream", json={"patient_id": pt.id, "question_id": "q1"}, headers=headers)
+        assert r.status_code == 200
+
+        chat_cls.assert_not_called()  # LLM으로 새어나가면 안 됨
+        events = _parse_sse(r.text)
+        done = next(e for e in events if e.get("done"))
+        assert done["answer_source"] == "preset"
+        deltas = "".join(e["delta"] for e in events if "delta" in e)
+        assert deltas == PRESET_QUESTIONS[0]["answer"]
+
+    def test_dynamic_question_does_not_call_llm_even_when_available(
+        self, client: TestClient, session: Session, monkeypatch: pytest.MonkeyPatch
+    ):
+        chat_cls = _install_mock_llm(monkeypatch, "LLM이 만든 답변이면 안 됩니다")
+        pt = _make_patient(session)
+        session.add(
+            PatientMedication(
+                patient_id=pt.id, medication_name="암로디핀정5밀리그램", source_type="manual",
+                verification_status="user_confirmed",
+            )
+        )
+        session.commit()
+        headers = {"Authorization": f"Bearer {create_access_token(pt.id, 'patient')}"}
+        dyn_id = client.get("/chat/questions", params={"patient_id": pt.id}, headers=headers).json()[0]["id"]
+
+        r = client.post("/chat/ask/stream", json={"patient_id": pt.id, "question_id": dyn_id}, headers=headers)
+        assert r.status_code == 200
+
+        chat_cls.assert_not_called()
+        events = _parse_sse(r.text)
+        assert next(e for e in events if e.get("done"))["answer_source"] == "preset"
+        deltas = "".join(e["delta"] for e in events if "delta" in e)
+        assert "암로디핀정5밀리그램" in deltas
+
+    def test_freeform_question_calls_llm(
+        self, client: TestClient, session: Session, monkeypatch: pytest.MonkeyPatch
+    ):
+        chat_cls = _install_mock_llm(monkeypatch, "자유질문 답변")
+        pt = _make_patient(session)
+        headers = {"Authorization": f"Bearer {create_access_token(pt.id, 'patient')}"}
+
+        r = client.post(
+            "/chat/ask/stream", json={"patient_id": pt.id, "question": "이 앱은 뭐하는 앱이야?"}, headers=headers
+        )
+        assert r.status_code == 200
+
+        chat_cls.assert_called()  # freeform은 여전히 LLM 호출(회귀 방지)
+        events = _parse_sse(r.text)
+        assert next(e for e in events if e.get("done"))["answer_source"].startswith("llm")
+        deltas = "".join(e["delta"] for e in events if "delta" in e)
+        assert "자유질문" in deltas
