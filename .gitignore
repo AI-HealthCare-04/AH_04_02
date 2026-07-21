@@ -140,6 +140,9 @@ logs/
 # ===== SQLite (backend/ 로컬 개발 DB) =====
 *.db
 
+# ===== 공유 개발 DB(Aiven) SSL CA 인증서 — 팀원 각자 로컬에 두는 파일, 레포에 커밋 안 함 =====
+backend/certs/*.pem
+
 # ===== Docker / 빌드 산출물 =====
 *.pid
 
