@@ -344,7 +344,7 @@ erDiagram
 | REQ-045 | `patients`/`caregivers`(`birth_date`) | `POST /monitoring/patients`, `POST /monitoring/caregivers` | 부분(`birth_date`만, `address` 없음, v8과 동일) | |
 | REQ-046 | 없음(가입과 초대가 별개 절차) | - | 미구현(v8과 동일) | |
 | REQ-047 | `ocr_results.match_score` | `PATCH /records/{id}/medications/{id}` | **완료로 정정(v8: 미구현)** | PR #59, `typo_suggestion` 응답 필드 |
-| REQ-048 | 없음(챗봇 컨텍스트로 자연스럽게 처리) | `/chat/ask` | 완료(전용 API 아님, v8과 동일) | |
+| REQ-048 | 없음(챗봇 컨텍스트로 자연스럽게 처리) | `/chat/ask` | **미구현으로 정정(v8: 완료)** | `Result.tsx`/`PrescriptionReview.tsx`의 챗봇 진입 버튼은 `guide_result_id` 유무와 무관하게 항상 노출된다(대신 `diagnosis`를 네비게이션 state로 전달) — REQ-048이 요구하는 "가이드 있으면 guide_result_id로 진입, 없으면 안내 문구만 표시"라는 조건부 분기 자체가 프론트에 없다(2026-07-21 status 파일 작성 중 발견, 코드 재확인으로 정정. 요구사항_정의서_v9는 이미 "미구현"으로 정확했음 — v8부터 이어진 ERD만의 오기재) |
 | REQ-049 | 없음(클라이언트 동작 규약) | - | 프론트 확인 필요(v8과 동일) | |
 | REQ-050 | `caregivers`(`org_*`) | `POST /monitoring/caregivers` | 완료(v8과 동일) | |
 | REQ-051(신규) | `patients`(`breakfast_time` 등 6개 필드) | `POST /monitoring/patients` 등 | **부분(신규)** | 자가진단 식사시간 — 입력·저장은 되나 가이드 생성 로직에서 미활용 |
