@@ -32,6 +32,8 @@ from models import (
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
+from routers.monitoring_router import PatientCreate, _register_patient
+
 INVITATION_EXPIRE_DAYS = 7
 
 router = APIRouter(tags=["Care"])
@@ -105,19 +107,27 @@ def get_latest_assessment(
 # 2. 보호자 초대 (Invitation)
 # ══════════════════════════════════════════
 class InvitationCreate(BaseModel):
-    patient_id: int
-    # Connect.tsx의 보호자 초대 UI에서 실제로 선택 가능한 4개 값만 허용한다.
+    # "patient"는 보호자→환자 초대(REQ-037)로, 아직 계정이 없는 환자를 초대하는 흐름이라
+    # patient_id가 없다 — 그래서 Optional. 나머지 4개는 기존 환자→보호자 초대(Connect.tsx)다.
+    patient_id: int | None = None
+    # Connect.tsx의 보호자 초대 UI에서 실제로 선택 가능한 4개 값 + 보호자→환자 초대용 "patient".
     # 직접 가입(CaregiverCreate)은 guardian/organization 흐름이고, 초대는 현장 돌봄 관계라
     # caregiver/life_support_worker/social_worker까지 별도로 허용한다.
-    relation_type: Literal["guardian", "caregiver", "life_support_worker", "social_worker"] = "guardian"
+    relation_type: Literal["guardian", "caregiver", "life_support_worker", "social_worker", "patient"] = "guardian"
     invited_phone: str | None = None
     inviter_caregiver_id: int | None = None
 
 
 class InvitationAccept(BaseModel):
-    caregiver_name: str
+    # relation_type != "patient" (환자→보호자 초대) 수락용 — 수락자가 보호자 본인
+    caregiver_name: str | None = None
     caregiver_id: int | None = None  # 기존 보호자면 전달, 신규면 None
     phone: str | None = None  # [2026-07-15] invited_phone이 지정된 초대는 이 값과 일치해야 수락 가능(REQ-003)
+    # relation_type == "patient" (보호자→환자 초대) 수락용 — 수락자가 실제 환자 계정을 만든다
+    patient_name: str | None = None
+    patient_email: str | None = None
+    patient_password: str | None = None
+    patient_phone: str | None = None
 
 
 class InvitationPublic(BaseModel):
@@ -150,11 +160,24 @@ def create_invitation(
     actor: Actor = Depends(get_current_actor),
     session: Session = Depends(get_session),
 ):
-    require_actor_patient_access(payload.patient_id, actor, session)
+    if payload.relation_type == "patient":
+        # 보호자→환자 초대: 아직 환자 계정이 없어 patient_id로는 인가할 수 없으므로,
+        # 초대 주체(inviter_caregiver_id)가 로그인한 보호자 본인인지만 확인한다.
+        if payload.inviter_caregiver_id is None:
+            raise HTTPException(400, "초대하는 보호자 정보가 필요해요.")
+        role, subject = actor
+        if role != "caregiver" or subject.id != payload.inviter_caregiver_id:
+            raise HTTPException(403, "본인 계정으로만 환자를 초대할 수 있어요.")
+        patient_id = None
+    else:
+        if payload.patient_id is None:
+            raise HTTPException(400, "대상 환자를 지정해야 해요.")
+        require_actor_patient_access(payload.patient_id, actor, session)
+        patient_id = payload.patient_id
 
     token = secrets.token_urlsafe(8)
     invitation = Invitation(
-        patient_id=payload.patient_id,
+        patient_id=patient_id,
         relation_type=payload.relation_type,
         inviter_caregiver_id=payload.inviter_caregiver_id,
         token_hash=hash_token(token),
@@ -172,7 +195,7 @@ def get_invitation(token: str, session: Session = Depends(get_session)):
     """InvitePage — 초대 링크 열었을 때 보여줄 정보"""
     invitation = _get_invitation_by_token(session, token)
 
-    patient = session.get(Patient, invitation.patient_id)
+    patient = session.get(Patient, invitation.patient_id) if invitation.patient_id else None
     inviter = (
         session.get(Caregiver, invitation.inviter_caregiver_id)
         if invitation.inviter_caregiver_id
@@ -190,15 +213,48 @@ def get_invitation(token: str, session: Session = Depends(get_session)):
 
 @router.post("/invitations/{token}/accept")
 def accept_invitation(token: str, payload: InvitationAccept, session: Session = Depends(get_session)):
+    # [알려진 한계] 이 pending 체크와 아래 최종 commit 사이에 행 잠금이 없어, 같은 토큰으로
+    # 동시에 두 번 수락 요청이 오면(예: 링크를 두 기기에서 거의 동시에 열기) 둘 다 이 체크를
+    # 통과해 patient 분기에서 계정이 2개 생길 수 있다 — 이 앱 규모(소규모 팀, 낮은 동시성)에선
+    # 발생 확률이 낮아 SELECT ... FOR UPDATE 도입은 보류, 재발 시 재검토.
     invitation = _get_invitation_by_token(session, token)
     if invitation.status != "pending":
         raise HTTPException(409, f"이미 {invitation.status} 처리된 초대예요")
 
     # [2026-07-15] 초대가 특정 전화번호를 지정했다면, 수락자가 그 번호의 소유자인지 확인
-    # (REQ-003) — 안 그러면 초대 URL만 탈취해도 본인 인증 없이 보호자-환자 관계가 생김.
+    # (REQ-003) — 안 그러면 초대 URL만 탈취해도 본인 인증 없이 관계가 생긴다. relation_type
+    # 종류와 무관하게 모든 수락 경로에 공통으로 적용해야 한다(2026-07-20 수정 — patient 분기가
+    # 이 체크보다 먼저 return해서 우회되고 있었음).
     if invitation.invited_phone:
-        if not payload.phone or normalize_phone(payload.phone) != normalize_phone(invitation.invited_phone):
+        provided_phone = payload.patient_phone if invitation.relation_type == "patient" else payload.phone
+        if not provided_phone or normalize_phone(provided_phone) != normalize_phone(invitation.invited_phone):
             raise HTTPException(403, "초대받은 전화번호와 일치하지 않아요.")
+
+    if invitation.relation_type == "patient":
+        # 보호자→환자 초대 수락 = 환자 본인이 실제 로그인 가능한 계정을 만든다.
+        if not payload.patient_name:
+            raise HTTPException(400, "환자 이름을 입력해 주세요.")
+        new_patient = _register_patient(
+            PatientCreate(
+                name=payload.patient_name,
+                email=payload.patient_email,
+                password=payload.patient_password,
+                phone=payload.patient_phone,
+            ),
+            session,
+        )
+        invitation.patient_id = new_patient.id
+        if invitation.inviter_caregiver_id:
+            session.add(
+                CaregiverPatient(
+                    caregiver_id=invitation.inviter_caregiver_id, patient_id=new_patient.id
+                )
+            )
+        invitation.status = "accepted"
+        invitation.accepted_at = datetime.now()
+        session.add(invitation)
+        session.commit()
+        return {"patient_id": new_patient.id, "status": "accepted"}
 
     if payload.caregiver_id:
         caregiver = session.get(Caregiver, payload.caregiver_id)
@@ -210,6 +266,8 @@ def accept_invitation(token: str, payload: InvitationAccept, session: Session = 
         # 연결·invitation 상태 변경과 한 트랜잭션으로 묶어 마지막에 한 번에 커밋한다.
         # (이전엔 여기서 바로 commit해서, 이 직후 장애가 나면 CaregiverPatient 연결도
         # 없고 invitation도 pending인 채로 Caregiver row만 영구히 남는 문제가 있었음)
+        if not payload.caregiver_name:
+            raise HTTPException(400, "본인 이름을 입력해 주세요.")
         caregiver = Caregiver(relation_type=invitation.relation_type)
         caregiver.name = payload.caregiver_name
         session.add(caregiver)
@@ -258,7 +316,200 @@ def list_invitations(
 
 
 # ══════════════════════════════════════════
-# 3. 알림 설정 (NotificationSetting)
+# 3. 돌봄관계 해제 (Trust Relation Dissolution, REQ-004)
+# ══════════════════════════════════════════
+class TrustRevocationResult(BaseModel):
+    trust_id: int
+    patient_id: int
+    caregiver_id: int
+    status: str
+    revoked_at: datetime | None = None
+    revocation_requested_by: int | None = None
+    should_alert_now: bool = False  # REQ-007a: 즉시 해제 후 마지막 연결이면 True
+
+
+@router.delete("/trust/relations/{trust_id}", response_model=TrustRevocationResult)
+def dissolve_trust_relation(
+    trust_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """[REQ-004] 보호자-환자 돌봄관계 해제 요청.
+
+    care_level=independent/guardian_check → 즉시 revoked.
+    care_level=third_party_needed → 제3자 승인 필요, revocation_pending으로 전환.
+    평가 이력이 없으면 independent로 간주해 즉시 해제한다."""
+    link = session.get(CaregiverPatient, trust_id)
+    if not link:
+        raise HTTPException(404, "존재하지 않는 연결이에요")
+
+    require_actor_patient_access(link.patient_id, actor, session)
+
+    if link.status != "active":
+        raise HTTPException(409, f"이미 {link.status} 상태인 연결이에요")
+
+    assessment = session.exec(
+        select(CareLevelAssessment)
+        .where(CareLevelAssessment.patient_id == link.patient_id)
+        .order_by(CareLevelAssessment.evaluated_at.desc())
+    ).first()
+
+    care_level = assessment.care_level if assessment else "independent"
+    role, subject = actor
+
+    if care_level in ("independent", "guardian_check"):
+        link.status = "revoked"
+        link.revoked_at = datetime.now()
+    else:  # third_party_needed — 요청자 role·id를 항상 기록 (환자/보호자 무관)
+        link.status = "revocation_pending"
+        link.revocation_requested_by = subject.id
+        link.requested_by_role = role  # "caregiver" | "patient"
+
+    session.add(link)
+    session.commit()
+    session.refresh(link)
+
+    # 즉시 해제(revoked)일 때만 마지막 연결 여부 확인 — pending은 아직 active 유지
+    should_alert = False
+    if link.status == "revoked":
+        remaining_active = session.exec(
+            select(CaregiverPatient)
+            .where(CaregiverPatient.patient_id == link.patient_id)
+            .where(CaregiverPatient.status == "active")
+        ).all()
+        patient = session.get(Patient, link.patient_id)
+        should_alert = (not remaining_active) and bool(patient) and _should_alert_now(patient)
+
+    return TrustRevocationResult(
+        trust_id=link.id,
+        patient_id=link.patient_id,
+        caregiver_id=link.caregiver_id,
+        status=link.status,
+        revoked_at=link.revoked_at,
+        revocation_requested_by=link.revocation_requested_by,
+        should_alert_now=should_alert,
+    )
+
+
+class RevocationApprovalRequest(BaseModel):
+    approve: bool
+
+
+class RevocationApprovalResult(BaseModel):
+    trust_id: int
+    patient_id: int
+    caregiver_id: int
+    status: str
+    revoked_at: datetime | None = None
+    should_alert_now: bool = False
+
+
+def _should_alert_now(patient: Patient) -> bool:
+    """REQ-007a: dismissed_at이 None이거나 30일이 지났으면 안내를 표시해야 한다."""
+    if patient.caregiver_alert_dismissed_at is None:
+        return True
+    return patient.caregiver_alert_dismissed_at + timedelta(days=30) < datetime.now()
+
+
+@router.post("/trust/relations/{trust_id}/revocation-approval", response_model=RevocationApprovalResult)
+def approve_revocation(
+    trust_id: int,
+    payload: RevocationApprovalRequest,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """[REQ-004] third_party_needed 환자의 해제 승인/거부.
+
+    approve=True  → status='revoked', revoked_at 기록.
+                    남은 active 연결이 0명이면 should_alert_now=True 반환(REQ-007a).
+    approve=False → status='active'로 복원(해제 거부)."""
+    link = session.get(CaregiverPatient, trust_id)
+    if not link:
+        raise HTTPException(404, "존재하지 않는 연결이에요")
+
+    require_actor_patient_access(link.patient_id, actor, session)
+
+    if link.status != "revocation_pending":
+        raise HTTPException(409, f"승인 대상이 아닌 연결이에요 (현재 상태: {link.status})")
+
+    role, subject = actor
+    # 요청자 본인은 role과 무관하게 승인 불가 (caregiver가 요청해도, patient가 요청해도)
+    if link.revocation_requested_by == subject.id and link.requested_by_role == role:
+        raise HTTPException(403, "본인이 요청한 해제는 본인이 승인할 수 없어요")
+
+    if payload.approve:
+        link.status = "revoked"
+        link.revoked_at = datetime.now()
+        # autoflush가 link 변경을 DB에 반영한 뒤 조회하므로 현재 link는 포함되지 않음
+        remaining_active = session.exec(
+            select(CaregiverPatient)
+            .where(CaregiverPatient.patient_id == link.patient_id)
+            .where(CaregiverPatient.status == "active")
+        ).all()
+    else:
+        link.status = "active"
+        link.revocation_requested_by = None
+        link.requested_by_role = None
+        remaining_active = [True]  # 복원됐으므로 최소 1개 active
+
+    session.add(link)
+    session.commit()
+    session.refresh(link)
+
+    patient = session.get(Patient, link.patient_id)
+    should_alert = (not remaining_active) and bool(patient) and _should_alert_now(patient)
+
+    return RevocationApprovalResult(
+        trust_id=link.id,
+        patient_id=link.patient_id,
+        caregiver_id=link.caregiver_id,
+        status=link.status,
+        revoked_at=link.revoked_at,
+        should_alert_now=should_alert,
+    )
+
+
+class DismissAlertResult(BaseModel):
+    patient_id: int
+    caregiver_alert_dismissed_at: datetime
+    next_alert_at: datetime  # dismissed_at + 30일
+
+
+@router.post("/trust/relations/{trust_id}/dismiss-alert", response_model=DismissAlertResult)
+def dismiss_caregiver_alert(
+    trust_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """[REQ-007a] 보호자 연결 권유 안내 닫기 — 30일간 재표시 억제.
+
+    사용자가 "닫기"를 누르면 Patient.caregiver_alert_dismissed_at을 현재 시각으로 갱신한다.
+    _should_alert_now()는 dismissed_at + 30일이 지나야 다시 True를 반환한다."""
+    link = session.get(CaregiverPatient, trust_id)
+    if not link:
+        raise HTTPException(404, "존재하지 않는 연결이에요")
+
+    require_actor_patient_access(link.patient_id, actor, session)
+
+    patient = session.get(Patient, link.patient_id)
+    if not patient:
+        raise HTTPException(404, "환자 정보를 찾을 수 없어요")
+
+    patient.caregiver_alert_dismissed_at = datetime.now()
+    session.add(patient)
+    session.commit()
+    session.refresh(patient)
+
+    dismissed_at = patient.caregiver_alert_dismissed_at
+    return DismissAlertResult(
+        patient_id=patient.id,
+        caregiver_alert_dismissed_at=dismissed_at,
+        next_alert_at=dismissed_at + timedelta(days=30),
+    )
+
+
+# ══════════════════════════════════════════
+# 4. 알림 설정 (NotificationSetting)
 # ══════════════════════════════════════════
 class NotificationUpdate(BaseModel):
     medication_reminder_enabled: bool | None = None

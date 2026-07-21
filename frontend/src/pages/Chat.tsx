@@ -3,10 +3,11 @@ import { useLocation } from "react-router-dom";
 import NavBar from "../components/NavBar";
 import { askChatFreeformStream, askChatStream, getChatQuestions, type ChatQuestion } from "../api/chat";
 import { getNotificationSettings } from "../api/care";
+import { formatUniqueSourceRefs, type SourceRef } from "../api/records";
 import { getCurrentPatientId, getCurrentUserName } from "../lib/session";
 import { C } from "../theme";
 
-type Message = { role: "user" | "bot"; text: string; source?: string };
+type Message = { role: "user" | "bot"; text: string; source?: string; sourceRefs?: SourceRef[] };
 type ChatContext = { drugName?: string; diagnosis?: string };
 
 const DEFAULT_CHATBOT_NAME = "약콩이";
@@ -85,11 +86,11 @@ export default function Chat() {
     });
   };
 
-  const finalizeLastBotMessage = (source: string) => {
+  const finalizeLastBotMessage = (source: string, sourceRefs?: SourceRef[]) => {
     setMessages((prev) => {
       const next = [...prev];
       const last = next[next.length - 1];
-      next[next.length - 1] = { ...last, source };
+      next[next.length - 1] = { ...last, source, sourceRefs };
       return next;
     });
     setLoading(false);
@@ -113,7 +114,7 @@ export default function Chat() {
     setLoading(true);
     await askChatStream(patientId, q.id, {
       onDelta: appendToLastBotMessage,
-      onDone: (event) => finalizeLastBotMessage(event.answer_source),
+      onDone: (event) => finalizeLastBotMessage(event.answer_source, event.source_refs),
       onError: failLastBotMessage,
     });
   };
@@ -131,7 +132,7 @@ export default function Chat() {
     setLoading(true);
     await askChatFreeformStream(patientId, text, {
       onDelta: appendToLastBotMessage,
-      onDone: (event) => finalizeLastBotMessage(event.answer_source),
+      onDone: (event) => finalizeLastBotMessage(event.answer_source, event.source_refs),
       onError: failLastBotMessage,
     });
   };
@@ -180,6 +181,13 @@ export default function Chat() {
                     </div>
                     {m.source && (
                       <p className="text-[11px] mt-1.5 px-1" style={{ color: C.muted }}>{formatAnswerSource(m.source)}</p>
+                    )}
+                    {/* [2026-07-20 추가] formatAnswerSource는 "어떻게 답했는지"(방법) 라벨일 뿐이라
+                        실제 참고 문서를 보여주지 못했다 — 실제 검색된 문서 title/출처를 따로 표시. */}
+                    {m.sourceRefs && m.sourceRefs.length > 0 && (
+                      <p className="text-[11px] mt-0.5 px-1" style={{ color: C.muted }}>
+                        참고 자료: {formatUniqueSourceRefs(m.sourceRefs).map((ref) => ref.text).join(", ")}
+                      </p>
                     )}
                   </div>
                 </div>

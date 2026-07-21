@@ -80,6 +80,10 @@ class Patient(SQLModel, table=True):
     lunch_regular: bool | None = None
     dinner_time: str | None = None
     dinner_regular: bool | None = None
+    # [2026-07-20 추가, REQ-007a] 보호자 연결 권유 안내를 사용자가 마지막으로 닫은 시각.
+    # None이거나 기록된 시각 + 30일 < now()이면 "지금 안내를 표시해야 한다"고 판단.
+    # 서비스 차단 없이 안내만 표시하는 용도 — should_alert_now는 API에서 계산해 반환.
+    caregiver_alert_dismissed_at: datetime | None = Field(default=None)
 
     @property
     def name(self) -> str:
@@ -168,6 +172,16 @@ class CaregiverPatient(SQLModel, table=True):
     caregiver_id: int = Field(foreign_key="caregivers.id")
     patient_id: int = Field(foreign_key="patients.id")
     created_at: datetime = Field(default_factory=datetime.now)
+    # [2026-07-20 추가, REQ-004] 연결 해제 상태 관리
+    # active: 정상 연결 / revocation_pending: third_party_needed 환자의 해제 승인 대기
+    # / revoked: 해제 완료
+    status: str = Field(default="active")
+    revoked_at: datetime | None = Field(default=None)
+    # revocation_requested_by: 요청자 ID (caregiver일 때는 caregivers.id, patient일 때는 patients.id)
+    # FK를 caregivers.id로 고정하면 환자 요청을 표현 못 해서 FK 없이 앱 레벨 검증만 사용한다.
+    revocation_requested_by: int | None = Field(default=None)
+    # requested_by_role: 요청자가 caregiver인지 patient인지 구분 — 자기승인 가드에 사용
+    requested_by_role: str | None = Field(default=None)  # "caregiver" | "patient"
 
 
 # ── 비밀번호 재설정 임시코드 [2026-07-15 추가, REQ-039] ──
@@ -245,6 +259,17 @@ class OcrResult(SQLModel, table=True):
     matched_drug_name: str = ""    # drug_matcher: 기준 약품명 목록에서 가장 유사한 이름
     match_score: float = 0.0       # drug_matcher: SequenceMatcher 유사도 (0~1)
     needs_review: bool = False     # drug_matcher: match_score < 0.7 이면 True (review_required와 별개)
+
+    @property
+    def display_name(self) -> str:
+        """화면 표시·RAG/DUR 조회에 쓸 이름 — 확신 있게 매칭됐으면(matched_drug_name,
+        needs_review=False) 그 정확한 전체명을, 아니면 원문(drug_name)을 그대로 쓴다.
+        drug_name/matched_drug_name 자체의 의미는 그대로 유지하고(원문 vs 매칭명 분리),
+        "어느 걸 보여줄지"만 이 한 곳에서 판단해 records_router.py/rag_router.py가
+        각자 다른 규칙을 쓰는 걸 막는다."""
+        if self.matched_drug_name and not self.needs_review:
+            return self.matched_drug_name
+        return self.drug_name
 
 
 # ── RAG 가이드 결과 (담당: 김영혜) ──
@@ -384,7 +409,11 @@ class MedicationRecord(SQLModel, table=True):
     __tablename__ = "medication_records"
 
     id: int | None = Field(default=None, primary_key=True)
-    patient_medication_id: int = Field(foreign_key="patient_medications.id", index=True)
+    # [2026-07-20 변경] OCR 기반 스케줄은 PatientMedication이 없으므로 nullable —
+    # schedule_id와 patient_medication_id 중 최소 하나는 있어야 한다(불변식, DB 레벨 제약은 아님).
+    patient_medication_id: int | None = Field(
+        default=None, foreign_key="patient_medications.id", index=True
+    )
     schedule_id: int | None = Field(default=None, foreign_key="medication_schedules.id")
     scheduled_at: datetime | None = None
     taken_at: datetime | None = None  # 실제 복용 시간, 아직 안 먹었으면 None
@@ -392,6 +421,10 @@ class MedicationRecord(SQLModel, table=True):
     verification_method: str = "self_report"  # self_report / caregiver / photo / device
     evidence_image_url: str | None = None
     memo: str | None = None
+    # [2026-07-20 추가] MedicationLog와 동일한 필드명/타입 — 체크인 기록을 이 테이블로
+    # 일원화하면서 "누가 체크했는지"(환자 본인 patient vs 보호자 대신 caregiver)를 보존한다.
+    confirmed_by_type: str | None = None
+    confirmed_by_caregiver_id: int | None = Field(default=None, foreign_key="caregivers.id")
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
@@ -423,7 +456,8 @@ class Invitation(SQLModel, table=True):
     __tablename__ = "invitations"
 
     id: int | None = Field(default=None, primary_key=True)
-    patient_id: int = Field(foreign_key="patients.id")
+    # 보호자→환자 초대(relation_type="patient")는 아직 환자 계정이 없어 nullable — 수락 시점에 채워진다.
+    patient_id: int | None = Field(default=None, foreign_key="patients.id")
     inviter_caregiver_id: int | None = Field(default=None, foreign_key="caregivers.id")
     relation_type: str = "guardian"
     invited_phone_encrypted: str | None = None
@@ -482,3 +516,22 @@ class ChatMessage(SQLModel, table=True):
     question_text: str
     answer_text: str
     created_at: datetime = Field(default_factory=datetime.now)
+
+
+# ── 가이드 결과 캐시 (REQ-020) ──
+# 진단명·약물조합·출처 데이터 버전을 SHA-256 해시로 캐시 키를 만들어,
+# 동일 조합의 반복 요청에서 LLM 재호출 없이 저장된 결과를 반환한다.
+# TTL = 7일(기본). data_version 변경 시 사실상 새 키가 생성돼 구 캐시는 자연 만료된다.
+class GuideCache(SQLModel, table=True):
+    __tablename__ = "guide_cache"
+
+    id: int | None = Field(default=None, primary_key=True)
+    # SHA-256(diagnosis + "|" + sorted drug_names + "|" + data_version)
+    cache_key: str = Field(unique=True, index=True)
+    diagnosis: str | None = None
+    drug_names: str = Field(default="[]", sa_column=Column(Text))  # JSON 배열
+    data_version: str
+    # (medication_guide, lifestyle_guide, source_refs) 튜플을 JSON 직렬화해 저장
+    guide_result: str = Field(sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=datetime.now)
+    expires_at: datetime

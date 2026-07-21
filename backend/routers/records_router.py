@@ -26,6 +26,7 @@ from sqlmodel import Session, select
 
 from routers.ocr_router import run_ocr
 from routers.rag_router import run_rag
+from services.drug_matcher import MATCH_THRESHOLD, match_drug
 
 router = APIRouter(prefix="/records", tags=["Records"])
 
@@ -87,7 +88,11 @@ def _create_schedules_from_ocr(
             session.add(
                 MedicationSchedule(
                     patient_id=record.patient_id,
-                    drug_name=item.drug_name,
+                    # [2026-07-20 버그수정] 예전엔 item.drug_name(축약명, 예: "암로디핀")을
+                    # 그대로 썼다 — Dashboard.tsx/Schedule.tsx가 이 값을 표시하므로 환자가
+                    # 매일 보는 화면에 짧은 이름이 노출되고 있었다. _build_record_response와
+                    # 동일한 규칙(item.display_name)으로 통일.
+                    drug_name=item.display_name,
                     time_slot=slot,
                     dose_timing=timings[i] if i < len(timings) else None,
                     memo=(
@@ -118,18 +123,9 @@ def _build_record_response(record: MedicalRecord, session: Session, guide: Guide
         "medications": [
             {
                 "id": item.id,  # [7/8 추가] 처방전확인 화면에서 항목별 수정 시 식별용
-                # [2026-07-20 추가] OCR 파싱은 형태(정/캡슐 등)를 일부러 잘라내고 저장한다
-                # (drug_matcher 매칭용, services/parsing_rules.py의 _drug_name_only 참고) —
-                # 그래서 item.drug_name은 "암로디핀" 같은 축약명이다. drug_matcher가 이미
-                # 정확한 전체 제품명(matched_drug_name, 예: "암로디핀정5mg")을 찾아뒀는데
-                # 지금까지 화면에 안 쓰고 있었다. 확신 있게 매칭됐을 때(needs_review=False)만
-                # 대표 표시값으로 쓴다 — 매칭이 불확실하면 파싱된 원본을 보여줘야
-                # 사용자가 직접 확인/수정할 수 있다.
-                "drug_name": (
-                    item.matched_drug_name
-                    if item.matched_drug_name and not item.needs_review
-                    else item.drug_name
-                ),
+                # [2026-07-20] item.display_name — 확신 있게 매칭됐을 때(needs_review=False)만
+                # matched_drug_name(전체 제품명)을 대표 표시값으로 쓴다(models.py 참고).
+                "drug_name": item.display_name,
                 "drug_code": item.drug_code,
                 "dosage": item.dosage,
                 "frequency": item.frequency,
@@ -296,6 +292,90 @@ def remove_medication_item(
     return _build_record_response(record, session, None)
 
 
+class MedicationPatch(BaseModel):
+    drug_name: str
+    dosage: str = ""
+    frequency: str = ""
+    total_days: str = ""
+    diagnosis: str = ""
+    drug_class: str = ""
+
+
+class MedicationPatchResult(BaseModel):
+    id: int
+    drug_name: str
+    dosage: str
+    frequency: str
+    total_days: str
+    diagnosis: str
+    drug_class: str
+    matched_drug_name: str
+    match_score: float
+    needs_review: bool
+    typo_suggestion: str | None = None
+
+
+@router.patch("/{record_id}/medications/{medication_id}", response_model=MedicationPatchResult)
+def patch_medication_item(
+    record_id: int,
+    medication_id: int,
+    payload: MedicationPatch,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """
+    처방전확인 화면 — 단건 약물 항목 수정 + REQ-047 오타 제안.
+
+    drug_name을 약물명 사전과 대조해, 사전에 정확히 없으면 가장 유사한 후보를
+    typo_suggestion으로 응답에 포함한다. typo_suggestion은 저장하지 않는다.
+    완전 일치 조건은 matched_name == drug_name (raw 문자열 exact match).
+    """
+    record = session.get(MedicalRecord, record_id)
+    if not record:
+        raise HTTPException(404, "해당 기록을 찾을 수 없어요")
+    require_actor_patient_access(record.patient_id, actor, session)
+    if record.status != "review_required":
+        raise HTTPException(409, "확인이 필요한 상태의 처방전이 아니에요")
+
+    item = session.get(OcrResult, medication_id)
+    if not item or item.record_id != record_id:
+        raise HTTPException(404, "해당 약물 항목을 찾을 수 없어요")
+
+    item.drug_name = payload.drug_name
+    item.dosage = payload.dosage
+    item.frequency = payload.frequency
+    item.total_days = payload.total_days
+    item.diagnosis = payload.diagnosis
+    item.drug_class = payload.drug_class
+
+    matched_name, score = match_drug(payload.drug_name)
+    item.matched_drug_name = matched_name
+    item.match_score = score
+    item.needs_review = score < MATCH_THRESHOLD
+
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+
+    typo_suggestion: str | None = None
+    if matched_name and matched_name != payload.drug_name and score >= MATCH_THRESHOLD:
+        typo_suggestion = matched_name
+
+    return MedicationPatchResult(
+        id=item.id,
+        drug_name=item.drug_name,
+        dosage=item.dosage,
+        frequency=item.frequency,
+        total_days=item.total_days,
+        diagnosis=item.diagnosis,
+        drug_class=item.drug_class,
+        matched_drug_name=item.matched_drug_name,
+        match_score=item.match_score,
+        needs_review=item.needs_review,
+        typo_suggestion=typo_suggestion,
+    )
+
+
 @router.get("")
 def list_records(
     patient_id: int,
@@ -426,7 +506,7 @@ async def confirm_medications(
     await asyncio.to_thread(_apply_corrections)
 
     try:
-        guide = await run_rag(record.id, session)
+        guide, _from_cache, _cache_expires_at = await run_rag(record.id, session)
     except ValueError as exc:
         _failure_reason = str(exc)  # except 블록 밖에서 e가 삭제되기 전에 캡처
 
