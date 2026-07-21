@@ -183,11 +183,11 @@ export default function MedGuide() {
         {tab === "생활습관" && (
           <div className="space-y-4">
             {guide.lifestyle_guide.guides?.length ? (
-              // [7/9] 실제 파이프라인 모양 — 약별 생활습관 안내 전문
-              guide.lifestyle_guide.guides.map((text, i) => (
+              // [2026-07-21 회의 반영] 실제 파이프라인 모양 — 진단명별 생활습관 안내(약별이 아님)
+              guide.lifestyle_guide.guides.map((entry, i) => (
                 <div key={i} className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
-                  <p className="text-[15px] font-black mb-3" style={{ color: C.dark }}>🌿 안내 {i + 1}</p>
-                  <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>{text}</p>
+                  <p className="text-[15px] font-black mb-3" style={{ color: C.dark }}>🌿 {entry.diagnosis || "생활습관 안내"}</p>
+                  <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>{entry.guide}</p>
                 </div>
               ))
             ) : (

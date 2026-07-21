@@ -33,13 +33,22 @@ export interface GuideDrug {
   review_flags?: string[];
 }
 
+/** [2026-07-21 회의 반영] 진단명 기준 생활습관 안내 1건 — 여러 약이 같은 진단명을 공유해도
+ * 한 번만 생성된다(생활습관 안내는 의약품별이 아니라 진단명별이어야 한다는 결정 반영). */
+export interface LifestyleGuideEntry {
+  diagnosis: string; // 진단명 미상이면 빈 문자열(안전한 일반 안내로 대체된 상태)
+  guide: string;
+  review_required?: boolean;
+  review_reason?: string;
+}
+
 export interface LifestyleGuide {
-  diagnosis: string;
+  diagnosis: string; // 대표 진단명(헤드라인 표시용) — guides[0].diagnosis와 대체로 동일
   // stub 모양
   diet?: { avoid: string[]; drug_specific: string[] };
   exercise?: { type: string; duration: string; intensity: string };
-  // 실제 파이프라인 모양 — 약별 생활습관 안내 전문 리스트
-  guides?: string[];
+  // 실제 파이프라인 모양 — 진단명별 생활습관 안내 목록(약 개수가 아니라 고유 진단명 개수만큼)
+  guides?: LifestyleGuideEntry[];
 }
 
 export interface SourceRef {
@@ -58,7 +67,8 @@ export interface SourceRef {
   // hira_active(약가 등재 상태)와는 다른 개념 — 이건 제조·판매 허가 자체의 취소여부다.
   permit_kind_code?: string;
   permit_active?: boolean;
-  // 실제 파이프라인 — 생활지침 인용
+  // 실제 파이프라인 — 생활지침 인용(2026-07-21부터 특정 약이 아니라 진단명 기준)
+  diagnosis?: string;
   disease?: string;
   category?: string;
   source?: string;
