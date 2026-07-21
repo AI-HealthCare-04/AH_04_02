@@ -8,10 +8,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 WORKDIR /workspace
 
 COPY pyproject.toml uv.lock ./
-# torch를 그냥 설치하면 이 컨테이너엔 없는 GPU용 CUDA/nvidia 패키지까지 같이
-# 받아온다(1GB+, 디스크 여유 부족하면 I/O 에러로 빌드가 죽는다) — CPU 전용 wheel을
-# 먼저 깔아서 이후 설치가 그걸 재사용하게 한다.
-RUN uv pip install --system --no-cache torch --index-url https://download.pytorch.org/whl/cpu
+# torch가 sentence-transformers 간접 의존성으로 들어오는데, pyproject.toml의
+# tool.uv.sources가 CPU 전용 wheel로 고정해둬서 CUDA/nvidia 패키지(수GB)는
+# uv.lock 단계에서부터 아예 빠져있다 — 여기서 추가 조치 불필요.
 RUN uv sync --frozen --no-cache
 
 WORKDIR /workspace/backend
