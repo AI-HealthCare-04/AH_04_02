@@ -43,7 +43,6 @@ def test_ocr_medications_pass_through_adapter_without_error():
     fake_guide = GuideResponse(
         drug_name="placeholder",
         medication_guide="",
-        lifestyle_guide="",
         disclaimer="disclaimer",
     )
 

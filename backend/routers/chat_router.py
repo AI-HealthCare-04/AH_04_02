@@ -299,14 +299,24 @@ def _summarize_source_refs(source_refs_json: str) -> list[str]:
 
 
 def _summarize_lifestyle_guide(lifestyle_guide_json: str) -> list[str]:
-    """마찬가지로 스텁(diet/exercise 구조) vs 실제 파이프라인(guides 리스트) 두 모양 다 처리."""
+    """마찬가지로 스텁(diet/exercise 구조) vs 실제 파이프라인(guides 리스트) 두 모양 다 처리.
+
+    [2026-07-21 회의 반영] 실제 파이프라인의 "guides"는 이제 문자열 배열이 아니라 진단명별
+    {diagnosis, guide} 객체 배열이다(의약품별이 아니라 진단명 기준으로 생성이 바뀌었기 때문) —
+    각 항목의 guide 텍스트만 뽑아 합친다. 옛 문자열 배열 항목이 섞여 들어와도(구 캐시 등)
+    죽지 않도록 문자열 원소는 그대로 쓴다.
+    """
     try:
         lifestyle_guide = json.loads(lifestyle_guide_json)
     except (json.JSONDecodeError, AttributeError, TypeError):
         return []
 
-    if lifestyle_guide.get("guides"):
-        return ["[생활습관 안내] " + " ".join(lifestyle_guide["guides"])]
+    guides = lifestyle_guide.get("guides")
+    if guides:
+        texts = [g.get("guide", "") if isinstance(g, dict) else str(g) for g in guides]
+        texts = [t for t in texts if t]
+        if texts:
+            return ["[생활습관 안내] " + " ".join(texts)]
 
     lines = []
     diet = lifestyle_guide.get("diet") or {}
