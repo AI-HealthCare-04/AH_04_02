@@ -208,6 +208,8 @@ def get_invitation(token: str, session: Session = Depends(get_session)):
         "patient_name": patient.name if patient else "알 수 없음",
         "inviter_name": inviter.name if inviter else None,
         "phone_verification_required": bool(invitation.invited_phone),
+        # [2026-07-22 추가] InviteAccept.tsx가 "초대 만료" 표시에 씀 (Figma 목업 참고)
+        "expires_at": invitation.expires_at,
     }
 
 

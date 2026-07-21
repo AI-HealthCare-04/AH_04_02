@@ -51,6 +51,8 @@ export interface InvitationInfo {
   inviter_name: string | null;
   // [2026-07-15] 초대가 특정 전화번호를 지정했으면 true — 수락 시 본인 전화번호 입력을 요구해야 함(REQ-003)
   phone_verification_required: boolean;
+  // [2026-07-22 추가] InviteAccept.tsx의 "초대 만료" 표시용
+  expires_at: string;
 }
 
 export async function createInvitation(payload: {

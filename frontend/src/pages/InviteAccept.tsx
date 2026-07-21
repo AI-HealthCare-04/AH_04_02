@@ -12,6 +12,14 @@ const RELATION_LABEL: Record<string, string> = {
   patient: "환자",
 };
 
+/** "2025.07.09 오전 10:00" 형식 — Figma 목업(App.figma-export.tsx.bak) 참고 */
+function formatExpiry(iso: string): string {
+  const d = new Date(iso);
+  const date = `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
+  const time = d.toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit", hour12: true });
+  return `${date} ${time}`;
+}
+
 export default function InviteAccept() {
   const navigate = useNavigate();
   const { token } = useParams<{ token: string }>();
@@ -28,6 +36,9 @@ export default function InviteAccept() {
 
   // 보호자→환자 초대(REQ-037): 수락자가 실제 환자 계정을 만드는 흐름
   const isPatientInvite = invite?.relation_type === "patient";
+  // [2026-07-22 추가] "환자→보호자 초대"(Connect.tsx)는 대부분 환자 본인이 직접 보내서
+  // inviter_name(보호자 초대자)이 없다 — 그 경우 환자 자신의 이름을 "초대한 사람"으로 보여준다.
+  const inviterDisplayName = invite?.inviter_name ?? invite?.patient_name;
 
   useEffect(() => {
     if (!token) return;
@@ -162,24 +173,33 @@ export default function InviteAccept() {
                   </>
                 ) : (
                   <>
-                    {invite.patient_name}님을<br />
-                    {RELATION_LABEL[invite.relation_type] ?? invite.relation_type}로 돌보게 돼요
+                    {inviterDisplayName}님이<br />
+                    {RELATION_LABEL[invite.relation_type] ?? invite.relation_type}로 초대했어요
                   </>
                 )}
               </h1>
 
               <div className="rounded-2xl p-5 mb-6 bg-[#F4F0EA] text-left space-y-2.5">
+                <div className="flex justify-between text-[13px]">
+                  <span className="text-[#8A7E75]">초대한 사람</span>
+                  <span className="font-bold text-[#1E1A17]">{inviterDisplayName}</span>
+                </div>
+                {/* [2026-07-22 추가] "관계"/"초대 만료"는 환자→보호자 초대에만 표시 —
+                    보호자→환자 초대는 아직 계정이 없는 사람에게 보내는 가입 초대라
+                    관계·만료 개념이 덜 중요해서 Figma 목업에도 안 나온다. */}
                 {!isPatientInvite && (
-                  <div className="flex justify-between text-[13px]">
-                    <span className="text-[#8A7E75]">대상자</span>
-                    <span className="font-bold text-[#1E1A17]">{invite.patient_name}</span>
-                  </div>
-                )}
-                {invite.inviter_name && (
-                  <div className="flex justify-between text-[13px]">
-                    <span className="text-[#8A7E75]">초대한 사람</span>
-                    <span className="font-bold text-[#1E1A17]">{invite.inviter_name}</span>
-                  </div>
+                  <>
+                    <div className="flex justify-between text-[13px]">
+                      <span className="text-[#8A7E75]">관계</span>
+                      <span className="font-bold text-[#1E1A17]">
+                        {RELATION_LABEL[invite.relation_type] ?? invite.relation_type}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-[13px]">
+                      <span className="text-[#8A7E75]">초대 만료</span>
+                      <span className="font-bold text-[#1E1A17]">{formatExpiry(invite.expires_at)}</span>
+                    </div>
+                  </>
                 )}
               </div>
 
