@@ -80,6 +80,20 @@ class LoginResponse(BaseModel):
     caregiver_id: int
     name: str
     role: str  # "caregiver" / "patient" — 프론트가 로그인 후 흐름(보호자용/환자 본인용)을 분기하는 데 씀
+    # [2026-07-22 추가] role == "caregiver"일 때만 의미있음("guardian"/"organization") — 프론트의
+    # 계정 전환 목록이 "환자 본인/보호자/기관" 표시에 쓴다.
+    relation_type: str | None = None
+    # [2026-07-22 추가] "저장된 계정" 전환 기능 전용 — access_token(60분)이 만료돼도 이 값으로
+    # 새 access_token을 스스로 받아올 수 있게 계정별로 저장해둔다. 재사용 방지로 매번 새로
+    # 발급되므로(POST /auth/token/refresh), 쓸 때마다 이 값도 같이 새로 저장해야 한다.
+    refresh_token: str
+
+
+class RefreshTokenRequest(BaseModel):
+    # [2026-07-22 추가] 계정 전환 기능은 계정마다 refresh_token이 달라서 브라우저 쿠키
+    # 하나(로그인 하나만 담을 수 있음)로는 표현이 안 된다 — 명시적으로 넘기면 그걸 쓰고,
+    # 없으면 기존처럼 쿠키를 쓴다(일반 로그인 흐름과 호환).
+    refresh_token: str | None = None
 
 
 class PasswordResetRequestRequest(BaseModel):
@@ -153,7 +167,9 @@ def login(payload: LoginRequest, response: Response, session: Session = Depends(
     caregivers = _find_by_identifiers(session, Caregiver, payload.identifier)
     for caregiver in caregivers:
         if _authenticate(session, "caregiver", caregiver, payload.password) is not None:
-            return _issue_login_response(response, caregiver.id, "caregiver", caregiver.name, session)
+            return _issue_login_response(
+                response, caregiver.id, "caregiver", caregiver.name, session, relation_type=caregiver.relation_type
+            )
 
     patients = _find_by_identifiers(session, Patient, payload.identifier)
     for patient in patients:
@@ -285,11 +301,13 @@ def _issue_reset_code(session: Session, subject_type: str, account) -> None:
         )
 
 
-def _issue_login_response(response: Response, subject_id: int, role: str, name: str, session: Session) -> LoginResponse:
+def _issue_login_response(
+    response: Response, subject_id: int, role: str, name: str, session: Session, relation_type: str | None = None
+) -> LoginResponse:
     """[2026-07-15] refresh 토큰 발급마다 jti를 RefreshToken 테이블에 기록 — /token/refresh가
     회전(재발급) 시 이 jti를 revoke해서 재사용을 막는다(REQ-001)."""
     access_token = create_access_token(subject_id, role)
-    refresh_token, jti = create_refresh_token(subject_id, role)
+    refresh_token_value, jti = create_refresh_token(subject_id, role)
     session.add(RefreshToken(
         jti=jti,
         subject_id=subject_id,
@@ -297,24 +315,36 @@ def _issue_login_response(response: Response, subject_id: int, role: str, name: 
         expires_at=datetime.now() + timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES),
     ))
     session.commit()
-    response.set_cookie(key="refresh_token", value=refresh_token, httponly=True)
-    return LoginResponse(access_token=access_token, caregiver_id=subject_id, name=name, role=role)
+    response.set_cookie(key="refresh_token", value=refresh_token_value, httponly=True)
+    return LoginResponse(
+        access_token=access_token,
+        caregiver_id=subject_id,
+        name=name,
+        role=role,
+        relation_type=relation_type,
+        refresh_token=refresh_token_value,
+    )
 
 
-@router.get("/token/refresh", response_model=LoginResponse)
+@router.post("/token/refresh", response_model=LoginResponse)
 def refresh_token(
+    payload: RefreshTokenRequest,
     response: Response,
-    refresh_token: str | None = Cookie(default=None),
+    refresh_token_cookie: str | None = Cookie(default=None, alias="refresh_token"),
     session: Session = Depends(get_session),
 ):
-    """login에서 set_cookie로 심어둔 refresh_token 쿠키를 검증하고, 새 access_token과
-    함께 새 refresh_token도 발급한다(rotation) — 이전 jti는 revoke 처리해 재사용을 막는다.
+    """login에서 심어둔 refresh_token(쿠키 또는 계정 전환 기능이 명시적으로 넘긴 값)을
+    검증하고, 새 access_token과 함께 새 refresh_token도 발급한다(rotation) — 이전 jti는
+    revoke 처리해 재사용을 막는다.
     [2026-07-15] 예전엔 access_token만 새로 발급하고 같은 refresh_token을 계속 재사용해서,
-    탈취된 refresh_token이 만료(14일) 전까지 계속 유효했다(REQ-001)."""
-    if not refresh_token:
+    탈취된 refresh_token이 만료(14일) 전까지 계속 유효했다(REQ-001).
+    [2026-07-22 수정] GET에서 POST로 변경 — 계정 전환 기능은 요청 바디로 refresh_token을
+    명시적으로 넘겨야 해서(쿠키 하나로는 계정별 값을 구분 못 함) 더 이상 GET만으로는 부족했다."""
+    token = payload.refresh_token or refresh_token_cookie
+    if not token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Refresh token이 없습니다.")
     try:
-        subject_id, role, jti = decode_refresh_token(refresh_token)
+        subject_id, role, jti = decode_refresh_token(token)
     except jwt.PyJWTError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "유효하지 않거나 만료된 refresh token입니다.")
 
@@ -343,7 +373,8 @@ def refresh_token(
     if subject.deactivated_at is not None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "탈퇴 처리된 계정입니다.")
 
-    return _issue_login_response(response, subject_id, role, subject.name, session)
+    relation_type = subject.relation_type if role == "caregiver" else None
+    return _issue_login_response(response, subject_id, role, subject.name, session, relation_type=relation_type)
 
 
 # ── 비밀번호 재설정 [2026-07-15 추가, REQ-039] ──

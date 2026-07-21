@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { refreshAccessToken } from "../api/auth";
 import { getCaregiverPatients } from "../api/monitoring";
 
 /**
@@ -31,15 +32,19 @@ export function isLoggedIn(): boolean {
 /**
  * [2026-07-21 추가] "다른 사용자로 전환"(MyPage.tsx) — 네이버 등에서처럼 이 기기에서
  * 로그인했던 계정을 기억해뒀다가 클릭 한 번으로 다시 로그인할 수 있게 함.
- * access_token을 그대로 저장해뒀다가 재사용하는 방식이라, 그 계정의 토큰이 이미
- * 만료됐으면 API 호출이 401로 실패하고 monitoringClient.ts 인터셉터가 /login으로
- * 돌려보낸다 — 그 경우 사용자가 그 계정을 다시 비밀번호로 로그인하면 된다(치명적
- * 실패 아님, 그냥 일반 로그인 화면으로 돌아가는 정도).
+ * [2026-07-22 수정] 처음엔 access_token(60분)을 그대로 저장해뒀다가 재사용하는 방식이라
+ * 만료되면 그냥 로그인 화면으로 튕겨나갔다 — refresh_token(14일)도 같이 저장해두고
+ * switchToRecentAccount()가 전환 시점에 새 access_token을 스스로 받아오게 바꿨다.
  */
 export interface RecentAccount {
   identifier: string; // 로그인에 쓴 이메일/전화번호 — 계정 식별 및 표시용
   name: string;
   accessToken: string;
+  // [2026-07-22 추가] access_token 만료 후 재발급용. 재사용 방지로 쓸 때마다 새로 발급되니
+  // switchToRecentAccount()가 매번 이 값도 최신 것으로 갱신해서 다시 저장한다.
+  refreshToken: string;
+  // [2026-07-22 추가] 계정 전환 목록에 "환자 본인/보호자/기관" 표시용.
+  role: "patient" | "guardian" | "organization";
   // [2026-07-22 수정] 케어하는 환자가 아직 없는 보호자는 로그인 시점엔 patientId가 없다 —
   // 이 경우까지 저장 대상에서 빠지면 "체크했는데 목록에 안 뜬다" 버그가 된다.
   patientId?: number;
@@ -74,16 +79,24 @@ export function removeRecentAccount(identifier: string): void {
   );
 }
 
-/** 목록에서 계정을 클릭했을 때 — 비밀번호 없이 그 계정의 세션으로 바로 전환. */
-export function switchToRecentAccount(account: RecentAccount): void {
-  localStorage.setItem("access_token", account.accessToken);
-  localStorage.setItem("user_name", account.name);
+/** 목록에서 계정을 클릭했을 때 — 비밀번호 없이 그 계정의 세션으로 바로 전환한다.
+ * [2026-07-22 수정] access_token(60분)이 만료됐을 수 있으니 refresh_token(14일)으로 새
+ * access_token을 받아온 뒤 저장한다 — refresh_token은 재사용 방지로 매번 새로 발급되므로
+ * (rotation) 이 계정 항목도 새 토큰들로 갱신해서 다음 전환 때도 계속 쓸 수 있게 한다.
+ * refresh_token 자체가 만료·무효화됐으면(오래돼서, 혹은 갱신 중 갱신 실패로 값이 어긋나서)
+ * 여기서 예외를 던진다 — 호출부(Login.tsx)가 이 계정을 목록에서 지우고 안내해야 한다. */
+export async function switchToRecentAccount(account: RecentAccount): Promise<void> {
+  const refreshed = await refreshAccessToken(account.refreshToken);
+  localStorage.setItem("access_token", refreshed.access_token);
+  localStorage.setItem("user_name", refreshed.name);
   // [2026-07-22 수정] 케어하는 환자가 없는 보호자는 patientId가 없다 — 억지로 지우거나
   // "0"을 넣지 않고 그대로 둔다(Login.tsx가 이 값 유무로 /patients vs /dashboard를 정한다).
   if (account.patientId) localStorage.setItem("patient_id", String(account.patientId));
   else localStorage.removeItem("patient_id");
   if (account.caregiverId) localStorage.setItem("caregiver_id", String(account.caregiverId));
   else localStorage.removeItem("caregiver_id");
+
+  saveRecentAccount({ ...account, accessToken: refreshed.access_token, refreshToken: refreshed.refresh_token });
 }
 
 /** [2026-07-21 추가] "아이디 저장" 체크박스 — 비밀번호/토큰 없이 이메일·전화번호 입력칸만
