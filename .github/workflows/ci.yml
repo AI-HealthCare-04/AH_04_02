@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: ["**"]
 
+# 같은 브랜치/PR에 연달아 push하면 이전 실행은 취소하고 최신 것만 돌린다 —
+# Actions 분당 한도를 중복 실행으로 낭비하지 않기 위함.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ci:
     runs-on: ubuntu-latest
