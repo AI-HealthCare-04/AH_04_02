@@ -318,25 +318,34 @@ def _summarize_lifestyle_guide(lifestyle_guide_json: str) -> list[str]:
 
 
 def _build_patient_context(patient_id: int, session: Session) -> str:
-    """환자의 가장 최근 처방전(OcrResult/GuideResult)을 텍스트로 요약합니다."""
+    """환자의 가장 최근 처방전(OcrResult/GuideResult)을 텍스트로 요약합니다.
+
+    [버그 수정] 처방전 사진 없이 '내 약 등록'(PatientMedication)만 한 환자는 예전엔
+    MedicalRecord가 없어 "아직 등록된 처방전 정보가 없습니다"만 나갔다 — 질문 문구엔
+    약 이름이 있는데 정작 LLM 컨텍스트엔 빠지는 사각지대였다. 그래서 처방전 유무와
+    무관하게 환자가 직접 등록한 약 이름(_patient_registered_drug_names)을 함께 넣는다."""
+    lines: list[str] = []
+
     record = session.exec(
         select(MedicalRecord)
         .where(MedicalRecord.patient_id == patient_id)
         .order_by(MedicalRecord.created_at.desc())
     ).first()
-    if not record:
-        return "아직 등록된 처방전 정보가 없습니다."
+    if record:
+        ocr_items = session.exec(select(OcrResult).where(OcrResult.record_id == record.id)).all()
+        lines.extend(_summarize_ocr_items(ocr_items))
 
-    ocr_items = session.exec(select(OcrResult).where(OcrResult.record_id == record.id)).all()
-    lines = _summarize_ocr_items(ocr_items)
+        guide = session.exec(
+            select(GuideResult).where(GuideResult.record_id == record.id).order_by(GuideResult.id.desc())
+        ).first()
+        if guide:
+            lines.extend(_summarize_medication_guide(guide.medication_guide))
+            lines.extend(_summarize_lifestyle_guide(guide.lifestyle_guide))
+            lines.extend(_summarize_source_refs(guide.source_refs))
 
-    guide = session.exec(
-        select(GuideResult).where(GuideResult.record_id == record.id).order_by(GuideResult.id.desc())
-    ).first()
-    if guide:
-        lines.extend(_summarize_medication_guide(guide.medication_guide))
-        lines.extend(_summarize_lifestyle_guide(guide.lifestyle_guide))
-        lines.extend(_summarize_source_refs(guide.source_refs))
+    registered_drug_names = _patient_registered_drug_names(patient_id, session)
+    if registered_drug_names:
+        lines.append(f"환자가 직접 등록한 약: {', '.join(registered_drug_names)}")
 
     return "\n".join(lines) if lines else "아직 등록된 처방전 정보가 없습니다."
 
@@ -672,10 +681,16 @@ def _generate_llm_answer(
     return content.strip() if isinstance(content, str) else str(content)
 
 
-def _resolve_question(payload: ChatAsk, session: Session) -> tuple[str, str, str, str]:
+def _resolve_question(payload: ChatAsk, session: Session) -> tuple[str, str, str, str, bool]:
     """question_id(고정/동적 질문) 또는 question(자유 텍스트) 중 하나를 해석해
-    (question_id, question_text, fallback_answer, fallback_source)를 반환한다.
-    /ask, /ask/stream이 완전히 동일한 해석 규칙을 써야 하므로 여기서 공유한다."""
+    (question_id, question_text, answer, source, use_llm)을 반환한다.
+    /ask, /ask/stream이 완전히 동일한 해석 규칙을 써야 하므로 여기서 공유한다.
+
+    마지막 use_llm은 두 엔드포인트가 LLM 호출 여부를 동일하게 판단하도록 여기서 한 번만
+    결정한다: preset/dynamic 질문이 매칭되면 이미 검수된 고정 답변이 있으므로 LLM을
+    호출하지 않고(use_llm=False) 그 답변을 그대로 내보내고, 자유입력(freeform)일 때만
+    LLM을 호출한다(use_llm=True). (버그: 예전엔 종류와 무관하게 _CHAT_LLM_AVAILABLE이면
+    무조건 LLM을 태워 고정 답변이 LLM으로 새어나갔다.)"""
     if payload.question_id:
         candidates = _build_dynamic_questions(payload.patient_id, session)
         match = next((q for q in candidates if q["id"] == payload.question_id), None)
@@ -683,13 +698,14 @@ def _resolve_question(payload: ChatAsk, session: Session) -> tuple[str, str, str
             match = next((q for q in PRESET_QUESTIONS if q["id"] == payload.question_id), None)
         if not match:
             raise HTTPException(404, "존재하지 않는 질문이에요")
-        return match["id"], match["text"], match["answer"], "preset"
+        return match["id"], match["text"], match["answer"], "preset", False
     if payload.question and payload.question.strip():
         return (
             "freeform",
             payload.question.strip(),
             "죄송해요, 지금은 이 질문에 실시간으로 답변드리기 어려워요. 담당 의사나 약사에게 확인해주세요.",
             "unsupported",
+            True,
         )
     raise HTTPException(422, "question_id 또는 question 중 하나는 필요해요")
 
@@ -698,7 +714,13 @@ def _gather_llm_inputs(patient_id: int, question_text: str, session: Session) ->
     """환자 컨텍스트 + DUR 보강조회 + RAG 근거 + 챗봇 이름을 모은다 — /ask, /ask/stream 공용.
     DUR/RAG는 리스트로 반환해 호출부가 각자 필요한 형태(개수 집계 vs 그냥 join)로 쓴다."""
     context_text = _build_patient_context(patient_id, session)
-    registered_drug_names = _latest_ocr_drug_names(patient_id, session)
+    # DUR 조회용 약 이름: 처방전 OCR 약 이름 + 환자가 직접 등록한 약 이름을 합친다.
+    # (버그: OCR만 보면 처방전 없이 '내 약 등록'만 한 환자는 DUR 조회에서 통째로 빠졌다.)
+    registered_drug_names = list(
+        dict.fromkeys(
+            [*_patient_registered_drug_names(patient_id, session), *_latest_ocr_drug_names(patient_id, session)]
+        )
+    )
     dur_context_lines = _build_on_demand_dur_context(question_text, registered_drug_names)
     rag_context_lines = _retrieve_chat_rag_context(question_text, context_text)
     setting = session.get(NotificationSetting, patient_id)
@@ -741,7 +763,7 @@ def ask(payload: ChatAsk, actor: Actor = Depends(get_current_actor), session: Se
     if not session.get(Patient, payload.patient_id):
         raise HTTPException(404, "해당 환자를 찾을 수 없어요")
 
-    question_id, question_text, fallback_answer, fallback_source = _resolve_question(payload, session)
+    question_id, question_text, fallback_answer, fallback_source, use_llm = _resolve_question(payload, session)
 
     started_ms = now_ms()
     answer_text, answer_source = fallback_answer, fallback_source
@@ -760,7 +782,7 @@ def ask(payload: ChatAsk, actor: Actor = Depends(get_current_actor), session: Se
             "llm_available": _CHAT_LLM_AVAILABLE,
         },
     ) as trace:
-        if _CHAT_LLM_AVAILABLE:
+        if _CHAT_LLM_AVAILABLE and use_llm:
             try:
                 context_text, dur_context_lines, rag_context_lines, bot_name = _gather_llm_inputs(
                     payload.patient_id, question_text, session
@@ -844,7 +866,7 @@ async def ask_stream(
     if not session.get(Patient, payload.patient_id):
         raise HTTPException(404, "해당 환자를 찾을 수 없어요")
 
-    question_id, question_text, fallback_answer, fallback_source = _resolve_question(payload, session)
+    question_id, question_text, fallback_answer, fallback_source, use_llm = _resolve_question(payload, session)
     patient_id = payload.patient_id
 
     async def _stream():
@@ -863,7 +885,7 @@ async def ask_stream(
                 "llm_available": _CHAT_LLM_AVAILABLE,
             },
         ) as trace:
-            if _CHAT_LLM_AVAILABLE:
+            if _CHAT_LLM_AVAILABLE and use_llm:
                 try:
                     from langchain_openai import ChatOpenAI
                     from rag.config import settings as rag_settings
