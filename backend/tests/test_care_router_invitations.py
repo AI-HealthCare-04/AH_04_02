@@ -69,6 +69,16 @@ def test_invitation_create_rejects_arbitrary_relation_type():
         InvitationCreate(patient_id=1, relation_type="totally_arbitrary_garbage_value")
 
 
+def test_invitation_create_no_longer_accepts_guardian_direction():
+    """[2026-07-21 회의 반영] "초대하기"(환자→보호자류 초대 생성) 삭제 — relation_type은
+    이제 "patient"(보호자→환자 초대)만 허용된다. guardian/caregiver/life_support_worker/
+    social_worker로 새 초대를 만들려는 시도는 스키마 단계에서 거부돼야 한다(과거에 이미
+    생성된 이런 초대들은 accept_invitation()으로 여전히 수락 가능 — 이 테스트는 생성만 막혔는지 확인)."""
+    for relation_type in ("guardian", "caregiver", "life_support_worker", "social_worker"):
+        with pytest.raises(ValidationError):
+            InvitationCreate(patient_id=1, relation_type=relation_type)
+
+
 def test_accept_invitation_preserves_invitation_relation_type():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
