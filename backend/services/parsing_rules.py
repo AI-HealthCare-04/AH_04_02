@@ -90,7 +90,17 @@ BARE_FREQ_RE    = re.compile(r"(?<!\d)(\d+)\s*회(?!\s*[가-힣\)])")
 ABBREV_FREQ_RE  = re.compile(r"\b(qd|od|bid|tid|qid|prn|hs|ac|pc)\b", re.IGNORECASE)
 DAYS_KOR_RE     = re.compile(r"(\d+)\s*일\s*분")
 DAYS_ABBREV_RE  = re.compile(r"#\s*(\d+)")
-DIAGNOSIS_KOR_RE  = re.compile(r"진단(?:명)?\s*[:：]\s*([^\[\n■]+?)(?=\s+\d+[.)]\s+|[\[\n■]|\Z)")
+# [2026-07-20 버그수정] CLOVA가 표(연락처/발행일/처방 내역 등)를 개행 없이 한 줄로 합쳐
+# 내보내면, 원래 있던 정지 조건(숫자+".)"+공백, "[\n■", 문자열 끝)이 전혀 안 걸려서
+# "진단: 제2형 당뇨병" 뒤의 연락처·처방 목록·주의문구까지 전부 diagnosis로 삼켜버렸다
+# (실제 재현: 300자 넘는 문자열이 ocr_results.diagnosis VARCHAR(255)를 초과해 저장 자체가
+# 실패함). 실제 처방전에 진단명 바로 뒤에 자주 오는 필드 라벨(연락처/발행일/처방/조제)도
+# 정지 조건에 추가했다 — 그래도 못 거른 경우를 대비해 extract_diagnosis()에서 길이도 자른다.
+DIAGNOSIS_KOR_RE  = re.compile(
+    r"진단(?:명)?\s*[:：]\s*([^\[\n■]+?)"
+    r"(?=\s+\d+[.)]\s+|[\[\n■]|\s*(?:연락처|발행일|처방|조제)|\Z)"
+)
+_MAX_DIAGNOSIS_LEN = 100  # ocr_results.diagnosis VARCHAR(255)보다 여유 있게 짧게 — 실제 진단명은 이보다 훨씬 짧다
 DRUG_CODE_RE      = re.compile(r"\[(?:급여|비급여)\]\[(\w+)\]")
 DIAGNOSIS_EN_RE   = re.compile(r"Dx\s*[:：]\s*(.+?)(?=\s+Rx\b|\Z)", re.IGNORECASE)
 DIAGNOSIS_CODE_RE = re.compile(r"질병분류기호\s*[:：]\s*\S+\s*[（(]([^)）]+)[)）]")
@@ -166,19 +176,20 @@ def extract_days(text: str) -> str:
 
 
 def extract_diagnosis(text: str) -> str:
-    matches = DIAGNOSIS_KOR_RE.findall(text)
-    if matches:
+    if matches := DIAGNOSIS_KOR_RE.findall(text):
         parts = [m.strip().rstrip(",/ ") for m in matches if m.strip()]
         seen: set = set()
         deduped = [p for p in parts if not (p in seen or seen.add(p))]  # type: ignore[func-returns-value]
-        return ", ".join(deduped)
-    m = DIAGNOSIS_EN_RE.search(text)
-    if m:
-        return m.group(1).strip()
-    m = DIAGNOSIS_CODE_RE.search(text)
-    if m:
-        return m.group(1).strip()
-    return ""
+        result = ", ".join(deduped)
+    elif m := DIAGNOSIS_EN_RE.search(text):
+        result = m.group(1).strip()
+    elif m := DIAGNOSIS_CODE_RE.search(text):
+        result = m.group(1).strip()
+    else:
+        result = ""
+    # [2026-07-20] 정지 조건을 다 못 거른 텍스트가 와도(예: 예상 못 한 OCR 포맷) DB
+    # 컬럼(ocr_results.diagnosis VARCHAR(255)) 저장 자체가 실패하지 않도록 방어적으로 자른다.
+    return result[:_MAX_DIAGNOSIS_LEN]
 
 
 def lookup_drug_class(drug_name: str) -> str:

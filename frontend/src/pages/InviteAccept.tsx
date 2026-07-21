@@ -9,6 +9,7 @@ const RELATION_LABEL: Record<string, string> = {
   caregiver: "요양보호사",
   life_support_worker: "생활지원사",
   social_worker: "사회복지사",
+  patient: "환자",
 };
 
 export default function InviteAccept() {
@@ -20,8 +21,13 @@ export default function InviteAccept() {
   const [error, setError] = useState("");
   const [caregiverName, setCaregiverName] = useState("");
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [decided, setDecided] = useState<"accepted" | "rejected" | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // 보호자→환자 초대(REQ-037): 수락자가 실제 환자 계정을 만드는 흐름
+  const isPatientInvite = invite?.relation_type === "patient";
 
   useEffect(() => {
     if (!token) return;
@@ -37,7 +43,30 @@ export default function InviteAccept() {
   }, [token]);
 
   const handleAccept = async () => {
-    if (!token || !caregiverName.trim()) return;
+    if (!token) return;
+
+    if (isPatientInvite) {
+      if (!caregiverName.trim()) return;
+      setSubmitting(true);
+      try {
+        const result = await acceptInvitation(token, {
+          patient_name: caregiverName.trim(),
+          patient_email: email.trim() || undefined,
+          patient_password: password.trim() || undefined,
+          patient_phone: phone.trim() || undefined,
+        });
+        // 환자 본인 계정을 만든 것이므로 patient_id만 저장한다(보호자 계정 아님).
+        localStorage.setItem("patient_id", String(result.patient_id));
+        setDecided("accepted");
+      } catch {
+        setError("가입 처리에 실패했어요. 입력한 정보를 확인해 주세요.");
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
+    if (!caregiverName.trim()) return;
     if (invite?.phone_verification_required && !phone.trim()) return;
     setSubmitting(true);
     try {
@@ -100,7 +129,9 @@ export default function InviteAccept() {
             </h2>
             <p className="text-[14px] text-[#8A7E75] mb-6">
               {decided === "accepted"
-                ? `이제 ${invite?.patient_name ?? ""}님의 복약 관리를 함께할 수 있어요.`
+                ? isPatientInvite
+                  ? "계정이 만들어졌어요. 이제 복약 관리를 시작할 수 있어요."
+                  : `이제 ${invite?.patient_name ?? ""}님의 복약 관리를 함께할 수 있어요.`
                 : "언제든지 다시 초대받을 수 있어요."}
             </p>
             {decided === "accepted" && (
@@ -119,18 +150,31 @@ export default function InviteAccept() {
                 <Heart className="w-8 h-8 text-[#C1653D]" />
               </div>
               <p className="text-[13px] font-bold text-[#8A7E75] mb-2">
-                {RELATION_LABEL[invite.relation_type] ?? invite.relation_type} 초대
+                {isPatientInvite
+                  ? "환자 연결 초대"
+                  : `${RELATION_LABEL[invite.relation_type] ?? invite.relation_type} 초대`}
               </p>
               <h1 className="text-[24px] font-black text-[#1E1A17] mb-7 leading-snug">
-                {invite.patient_name}님을<br />
-                {RELATION_LABEL[invite.relation_type] ?? invite.relation_type}로 돌보게 돼요
+                {isPatientInvite ? (
+                  <>
+                    복약 관리를 함께할<br />
+                    계정을 만들어요
+                  </>
+                ) : (
+                  <>
+                    {invite.patient_name}님을<br />
+                    {RELATION_LABEL[invite.relation_type] ?? invite.relation_type}로 돌보게 돼요
+                  </>
+                )}
               </h1>
 
               <div className="rounded-2xl p-5 mb-6 bg-[#F4F0EA] text-left space-y-2.5">
-                <div className="flex justify-between text-[13px]">
-                  <span className="text-[#8A7E75]">대상자</span>
-                  <span className="font-bold text-[#1E1A17]">{invite.patient_name}</span>
-                </div>
+                {!isPatientInvite && (
+                  <div className="flex justify-between text-[13px]">
+                    <span className="text-[#8A7E75]">대상자</span>
+                    <span className="font-bold text-[#1E1A17]">{invite.patient_name}</span>
+                  </div>
+                )}
                 {invite.inviter_name && (
                   <div className="flex justify-between text-[13px]">
                     <span className="text-[#8A7E75]">초대한 사람</span>
@@ -139,23 +183,56 @@ export default function InviteAccept() {
                 )}
               </div>
 
-              <input
-                value={caregiverName}
-                onChange={(e) => setCaregiverName(e.target.value)}
-                placeholder="본인 이름을 입력해 주세요"
-                className="w-full px-4 py-3.5 mb-5 rounded-xl border border-[rgba(30,26,23,0.12)] text-[15px] outline-none"
-              />
-              {invite.phone_verification_required && (
+              {isPatientInvite ? (
                 <>
+                  <input
+                    value={caregiverName}
+                    onChange={(e) => setCaregiverName(e.target.value)}
+                    placeholder="이름을 입력해 주세요"
+                    className="w-full px-4 py-3.5 mb-3 rounded-xl border border-[rgba(30,26,23,0.12)] text-[15px] outline-none"
+                  />
+                  <input
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    type="email"
+                    placeholder="이메일 (로그인 아이디) — 선택"
+                    className="w-full px-4 py-3.5 mb-3 rounded-xl border border-[rgba(30,26,23,0.12)] text-[15px] outline-none"
+                  />
+                  <input
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    type="password"
+                    placeholder="비밀번호 — 선택"
+                    className="w-full px-4 py-3.5 mb-3 rounded-xl border border-[rgba(30,26,23,0.12)] text-[15px] outline-none"
+                  />
                   <input
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
-                    placeholder="초대받은 전화번호를 입력해 주세요"
-                    className="w-full px-4 py-3.5 mb-2 rounded-xl border border-[rgba(30,26,23,0.12)] text-[15px] outline-none"
+                    placeholder="전화번호 (010-0000-0000) — 선택"
+                    className="w-full px-4 py-3.5 mb-5 rounded-xl border border-[rgba(30,26,23,0.12)] text-[15px] outline-none"
                   />
-                  <p className="text-[12px] text-[#8A7E75] mb-5 text-left">
-                    이 초대는 특정 전화번호로 발송됐어요. 본인 확인을 위해 그 번호를 입력해 주세요.
-                  </p>
+                </>
+              ) : (
+                <>
+                  <input
+                    value={caregiverName}
+                    onChange={(e) => setCaregiverName(e.target.value)}
+                    placeholder="본인 이름을 입력해 주세요"
+                    className="w-full px-4 py-3.5 mb-5 rounded-xl border border-[rgba(30,26,23,0.12)] text-[15px] outline-none"
+                  />
+                  {invite.phone_verification_required && (
+                    <>
+                      <input
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        placeholder="초대받은 전화번호를 입력해 주세요"
+                        className="w-full px-4 py-3.5 mb-2 rounded-xl border border-[rgba(30,26,23,0.12)] text-[15px] outline-none"
+                      />
+                      <p className="text-[12px] text-[#8A7E75] mb-5 text-left">
+                        이 초대는 특정 전화번호로 발송됐어요. 본인 확인을 위해 그 번호를 입력해 주세요.
+                      </p>
+                    </>
+                  )}
                 </>
               )}
               {error && <p className="text-[13px] text-[#D94F4F] mb-4">{error}</p>}

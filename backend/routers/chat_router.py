@@ -26,6 +26,7 @@ import os
 import re
 import sys
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from core.database import get_session
@@ -497,35 +498,54 @@ def _extract_dur_candidate_drug_names(question_text: str, registered_drug_names:
     return result[:5]
 
 
+def _resolve_one_dur_lookup_name(raw_name: str) -> list[str]:
+    """raw_name 하나를 e약은요/허가정보로 확인해 후보 이름 목록을 만든다.
+
+    [2026-07-21 분리] _resolve_dur_lookup_names()가 raw_names를 순차로 돌던 것을
+    ThreadPoolExecutor로 병렬 호출하기 위해, raw_name 1개 처리 단위를 별도 함수로 뽑았다.
+    """
+    from rag.mfds_client import search_by_name, search_permit_info
+
+    found: list[str] = [raw_name]
+    try:
+        for drug in search_by_name(raw_name, num_of_rows=5):
+            found.append(drug.item_name)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        for permit in search_permit_info(raw_name, num_of_rows=5):
+            found.append(permit.item_name)
+            if permit.ingr_name:
+                for ingredient in re.split(r"[,;/+· ]+", permit.ingr_name):
+                    ingredient = ingredient.strip()
+                    if len(ingredient) >= 3:
+                        found.append(ingredient)
+    except Exception:  # noqa: BLE001
+        pass
+    return found
+
+
 def _resolve_dur_lookup_names(raw_names: list[str]) -> list[str]:
     """질문에 나온 표현을 e약은요/의약품 허가정보로 확인해 DUR 조회어를 확장한다.
 
     사용자가 성분명(예: 심바스타틴)이나 제품명 일부를 입력할 수 있으므로, 원문 조회어만
     DUR에 던지지 않고 e약은요 품목명과 허가정보의 품목명/주성분명을 함께 후보로 삼는다.
+
+    [2026-07-21 수정] raw_name마다 순차로 e약은요+허가정보 live API를 호출하던 걸
+    ThreadPoolExecutor로 병렬화했다 — 정부 공공데이터포털 API가 개별 호출당 수백ms~수초
+    걸릴 수 있어, 챗봇 DUR 질문 하나가 이 단계에서만 최대 10회(5개 후보 x 2개 API)
+    순차 호출로 여러 초가 걸리던 문제(사용자 보고 "챗봇 답변 느림")의 핵심 원인이었다.
     """
     try:
-        from rag.mfds_client import search_by_name, search_permit_info
+        from rag.mfds_client import search_by_name, search_permit_info  # noqa: F401
     except Exception:  # noqa: BLE001
         return raw_names
 
-    resolved: list[str] = []
-    for raw_name in raw_names:
-        resolved.append(raw_name)
-        try:
-            for drug in search_by_name(raw_name, num_of_rows=5):
-                resolved.append(drug.item_name)
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            for permit in search_permit_info(raw_name, num_of_rows=5):
-                resolved.append(permit.item_name)
-                if permit.ingr_name:
-                    for ingredient in re.split(r"[,;/+· ]+", permit.ingr_name):
-                        ingredient = ingredient.strip()
-                        if len(ingredient) >= 3:
-                            resolved.append(ingredient)
-        except Exception:  # noqa: BLE001
-            pass
+    if len(raw_names) == 1:
+        resolved = _resolve_one_dur_lookup_name(raw_names[0])
+    else:
+        with ThreadPoolExecutor(max_workers=min(len(raw_names), 8)) as executor:
+            resolved = [name for names in executor.map(_resolve_one_dur_lookup_name, raw_names) for name in names]
 
     seen: set[str] = set()
     result: list[str] = []
@@ -568,35 +588,64 @@ def _build_on_demand_dur_context(question_text: str, registered_drug_names: list
         return [
             "[DUR 보강조회] 질문에서 조회할 의약품명을 특정하지 못했습니다. 약 이름을 정확히 입력받아 DUR 병용금기/주의정보를 확인해야 합니다."
         ]
-    lookup_names = _resolve_dur_lookup_names(raw_candidate_names)
+    # [2026-07-21 추가] 이 경로(DUR 전용 질문)는 _retrieve_chat_rag_docs가 ChromaDB를
+    # 아예 건너뛰므로(DUR 데이터는 Chroma에 없음) Langfuse에 retriever 스팬이 하나도 안
+    # 남았다 — 실제 조회(e약은요/허가정보 이름 확인 + DUR API 4종)는 여기서 일어나는데
+    # 그게 하나도 안 보이니 "DUR 관련 질문인데 조회 기록이 없다"는 오해를 샀다.
+    # vectorstore.similarity_search()와 동일한 as_type="retriever" 패턴으로 span을 남긴다.
+    with optional_observation(
+        as_type="retriever",
+        name="retrieve-dur-lookup",
+        input={"raw_candidate_names": raw_candidate_names},
+    ) as observation:
+        lookup_names = _resolve_dur_lookup_names(raw_candidate_names)
 
-    lines: list[str] = []
-    for drug_name in lookup_names:
-        try:
-            taboos = _search_dur_taboo(drug_name)
-            cautions = _search_dur_cautions(drug_name)
-        except Exception:  # noqa: BLE001
-            lines.append(f"[DUR 보강조회] {drug_name}: DUR API 조회에 실패했습니다. 약사나 의사에게 확인이 필요합니다.")
-            continue
+        # [2026-07-21 수정] drug_name마다 병용금기(1회) + 노인주의/연령금기/임부금기(3회)를
+        # 순차 live API 호출로 조회하던 걸 ThreadPoolExecutor로 병렬화했다 — lookup_names가
+        # 최대 10개라 순차로는 최대 40회 호출이 직렬로 쌓였다(_resolve_dur_lookup_names의
+        # 병렬화와 같은 이유).
+        def _lookup_one(drug_name: str) -> tuple[str, list, list, Exception | None]:
+            try:
+                return drug_name, _search_dur_taboo(drug_name), _search_dur_cautions(drug_name), None
+            except Exception as exc:  # noqa: BLE001
+                return drug_name, [], [], exc
 
-        display_name = drug_name
-        for caution in cautions[:5]:
-            detail = f": {caution.detail}" if caution.detail else ""
-            extra = f" ({caution.extra})" if caution.extra else ""
-            lines.append(f"[DUR 보강조회] {display_name} - {caution.category}{extra}{detail}")
-
-        partner_names = [name for name in [*registered_drug_names, *lookup_names] if name != drug_name]
-        if _asks_for_taboo_list(question_text):
-            matched_taboos = taboos
+        if len(lookup_names) == 1:
+            lookup_results = [_lookup_one(lookup_names[0])]
         else:
-            matched_taboos = [
-                taboo
-                for taboo in taboos
-                if any(_matches_drug_name(taboo.mixture_item_name, partner) for partner in partner_names)
-            ]
-        for taboo in matched_taboos[:5]:
-            content = f": {taboo.prohbt_content}" if taboo.prohbt_content else ""
-            lines.append(f"[DUR 보강조회] {display_name} - {taboo.mixture_item_name} 병용금기{content}")
+            with ThreadPoolExecutor(max_workers=min(len(lookup_names), 8)) as executor:
+                lookup_results = list(executor.map(_lookup_one, lookup_names))
+
+        lines: list[str] = []
+        for drug_name, taboos, cautions, lookup_error in lookup_results:
+            if lookup_error is not None:
+                lines.append(f"[DUR 보강조회] {drug_name}: DUR API 조회에 실패했습니다. 약사나 의사에게 확인이 필요합니다.")
+                continue
+
+            display_name = drug_name
+            for caution in cautions[:5]:
+                detail = f": {caution.detail}" if caution.detail else ""
+                extra = f" ({caution.extra})" if caution.extra else ""
+                lines.append(f"[DUR 보강조회] {display_name} - {caution.category}{extra}{detail}")
+
+            partner_names = [name for name in [*registered_drug_names, *lookup_names] if name != drug_name]
+            if _asks_for_taboo_list(question_text):
+                matched_taboos = taboos
+            else:
+                matched_taboos = [
+                    taboo
+                    for taboo in taboos
+                    if any(_matches_drug_name(taboo.mixture_item_name, partner) for partner in partner_names)
+                ]
+            for taboo in matched_taboos[:5]:
+                content = f": {taboo.prohbt_content}" if taboo.prohbt_content else ""
+                lines.append(f"[DUR 보강조회] {display_name} - {taboo.mixture_item_name} 병용금기{content}")
+
+        update_observation(
+            observation,
+            output={"lookup_names": lookup_names, "retrieved_line_count": len(lines)},
+        )
+        flush_langfuse()
 
     if not lines:
         joined = ", ".join(raw_candidate_names)
@@ -604,12 +653,54 @@ def _build_on_demand_dur_context(question_text: str, registered_drug_names: list
     return lines
 
 
-def _retrieve_chat_rag_context(question_text: str, patient_context_text: str, k: int = 3) -> list[str]:
-    """챗봇 자유질문에도 ChromaDB 근거를 붙인다.
+_LIFESTYLE_KEYWORDS = (
+    "음식",
+    "식단",
+    "식이",
+    "먹으면 좋",
+    "먹지 말",
+    "먹지말",
+    "운동",
+    "생활습관",
+    "생활 습관",
+    "생활지침",
+    "금연",
+    "담배",
+    "음주",
+    "절주",
+    "체중",
+    "다이어트",
+    "합병증 예방",
+    "합병증예방",
+)
+
+
+def _is_lifestyle_question(question_text: str) -> bool:
+    """[2026-07-21 추가] 생활습관(음식/운동/주의사항) 질문인지 판별한다 — 이런 질문은 의약품
+    문서보다 질병관리청 건강정보(doc_type="kdca_health_info")를 우선 조회해야 한다
+    (_should_answer_from_dur_only와 동일한 키워드 기반 분류 방식)."""
+    normalized = question_text.replace(" ", "")
+    return any(keyword.replace(" ", "") in normalized for keyword in _LIFESTYLE_KEYWORDS)
+
+
+def _retrieve_chat_rag_docs(question_text: str) -> list:
+    """챗봇 자유질문의 실제 ChromaDB 근거 문서를 검색한다.
 
     처방전 등록 시 생성된 GuideResult만 읽으면 이미 저장된 요약에는 답할 수 있지만,
     Langfuse에서 실제 retrieval이 보이지 않고 최신 ChromaDB 근거도 다시 확인하지 못한다.
-    조회 실패는 챗봇 전체 실패로 보지 않고 빈 참고자료로 처리한다.
+    조회 실패는 챗봇 전체 실패로 보지 않고 빈 리스트로 처리한다.
+
+    [2026-07-20] 예전엔 이 함수가 LLM 프롬프트용 문자열만 만들고 실제 검색된 문서 정보
+    (title/source/item_name)를 API 응답에 전혀 안 내려줬다 — 프론트가 answer_source("llm
+    (gpt-4o-mini)" 등, 생성 "방법" 라벨일 뿐)를 "출처"로 오인해 보여주고 있었다. 이제
+    Document 자체를 반환해서 호출부가 프롬프트용 문자열(_rag_docs_to_prompt_lines)과
+    실제 인용 데이터(_rag_docs_to_source_refs) 양쪽을 같은 조회 결과에서 만든다.
+
+    [2026-07-21 수정] doc_type 필터 없이 컬렉션 전체를 한 번에 유사도 검색하면 의약품/생활습관
+    문서가 뒤섞여 나와 우선순위가 없었다 — rag_chain.py._build_context()와 동일한 원칙으로,
+    생활습관(음식/운동/주의사항) 질문은 질병관리청 건강정보(doc_type="kdca_health_info")를
+    최우선으로, 그 외(의약품 관련) 질문은 doc_type="drug"(e약은요/HIRA 기반 문서)를 최우선으로
+    조회하고 못 찾을 때만 필터 없는 전체 검색으로 넘어간다.
     """
     if _should_answer_from_dur_only(question_text):
         return []
@@ -623,10 +714,16 @@ def _retrieve_chat_rag_context(question_text: str, patient_context_text: str, k:
     try:
         from rag.vectorstore import similarity_search
 
-        docs = similarity_search(query[:1000], k=k)
+        primary_filter = {"doc_type": "kdca_health_info"} if _is_lifestyle_question(query) else {"doc_type": "drug"}
+        docs = similarity_search(query[:1000], k=3, filter=primary_filter)
+        if not docs:
+            docs = similarity_search(query[:1000], k=3)
+        return docs
     except Exception:  # noqa: BLE001 — RAG 조회 실패 시에도 챗봇 답변 폴백/LLM 답변은 유지
         return []
 
+
+def _rag_docs_to_prompt_lines(docs: list) -> list[str]:
     lines = []
     for idx, doc in enumerate(docs, start=1):
         title = doc.metadata.get("title") or doc.metadata.get("item_name") or doc.metadata.get("disease") or "자료"
@@ -634,6 +731,28 @@ def _retrieve_chat_rag_context(question_text: str, patient_context_text: str, k:
         label = f"{title} / {source}" if source else title
         lines.append(f"[{idx}] {label}\n{doc.page_content}")
     return lines
+
+
+def _rag_docs_to_source_refs(docs: list) -> list[dict]:
+    """실제 검색된 문서의 title/source/item_name 등을 프론트에서 확인할 수 있는 형태로
+    변환한다. frontend/src/api/records.ts의 기존 SourceRef 타입/formatSourceRef와 필드명을
+    맞춰 재사용한다(의약품 인용에 이미 쓰이는 관례 — 새 타입 안 만듦)."""
+    refs = []
+    for doc in docs:
+        ref = {
+            k: v
+            for k, v in {
+                "item_name": doc.metadata.get("item_name"),
+                "field": doc.metadata.get("field_label") or doc.metadata.get("field"),
+                "disease": doc.metadata.get("disease") or doc.metadata.get("title"),
+                "category": doc.metadata.get("category"),
+                "source": doc.metadata.get("source"),
+            }.items()
+            if v
+        }
+        if ref:
+            refs.append(ref)
+    return refs
 
 
 def _build_chat_messages(
@@ -710,9 +829,16 @@ def _resolve_question(payload: ChatAsk, session: Session) -> tuple[str, str, str
     raise HTTPException(422, "question_id 또는 question 중 하나는 필요해요")
 
 
-def _gather_llm_inputs(patient_id: int, question_text: str, session: Session) -> tuple[str, list[str], list[str], str]:
-    """환자 컨텍스트 + DUR 보강조회 + RAG 근거 + 챗봇 이름을 모은다 — /ask, /ask/stream 공용.
-    DUR/RAG는 리스트로 반환해 호출부가 각자 필요한 형태(개수 집계 vs 그냥 join)로 쓴다."""
+def _gather_llm_inputs(
+    patient_id: int, question_text: str, session: Session
+) -> tuple[str, list[str], list[str], str, list[dict]]:
+    """환자 컨텍스트 + DUR 보강조회 + RAG 근거 + 챗봇 이름 + RAG 인용 데이터를 모은다 —
+    /ask, /ask/stream 공용. DUR/RAG는 리스트로 반환해 호출부가 각자 필요한 형태(개수 집계
+    vs 그냥 join)로 쓴다.
+
+    [2026-07-20 추가] rag_refs — 실제 검색된 문서(title/source/item_name)를 API 응답의
+    source_refs로 내려주기 위해 한 번의 조회(_retrieve_chat_rag_docs)에서 프롬프트용
+    문자열과 함께 만든다(중복 조회 없음)."""
     context_text = _build_patient_context(patient_id, session)
     # DUR 조회용 약 이름: 처방전 OCR 약 이름 + 환자가 직접 등록한 약 이름을 합친다.
     # (버그: OCR만 보면 처방전 없이 '내 약 등록'만 한 환자는 DUR 조회에서 통째로 빠졌다.)
@@ -722,10 +848,12 @@ def _gather_llm_inputs(patient_id: int, question_text: str, session: Session) ->
         )
     )
     dur_context_lines = _build_on_demand_dur_context(question_text, registered_drug_names)
-    rag_context_lines = _retrieve_chat_rag_context(question_text, context_text)
+    rag_docs = _retrieve_chat_rag_docs(question_text)
+    rag_context_lines = _rag_docs_to_prompt_lines(rag_docs)
+    rag_refs = _rag_docs_to_source_refs(rag_docs)
     setting = session.get(NotificationSetting, patient_id)
     bot_name = setting.chatbot_name if setting else "약콩이"
-    return context_text, dur_context_lines, rag_context_lines, bot_name
+    return context_text, dur_context_lines, rag_context_lines, bot_name, rag_refs
 
 
 def _sse_event(data: dict) -> str:
@@ -770,6 +898,7 @@ def ask(payload: ChatAsk, actor: Actor = Depends(get_current_actor), session: Se
     context_line_count = 0
     rag_context_count = 0
     dur_context_count = 0
+    source_refs: list[dict] = []
 
     with optional_observation(
         as_type="span",
@@ -784,7 +913,7 @@ def ask(payload: ChatAsk, actor: Actor = Depends(get_current_actor), session: Se
     ) as trace:
         if _CHAT_LLM_AVAILABLE and use_llm:
             try:
-                context_text, dur_context_lines, rag_context_lines, bot_name = _gather_llm_inputs(
+                context_text, dur_context_lines, rag_context_lines, bot_name, source_refs = _gather_llm_inputs(
                     payload.patient_id, question_text, session
                 )
                 context_line_count = len([line for line in context_text.splitlines() if line.strip()])
@@ -814,6 +943,7 @@ def ask(payload: ChatAsk, actor: Actor = Depends(get_current_actor), session: Se
                     update_observation(generation, output={"answer": mask_for_langfuse(answer_text)})
             except Exception as exc:  # noqa: BLE001 — LLM 실패해도 챗봇 자체는 응답해야 함
                 answer_text, answer_source = fallback_answer, f"{fallback_source}_fallback ({type(exc).__name__})"
+                source_refs = []  # 실제 표시되는 답변은 폴백 문구라 방금 조회한 인용은 무관함
 
         update_observation(
             trace,
@@ -842,6 +972,7 @@ def ask(payload: ChatAsk, actor: Actor = Depends(get_current_actor), session: Se
         "question": question_text,
         "answer": answer_text,
         "answer_source": answer_source,
+        "source_refs": source_refs,
         "created_at": msg.created_at.isoformat(),
     }
 
@@ -871,6 +1002,7 @@ async def ask_stream(
 
     async def _stream():
         answer_text, answer_source = fallback_answer, fallback_source
+        source_refs: list[dict] = []
         chunks: list[str] = []
         started_ms = now_ms()
 
@@ -890,7 +1022,7 @@ async def ask_stream(
                     from langchain_openai import ChatOpenAI
                     from rag.config import settings as rag_settings
 
-                    context_text, dur_lines, rag_lines, bot_name = await asyncio.to_thread(
+                    context_text, dur_lines, rag_lines, bot_name, source_refs = await asyncio.to_thread(
                         _gather_llm_inputs, patient_id, question_text, session
                     )
                     messages = _build_chat_messages(
@@ -919,6 +1051,7 @@ async def ask_stream(
                         answer_source = f"llm_partial ({type(exc).__name__})"
                     else:
                         answer_text, answer_source = fallback_answer, f"{fallback_source}_fallback ({type(exc).__name__})"
+                        source_refs = []  # 실제 표시되는 답변은 폴백 문구라 방금 조회한 인용은 무관함
                         yield _sse_event({"delta": answer_text})
             else:
                 yield _sse_event({"delta": answer_text})
@@ -945,6 +1078,7 @@ async def ask_stream(
             {
                 "done": True,
                 "answer_source": answer_source,
+                "source_refs": source_refs,
                 "created_at": created_at,
                 "partial": answer_source.startswith("llm_partial"),
             }

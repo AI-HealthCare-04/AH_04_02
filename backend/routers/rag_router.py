@@ -154,7 +154,11 @@ def _generate_via_rag(ocr_items: Sequence[OcrResult]) -> tuple[dict, dict, list]
 
     medications = [
         {
-            "drug_name": item.drug_name,
+            # [2026-07-20 버그수정] item.drug_name(축약명)이 아니라 item.display_name(확신
+            # 있게 매칭됐으면 전체 제품명)으로 RAG/DUR 조회를 해야 "노바스크정5mg" 같은
+            # 원문이 "노바스크"로 잘려서 조회되는 걸 막는다 — records_router.py의 화면
+            # 표시 규칙과 동일(models.py의 OcrResult.display_name 참고).
+            "drug_name": item.display_name,
             "dosage": item.dosage,
             "frequency": item.frequency,
             "diagnosis": item.diagnosis,
@@ -172,6 +176,7 @@ def _generate_via_rag(ocr_items: Sequence[OcrResult]) -> tuple[dict, dict, list]
                 "medication_guide": g.medication_guide,
                 "precautions": g.precautions,
                 "review_required": g.review_required,
+                "review_reason": g.review_reason,
                 "review_flags": g.review_flags,
             }
             for g in guides

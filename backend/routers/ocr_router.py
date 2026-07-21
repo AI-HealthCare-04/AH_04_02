@@ -74,6 +74,16 @@ def _fetch_rag_drug_detail(drug_name: str) -> dict:
 
     precaution_parts: list[str] = []
 
+    # [2026-07-20 추가] "노바스크정5mg"처럼 e약은요 등록명과 글자 단위로 다른 이름이 들어와도
+    # 조회가 걸리도록 후보 이름을 순서대로 시도한다(rag_chain.py의 resolve_drug_name_candidates
+    # 재사용 — DUR/RAG 가이드 생성과 동일한 폴백 체인, 중복 구현 금지).
+    try:
+        from rag.rag_chain import resolve_drug_name_candidates
+
+        candidates = resolve_drug_name_candidates(drug_name)
+    except Exception:  # noqa: BLE001 — 후보 생성 실패 시 원문 하나만으로 폴백
+        candidates = [drug_name]
+
     # [2026-07-20] "사용상의 주의사항"이라는 정확한 명칭의 필드는 e약은요(atpn_qesitm,
     # 그냥 "주의사항"으로 라벨링됨)가 아니라 허가정보 상세(search_permit_detail의
     # nb_doc_data)에 있다 — mfds_client.py에 이미 "제품허가정보로 사용상의 주의사항
@@ -82,27 +92,31 @@ def _fetch_rag_drug_detail(drug_name: str) -> dict:
     try:
         from rag.mfds_client import parse_doc_sections, search_permit_detail
 
-        permit_hits = search_permit_detail(drug_name, num_of_rows=1)
-        if permit_hits and permit_hits[0].nb_doc_data:
-            sections = parse_doc_sections(permit_hits[0].nb_doc_data)
-            for title, text in sections:
-                precaution_parts.append(f"[사용상의 주의사항 - {title}] {text}" if title else text)
+        for candidate in candidates:
+            permit_hits = search_permit_detail(candidate, num_of_rows=1)
+            if permit_hits and permit_hits[0].nb_doc_data:
+                sections = parse_doc_sections(permit_hits[0].nb_doc_data)
+                for title, text in sections:
+                    precaution_parts.append(f"[사용상의 주의사항 - {title}] {text}" if title else text)
+                break
     except Exception:  # noqa: BLE001 — 키 미설정/네트워크 실패/미등재 약품명 등 어떤 이유로든 조용히 폴백
         pass
 
     try:
         from rag.mfds_client import search_by_name
 
-        hits = search_by_name(drug_name, num_of_rows=1)
-        if hits:
-            hit = hits[0]
-            if hit.atpn_warn_qesitm:
-                precaution_parts.append(f"[경고] {hit.atpn_warn_qesitm.strip()}")
-            if hit.atpn_qesitm:
-                precaution_parts.append(hit.atpn_qesitm.strip())
-            side_effects = hit.se_qesitm.strip() if hit.se_qesitm else None
-            interactions = hit.intrc_qesitm.strip() if hit.intrc_qesitm else None
-            storage = hit.deposit_method_qesitm.strip() if hit.deposit_method_qesitm else None
+        for candidate in candidates:
+            hits = search_by_name(candidate, num_of_rows=1)
+            if hits:
+                hit = hits[0]
+                if hit.atpn_warn_qesitm:
+                    precaution_parts.append(f"[경고] {hit.atpn_warn_qesitm.strip()}")
+                if hit.atpn_qesitm:
+                    precaution_parts.append(hit.atpn_qesitm.strip())
+                side_effects = hit.se_qesitm.strip() if hit.se_qesitm else None
+                interactions = hit.intrc_qesitm.strip() if hit.intrc_qesitm else None
+                storage = hit.deposit_method_qesitm.strip() if hit.deposit_method_qesitm else None
+                break
     except Exception:  # noqa: BLE001 — 키 미설정/네트워크 실패/미등재 약품명 등 어떤 이유로든 조용히 폴백
         pass
 
@@ -112,11 +126,13 @@ def _fetch_rag_drug_detail(drug_name: str) -> dict:
     try:
         from rag.dur_master import search_age_taboo, search_elderly_caution, search_pregnancy_taboo
 
-        raw_cautions = [
-            *search_elderly_caution(drug_name, num_of_rows=20),
-            *search_age_taboo(drug_name, num_of_rows=20),
-            *search_pregnancy_taboo(drug_name, num_of_rows=20),
-        ]
+        raw_cautions: list = []
+        for search_fn in (search_elderly_caution, search_age_taboo, search_pregnancy_taboo):
+            for candidate in candidates:
+                found = search_fn(candidate, num_of_rows=20)
+                if found:
+                    raw_cautions.extend(found)
+                    break
         dur_cautions = [
             {"category": c.category, "detail": c.detail, "extra": c.extra} for c in raw_cautions
         ]

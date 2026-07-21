@@ -4,6 +4,37 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _clear_mfds_lru_caches():
+    """[2026-07-21 추가] search_by_name/search_permit_info/search_permit_detail/DUR 4종에
+    lru_cache를 추가했다(챗봇 DUR 조회 속도 개선) — 캐시가 프로세스 생명주기 동안 유지되면
+    같은 item_name을 서로 다른 mock 응답으로 검증하는 테스트끼리 캐시를 공유해 먼저 실행된
+    테스트의 결과가 나중 테스트에 새어나간다(실제로 test_search_by_name_raises_on_error_code가
+    이렇게 깨졌다). 매 테스트 전후로 캐시를 비워 테스트 간 격리를 보장한다."""
+    from rag.dur_master import (
+        search_age_taboo,
+        search_elderly_caution,
+        search_pregnancy_taboo,
+        search_usjnt_taboo,
+    )
+    from rag.mfds_client import search_by_name, search_permit_detail, search_permit_info
+
+    caches = [
+        search_by_name,
+        search_permit_info,
+        search_permit_detail,
+        search_usjnt_taboo,
+        search_elderly_caution,
+        search_age_taboo,
+        search_pregnancy_taboo,
+    ]
+    for cached_fn in caches:
+        cached_fn.cache_clear()
+    yield
+    for cached_fn in caches:
+        cached_fn.cache_clear()
+
+
+@pytest.fixture(autouse=True)
 def _no_real_dur_lookups():
     """DUR 조회 함수들이 실수로 로컬의 실제(수십만~87만 행) CSV를 읽지 않도록 기본값을 빈 리스트로 고정한다.
 

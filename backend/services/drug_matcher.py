@@ -21,12 +21,35 @@ _cached_names: list[str] | None = None
 _cached_norm_names: list[str] | None = None  # _normalize() 적용된 기준 목록
 
 # 용량·제형 정보 패턴 — OCR과 기준 목록 양쪽에 동일하게 적용
+# [2026-07-20 버그수정] HIRA 약가마스터가 같은 성분의 다른 용량 항목끼리도 "밀리그램"/
+# "밀리그람"(마이크로그램도 마찬가지) 표기를 섞어 쓴다(정부 데이터 자체의 표기 불일치,
+# 예: "노바스크정5밀리그람" vs "노바스크정2.5밀리그램") — 영문 단위(mg/g 등)만 인식하던
+# 기존 패턴은 이 한글 표기를 전혀 못 지워서, 정규화를 거쳐도 용량이 그대로 남아있었다.
+# 그 결과 "노바스크정5밀리그램"(OCR 원문)이 정답("노바스크정5밀리그람", 표기만 다름)보다
+# 전혀 다른 약("노바크정5밀리그램", 우연히 "그램" 철자가 똑같아 근소하게 더 높은 점수)에
+# 더 가깝게 계산되는 오매칭이 실제로 재현됐다.
 _DOSAGE_RE = re.compile(
     r'\s*\d+(\.\d+)?\s*'
-    r'(mg|ml|mcg|μg|ug|g|mEq|IU|%|정|캡슐|연질캡슐|장용정|장용캡슐|서방정|분산정|액|시럽|주|크림|연고|겔|패취|패치|점안|점이)'
-    r'(\s*/\s*\d+(\.\d+)?\s*(mg|ml|mcg|μg|ug|g|mEq|IU|%|정|캡슐|연질캡슐|장용정|장용캡슐|서방정|분산정))?',
+    r'(mg|ml|mcg|μg|ug|g|mEq|IU|%'
+    r'|밀리그램|밀리그람|마이크로그램|마이크로그람|그램|그람|밀리리터|리터'
+    r'|정|캡슐|연질캡슐|장용정|장용캡슐|서방정|분산정|액|시럽|주|크림|연고|겔|패취|패치|점안|점이)'
+    r'(\s*/\s*\d+(\.\d+)?\s*(mg|ml|mcg|μg|ug|g|mEq|IU|%'
+    r'|밀리그램|밀리그람|마이크로그램|마이크로그람|그램|그람|밀리리터|리터'
+    r'|정|캡슐|연질캡슐|장용정|장용캡슐|서방정|분산정))?',
     re.IGNORECASE,
 )
+
+_DOSAGE_NUMBER_RE = re.compile(
+    r'(\d+(?:\.\d+)?)\s*'
+    r'(?:mg|ml|mcg|μg|ug|g|mEq|IU|%|밀리그램|밀리그람|마이크로그램|마이크로그람|그램|그람|밀리리터|리터)',
+    re.IGNORECASE,
+)
+
+
+def _extract_dosage_number(text: str) -> str | None:
+    """이름에서 단위 직전 첫 용량 숫자를 추출한다("5"/"2.5" 등) — 없으면 None."""
+    m = _DOSAGE_NUMBER_RE.search(text)
+    return m.group(1) if m else None
 
 
 def _normalize(text: str) -> str:
@@ -62,9 +85,16 @@ def _match_normalized(
     """정규화된 문자열로 기준 목록과 매칭, (원본 기준명, score) 반환.
 
     1단계: normalized 문자열로 유사도 점수 계산.
-    동점 시 2단계: 원본 ocr_text vs raw 기준명으로 타이브레이킹 — 같은 성분명 다른
-    용량("메트포르민정250mg"/"메트포르민정500mg")이 동일한 normalized로 뭉쳐질 때
-    원본 문자열에 가장 가까운 항목을 선택한다.
+    동점 시 2단계: 용량 숫자가 원본과 정확히 같은 후보를 우선한다 — 3단계: 그래도
+    못 가르면 원본 ocr_text vs raw 기준명 전체 문자열 유사도로 타이브레이킹한다.
+
+    [2026-07-20 버그수정] 2단계(용량 숫자 우선)가 없었을 때는, 같은 성분명 다른
+    용량("노바스크정2.5밀리그램"/"노바스크정5밀리그람" 등, 정규화 후 전부 "노바스크정"
+    으로 뭉쳐짐)이 동시에 후보가 되면 3단계(전체 문자열 유사도)만으로 골랐는데,
+    difflib.SequenceMatcher.ratio()가 문자열 길이·삽입 위치에 따라 부정확하게 흔들려서
+    OCR 원문이 "5mg"인데 "2.5mg" 항목이 오히려 근소하게 더 높은 점수로 뽑히는 실제
+    오매칭이 있었다(용량이 다른 약을 골라버리는 건 복약 안전상 특히 위험). 용량 숫자가
+    명시적으로 일치하는 후보가 있으면 그걸 최우선으로 삼아 이 위험을 없앤다.
     """
     close_norm = get_close_matches(norm_ocr, norm_pool, n=5, cutoff=0.3)
     if close_norm:
@@ -80,12 +110,22 @@ def _match_normalized(
     else:
         candidates = list(zip(raw_pool[:500], norm_pool[:500]))
 
+    ocr_dosage = _extract_dosage_number(ocr_text)
+
     best_name, best_score = "", 0.0
     for raw_name, norm_name in candidates:
         score = SequenceMatcher(None, norm_ocr, norm_name).ratio()
         if score > best_score:
             best_score, best_name = score, raw_name
         elif score == best_score and best_name:
+            if ocr_dosage is not None:
+                raw_matches_dosage = _extract_dosage_number(raw_name) == ocr_dosage
+                best_matches_dosage = _extract_dosage_number(best_name) == ocr_dosage
+                if raw_matches_dosage and not best_matches_dosage:
+                    best_name = raw_name
+                    continue
+                if best_matches_dosage and not raw_matches_dosage:
+                    continue
             raw_score = SequenceMatcher(None, ocr_text, raw_name).ratio()
             prev_raw_score = SequenceMatcher(None, ocr_text, best_name).ratio()
             if raw_score > prev_raw_score:

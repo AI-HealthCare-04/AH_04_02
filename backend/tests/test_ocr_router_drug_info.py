@@ -198,8 +198,11 @@ class TestDrugInfoMatchedNameValidation:
             r = client.get("/ocr/drug-info", params={"drug_name": "케이캡정50mg"})
 
         assert r.status_code == 200
-        mock_search.assert_called_once_with("케이캡정50mg", num_of_rows=1)
-        mock_permit.assert_called_once_with("케이캡정50mg", num_of_rows=1)
+        # [2026-07-20] resolve_drug_name_candidates()가 원문 다음으로 용량표기 제거명도
+        # 시도하므로 이제 호출이 1회로 고정되지 않는다 — 원문 그대로 조회했는지(다른 이름으로
+        # "바꿔치기"되지 않았는지)만 확인한다.
+        mock_search.assert_any_call("케이캡정50mg", num_of_rows=1)
+        mock_permit.assert_any_call("케이캡정50mg", num_of_rows=1)
 
 
 class TestDrugInfoPatientSummaryField:

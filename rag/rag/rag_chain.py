@@ -1,5 +1,8 @@
 import json
+import logging
+import re
 
+from langchain_core.documents import Document
 from rag.chunking import drugs_to_documents
 from rag.config import settings
 from rag.dur_master import (
@@ -33,6 +36,8 @@ from rag.vectorstore import (
     search_kdca_health_info,
     similarity_search,
 )
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
 당신은 고령 만성질환 환자와 보호자를 위한 복약·생활습관 가이드를 작성하는 보조자입니다.
@@ -82,15 +87,63 @@ class NoContextFoundError(RuntimeError):
     pass
 
 
-def _live_fetch_and_ingest(drug_name: str) -> None:
-    """벡터DB에 없는 약이면 식약처 API에서 바로 조회해 즉시 채워 넣는다.
+def _live_fetch_and_ingest(drug_name: str) -> list[Document]:
+    """벡터DB에 없는 약이면 식약처 API에서 바로 조회해 즉시 채워 넣고, 그 문서를 그대로 돌려준다.
 
     OCR이 처방전에서 실시간으로 뽑아내는 약은 사전 ingest 배치에 없을 수 있으므로,
     이 fallback이 없으면 방금 인식한 약을 조회할 방법이 없다.
+
+    [2026-07-20 수정] 예전엔 인제스트만 하고 호출부가 같은 drug_name 문자열로
+    search_by_item_name()을 다시 호출했는데, e약은요가 반환하는 공식 item_name이
+    질의어와 다를 수 있어(예: "5mg" 질의 → 실제 저장은 "5밀리그람") 재조회가 또 실패했다.
+    방금 만든 문서를 그대로 반환해 이 재조회 단계 자체를 없앤다.
     """
     found = search_by_name(drug_name, num_of_rows=settings.TOP_K)
-    if found:
-        add_documents(drugs_to_documents(found))
+    if not found:
+        return []
+    documents = drugs_to_documents(found)
+    add_documents(documents)
+    return documents
+
+
+_DOSAGE_FORM_RE = re.compile(
+    r'\s*\d+(\.\d+)?\s*'
+    r'(mg|ml|mcg|μg|ug|g|mEq|IU|%|정|캡슐|연질캡슐|장용정|장용캡슐|서방정|분산정|액|시럽|주|크림|연고|겔|패취|패치|점안|점이)'
+    r'(\s*/\s*\d+(\.\d+)?\s*(mg|ml|mcg|μg|ug|g|mEq|IU|%|정|캡슐|연질캡슐|장용정|장용캡슐|서방정|분산정))?',
+    re.IGNORECASE,
+)
+
+
+def _strip_dosage_form(text: str) -> str:
+    """용량·제형 표기를 제거한 이름 반환("암로디핀정5mg" -> "암로디핀").
+
+    backend/services/drug_matcher.py의 _normalize()와 발상이 같지만, rag/ 패키지는
+    backend를 import하지 않는 기존 관례(별도 배포 단위)를 따르기 위해 여기서 작게
+    재구현한다.
+    """
+    normalized = _DOSAGE_FORM_RE.sub("", text).strip()
+    return re.sub(r'\s+', ' ', normalized).strip()
+
+
+def resolve_drug_name_candidates(drug_name: str) -> list[str]:
+    """이름 표기 불일치(용량 단위 표기 차이 등) 대응용 후보 목록 — 원문 → 용량·제형 표기
+    제거명 순으로, 순서대로 시도해 첫 히트에서 멈추는 fallback 체인에 쓴다.
+
+    [2026-07-20] HIRA 약가마스터/허가정보 조회로 후보를 추가로 확장하는 안도 검토했지만,
+    실제 라이브 API로 확인한 결과 HIRA/허가정보도 e약은요와 마찬가지로 브랜드/상품명
+    표기이지 성분명 사전이 아니라(예: "노바스크정5밀리그람(암로디핀베실산염)"처럼 브랜드+
+    용량+성분명이 한 문자열에 섞여 있음) — 실질적인 매칭 개선 효과가 불확실한 반면, 매
+    호출마다 네트워크 조회가 2회씩 추가로 늘어나고 기존 _build_context 테스트들의
+    "HIRA/허가정보는 정확히 1번만 조회한다"는 전제도 깨뜨린다. 그래서 네트워크 호출 없는
+    로컬 정규화만 후보로 둔다 — 실제 이름 찾기는 e약은요 라이브 partial-match
+    API(_live_fetch_and_ingest)가 이미 담당한다.
+    """
+    candidates: list[str] = []
+    for name in (drug_name, _strip_dosage_form(drug_name)):
+        name = (name or "").strip()
+        if name and name not in candidates:
+            candidates.append(name)
+    return candidates
 
 
 def _lookup_hira_entry(item_name: str, cache: dict[str, HiraDrugMasterEntry | None]) -> HiraDrugMasterEntry | None:
@@ -154,13 +207,20 @@ def _build_context(
     dosage: str = "",
     diagnosis: str | None = None,
 ) -> list[dict]:
-    docs = search_by_item_name(drug_name)
-    if not docs:
-        _live_fetch_and_ingest(drug_name)
-        docs = search_by_item_name(drug_name)
+    docs: list[Document] = []
+    for candidate in resolve_drug_name_candidates(drug_name):
+        docs = search_by_item_name(candidate)
+        if not docs:
+            docs = _live_fetch_and_ingest(candidate)
+        if docs:
+            break
     if not docs:
         query = " ".join(part for part in (drug_name, dosage, situation) if part).strip()
-        docs = similarity_search(query, k=settings.TOP_K)
+        # doc_type="drug" 필터 — 이 컬렉션엔 KDCA 생활지침 문서(item_name 메타데이터 자체가
+        # 없음)도 섞여 있어, 필터 없이 검색하면 그 문서가 섞여 들어와 아래 루프가 죽을 수
+        # 있었다(2026-07-20 실서버 재현 확인). chunking.py가 새로 태깅한 문서만 이 필터에
+        # 걸리므로, 백필 전 기존 문서 대비 아래 .get() 방어도 함께 둔다.
+        docs = similarity_search(query, k=settings.TOP_K, filter={"doc_type": "drug"})
 
     hira_cache: dict[str, HiraDrugMasterEntry | None] = {}
     permit_cache: dict[str, DrugPermitInfo | None] = {}
@@ -168,8 +228,11 @@ def _build_context(
     context_items = []
     item_seqs: dict[str, str] = {}
     for doc in docs:
-        item_name = doc.metadata["item_name"]
-        item_seqs.setdefault(item_name, doc.metadata["item_seq"])
+        item_name = doc.metadata.get("item_name")
+        if item_name is None:
+            logger.warning("문서에 item_name 메타데이터가 없어 건너뜁니다: %r", doc.metadata)
+            continue
+        item_seqs.setdefault(item_name, doc.metadata.get("item_seq", ""))
         hira_entry = _lookup_hira_entry(item_name, hira_cache)
         permit_entry = _lookup_permit_entry(item_name, permit_cache)
         context_items.append(
@@ -177,9 +240,9 @@ def _build_context(
                 "kind": "drug",
                 "text": doc.page_content,
                 "source_ref": SourceRef(
-                    item_seq=doc.metadata["item_seq"],
+                    item_seq=doc.metadata.get("item_seq", ""),
                     item_name=item_name,
-                    field=doc.metadata["field_label"],
+                    field=doc.metadata.get("field_label", ""),
                     update_de=doc.metadata.get("update_de") or None,
                     hira_standard_code=hira_entry.standard_code if hira_entry else None,
                     hira_atc_code=hira_entry.atc_code if hira_entry else None,
@@ -216,29 +279,17 @@ def _build_context(
                 }
             )
 
+    # [2026-07-21 버그수정] data/lifestyle_guidelines.json(4개 질환 curated set)은 실제로는
+    # 대한고혈압학회/대한당뇨병학회/한국지질·동맥경화학회/대한신장학회 등 학회 진료지침을
+    # AI 챗봇 요약 대화로 정리한 2차 가공 데이터다(README_rag.md에 "실제 서비스 반영 전 원문과
+    # 반드시 대조 검증"이 필요하다고 명시된 미검증 상태) — 11건 중 단 2건만 질병관리청을
+    # 인용하고 당뇨병/이상지질혈증/만성콩팥병은 질병관리청 인용이 아예 없다. 생활습관(음식/
+    # 운동/주의사항) 안내는 질병관리청 국가건강정보포털 실제 수집분(search_kdca_health_info)을
+    # 최우선 소스로 삼고, 그걸로 못 찾을 때만 이 curated 학회 요약으로 보강한다.
     lifestyle_found = False
-    for disease_code in _resolve_disease_codes(diagnosis):
-        for doc in search_by_disease(disease_code):
-            lifestyle_found = True
-            context_items.append(
-                {
-                    "kind": "lifestyle",
-                    "text": doc.page_content,
-                    "source_ref": LifestyleSourceRef(
-                        guideline_id=doc.metadata["guideline_id"],
-                        disease=doc.metadata["disease"],
-                        category=doc.metadata["category"],
-                        source=doc.metadata["source"],
-                    ),
-                }
-            )
-
-    # data/lifestyle_guidelines.json은 4개 만성질환만 사람이 손으로 정리한 것이라
-    # 그 목록에 없는 진단명은 위 루프가 항상 0건이다. 663건 전체를 알아서 등록할 수는
-    # 없으니(REQ-015~019 범위 확장), 이럴 때만 질병관리청 국가건강정보포털 전체
-    # 수집분(KdcaHealthInfoSection)에서 임베딩 유사도로 보강한다.
-    if not lifestyle_found and diagnosis:
+    if diagnosis:
         for doc in search_kdca_health_info(diagnosis, k=3):
+            lifestyle_found = True
             context_items.append(
                 {
                     "kind": "lifestyle",
@@ -251,6 +302,22 @@ def _build_context(
                     ),
                 }
             )
+
+    if not lifestyle_found:
+        for disease_code in _resolve_disease_codes(diagnosis):
+            for doc in search_by_disease(disease_code):
+                context_items.append(
+                    {
+                        "kind": "lifestyle",
+                        "text": doc.page_content,
+                        "source_ref": LifestyleSourceRef(
+                            guideline_id=doc.metadata["guideline_id"],
+                            disease=doc.metadata["disease"],
+                            category=doc.metadata["category"],
+                            source=doc.metadata["source"],
+                        ),
+                    }
+                )
 
     for idx, item in enumerate(context_items, start=1):
         item["idx"] = idx
@@ -439,10 +506,14 @@ def _check_dur_taboo(drug_name: str, other_drug_names: list[str]) -> list[DurWar
     """
     if not other_drug_names:
         return []
-    try:
-        taboo_entries = search_usjnt_taboo(drug_name)
-    except Exception:  # noqa: BLE001 — DUR 조회 실패가 가이드 생성 자체를 막으면 안 됨
-        return []
+    taboo_entries: list = []
+    for candidate in resolve_drug_name_candidates(drug_name):
+        try:
+            taboo_entries = search_usjnt_taboo(candidate)
+        except Exception:  # noqa: BLE001 — DUR 조회 실패가 가이드 생성 자체를 막으면 안 됨
+            taboo_entries = []
+        if taboo_entries:
+            break
 
     # DUR CSV는 브랜드(제품) 단위라, 같은 성분의 약이 여러 제조사 제품으로 등재돼 있으면
     # 같은 경고가 수십~수천 건 중복될 수 있다(예: "메토트렉세이트" 주사제만 제조사별로 여러 종).
@@ -476,11 +547,16 @@ def _check_dur_cautions(drug_name: str) -> list[DurCaution]:
     생성 자체는 막지 않는다 (_check_dur_taboo와 동일한 fail-safe 원칙).
     """
     cautions: list[DurCaution] = []
+    candidates = resolve_drug_name_candidates(drug_name)
     for search_fn in (search_elderly_caution, search_age_taboo, search_pregnancy_taboo):
-        try:
-            cautions.extend(search_fn(drug_name))
-        except Exception:  # noqa: BLE001 — DUR 조회 실패가 가이드 생성 자체를 막으면 안 됨
-            continue
+        for candidate in candidates:
+            try:
+                found = search_fn(candidate)
+            except Exception:  # noqa: BLE001 — DUR 조회 실패가 가이드 생성 자체를 막으면 안 됨
+                found = []
+            if found:
+                cautions.extend(found)
+                break
     return cautions
 
 
@@ -564,6 +640,7 @@ def generate_guides_from_medications(medications: list) -> list[GuideResponse]:
             drug_name = (
                 medication.get("drug_name") if isinstance(medication, dict) else getattr(medication, "drug_name", "")
             ) or "(미상)"
+            logger.exception("가이드 생성 실패: drug_name=%s", drug_name)
             guides.append(
                 GuideResponse(
                     drug_name=drug_name,
