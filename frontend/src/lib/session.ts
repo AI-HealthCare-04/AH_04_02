@@ -28,6 +28,80 @@ export function isLoggedIn(): boolean {
   return !!localStorage.getItem("access_token");
 }
 
+/**
+ * [2026-07-21 추가] "다른 사용자로 전환"(MyPage.tsx) — 네이버 등에서처럼 이 기기에서
+ * 로그인했던 계정을 기억해뒀다가 클릭 한 번으로 다시 로그인할 수 있게 함.
+ * access_token을 그대로 저장해뒀다가 재사용하는 방식이라, 그 계정의 토큰이 이미
+ * 만료됐으면 API 호출이 401로 실패하고 monitoringClient.ts 인터셉터가 /login으로
+ * 돌려보낸다 — 그 경우 사용자가 그 계정을 다시 비밀번호로 로그인하면 된다(치명적
+ * 실패 아님, 그냥 일반 로그인 화면으로 돌아가는 정도).
+ */
+export interface RecentAccount {
+  identifier: string; // 로그인에 쓴 이메일/전화번호 — 계정 식별 및 표시용
+  name: string;
+  accessToken: string;
+  // [2026-07-22 수정] 케어하는 환자가 아직 없는 보호자는 로그인 시점엔 patientId가 없다 —
+  // 이 경우까지 저장 대상에서 빠지면 "체크했는데 목록에 안 뜬다" 버그가 된다.
+  patientId?: number;
+  caregiverId?: number;
+}
+
+const RECENT_ACCOUNTS_KEY = "recent_accounts";
+const MAX_RECENT_ACCOUNTS = 5;
+
+export function getRecentAccounts(): RecentAccount[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(RECENT_ACCOUNTS_KEY) ?? "[]");
+    return Array.isArray(raw) ? raw : [];
+  } catch {
+    return [];
+  }
+}
+
+/** 로그인 성공 직후(Login.tsx) 호출 — 같은 계정이 이미 있으면 맨 앞으로 갱신, 5개까지만 유지. */
+export function saveRecentAccount(account: RecentAccount): void {
+  const next = [account, ...getRecentAccounts().filter((a) => a.identifier !== account.identifier)].slice(
+    0,
+    MAX_RECENT_ACCOUNTS
+  );
+  localStorage.setItem(RECENT_ACCOUNTS_KEY, JSON.stringify(next));
+}
+
+export function removeRecentAccount(identifier: string): void {
+  localStorage.setItem(
+    RECENT_ACCOUNTS_KEY,
+    JSON.stringify(getRecentAccounts().filter((a) => a.identifier !== identifier))
+  );
+}
+
+/** 목록에서 계정을 클릭했을 때 — 비밀번호 없이 그 계정의 세션으로 바로 전환. */
+export function switchToRecentAccount(account: RecentAccount): void {
+  localStorage.setItem("access_token", account.accessToken);
+  localStorage.setItem("user_name", account.name);
+  // [2026-07-22 수정] 케어하는 환자가 없는 보호자는 patientId가 없다 — 억지로 지우거나
+  // "0"을 넣지 않고 그대로 둔다(Login.tsx가 이 값 유무로 /patients vs /dashboard를 정한다).
+  if (account.patientId) localStorage.setItem("patient_id", String(account.patientId));
+  else localStorage.removeItem("patient_id");
+  if (account.caregiverId) localStorage.setItem("caregiver_id", String(account.caregiverId));
+  else localStorage.removeItem("caregiver_id");
+}
+
+/** [2026-07-21 추가] "아이디 저장" 체크박스 — 비밀번호/토큰 없이 이메일·전화번호 입력칸만
+ * 다음에 미리 채워둔다("자동 로그인"보다 약한, 그냥 타이핑 한 번 줄여주는 기능). */
+const REMEMBERED_IDENTIFIER_KEY = "remembered_identifier";
+
+export function getRememberedIdentifier(): string {
+  return localStorage.getItem(REMEMBERED_IDENTIFIER_KEY) ?? "";
+}
+
+export function setRememberedIdentifier(identifier: string): void {
+  localStorage.setItem(REMEMBERED_IDENTIFIER_KEY, identifier);
+}
+
+export function clearRememberedIdentifier(): void {
+  localStorage.removeItem(REMEMBERED_IDENTIFIER_KEY);
+}
+
 /** [2026-07-14 추가] 마이페이지 글자 크기 설정 — 컴포넌트 대부분이 rem이 아닌 고정 px로
  * 스타일링되어 있어 :root font-size만으로는 전체 화면에 적용되지 않는다. 대신 브라우저의
  * `zoom` 배율을 그대로 써서 폰트뿐 아니라 여백·아이콘까지 통째로 축소/확대한다. */

@@ -1,22 +1,56 @@
 import { useState } from "react";
+import type { MouseEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import { X } from "lucide-react";
 import NavBar from "../components/NavBar";
 import { login } from "../api/auth";
 import { getCaregiverPatients, type Caregiver, type Patient } from "../api/monitoring";
+import {
+  clearRememberedIdentifier,
+  getRecentAccounts,
+  getRememberedIdentifier,
+  removeRecentAccount,
+  saveRecentAccount,
+  setRememberedIdentifier,
+  switchToRecentAccount,
+  type RecentAccount,
+} from "../lib/session";
 import { C } from "../theme";
 
 export default function Login() {
   const navigate = useNavigate();
-  const [identifier, setIdentifier] = useState("");
+  const [identifier, setIdentifier] = useState(getRememberedIdentifier);
   const [password, setPassword] = useState("");
   const [selectedCaregiver, setSelectedCaregiver] = useState<Caregiver | null>(null);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // [2026-07-21 추가] "다른 사용자로 전환" — 이 기기에서 로그인했던 계정 목록
+  const [recentAccounts, setRecentAccounts] = useState<RecentAccount[]>(getRecentAccounts());
+  // 보호자가 케어하는 환자가 여럿이라 선택 화면을 거칠 때, 그 사이에 로그인 응답의
+  // access_token을 들고 있다가 환자를 고른 시점에 saveRecentAccount에 같이 넘긴다.
+  const [pendingAccessToken, setPendingAccessToken] = useState("");
+  // [2026-07-21 추가] 아이디 저장(이메일/전화번호만 미리 채움) vs 자동 로그인(비밀번호 없이
+  // 바로 전환되는 계정 목록에 추가) — 이미 저장된 아이디가 있으면 체크박스도 켜서 보여준다.
+  const [rememberId, setRememberId] = useState(() => getRememberedIdentifier() !== "");
+  const [autoLogin, setAutoLogin] = useState(false);
 
-  const proceedWithPatient = (caregiverId: number, patient: Patient) => {
+  // 로그인 성공 직후 공통 처리 — 체크박스 상태에 따라 아이디/계정을 기억하거나 지운다.
+  const persistLoginChoice = (account: RecentAccount) => {
+    if (rememberId) setRememberedIdentifier(account.identifier);
+    else clearRememberedIdentifier();
+
+    // [사용자 요청] "자동로그인에 체크하는 계정만 저장되게" — 체크 안 하면 계정 전환
+    // 목록에도 안 남아야 하므로, 이전에 체크해서 저장돼있었더라도 지금 체크를 껐으면 제거한다.
+    if (autoLogin) saveRecentAccount(account);
+    else removeRecentAccount(account.identifier);
+    setRecentAccounts(getRecentAccounts());
+  };
+
+  const proceedWithPatient = (caregiverId: number, patient: Patient, name: string, accessToken: string) => {
     localStorage.setItem("caregiver_id", String(caregiverId));
     localStorage.setItem("patient_id", String(patient.id));
+    persistLoginChoice({ identifier: identifier.trim(), name, accessToken, patientId: patient.id, caregiverId });
     navigate("/dashboard");
   };
 
@@ -36,6 +70,7 @@ export default function Login() {
       if (role === "patient") {
         localStorage.setItem("patient_id", String(caregiver_id));
         localStorage.removeItem("caregiver_id");
+        persistLoginChoice({ identifier: identifier.trim(), name, accessToken: access_token, patientId: caregiver_id });
         navigate("/dashboard");
         return;
       }
@@ -47,12 +82,17 @@ export default function Login() {
       if (list.length === 0) {
         // [2026-07-15] 케어하는 환자가 없으면 여기서 막다른 길이었음 — SignUp.tsx의
         // 보호자 가입 직후 흐름과 동일하게 환자 등록 화면으로 바로 보낸다.
+        // [2026-07-22 수정] 이 분기가 persistLoginChoice를 안 거치고 바로 return해버려서
+        // "자동 로그인 체크했는데 계정 목록에 안 뜬다" 버그의 원인이었다 — 환자가 아직
+        // 없어도 로그인 자체는 성공이니 체크박스 선택은 그대로 반영해야 한다.
+        persistLoginChoice({ identifier: identifier.trim(), name, accessToken: access_token, caregiverId: caregiver_id });
         navigate("/patients");
         return;
       } else if (list.length === 1) {
-        proceedWithPatient(caregiver_id, list[0]);
+        proceedWithPatient(caregiver_id, list[0], name, access_token);
         return;
       } else {
+        setPendingAccessToken(access_token);
         setPatients(list);
       }
     } catch {
@@ -60,6 +100,19 @@ export default function Login() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSwitchAccount = (account: RecentAccount) => {
+    switchToRecentAccount(account);
+    // [2026-07-22 수정] 케어하는 환자가 없던 보호자 계정은 patientId가 없다 — 그대로
+    // /dashboard로 보내면 엉뚱한 환자로 진입하니, 환자 등록 화면으로 보낸다.
+    navigate(account.patientId ? "/dashboard" : "/patients");
+  };
+
+  const handleRemoveRecent = (e: MouseEvent, identifierToRemove: string) => {
+    e.stopPropagation();
+    removeRecentAccount(identifierToRemove);
+    setRecentAccounts(getRecentAccounts());
   };
 
   const handleBack = () => {
@@ -84,6 +137,43 @@ export default function Login() {
             {patients.length > 0 ? "케어하실 환자를 선택해 주세요" : "이메일(또는 전화번호)과 비밀번호를 입력해 주세요"}
           </p>
         </div>
+
+        {/* [2026-07-21 추가] "다른 사용자로 전환"(MyPage.tsx)에서 온 경우 이 기기에 로그인했던
+            계정을 눌러서 바로 전환할 수 있게 — 네이버 등의 계정 전환과 동일한 패턴. */}
+        {!selectedCaregiver && recentAccounts.length > 0 && (
+          <div className="w-full mb-4">
+            <p className="text-[12px] font-bold mb-2 px-1" style={{ color: C.muted }}>이 기기에 로그인했던 계정</p>
+            <div className="flex flex-col gap-2">
+              {recentAccounts.map((account) => (
+                <button
+                  key={account.identifier}
+                  onClick={() => handleSwitchAccount(account)}
+                  className="flex items-center gap-3 w-full px-4 py-3 rounded-[10px] border-[1.5px] text-left"
+                  style={{ background: C.white, borderColor: "rgba(30,26,23,0.12)" }}
+                >
+                  <div
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-white text-[15px] font-bold shrink-0"
+                    style={{ background: C.terracotta }}
+                  >
+                    {account.name[0]}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[14px] font-bold truncate" style={{ color: C.dark }}>{account.name}</p>
+                    <p className="text-[12px] truncate" style={{ color: C.muted }}>{account.identifier}</p>
+                  </div>
+                  <span
+                    onClick={(e) => handleRemoveRecent(e, account.identifier)}
+                    className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 hover:opacity-70"
+                    style={{ background: "rgba(30,26,23,0.06)" }}
+                    aria-label={`${account.name} 계정 목록에서 제거`}
+                  >
+                    <X className="w-3.5 h-3.5" style={{ color: C.muted }} />
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div
           className="w-full rounded-2xl px-5 py-6 sm:px-6 sm:py-7"
@@ -115,6 +205,30 @@ export default function Login() {
                 style={{ color: C.dark, background: C.ivory, borderColor: "rgba(30,26,23,0.12)" }}
                 autoComplete="current-password"
               />
+
+              <div className="flex items-center gap-4 px-1">
+                <label className="flex items-center gap-1.5 text-[13px] cursor-pointer" style={{ color: C.muted }}>
+                  <input
+                    type="checkbox"
+                    checked={rememberId}
+                    onChange={(e) => setRememberId(e.target.checked)}
+                    className="w-4 h-4 accent-current"
+                    style={{ color: C.terracotta }}
+                  />
+                  아이디 저장
+                </label>
+                <label className="flex items-center gap-1.5 text-[13px] cursor-pointer" style={{ color: C.muted }}>
+                  <input
+                    type="checkbox"
+                    checked={autoLogin}
+                    onChange={(e) => setAutoLogin(e.target.checked)}
+                    className="w-4 h-4 accent-current"
+                    style={{ color: C.terracotta }}
+                  />
+                  이 기기에서 자동 로그인
+                </label>
+              </div>
+
               {error && <p className="text-[14px] text-center py-3" style={{ color: C.danger }}>{error}</p>}
               <button
                 type="submit"
@@ -143,7 +257,7 @@ export default function Login() {
                   key={p.id}
                   className="flex justify-between items-center w-full px-[18px] py-4 text-[15px] font-semibold rounded-[10px] cursor-pointer text-left border-[1.5px]"
                   style={{ color: C.dark, background: C.ivory, borderColor: "rgba(30,26,23,0.12)" }}
-                  onClick={() => proceedWithPatient(selectedCaregiver.id, p)}
+                  onClick={() => proceedWithPatient(selectedCaregiver.id, p, selectedCaregiver.name, pendingAccessToken)}
                 >
                   <span className="text-[15px] font-bold" style={{ color: C.dark }}>{p.name}</span>
                   {p.note && (
