@@ -17,13 +17,20 @@ import {
 } from "../lib/session";
 import { C } from "../theme";
 
-// [2026-07-22 추가] 계정 전환 목록에서 "환자 본인/보호자/기관" 구분용 — role이 없는(이 기능
-// 이전에 저장된) 옛 항목은 undefined일 수 있어 뱃지를 그냥 숨긴다.
+// [2026-07-22 추가] 계정 전환 목록에서 "환자 본인/보호자/기관" 구분용.
 const ROLE_LABELS: Record<RecentAccount["role"], string> = {
   patient: "환자 본인",
   guardian: "보호자",
   organization: "기관",
 };
+
+// [2026-07-22 추가] role 필드가 생기기 전에 저장된 옛 계정 항목은 undefined라 뱃지가 안
+// 뜬다 — caregiverId 유무로 최소한 환자 본인/보호자는 구분해서 보여준다(기관은 옛 데이터에
+// relation_type이 없어 추정 불가하니 보호자로 표시됨 — 다시 로그인하면 정확한 값으로 갱신).
+function displayRole(account: RecentAccount): RecentAccount["role"] {
+  if (account.role) return account.role;
+  return account.caregiverId ? "guardian" : "patient";
+}
 
 export default function Login() {
   const navigate = useNavigate();
@@ -223,14 +230,12 @@ export default function Login() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       <p className="text-[14px] font-bold truncate" style={{ color: C.dark }}>{account.name}</p>
-                      {ROLE_LABELS[account.role] && (
-                        <span
-                          className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded"
-                          style={{ background: `${C.terracotta}15`, color: C.terracotta }}
-                        >
-                          {ROLE_LABELS[account.role]}
-                        </span>
-                      )}
+                      <span
+                        className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded"
+                        style={{ background: `${C.terracotta}15`, color: C.terracotta }}
+                      >
+                        {ROLE_LABELS[displayRole(account)]}
+                      </span>
                     </div>
                     <p className="text-[12px] truncate" style={{ color: C.muted }}>{account.identifier}</p>
                   </div>
