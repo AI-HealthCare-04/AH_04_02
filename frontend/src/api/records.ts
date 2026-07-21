@@ -194,6 +194,8 @@ export interface MedicationCorrection {
   total_days: string;
   diagnosis: string;
   drug_class: string;
+  // [2026-07-21 추가] 처방확인 화면에서 고른 복용시간(공복/아침 식후 등, 순서대로 시간대에 매핑)
+  dose_timings: string[];
 }
 
 /**

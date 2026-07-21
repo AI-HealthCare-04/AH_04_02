@@ -65,6 +65,15 @@ export default function Dashboard() {
   const today = new Date();
   const dateLabel = `${today.getFullYear()}년 ${today.getMonth() + 1}월 ${today.getDate()}일 (${"일월화수목금토"[today.getDay()]})`;
 
+  // [2026-07-21 추가] 시간대별로 묶어서 보여줌 — "이 시간에 뭘 먹어야 하는지" 한눈에 보이게.
+  // 백엔드(/monitoring/today)가 이미 time_slot 순으로 정렬해서 내려주므로 그 순서 그대로 묶기만 함.
+  const medGroups: [string, Medication[]][] = [];
+  meds.forEach((med) => {
+    const group = medGroups.find(([time]) => time === med.time);
+    if (group) group[1].push(med);
+    else medGroups.push([med.time, [med]]);
+  });
+
   return (
     <div className="min-h-screen" style={{ background: C.ivory, fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" }}>
       <NavBar isLoggedIn userName={getCurrentUserName()} />
@@ -117,8 +126,12 @@ export default function Dashboard() {
           <p className="text-sm mb-4" style={{ color: C.muted }}>등록된 복약 일정이 없어요.</p>
         )}
 
-        <div className="flex flex-col gap-4 mb-8">
-          {meds.map((med) => (
+        <div className="flex flex-col gap-6 mb-8">
+          {medGroups.map(([time, group]) => (
+            <div key={time}>
+              <p className="text-[13px] font-bold mb-2.5" style={{ color: C.terracotta }}>{time}</p>
+              <div className="flex flex-col gap-4">
+                {group.map((med) => (
             <div key={med.id} className="rounded-2xl px-5 sm:px-6 py-5 border" style={{ background: C.white, borderColor: "rgba(30,26,23,0.12)" }}>
               <div className="flex justify-between mb-4">
                 <div>
@@ -166,6 +179,9 @@ export default function Dashboard() {
                     </button>
                   );
                 })}
+              </div>
+            </div>
+                ))}
               </div>
             </div>
           ))}

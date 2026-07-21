@@ -16,7 +16,8 @@ import { C } from "../theme";
 import { formatTime12, from12, HOURS_12, MINUTES_5, PERIODS, to12, WheelColumn } from "../components/WheelTimePicker";
 
 // [7/8 변경] 피그마 디자인 반영 — 시간대(아침/점심/저녁) 대신 "복용 상태" 6종 + 실제 시각 입력
-const DOSE_TIMINGS = ["공복", "아침 식후", "점심 식전", "점심 식후", "저녁 식전", "저녁 식후"];
+// [2026-07-21] PrescriptionReview.tsx(처방확인 화면)에서도 그대로 재사용하려고 export.
+export const DOSE_TIMINGS = ["공복", "아침 식후", "점심 식전", "점심 식후", "저녁 식전", "저녁 식후"];
 
 interface TimeEntry {
   key: number;

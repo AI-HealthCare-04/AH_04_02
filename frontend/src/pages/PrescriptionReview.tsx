@@ -13,6 +13,17 @@ import {
 } from "../api/records";
 import { C } from "../theme";
 import { getCurrentUserName } from "../lib/session";
+import { DOSE_TIMINGS } from "./Schedule";
+
+// [2026-07-21 추가] 처방확인 화면에서 "1일 N회"를 보고 복용시간을 바로 추정해서 보여줌 —
+// 백엔드 _DEFAULT_TIME_SLOTS(records_router.py)와 같은 빈도 표기를 기준으로 삼되, 실제
+// 시간대 개수는 여기서 사용자가 고른 값의 "개수"가 그대로 진실 공급원이 된다(백엔드도 동일).
+// 인식 못 하는 빈도 표기는 지어내지 않고 빈 배열(사용자가 직접 고르게 둠).
+const DOSE_TIMING_GUESS: Record<string, string[]> = {
+  "1일 1회": ["아침 식후"],
+  "1일 2회": ["아침 식후", "저녁 식후"],
+  "1일 3회": ["아침 식후", "점심 식후", "저녁 식후"],
+};
 
 const FIELDS: { key: keyof OcrMedication; label: string }[] = [
   { key: "drug_name", label: "약품명" },
@@ -72,6 +83,8 @@ export default function PrescriptionReview() {
   const { recordId } = useParams<{ recordId: string }>();
   const [record, setRecord] = useState<RecordResult | null>(null);
   const [edited, setEdited] = useState<Record<number, OcrMedication>>({});
+  // [2026-07-21 추가] 항목별 복용시간(공복/아침 식후 등) 다중 선택 — 순서가 곧 하루 중 순서
+  const [doseTimings, setDoseTimings] = useState<Record<number, string[]>>({});
   const [confirmed, setConfirmed] = useState<Set<number>>(new Set());
   // 약품명이 실제 존재하는 약인지(e약은요/HIRA 매칭) — key: 항목 id, undefined면 아직 조회 전
   const [drugNameOk, setDrugNameOk] = useState<Record<number, boolean>>({});
@@ -99,6 +112,12 @@ export default function PrescriptionReview() {
         const initial: Record<number, OcrMedication> = {};
         data.medications.forEach((m) => (initial[m.id] = { ...m }));
         setEdited(initial);
+
+        const initialTimings: Record<number, string[]> = {};
+        data.medications.forEach((m) => {
+          initialTimings[m.id] = DOSE_TIMING_GUESS[m.frequency.trim()] ?? [];
+        });
+        setDoseTimings(initialTimings);
 
         // [7/9] 신뢰도와 무관하게 항상 모든 항목의 약품명을 검증한다 (예전엔 review_required
         // 항목만 검증했음 — 그래서 신뢰도가 높으면 오타가 있어도 그냥 넘어갔었다).
@@ -128,6 +147,17 @@ export default function PrescriptionReview() {
 
   const update = (id: number, field: keyof OcrMedication, value: string) => {
     setEdited((prev) => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
+  };
+
+  // 이미 골랐으면 빼고, 아니면 맨 뒤에 추가 — 선택 순서가 그대로 하루 중 시간 순서가 됨
+  const toggleDoseTiming = (id: number, timing: string) => {
+    setDoseTimings((prev) => {
+      const current = prev[id] ?? [];
+      const next = current.includes(timing)
+        ? current.filter((t) => t !== timing)
+        : [...current, timing];
+      return { ...prev, [id]: next };
+    });
   };
 
   const fieldIssues = (item: OcrMedication): FieldIssue[] =>
@@ -190,10 +220,13 @@ export default function PrescriptionReview() {
       const updated = await addMedicationItem(record.record_id);
       setRecord(updated);
       const next: Record<number, OcrMedication> = { ...edited };
+      const nextTimings: Record<number, string[]> = { ...doseTimings };
       updated.medications.forEach((m) => {
         if (!(m.id in next)) next[m.id] = { ...m };
+        if (!(m.id in nextTimings)) nextTimings[m.id] = DOSE_TIMING_GUESS[m.frequency.trim()] ?? [];
       });
       setEdited(next);
+      setDoseTimings(nextTimings);
     } catch {
       setError("약물을 추가하지 못했어요. 잠시 후 다시 시도해 주세요.");
     } finally {
@@ -256,6 +289,7 @@ export default function PrescriptionReview() {
           total_days: e.total_days.trim(),
           diagnosis: e.diagnosis.trim(),
           drug_class: e.drug_class.trim(),
+          dose_timings: doseTimings[m.id] ?? [],
         };
       });
       const updated = await confirmMedications(record.record_id, corrections);
@@ -519,10 +553,8 @@ export default function PrescriptionReview() {
                         </div>
                       )}
 
-                      <div
-                        ref={(el) => { itemContainerRefs.current[item.id] = el; }}
-                        className="p-6 grid grid-cols-2 gap-4"
-                      >
+                      <div ref={(el) => { itemContainerRefs.current[item.id] = el; }}>
+                      <div className="p-6 grid grid-cols-2 gap-4">
                         {FIELDS.map(({ key, label }) => {
                           const hasIssue = !isDone && issues.some((iss) => iss.field === key);
                           return (
@@ -564,6 +596,43 @@ export default function PrescriptionReview() {
                             </div>
                           );
                         })}
+                      </div>
+
+                      {/* [2026-07-21 추가] 처방확인 화면에서 복용시간을 바로 설정 — 나중에
+                          Schedule.tsx에서 또 손대지 않아도 되고, 대시보드/알림에서 시간대별로
+                          묶어 보여줄 수 있게 됨. 필수 항목이 아니라(issues에 안 들어감) 몰라도
+                          그냥 넘어갈 수 있다 — 모르는 걸 지어내지 않는다는 기존 원칙 유지. */}
+                      <div className="px-6 pb-6">
+                        <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5" style={{ color: C.muted }}>
+                          복용시간 (선택)
+                        </label>
+                        {isDone ? (
+                          <p className="text-[14px] px-4 py-2.5 rounded-xl font-medium" style={{ color: C.dark, background: `${C.success}12` }}>
+                            {(doseTimings[item.id] ?? []).length > 0 ? doseTimings[item.id].join(" · ") : "설정 안 함"}
+                          </p>
+                        ) : (
+                          <div className="flex flex-wrap gap-2">
+                            {DOSE_TIMINGS.map((timing) => {
+                              const active = (doseTimings[item.id] ?? []).includes(timing);
+                              return (
+                                <button
+                                  key={timing}
+                                  type="button"
+                                  onClick={() => toggleDoseTiming(item.id, timing)}
+                                  className="px-3.5 py-2 rounded-full text-[13px] font-bold transition-all"
+                                  style={{
+                                    background: active ? C.terracotta : C.ivory,
+                                    color: active ? C.white : C.muted,
+                                    border: `1.5px solid ${active ? C.terracotta : "rgba(30,26,23,0.12)"}`,
+                                  }}
+                                >
+                                  {timing}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                       </div>
                     </div>
 

@@ -661,6 +661,7 @@ def get_today(
         select(MedicationSchedule)
         .where(MedicationSchedule.patient_id == patient_id)
         .where(MedicationSchedule.active == True)  # noqa: E712
+        .order_by(MedicationSchedule.time_slot)  # [2026-07-21 추가] 프론트가 시간대별로 그룹핑해서 보여줌
     ).all()
 
     result = []

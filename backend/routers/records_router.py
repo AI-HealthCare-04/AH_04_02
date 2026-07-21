@@ -20,7 +20,7 @@ from datetime import datetime
 from core.database import get_session
 from core.dependencies import Actor, get_current_actor, require_actor_patient_access
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from models import Caregiver, GuideResult, MedicalRecord, MedicationSchedule, OcrResult
+from models import Caregiver, GuideResult, MedicalRecord, MedicationSchedule, OcrResult, Patient
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -39,19 +39,62 @@ _DEFAULT_TIME_SLOTS = {
     "1일 3회": ["08:00", "13:00", "19:00"],
     "1일 4회": ["08:00", "12:00", "17:00", "21:00"],
 }
+# [2026-07-21 추가] 처방확인 화면에서 고른 복용시간(dose_timing)은 환자가 회원가입 직후
+# MealTimeCheck.tsx에서 설정한 실제 식사시간(Patient.breakfast_time 등, monitoring_router.py의
+# PUT /patients/{id}/meal-times)을 기준으로 시각을 계산한다 — 모두에게 같은 "08:00"을
+# 박아넣는 대신, 이 환자가 실제로 아침을 언제 먹는지에 맞춘다. (식전/식후) 30분,
+# 공복은 아침식사 1시간 전 — 의학적으로 엄밀한 기준이 아니라 합리적인 기본값이며,
+# 실제 시각은 Schedule.tsx에서 언제든 직접 수정할 수 있다.
+_MEAL_OFFSET_MINUTES: dict[str, tuple[str, int]] = {
+    "공복": ("breakfast", -60),
+    "아침 식후": ("breakfast", 30),
+    "점심 식전": ("lunch", -30),
+    "점심 식후": ("lunch", 30),
+    "저녁 식전": ("dinner", -30),
+    "저녁 식후": ("dinner", 30),
+}
+# 환자가 식사시간 설문을 건너뛴 경우(필드가 None)의 폴백 — 기존 _DEFAULT_TIME_SLOTS의
+# "1일 3회" 기본값과 동일하게 맞춰 일관성을 유지한다.
+_MEAL_TIME_FALLBACK = {"breakfast": "08:00", "lunch": "13:00", "dinner": "19:00"}
 
 
-def _create_schedules_from_ocr(record: MedicalRecord, ocr_items: Sequence[OcrResult], session: Session) -> None:
+def _resolve_time_slot(dose_timing: str, patient: Patient | None) -> str:
+    meal, offset = _MEAL_OFFSET_MINUTES.get(dose_timing, (None, 0))
+    if meal is None:
+        return _MEAL_TIME_FALLBACK["breakfast"]  # DOSE_TIMINGS 6종 외 값은 들어올 일이 없지만 방어적으로
+    base = getattr(patient, f"{meal}_time", None) if patient else None
+    base = base or _MEAL_TIME_FALLBACK[meal]
+    hour, minute = (int(x) for x in base.split(":", 1))
+    total = (hour * 60 + minute + offset) % (24 * 60)
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
+def _create_schedules_from_ocr(
+    record: MedicalRecord,
+    ocr_items: Sequence[OcrResult],
+    session: Session,
+    dose_timings_by_id: dict[int, list[str]] | None = None,
+) -> None:
+    dose_timings_by_id = dose_timings_by_id or {}
+    patient = session.get(Patient, record.patient_id)
     for item in ocr_items:
         if not item.drug_name:
             continue
-        for slot in _DEFAULT_TIME_SLOTS.get(item.frequency, ["09:00"]):
+        timings = dose_timings_by_id.get(item.id) or []
+        slots = [_resolve_time_slot(t, patient) for t in timings] if timings else None
+        slots = slots or _DEFAULT_TIME_SLOTS.get(item.frequency, ["09:00"])
+        for i, slot in enumerate(slots):
             session.add(
                 MedicationSchedule(
                     patient_id=record.patient_id,
                     drug_name=item.drug_name,
                     time_slot=slot,
-                    memo="처방전에서 자동 등록됨 — 시간·식전후 여부는 확인 후 수정해주세요",
+                    dose_timing=timings[i] if i < len(timings) else None,
+                    memo=(
+                        "처방전확인 화면에서 복용시간을 설정했어요"
+                        if timings
+                        else "처방전에서 자동 등록됨 — 시간·식전후 여부는 확인 후 수정해주세요"
+                    ),
                     # [2026-07-20 추가] 이 처방전을 나중에 삭제할 때 같이 비활성화할 수 있도록 연결.
                     record_id=record.id,
                 )
@@ -330,6 +373,9 @@ class MedicationCorrection(BaseModel):
     total_days: str = ""  # [2026-07-18 추가] 총 투약일수
     diagnosis: str
     drug_class: str
+    # [2026-07-21 추가] 처방확인 화면에서 고른 복용시간(공복/아침 식후 등) — 환자의 실제
+    # 식사시간(_resolve_time_slot) 기준으로 시간대에 매핑된다. 비어있으면 기존처럼 frequency로 기본 추정.
+    dose_timings: list[str] = []
 
 
 class ConfirmMedicationsPayload(BaseModel):
@@ -407,7 +453,8 @@ async def confirm_medications(
     # 매번 손으로 다시 입력하지 않도록.
     def _register_schedules() -> None:
         ocr_items = session.exec(select(OcrResult).where(OcrResult.record_id == record.id)).all()
-        _create_schedules_from_ocr(record, ocr_items, session)
+        dose_timings_by_id = {c.id: c.dose_timings for c in payload.medications if c.dose_timings}
+        _create_schedules_from_ocr(record, ocr_items, session, dose_timings_by_id)
 
     await asyncio.to_thread(_register_schedules)
 
