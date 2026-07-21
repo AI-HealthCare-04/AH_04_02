@@ -31,7 +31,7 @@ from models import (
     Caregiver,
     CaregiverPatient,
     CareLevelAssessment,
-    MedicationLog,
+    MedicationRecord,
     MedicationSchedule,
     NotificationLog,
     NotificationSetting,
@@ -49,7 +49,7 @@ TICK_SECONDS = 60
 # due_time 이후 이 창 안에 들어온 것까지는 아직 "정시 알림 대상"으로 본다. 창을 넘기면
 # 그때부터는 _fire_due_reminders가 아니라 _mark_missed가 처리한다.
 CATCH_UP_MINUTES = 10
-# [2026-07-19] 정시를 이만큼 넘기고도 MedicationLog에 오늘자 체크가 없으면 "놓침"으로
+# [2026-07-19] 정시를 이만큼 넘기고도 MedicationRecord에 오늘자 체크가 없으면 "놓침"으로
 # 판정한다. Dashboard.tsx의 "아직이요"(clear_intake) 버튼이 오늘자 로그를 지우면 이
 # 창이 다시 흐르기 시작하므로, 사용자가 그 버튼을 정시 임박 직전에 누르면 곧바로 다시
 # missed 판정될 수 있다는 걸 알고 있다(라운드2 검토에서 지적된 한계, 별도 UX 개선 필요).
@@ -84,9 +84,10 @@ def _parse_time_slot(time_slot: str) -> tuple[int, int] | None:
 def _has_today_log(session: Session, schedule_id: int, today_str: str) -> bool:
     return (
         session.exec(
-            select(MedicationLog)
-            .where(MedicationLog.schedule_id == schedule_id)
-            .where(func.date(MedicationLog.checked_at) == today_str)
+            select(MedicationRecord)
+            .where(MedicationRecord.schedule_id == schedule_id)
+            .where(func.date(MedicationRecord.taken_at) == today_str)
+            .where(MedicationRecord.status.in_(["taken", "skipped"]))
         ).first()
         is not None
     )

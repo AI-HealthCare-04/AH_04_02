@@ -29,6 +29,7 @@ export interface GuideDrug {
   medication_guide?: string;
   precautions?: string[];
   review_required?: boolean;
+  review_reason?: string; // [2026-07-20 추가] 가이드 생성 실패 시 원인 문구(review_flags만으론 원인을 알 수 없었음)
   review_flags?: string[];
 }
 

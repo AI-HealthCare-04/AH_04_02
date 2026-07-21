@@ -27,6 +27,7 @@ def drug_to_documents(drug: DrugInfo) -> list[Document]:
             Document(
                 page_content=content,
                 metadata={
+                    "doc_type": "drug",
                     "item_seq": drug.item_seq,
                     "item_name": drug.item_name,
                     "entp_name": drug.entp_name,

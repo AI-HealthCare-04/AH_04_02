@@ -186,6 +186,78 @@ class TestAskStreamFallback:
         assert msg.question_text == "임의의 자유 질문입니다"
 
 
+def _mock_llm(monkeypatch: pytest.MonkeyPatch, answer: str = "테스트 답변입니다.") -> None:
+    """_CHAT_LLM_AVAILABLE=True(실 LLM 사용 조건)를 흉내내고 ChatOpenAI를 가짜로 바꿔
+    실제 호출 없이 답변만 채운다."""
+    import langchain_openai
+
+    response = MagicMock()
+    response.content = answer
+    fake_chat = MagicMock()
+    fake_chat.invoke.return_value = response
+
+    async def _fake_astream(*_args, **_kwargs):
+        yield SimpleNamespace(content=answer)
+
+    fake_chat.astream = _fake_astream
+
+    monkeypatch.setattr(chat_router, "_CHAT_LLM_AVAILABLE", True)
+    monkeypatch.setattr(chat_router, "_rag_settings", SimpleNamespace(OPENAI_MODEL="gpt-test", OPENAI_API_KEY="test-key"), raising=False)
+    monkeypatch.setattr(langchain_openai, "ChatOpenAI", MagicMock(return_value=fake_chat))
+
+
+class TestSourceRefs:
+    """[2026-07-20 이슈1 수정] source_refs가 실제 ChromaDB 검색 결과를 반영하는지 —
+    답변 생성 방법 라벨(answer_source)이 아니라 진짜 인용 데이터가 응답에 담기는지 검증."""
+
+    def _fake_docs(self):
+        return [
+            SimpleNamespace(
+                page_content="테스트 본문",
+                metadata={"item_name": "타이레놀정500밀리그람(아세트아미노펜)", "field_label": "주의사항"},
+            )
+        ]
+
+    def test_ask_returns_real_retrieved_source_refs(self, client: TestClient, session: Session, monkeypatch):
+        pt = _make_patient(session)
+        headers = {"Authorization": f"Bearer {create_access_token(pt.id, 'patient')}"}
+        _mock_llm(monkeypatch)
+        monkeypatch.setattr("rag.vectorstore.similarity_search", lambda *a, **k: self._fake_docs())
+
+        r = client.post(
+            "/chat/ask", json={"patient_id": pt.id, "question": "이 약 먹어도 되나요?"}, headers=headers
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["source_refs"] == [
+            {"item_name": "타이레놀정500밀리그람(아세트아미노펜)", "field": "주의사항"}
+        ]
+
+    def test_ask_stream_done_event_includes_source_refs(self, client: TestClient, session: Session, monkeypatch):
+        pt = _make_patient(session)
+        headers = {"Authorization": f"Bearer {create_access_token(pt.id, 'patient')}"}
+        _mock_llm(monkeypatch)
+        monkeypatch.setattr("rag.vectorstore.similarity_search", lambda *a, **k: self._fake_docs())
+
+        r = client.post(
+            "/chat/ask/stream", json={"patient_id": pt.id, "question": "이 약 먹어도 되나요?"}, headers=headers
+        )
+        assert r.status_code == 200
+        done = next(e for e in _parse_sse(r.text) if e.get("done"))
+        assert done["source_refs"] == [
+            {"item_name": "타이레놀정500밀리그람(아세트아미노펜)", "field": "주의사항"}
+        ]
+
+    def test_preset_question_has_no_source_refs(self, client: TestClient, session: Session):
+        """preset/dynamic 매칭은 RAG 조회 자체를 안 하므로(_CHAT_LLM_AVAILABLE=False,
+        stub 기본값) source_refs가 빈 배열이어야 한다."""
+        pt = _make_patient(session)
+        headers = {"Authorization": f"Bearer {create_access_token(pt.id, 'patient')}"}
+        r = client.post("/chat/ask", json={"patient_id": pt.id, "question_id": "q1"}, headers=headers)
+        assert r.status_code == 200
+        assert r.json()["source_refs"] == []
+
+
 class TestAskStreamLlmGating:
     """버그1(/ask/stream): preset/dynamic 고정 답변이 매칭되면 LLM을 태우지 않고 바로
     고정 답변을 스트리밍해야 한다. LLM은 freeform 자유입력일 때만 호출."""

@@ -27,6 +27,8 @@
 모르므로 조건 판단 없이 정보성으로만 노출한다 (schemas.DurCaution 참고).
 """
 
+from functools import lru_cache
+
 from rag.config import settings
 from rag.mfds_client import _request
 from rag.schemas import DurCaution, DurTabooInfo
@@ -63,6 +65,10 @@ def _dedupe_taboo(taboos: list[DurTabooInfo]) -> list[DurTabooInfo]:
     return deduped
 
 
+# [2026-07-21 추가] chat_router._build_on_demand_dur_context가 한 질문당 후보 이름마다
+# 이 4개 API를 전부 순차 호출한다(최대 약 40회) — DUR 데이터도 정부가 주기적으로만 갱신하는
+# 정적에 가까운 데이터라 mfds_client의 캐싱과 동일한 이유로 인메모리 캐싱한다.
+@lru_cache(maxsize=512)
 def search_usjnt_taboo(item_name: str, num_of_rows: int = 100, page_no: int = 1) -> list[DurTabooInfo]:
     """품목명(부분일치)으로 병용금기 상대 목록을 조회합니다.
 
@@ -86,6 +92,7 @@ def search_usjnt_taboo(item_name: str, num_of_rows: int = 100, page_no: int = 1)
     return _dedupe_taboo(taboos)
 
 
+@lru_cache(maxsize=512)
 def search_elderly_caution(item_name: str, num_of_rows: int = 100, page_no: int = 1) -> list[DurCaution]:
     """품목명(부분일치)으로 노인주의 정보를 조회합니다.
 
@@ -108,6 +115,7 @@ def search_elderly_caution(item_name: str, num_of_rows: int = 100, page_no: int 
     return _dedupe_cautions(cautions)
 
 
+@lru_cache(maxsize=512)
 def search_age_taboo(item_name: str, num_of_rows: int = 100, page_no: int = 1) -> list[DurCaution]:
     """품목명(부분일치)으로 연령금기(특정 연령대 사용 금지) 정보를 조회합니다."""
     data = _request(
@@ -126,6 +134,7 @@ def search_age_taboo(item_name: str, num_of_rows: int = 100, page_no: int = 1) -
     return _dedupe_cautions(cautions)
 
 
+@lru_cache(maxsize=512)
 def search_pregnancy_taboo(item_name: str, num_of_rows: int = 100, page_no: int = 1) -> list[DurCaution]:
     """품목명(부분일치)으로 임부금기 정보를 조회합니다."""
     data = _request(

@@ -13,8 +13,9 @@ from unittest.mock import patch
 from routers.chat_router import (
     _build_on_demand_dur_context,
     _extract_dur_candidate_drug_names,
+    _is_lifestyle_question,
     _menu_map_text,
-    _retrieve_chat_rag_context,
+    _retrieve_chat_rag_docs,
     _service_info_text,
     _should_answer_from_dur_only,
     _summarize_lifestyle_guide,
@@ -112,7 +113,7 @@ def test_dur_question_does_not_use_general_kdca_rag_context():
     assert _should_answer_from_dur_only("와파린이랑 타이레놀 같이 복용해도 되나요?")
     assert _should_answer_from_dur_only("아스피린과 와파린을 함께 복용해도 괜찮나요?")
     assert _should_answer_from_dur_only("이 약 드셔도 되나요?")
-    assert _retrieve_chat_rag_context("이 약 임부금기야?", "[DUR 임부금기] 테스트약: 임신 3기 주의") == []
+    assert _retrieve_chat_rag_docs("이 약 임부금기야?") == []
 
 
 def test_extract_dur_candidate_includes_unregistered_drug_mentioned_in_question():
@@ -158,6 +159,77 @@ def test_on_demand_dur_context_resolves_drug_name_then_returns_taboo_list():
         lines = _build_on_demand_dur_context("심바스타틴이랑 먹으면 안되는 의약품 정보 알려줘", [])
 
     assert any("이트라코나졸" in line and "병용금기" in line for line in lines), lines
+
+
+def test_is_lifestyle_question_detects_food_exercise_keywords():
+    assert _is_lifestyle_question("고혈압에 좋은 음식이 뭐야?")
+    assert _is_lifestyle_question("운동은 얼마나 해야 돼?")
+    assert _is_lifestyle_question("생활습관 어떻게 관리해야 해?")
+    assert not _is_lifestyle_question("이 약 부작용이 뭐야?")
+
+
+def test_retrieve_chat_rag_docs_prefers_kdca_for_lifestyle_question():
+    """[2026-07-21] 생활습관(음식/운동) 질문은 질병관리청 건강정보(doc_type=kdca_health_info)를
+    최우선으로 조회한다."""
+    kdca_doc = SimpleNamespace(
+        page_content="채소와 저염식 위주로 드세요.",
+        metadata={"title": "고혈압", "source": "질병관리청 국가건강정보포털", "doc_type": "kdca_health_info"},
+    )
+    with patch("rag.vectorstore.similarity_search", return_value=[kdca_doc]) as mock_search:
+        docs = _retrieve_chat_rag_docs("고혈압에 좋은 음식이 뭐야?")
+
+    mock_search.assert_called_once()
+    assert mock_search.call_args.kwargs["filter"] == {"doc_type": "kdca_health_info"}
+    assert docs == [kdca_doc]
+
+
+def test_retrieve_chat_rag_docs_falls_back_when_kdca_has_no_match():
+    """질병관리청 필터로 못 찾으면 필터 없는 전체 검색으로 폴백한다."""
+    fallback_doc = SimpleNamespace(
+        page_content="일부 참고 자료",
+        metadata={"title": "일부 참고 자료", "source": "기타"},
+    )
+    with patch("rag.vectorstore.similarity_search", side_effect=[[], [fallback_doc]]) as mock_search:
+        docs = _retrieve_chat_rag_docs("운동은 얼마나 해야 돼?")
+
+    assert mock_search.call_count == 2
+    assert mock_search.call_args_list[0].kwargs["filter"] == {"doc_type": "kdca_health_info"}
+    assert "filter" not in mock_search.call_args_list[1].kwargs
+    assert docs == [fallback_doc]
+
+
+def test_retrieve_chat_rag_docs_prefers_drug_docs_for_non_lifestyle_question():
+    """의약품 관련(생활습관 키워드 없는) 질문은 doc_type=drug 문서를 최우선으로 조회한다."""
+    drug_doc = SimpleNamespace(
+        page_content="고혈압에 사용합니다.",
+        metadata={"item_name": "암로디핀정5mg", "field_label": "효능·효과"},
+    )
+    with patch("rag.vectorstore.similarity_search", return_value=[drug_doc]) as mock_search:
+        docs = _retrieve_chat_rag_docs("이 약 효능이 뭐야?")
+
+    mock_search.assert_called_once()
+    assert mock_search.call_args.kwargs["filter"] == {"doc_type": "drug"}
+    assert docs == [drug_doc]
+
+
+def test_on_demand_dur_context_creates_langfuse_retriever_span():
+    """[2026-07-21] DUR 전용 질문은 ChromaDB를 건너뛰어(_retrieve_chat_rag_docs가 []을
+    반환) Langfuse에 retriever 스팬이 하나도 안 남았다 — 실제 DUR 조회 자체를 스팬으로 남긴다."""
+    with (
+        patch("rag.mfds_client.search_by_name", return_value=[]),
+        patch("rag.mfds_client.search_permit_info", return_value=[]),
+        patch.dict(
+            _build_on_demand_dur_context.__globals__,
+            {"_search_dur_taboo": lambda _name: [], "_search_dur_cautions": lambda _name: []},
+        ),
+        patch("routers.chat_router.optional_observation") as mock_observation,
+    ):
+        _build_on_demand_dur_context("타이레놀 임부금기 있어?", [])
+
+    assert any(
+        call.kwargs.get("name") == "retrieve-dur-lookup" and call.kwargs.get("as_type") == "retriever"
+        for call in mock_observation.call_args_list
+    )
 
 
 def test_service_info_contains_app_description_for_chatbot():

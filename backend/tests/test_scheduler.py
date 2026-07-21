@@ -16,7 +16,7 @@ from models import (
     Caregiver,
     CaregiverPatient,
     CareLevelAssessment,
-    MedicationLog,
+    MedicationRecord,
     MedicationSchedule,
     NotificationLog,
     NotificationSetting,
@@ -165,14 +165,14 @@ class TestMarkMissed:
         assert logs[0].kind == "missed"
 
     def test_no_missed_if_already_checked_today(self, session: Session):
-        # [round5 수정] checked_at을 명시하지 않으면 MedicationLog의 default_factory=datetime.now가
+        # [round5 수정] taken_at을 명시하지 않으면 MedicationRecord의 default_factory=datetime.now가
         # "실제" 시스템 날짜를 쓰는데, 이 테스트는 시뮬레이션된 now(2026-07-19)와 비교한다 —
         # 테스트를 만든 날은 실제 날짜도 7/19라 우연히 통과했지만, 다음 날 실행하면 실패한다
-        # (실제로 재현됨). checked_at을 시뮬레이션된 now로 명시해 날짜에 무관하게 만든다.
+        # (실제로 재현됨). taken_at을 시뮬레이션된 now로 명시해 날짜에 무관하게 만든다.
         pt = _make_patient(session)
         sched = _make_schedule(session, pt, "08:00")
         now = datetime(2026, 7, 19, 9, 5)
-        session.add(MedicationLog(schedule_id=sched.id, status="taken", checked_at=now))
+        session.add(MedicationRecord(schedule_id=sched.id, status="taken", taken_at=now))
         session.commit()
 
         scheduler._mark_missed(session, now)

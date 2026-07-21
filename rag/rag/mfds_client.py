@@ -1,6 +1,7 @@
 import re
 import time
 import xml.etree.ElementTree as ET
+from functools import lru_cache
 
 import requests
 from rag.config import settings
@@ -37,6 +38,12 @@ def _request(params: dict, base_url: str | None = None, retries: int = 2, timeou
     raise MfdsApiError(f"MFDS API request failed after {retries + 1} attempts: {last_error}")
 
 
+# [2026-07-21 추가] 챗봇 DUR 온디맨드 조회(chat_router._resolve_dur_lookup_names 등)가 같은
+# 품목명을 짧은 시간 안에 여러 후보(원문/성분명 등)로 반복 조회하는데, 이 데이터는 정부가
+# 보통 하루~한 달 단위로 갱신하는 정적에 가까운 데이터라 매 요청마다 실시간으로 다시 받을
+# 필요가 없다 — 프로세스 생명주기 동안 인메모리로 캐싱한다(drug_reference.py의 HIRA/e약은요
+# CSV 캐싱과 동일한 관례, 서버 재시작 전까지는 갱신되지 않는다는 점도 동일).
+@lru_cache(maxsize=512)
 def search_by_name(item_name: str, num_of_rows: int = 10, page_no: int = 1) -> list[DrugInfo]:
     """품목명(부분 일치)으로 의약품 정보를 검색합니다."""
     data = _request({"itemName": item_name, "numOfRows": num_of_rows, "pageNo": page_no})
@@ -66,6 +73,7 @@ def fetch_first_match(item_name: str) -> DrugInfo | None:
 
 # [2026-07-14] 활용신청 승인되어 재활성화. item_name 쿼리 파라미터, 응답 필드 전부
 # 실제 API 호출로 재확인 완료(schemas.DrugPermitInfo 참고).
+@lru_cache(maxsize=512)
 def search_permit_info(item_name: str, num_of_rows: int = 10, page_no: int = 1) -> list[DrugPermitInfo]:
     """식약처_의약품제품허가정보(DrugPrdtPrmsnInfoService07)로 품목명(부분 일치) 허가 상태를 조회합니다.
 
@@ -93,6 +101,7 @@ def is_officially_approved(item_name: str) -> bool | None:
 
 # [2026-07-14 추가] 사용자가 "제품허가정보로 사용상의 주의사항 조회 가능한지" 확인 요청 —
 # 목록 조회(getDrugPrdtPrmsnInq07)에는 없고, 상세정보(getDrugPrdtPrmsnDtlInq06)에만 있다.
+@lru_cache(maxsize=512)
 def search_permit_detail(item_name: str, num_of_rows: int = 10, page_no: int = 1) -> list[DrugPermitDetail]:
     """식약처_의약품제품허가정보 상세정보(getDrugPrdtPrmsnDtlInq06)를 품목명(부분 일치)으로 조회합니다.
 

@@ -39,7 +39,7 @@ from models import (
     Caregiver,
     CaregiverPatient,
     MedicalRecord,
-    MedicationLog,
+    MedicationRecord,
     MedicationSchedule,
     NotificationLog,
     OcrResult,
@@ -103,8 +103,9 @@ class MealTimesUpdate(BaseModel):
     dinner_regular: bool | None = None
 
 
-@router.post("/patients", response_model=PatientPublic)
-def create_patient(payload: PatientCreate, session: Session = Depends(get_session)):
+def _register_patient(payload: PatientCreate, session: Session) -> Patient:
+    """실제 Patient 계정 생성 — create_patient 엔드포인트와 보호자→환자 초대 수락
+    (care_router.accept_invitation) 양쪽에서 재사용하는 공용 로직."""
     # [2026-07-14] 이메일 앞뒤 공백/대소문자가 섞이면 같은 사람이 다른 계정으로 취급돼
     # 로그인이 안 되는 문제가 있었다 — 저장 전에 항상 정규화한다.
     email = normalize_email(payload.email) if payload.email else None
@@ -127,6 +128,11 @@ def create_patient(payload: PatientCreate, session: Session = Depends(get_sessio
     session.commit()
     session.refresh(patient)
     return patient
+
+
+@router.post("/patients", response_model=PatientPublic)
+def create_patient(payload: PatientCreate, session: Session = Depends(get_session)):
+    return _register_patient(payload, session)
 
 
 @router.get("/patients", response_model=list[PatientPublic])
@@ -403,8 +409,6 @@ class ScheduleUpdate(BaseModel):
 
 class CheckIn(BaseModel):
     status: str  # "taken" | "skipped" (Dashboard.tsx IntakeStatus와 동일)
-    # [7/9 추가] 보호자가 모니터링 화면에서 대신 체크할 때만 채워짐 — 환자 본인이 체크하면 None
-    confirmed_by_caregiver_id: int | None = None
 
 
 @router.post("/schedules", response_model=MedicationSchedule)
@@ -487,11 +491,11 @@ def delete_schedule(
     if not schedule:
         raise HTTPException(404, "해당 일정을 찾을 수 없어요")
     require_actor_patient_access(schedule.patient_id, actor, session)
-    logs = session.exec(
-        select(MedicationLog).where(MedicationLog.schedule_id == schedule_id)
+    records = session.exec(
+        select(MedicationRecord).where(MedicationRecord.schedule_id == schedule_id)
     ).all()
-    for log in logs:
-        session.delete(log)
+    for record in records:
+        session.delete(record)
     session.delete(schedule)
     session.commit()
     return {"deleted": schedule_id}
@@ -512,26 +516,38 @@ def check_intake(
 
     today_str = date.today().isoformat()
     existing = session.exec(
-        select(MedicationLog)
-        .where(MedicationLog.schedule_id == schedule_id)
-        .where(func.date(MedicationLog.checked_at) == today_str)
+        select(MedicationRecord)
+        .where(MedicationRecord.schedule_id == schedule_id)
+        .where(MedicationRecord.status.in_(["taken", "skipped"]))
+        .where(func.date(MedicationRecord.taken_at) == today_str)
     ).first()
 
-    confirmed_by_type = "caregiver" if payload.confirmed_by_caregiver_id else "patient"
+    # [2026-07-20 보안수정] "누가 체크했는지"는 요청 바디가 아니라 인증된 actor에서만
+    # 가져온다 — payload로 임의의 confirmed_by_caregiver_id를 받으면 이 환자와 무관한
+    # 보호자의 신원(이름 등 PII)이 이 환자의 복약 로그에 확인자로 표시될 수 있었다.
+    role, subject = actor
+    confirmed_by_caregiver_id = subject.id if role == "caregiver" else None
+    confirmed_by_type = "caregiver" if confirmed_by_caregiver_id else "patient"
+    verification_method = "caregiver" if confirmed_by_caregiver_id else "self_report"
+    now = datetime.now()
 
     if existing:
         existing.status = payload.status
-        existing.checked_at = datetime.now()
+        existing.taken_at = now
+        existing.updated_at = now
+        existing.verification_method = verification_method
         existing.confirmed_by_type = confirmed_by_type
-        existing.confirmed_by_caregiver_id = payload.confirmed_by_caregiver_id
+        existing.confirmed_by_caregiver_id = confirmed_by_caregiver_id
         session.add(existing)
     else:
         session.add(
-            MedicationLog(
+            MedicationRecord(
                 schedule_id=schedule_id,
                 status=payload.status,
+                taken_at=now,
+                verification_method=verification_method,
                 confirmed_by_type=confirmed_by_type,
-                confirmed_by_caregiver_id=payload.confirmed_by_caregiver_id,
+                confirmed_by_caregiver_id=confirmed_by_caregiver_id,
             )
         )
 
@@ -551,9 +567,10 @@ def clear_intake(
 
     today_str = date.today().isoformat()
     existing = session.exec(
-        select(MedicationLog)
-        .where(MedicationLog.schedule_id == schedule_id)
-        .where(func.date(MedicationLog.checked_at) == today_str)
+        select(MedicationRecord)
+        .where(MedicationRecord.schedule_id == schedule_id)
+        .where(MedicationRecord.status.in_(["taken", "skipped"]))
+        .where(func.date(MedicationRecord.taken_at) == today_str)
     ).first()
     if existing:
         session.delete(existing)
@@ -573,7 +590,12 @@ def list_logs(
     """
     최근 N일간의 복약 체크 기록을 스케줄명과 함께 반환합니다.
     프론트(모니터링대시보드)가 이 원본 로그로 캘린더 점 색상·주간 이행률·최근 기록 표를 직접 계산합니다.
-    (별도 집계 테이블 없이 MedicationLog를 그대로 조회하는 방식 — schedule_v6 단순화 원칙과 동일)
+    (별도 집계 테이블 없이 MedicationRecord를 그대로 조회하는 방식 — schedule_v6 단순화 원칙과 동일)
+
+    [2026-07-20 REQ-037 Phase2] 체크인 기록을 MedicationRecord로 일원화했다. status가 5종
+    (scheduled/taken/missed/skipped/duplicate_suspected)이라, 사용자가 실제로 체크한
+    taken/skipped만 명시적으로 필터링해서 응답에 노출한다(프론트 MedicationLogEntry.status는
+    taken/skipped/missed만 안다 — missed는 아래 NotificationLog 병합으로 합성됨).
     """
     require_actor_patient_access(patient_id, actor, session)
 
@@ -585,41 +607,42 @@ def list_logs(
         return []
 
     since = datetime.now() - timedelta(days=days)
-    logs = session.exec(
-        select(MedicationLog)
-        .where(MedicationLog.schedule_id.in_(list(schedule_map.keys())))
-        .where(MedicationLog.checked_at >= since)
-        .order_by(MedicationLog.checked_at.desc())
+    records = session.exec(
+        select(MedicationRecord)
+        .where(MedicationRecord.schedule_id.in_(list(schedule_map.keys())))
+        .where(MedicationRecord.status.in_(["taken", "skipped"]))
+        .where(MedicationRecord.taken_at >= since)
+        .order_by(MedicationRecord.taken_at.desc())
     ).all()
 
-    caregiver_ids = {log.confirmed_by_caregiver_id for log in logs if log.confirmed_by_caregiver_id}
+    caregiver_ids = {r.confirmed_by_caregiver_id for r in records if r.confirmed_by_caregiver_id}
     caregiver_names = {
         c.id: c.name for c in session.exec(select(Caregiver).where(Caregiver.id.in_(caregiver_ids)))
     } if caregiver_ids else {}
 
     entries = [
         {
-            "id": str(log.id),
-            "schedule_id": log.schedule_id,
-            "drug_name": schedule_map[log.schedule_id].drug_name,
-            "time_slot": schedule_map[log.schedule_id].time_slot,
-            "status": log.status,
-            "checked_at": log.checked_at.isoformat(),
-            "confirmed_by_type": log.confirmed_by_type,
+            "id": str(r.id),
+            "schedule_id": r.schedule_id,
+            "drug_name": schedule_map[r.schedule_id].drug_name,
+            "time_slot": schedule_map[r.schedule_id].time_slot,
+            "status": r.status,
+            "checked_at": r.taken_at.isoformat(),
+            "confirmed_by_type": r.confirmed_by_type,
             "confirmed_by_name": (
-                caregiver_names.get(log.confirmed_by_caregiver_id, "보호자")
-                if log.confirmed_by_type == "caregiver"
+                caregiver_names.get(r.confirmed_by_caregiver_id, "보호자")
+                if r.confirmed_by_type == "caregiver"
                 else "본인"
             ),
         }
-        for log in logs
+        for r in records
     ]
 
     # [2026-07-19 추가, REQ-037 Phase1] core/scheduler.py가 정시를 놓친 걸 감지하면
-    # MedicationLog가 아니라 NotificationLog(kind="missed")에 기록한다(레거시 스키마를
+    # MedicationRecord가 아니라 NotificationLog(kind="missed")에 기록한다(레거시 스키마를
     # 안 건드리는 read-side 병합 — models.py NotificationLog 주석 참고). 실제 체크 기록이
     # 이미 있는 (schedule_id, 날짜)는 그 체크가 우선이므로 missed로 겹쳐 넣지 않는다.
-    real_checked_dates = {(log.schedule_id, log.checked_at.date().isoformat()) for log in logs}
+    real_checked_dates = {(r.schedule_id, r.taken_at.date().isoformat()) for r in records}
     missed_notifs = session.exec(
         select(NotificationLog)
         .where(NotificationLog.kind == "missed")
@@ -665,16 +688,17 @@ def get_today(
 
     result = []
     for s in schedules:
-        log = session.exec(
-            select(MedicationLog)
-            .where(MedicationLog.schedule_id == s.id)
-            .where(func.date(MedicationLog.checked_at) == today_str)
+        record = session.exec(
+            select(MedicationRecord)
+            .where(MedicationRecord.schedule_id == s.id)
+            .where(MedicationRecord.status.in_(["taken", "skipped"]))
+            .where(func.date(MedicationRecord.taken_at) == today_str)
         ).first()
-        if log:
-            status = log.status
+        if record:
+            status = record.status
         else:
             # [2026-07-19 추가, REQ-037 Phase1] 오늘자 체크가 없으면, 스케줄러가 이미
-            # "놓침"으로 판정해뒀는지 NotificationLog에서 확인한다(MedicationLog 스키마는
+            # "놓침"으로 판정해뒀는지 NotificationLog에서 확인한다(MedicationRecord 스키마는
             # 안 건드리는 read-side 병합).
             missed = session.exec(
                 select(NotificationLog)

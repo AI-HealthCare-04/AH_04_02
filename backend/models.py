@@ -260,6 +260,17 @@ class OcrResult(SQLModel, table=True):
     match_score: float = 0.0       # drug_matcher: SequenceMatcher 유사도 (0~1)
     needs_review: bool = False     # drug_matcher: match_score < 0.7 이면 True (review_required와 별개)
 
+    @property
+    def display_name(self) -> str:
+        """화면 표시·RAG/DUR 조회에 쓸 이름 — 확신 있게 매칭됐으면(matched_drug_name,
+        needs_review=False) 그 정확한 전체명을, 아니면 원문(drug_name)을 그대로 쓴다.
+        drug_name/matched_drug_name 자체의 의미는 그대로 유지하고(원문 vs 매칭명 분리),
+        "어느 걸 보여줄지"만 이 한 곳에서 판단해 records_router.py/rag_router.py가
+        각자 다른 규칙을 쓰는 걸 막는다."""
+        if self.matched_drug_name and not self.needs_review:
+            return self.matched_drug_name
+        return self.drug_name
+
 
 # ── RAG 가이드 결과 (담당: 김영혜) ──
 class GuideResult(SQLModel, table=True):
@@ -398,7 +409,11 @@ class MedicationRecord(SQLModel, table=True):
     __tablename__ = "medication_records"
 
     id: int | None = Field(default=None, primary_key=True)
-    patient_medication_id: int = Field(foreign_key="patient_medications.id", index=True)
+    # [2026-07-20 변경] OCR 기반 스케줄은 PatientMedication이 없으므로 nullable —
+    # schedule_id와 patient_medication_id 중 최소 하나는 있어야 한다(불변식, DB 레벨 제약은 아님).
+    patient_medication_id: int | None = Field(
+        default=None, foreign_key="patient_medications.id", index=True
+    )
     schedule_id: int | None = Field(default=None, foreign_key="medication_schedules.id")
     scheduled_at: datetime | None = None
     taken_at: datetime | None = None  # 실제 복용 시간, 아직 안 먹었으면 None
@@ -406,6 +421,10 @@ class MedicationRecord(SQLModel, table=True):
     verification_method: str = "self_report"  # self_report / caregiver / photo / device
     evidence_image_url: str | None = None
     memo: str | None = None
+    # [2026-07-20 추가] MedicationLog와 동일한 필드명/타입 — 체크인 기록을 이 테이블로
+    # 일원화하면서 "누가 체크했는지"(환자 본인 patient vs 보호자 대신 caregiver)를 보존한다.
+    confirmed_by_type: str | None = None
+    confirmed_by_caregiver_id: int | None = Field(default=None, foreign_key="caregivers.id")
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
@@ -437,7 +456,8 @@ class Invitation(SQLModel, table=True):
     __tablename__ = "invitations"
 
     id: int | None = Field(default=None, primary_key=True)
-    patient_id: int = Field(foreign_key="patients.id")
+    # 보호자→환자 초대(relation_type="patient")는 아직 환자 계정이 없어 nullable — 수락 시점에 채워진다.
+    patient_id: int | None = Field(default=None, foreign_key="patients.id")
     inviter_caregiver_id: int | None = Field(default=None, foreign_key="caregivers.id")
     relation_type: str = "guardian"
     invited_phone_encrypted: str | None = None
