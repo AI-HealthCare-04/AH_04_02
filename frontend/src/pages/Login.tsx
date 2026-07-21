@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { MouseEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { X } from "lucide-react";
@@ -34,6 +34,19 @@ export default function Login() {
   // 바로 전환되는 계정 목록에 추가) — 이미 저장된 아이디가 있으면 체크박스도 켜서 보여준다.
   const [rememberId, setRememberId] = useState(() => getRememberedIdentifier() !== "");
   const [autoLogin, setAutoLogin] = useState(false);
+
+  // [2026-07-22 추가] monitoringClient.ts의 401 인터셉터가 남겨둔 안내 메시지 — 저장된
+  // 계정을 클릭했는데 토큰이 만료돼 있으면 여기로 튕겨오면서 이 메시지가 뜬다("눌러도
+  // 반응 없음"처럼 보이던 문제 수정). useState 초기화 함수 안에서 읽고 지우면 StrictMode가
+  // 개발 모드에서 그 함수를 두 번 호출해 두 번째 호출 때는 이미 지워진 뒤라 메시지가
+  // 조용히 사라지는 문제가 있어 — 실제로 한 번만 도는 useEffect로 옮겼다.
+  useEffect(() => {
+    const notice = sessionStorage.getItem("login_notice");
+    if (notice) {
+      sessionStorage.removeItem("login_notice");
+      setError(notice);
+    }
+  }, []);
 
   // 로그인 성공 직후 공통 처리 — 체크박스 상태에 따라 아이디/계정을 기억하거나 지운다.
   const persistLoginChoice = (account: RecentAccount) => {
