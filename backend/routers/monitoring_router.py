@@ -33,7 +33,7 @@ from core.dependencies import (
     require_actor_patient_access,
     require_patient_access,
 )
-from core.security import normalize_email
+from core.security import hash_phone, normalize_email
 from fastapi import APIRouter, Depends, HTTPException
 from models import (
     Caregiver,
@@ -113,6 +113,15 @@ def _register_patient(payload: PatientCreate, session: Session) -> Patient:
     # 대신 사용자에게 명확한 409를 주기 위해 사전 검사도 함께 한다.
     if email and session.exec(select(Patient).where(Patient.email == email)).first():
         raise HTTPException(409, "이미 사용중인 이메일입니다.")
+
+    # [2026-07-22 추가] phone_hash엔 email과 달리 유니크 제약이 없어서, 중복된 전화번호로
+    # 가입해도 여기선 막히지 않고 조용히 저장됐다 — auth_router._find_by_identifier가
+    # phone_hash로 조회할 때 `.first()`를 쓰기 때문에, 나중에 로그인 시도 시(특히 이
+    # 가입 직후 자동 로그인) 먼저 만들어진 다른 계정이 걸려서 비밀번호가 안 맞다고
+    # 나오는 버그로 이어졌다(SignUp.tsx "가입 처리에 실패했어요"). email과 동일하게
+    # 가입 시점에 막는다.
+    if payload.phone and session.exec(select(Patient).where(Patient.phone_hash == hash_phone(payload.phone))).first():
+        raise HTTPException(409, "이미 사용중인 전화번호입니다.")
 
     # [7/9] name/phone은 Patient의 프로퍼티(암호화 setter)라 생성자 kwarg로 못 받음 —
     # 나머지 필드로 먼저 만들고 .name/.phone에 대입해서 암호화·해시 처리한다.
@@ -265,6 +274,12 @@ def create_caregiver(payload: CaregiverCreate, session: Session = Depends(get_se
     email = normalize_email(payload.email) if payload.email else None
     if email and session.exec(select(Caregiver).where(Caregiver.email == email)).first():
         raise HTTPException(409, "이미 사용중인 이메일입니다.")
+
+    # [2026-07-22 추가] Patient._register_patient와 동일한 이유 — phone_hash 유니크
+    # 제약이 없어 중복 전화번호 가입이 조용히 허용됐고, 로그인 시 `.first()`가 먼저
+    # 만들어진 다른 보호자 계정을 집어서 회원가입 직후 자동 로그인이 실패했다.
+    if payload.phone and session.exec(select(Caregiver).where(Caregiver.phone_hash == hash_phone(payload.phone))).first():
+        raise HTTPException(409, "이미 사용중인 전화번호입니다.")
 
     # [7/9] name/phone은 Caregiver의 프로퍼티(암호화 setter)라 생성자 kwarg로 못 받음 —
     # 나머지 필드로 먼저 만들고 .name/.phone에 대입해서 암호화·해시 처리한다.

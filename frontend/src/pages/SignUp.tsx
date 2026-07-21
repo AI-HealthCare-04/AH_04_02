@@ -268,8 +268,12 @@ export default function SignUp() {
         localStorage.setItem("user_name", loggedInName);
       }
       setDone(true);
-    } catch {
-      setError("가입 처리에 실패했어요. 잠시 후 다시 시도해 주세요.");
+    } catch (e) {
+      // [2026-07-22 수정] 이메일/전화번호 중복(409)처럼 백엔드가 구체적인 사유를 주는
+      // 경우까지 "가입 처리에 실패했어요"로 뭉개면 사용자가 뭘 고쳐야 할지 알 수 없다
+      // — Schedule.tsx의 describeError와 동일한 방식으로 detail이 있으면 그대로 보여준다.
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(detail || "가입 처리에 실패했어요. 잠시 후 다시 시도해 주세요.");
     } finally {
       setSubmitting(false);
     }
