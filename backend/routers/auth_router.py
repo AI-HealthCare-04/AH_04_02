@@ -109,18 +109,30 @@ class WithdrawCancelRequest(BaseModel):
     password: str
 
 
-def _find_by_identifier(session: Session, model, identifier: str):
-    """identifier가 이메일 형식이면 email로, 아니면 전화번호로 보고 phone_hash로 조회.
+def _find_by_identifiers(session: Session, model, identifier: str) -> list:
+    """identifier가 이메일 형식이면 email로, 아니면 전화번호로 보고 phone_hash로 조회 —
+    일치하는 계정을 전부 반환한다.
 
     [2026-07-14] 이메일은 대소문자·좌우공백 차이(모바일 자동대문자화 등)로 가입 때와
     다르게 입력돼도 같은 계정으로 찾아야 한다. 가입 시(monitoring_router.py)부터
     normalize_email()로 정규화해서 저장하므로, 조회할 때도 같은 정규화 함수로 비교한다
     — DB의 `func.lower()` 비교는 가입 시 저장값 자체가 정규화돼 있지 않으면 여전히
     " Test@x.com "과 "test@x.com"이 별개 계정으로 남는 문제를 못 막아서 채택하지 않았다.
+
+    [2026-07-22 추가] 전화번호는 이메일과 달리 테이블 전체가 아니라 관계(역할)당 유니크로
+    바뀌었다 — 같은 사람이 환자 본인/보호자/기관 계정을 각각 하나씩 같은 전화번호로 가질 수
+    있다(monitoring_router.py). 그래서 phone_hash 조회는 이제 여러 계정을 반환할 수 있고,
+    login()은 비밀번호가 맞는 계정을 찾을 때까지 이 목록을 순회한다.
     """
     if "@" in identifier:
-        return session.exec(select(model).where(model.email == normalize_email(identifier))).first()
-    return session.exec(select(model).where(model.phone_hash == hash_phone(identifier))).first()
+        return list(session.exec(select(model).where(model.email == normalize_email(identifier))).all())
+    return list(session.exec(select(model).where(model.phone_hash == hash_phone(identifier))).all())
+
+
+def _find_by_identifier(session: Session, model, identifier: str):
+    """단일 계정만 다루는 기존 호출부(비밀번호 재설정/탈퇴 취소)용 — 여러 계정이 걸려도
+    첫 번째만 본다. 이 세 곳까지 멀티 계정 대응하는 건 지금 범위 밖(TODO)."""
+    return next(iter(_find_by_identifiers(session, model, identifier)), None)
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -132,20 +144,23 @@ def login(payload: LoginRequest, response: Response, session: Session = Depends(
 
     [2026-07-15 추가, REQ-039] 계정 잠금 — 이 함수가 다루는 것은 caregiver/patient
     양쪽 다 같은 원칙이라 공용 헬퍼(_authenticate)로 뺐다.
+
+    [2026-07-22 추가] 전화번호가 이제 관계(역할)당 유니크라 한 사람이 환자 본인/보호자/
+    기관 계정을 같은 전화번호로 여러 개 가질 수 있다 — 후보 전부를 비밀번호가 맞는 계정을
+    찾을 때까지 순회한다(첫 번째만 보면 다른 역할 계정에 걸려 정작 본인 계정 로그인이
+    실패하는 버그가 남).
     """
-    caregiver = _find_by_identifier(session, Caregiver, payload.identifier)
-    if caregiver:
-        result = _authenticate(session, "caregiver", caregiver, payload.password)
-        if result is not None:
+    caregivers = _find_by_identifiers(session, Caregiver, payload.identifier)
+    for caregiver in caregivers:
+        if _authenticate(session, "caregiver", caregiver, payload.password) is not None:
             return _issue_login_response(response, caregiver.id, "caregiver", caregiver.name, session)
 
-    patient = _find_by_identifier(session, Patient, payload.identifier)
-    if patient:
-        result = _authenticate(session, "patient", patient, payload.password)
-        if result is not None:
+    patients = _find_by_identifiers(session, Patient, payload.identifier)
+    for patient in patients:
+        if _authenticate(session, "patient", patient, payload.password) is not None:
             return _issue_login_response(response, patient.id, "patient", patient.name, session)
 
-    if not caregiver and not patient:
+    if not caregivers and not patients:
         logger.info("login failed: no caregiver/patient matches identifier")
 
     raise HTTPException(status.HTTP_400_BAD_REQUEST, "이메일/전화번호 또는 비밀번호가 올바르지 않습니다.")

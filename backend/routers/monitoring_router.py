@@ -278,7 +278,19 @@ def create_caregiver(payload: CaregiverCreate, session: Session = Depends(get_se
     # [2026-07-22 추가] Patient._register_patient와 동일한 이유 — phone_hash 유니크
     # 제약이 없어 중복 전화번호 가입이 조용히 허용됐고, 로그인 시 `.first()`가 먼저
     # 만들어진 다른 보호자 계정을 집어서 회원가입 직후 자동 로그인이 실패했다.
-    if payload.phone and session.exec(select(Caregiver).where(Caregiver.phone_hash == hash_phone(payload.phone))).first():
+    # [2026-07-22 수정] 단, 같은 사람이 보호자(가족)이면서 동시에 기관(요양보호사 등)
+    # 소속일 수 있고, 환자 본인 계정도 별도로 가질 수 있다(부모님 보호자이자 본인은
+    # 환자, 게다가 요양보호사로 근무 — 세 역할 모두 흔한 조합) — 그래서 전화번호는
+    # 테이블 전체가 아니라 relation_type(같은 역할)끼리만 중복을 막는다. Patient는
+    # 역할이 하나뿐이라 테이블 전체 유니크로 충분하다.
+    if (
+        payload.phone
+        and session.exec(
+            select(Caregiver)
+            .where(Caregiver.phone_hash == hash_phone(payload.phone))
+            .where(Caregiver.relation_type == payload.relation_type)
+        ).first()
+    ):
         raise HTTPException(409, "이미 사용중인 전화번호입니다.")
 
     # [7/9] name/phone은 Caregiver의 프로퍼티(암호화 setter)라 생성자 kwarg로 못 받음 —
