@@ -110,6 +110,34 @@ export async function listInvitations(patientId: number) {
   return data;
 }
 
+// [2026-07-22 추가] "받은 초대" — 환자가 전화번호를 지정해 보낸 초대를 링크 없이 확인/수락하는
+// 보호자·기관용 흐름(PatientManagement.tsx). InvitationSummary와 달리 patient_id/invited_phone이
+// 없다 — 이건 "내가 보낸" 목록이 아니라 "나에게 온" 목록이라 다른 사람의 patient_id를 노출하지 않는다.
+export interface ReceivedInvitation {
+  id: number;
+  relation_type: string;
+  patient_name: string;
+  created_at: string;
+  expires_at: string | null;
+}
+
+export async function listReceivedInvitations(caregiverId: number) {
+  const { data } = await monitoringClient.get<ReceivedInvitation[]>(
+    `/caregivers/${caregiverId}/pending-invitations`
+  );
+  return data;
+}
+
+export async function acceptInvitationAsCaregiver(invitationId: number) {
+  const { data } = await monitoringClient.post(`/invitations/${invitationId}/accept-as-caregiver`);
+  return data;
+}
+
+export async function rejectInvitationAsCaregiver(invitationId: number) {
+  const { data } = await monitoringClient.post(`/invitations/${invitationId}/reject-as-caregiver`);
+  return data;
+}
+
 // ── 3. 알림 설정 (NotificationSetting) ──
 
 export interface NotificationSettings {
