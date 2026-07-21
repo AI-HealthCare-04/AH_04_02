@@ -1,3 +1,4 @@
+import inspect
 from unittest.mock import patch
 
 from langchain_core.documents import Document
@@ -8,6 +9,7 @@ from rag.rag_chain import (
     generate_guide,
     generate_guide_from_medication,
     generate_guides_from_medications,
+    generate_lifestyle_guide_for_diagnosis,
 )
 from rag.schemas import (
     DrugInfo,
@@ -17,6 +19,7 @@ from rag.schemas import (
     DurTabooInfo,
     GuideResponse,
     HiraDrugMasterEntry,
+    LifestyleGuideResult,
 )
 
 FAKE_DOC = Document(
@@ -382,21 +385,79 @@ def test_build_context_skips_lifestyle_search_without_diagnosis():
     assert all(item["kind"] == "drug" for item in context_items)
 
 
-def test_generate_guide_dry_run_includes_lifestyle_source_refs():
-    """OPENAI_API_KEY가 없는 dry-run 모드에서도 생활지침 인용은 lifestyle_source_refs로 채워진다."""
+def test_generate_guide_does_not_search_lifestyle_context():
+    """[2026-07-21 회의 반영] generate_guide()(의약품 전용)는 이제 생활습관 컨텍스트를
+    전혀 조회하지 않는다 — 그 진단명이 매칭돼도 search_by_disease/search_kdca_health_info를
+    호출하지 않아야 하고, 결과 GuideResponse에는 lifestyle_guide/lifestyle_source_refs
+    필드 자체가 없다(스키마에서 제거됨)."""
     with (
         patch("rag.rag_chain.search_by_item_name", return_value=[FAKE_DOC]),
-        patch("rag.rag_chain.search_by_disease", return_value=[FAKE_LIFESTYLE_DOC]),
+        patch("rag.rag_chain.search_by_disease") as mock_curated,
+        patch("rag.rag_chain.search_kdca_health_info") as mock_kdca,
         patch("rag.rag_chain.search_hira_by_product_name", return_value=[]),
         patch("rag.rag_chain.settings.OPENAI_API_KEY", None),
     ):
         guide = generate_guide("암로디핀정5밀리그램", diagnosis="고혈압")
 
+    mock_curated.assert_not_called()
+    mock_kdca.assert_not_called()
     assert len(guide.source_refs) == 1
     assert guide.source_refs[0].item_name == "암로디핀정5밀리그램"
-    assert len(guide.lifestyle_source_refs) == 1
-    assert guide.lifestyle_source_refs[0].guideline_id == "htn-diet-1"
-    assert "소금" in guide.lifestyle_guide
+    assert "lifestyle_guide" not in GuideResponse.model_fields
+    assert "lifestyle_source_refs" not in GuideResponse.model_fields
+
+
+def test_generate_lifestyle_guide_for_diagnosis_dry_run_uses_context_text():
+    """OPENAI_API_KEY가 없는 dry-run 모드에서도 생활지침 인용·본문이 그대로 채워진다."""
+    with (
+        patch("rag.rag_chain.search_kdca_health_info", return_value=[]),
+        patch("rag.rag_chain.search_by_disease", return_value=[FAKE_LIFESTYLE_DOC]),
+        patch("rag.rag_chain.settings.OPENAI_API_KEY", None),
+    ):
+        result = generate_lifestyle_guide_for_diagnosis("고혈압")
+
+    assert result.diagnosis == "고혈압"
+    assert len(result.source_refs) == 1
+    assert result.source_refs[0].guideline_id == "htn-diet-1"
+    assert "소금" in result.guide
+    assert "dry_run" in result.review_flags
+
+
+def test_generate_lifestyle_guide_for_diagnosis_has_no_drug_name_param():
+    """[2026-07-21 회의 반영] 생활습관 안내는 의약품과 무관하게 진단명만으로 생성돼야
+    한다 — 함수 시그니처 자체가 drug_name을 받지 않도록 구조적으로 고정한다."""
+    params = list(inspect.signature(generate_lifestyle_guide_for_diagnosis).parameters)
+    assert params == ["diagnosis"]
+
+
+def test_generate_lifestyle_guide_for_diagnosis_falls_back_safely_without_diagnosis():
+    """진단명이 없으면 검색을 시도하지 않고(지어내지 않고) 안전한 일반 안내로 즉시 대체한다."""
+    with (
+        patch("rag.rag_chain.search_kdca_health_info") as mock_kdca,
+        patch("rag.rag_chain.search_by_disease") as mock_curated,
+    ):
+        result = generate_lifestyle_guide_for_diagnosis(None)
+
+    mock_kdca.assert_not_called()
+    mock_curated.assert_not_called()
+    assert result.diagnosis == ""
+    assert result.review_required is True
+    assert "no_diagnosis" in result.review_flags
+    assert "진단명" in result.guide
+
+
+def test_generate_lifestyle_guide_for_diagnosis_falls_back_safely_when_no_context_found():
+    """진단명은 있지만 매칭되는 생활지침이 하나도 없으면, 지어내지 않고 안전한 안내로 대체한다."""
+    with (
+        patch("rag.rag_chain.search_kdca_health_info", return_value=[]),
+        patch("rag.rag_chain.search_by_disease", return_value=[]),
+    ):
+        result = generate_lifestyle_guide_for_diagnosis("희귀질환예시")
+
+    assert result.diagnosis == "희귀질환예시"
+    assert result.review_required is True
+    assert "no_lifestyle_context" in result.review_flags
+    assert result.source_refs == []
 
 
 def test_generate_guide_from_medication_maps_ocr_fields():
@@ -449,7 +510,6 @@ def _base_guide(**overrides) -> GuideResponse:
     defaults = dict(
         drug_name="로자탄",
         medication_guide="복약 안내",
-        lifestyle_guide="생활습관 안내",
         disclaimer="disclaimer",
         review_required=False,
         review_reason=None,
@@ -504,7 +564,7 @@ def test_batch_isolates_failure():
         "rag.rag_chain.generate_guide_from_medication",
         side_effect=fake_generate_guide_from_medication,
     ):
-        guides = generate_guides_from_medications(
+        guides, lifestyle_guides = generate_guides_from_medications(
             [{"drug_name": "정상약"}, {"drug_name": "실패약"}]
         )
 
@@ -514,6 +574,10 @@ def test_batch_isolates_failure():
     assert guides[1].drug_name == "실패약"
     assert guides[1].review_required is True
     assert guides[1].review_flags == ["generation_error"]
+    # 진단명이 하나도 없으므로(둘 다 diagnosis 미지정) 안전한 폴백 안내 1건만 반환된다.
+    assert len(lifestyle_guides) == 1
+    assert lifestyle_guides[0].diagnosis == ""
+    assert "no_diagnosis" in lifestyle_guides[0].review_flags
 
 
 def _dur_entry(**overrides) -> DurTabooInfo:
@@ -603,6 +667,34 @@ def test_generate_guides_from_medications_passes_sibling_drug_names():
     assert calls[0].kwargs["other_drug_names"] == ["아스피린", "로자탄"]
     assert calls[1].kwargs["other_drug_names"] == ["와파린", "로자탄"]
     assert calls[2].kwargs["other_drug_names"] == ["와파린", "아스피린"]
+
+
+def test_generate_guides_from_medications_generates_lifestyle_once_per_unique_diagnosis():
+    """[2026-07-21 회의 반영, 핵심 회귀 테스트] 여러 약이 같은 진단명을 공유해도 생활습관
+    안내는 진단명당 한 번만 생성돼야 한다 — "의약품별"이 아니라 "진단명별"이라는 요구사항의
+    직접적인 검증. 서로 다른 진단명(고혈압/당뇨병)은 각각 한 번씩, 총 2번만 호출된다."""
+    medications = [
+        {"drug_name": "암로디핀", "diagnosis": "고혈압"},
+        {"drug_name": "로자탄", "diagnosis": "고혈압"},  # 고혈압 중복 — 재생성되면 안 됨
+        {"drug_name": "메트포르민", "diagnosis": "당뇨병"},
+    ]
+    with (
+        patch("rag.rag_chain.generate_guide_from_medication") as mock_generate_guide,
+        patch("rag.rag_chain.generate_lifestyle_guide_for_diagnosis") as mock_generate_lifestyle,
+    ):
+        mock_generate_guide.side_effect = lambda medication, other_drug_names=None: _base_guide(
+            drug_name=medication["drug_name"]
+        )
+        mock_generate_lifestyle.side_effect = lambda diagnosis: LifestyleGuideResult(
+            diagnosis=diagnosis or "", guide=f"{diagnosis} 생활습관 안내"
+        )
+        guides, lifestyle_guides = generate_guides_from_medications(medications)
+
+    assert len(guides) == 3  # 의약품별 가이드는 여전히 3개(약 개수만큼)
+    assert mock_generate_lifestyle.call_count == 2  # 생활습관은 고유 진단명(2개)만큼만 호출
+    called_diagnoses = [c.args[0] for c in mock_generate_lifestyle.call_args_list]
+    assert called_diagnoses == ["고혈압", "당뇨병"]  # 첫 등장 순서, 중복 없음
+    assert [lg.diagnosis for lg in lifestyle_guides] == ["고혈압", "당뇨병"]
 
 
 def _caution(**overrides) -> DurCaution:

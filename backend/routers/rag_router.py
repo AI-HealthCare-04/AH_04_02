@@ -167,7 +167,9 @@ def _generate_via_rag(ocr_items: Sequence[OcrResult]) -> tuple[dict, dict, list]
         }
         for item in ocr_items
     ]
-    guides = _generate_guides(medications)  # 동기 함수(LLM/벡터DB 호출) — 반드시 스레드에서 실행할 것
+    # [2026-07-21 회의 반영] generate_guides_from_medications()가 이제 (약별 가이드, 진단명별
+    # 생활습관 안내) 튜플을 돌려준다 — 생활습관 안내는 약 개수가 아니라 고유 진단명 개수만큼만 있다.
+    guides, lifestyle_results = _generate_guides(medications)  # 동기 함수(LLM/벡터DB 호출) — 반드시 스레드에서 실행할 것
 
     medication_guide = {
         "drugs": [
@@ -182,9 +184,21 @@ def _generate_via_rag(ocr_items: Sequence[OcrResult]) -> tuple[dict, dict, list]
             for g in guides
         ]
     }
+    # [2026-07-21 회의 반영] "guides"는 이제 문자열 배열이 아니라 진단명별 {diagnosis, guide}
+    # 객체 배열이다 — 여러 약이 같은 진단명을 공유해도 그 진단명의 안내는 한 번만 들어있다.
+    # 최상위 "diagnosis"는 프론트가 헤드라인으로 쓰는 대표 진단명(첫 번째 실제 진단명, 전부
+    # 미상이면 빈 문자열)이다.
     lifestyle_guide = {
-        "diagnosis": ocr_items[0].diagnosis,
-        "guides": [g.lifestyle_guide for g in guides],
+        "diagnosis": next((lr.diagnosis for lr in lifestyle_results if lr.diagnosis), ""),
+        "guides": [
+            {
+                "diagnosis": lr.diagnosis,
+                "guide": lr.guide,
+                "review_required": lr.review_required,
+                "review_reason": lr.review_reason,
+            }
+            for lr in lifestyle_results
+        ],
     }
     source_refs = [
         {
@@ -201,9 +215,10 @@ def _generate_via_rag(ocr_items: Sequence[OcrResult]) -> tuple[dict, dict, list]
         for g in guides
         for ref in g.source_refs
     ] + [
-        {"drug_name": g.drug_name, "disease": ref.disease, "category": ref.category, "source": ref.source}
-        for g in guides
-        for ref in g.lifestyle_source_refs
+        # [2026-07-21 회의 반영] 생활습관 인용은 이제 특정 약(drug_name)이 아니라 진단명 기준이다.
+        {"diagnosis": lr.diagnosis, "disease": ref.disease, "category": ref.category, "source": ref.source}
+        for lr in lifestyle_results
+        for ref in lr.source_refs
     ] + [
         # [7/10] DUR 병용금기 경고 — 같은 처방전의 다른 약과 실제로 금기 관계일 때만 존재.
         # [7/13] API 대신 로컬 CSV 조회로 전환(dur_master.py) — backend/data/에 해당 CSV가
