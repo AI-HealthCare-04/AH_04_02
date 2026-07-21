@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import type { FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ChevronDown, ChevronRight, Menu, Pill, Search, X } from "lucide-react";
 import { C } from "../theme";
 
@@ -45,8 +45,11 @@ const ALL_MENU_ENTRIES: { label: string; to: string }[] = NAV_ITEMS.flatMap((ite
  * [이후] 색상을 theme.ts(C)로 통일 — 인라인 hex 제거.
  * [7/13] lg 미만 구간용 햄버거 드로어 추가 — ESC/바깥클릭 닫기, 스크롤 잠금.
  */
+const AUTH_PATHS = ["/login", "/register", "/reset-password"];
+
 export default function NavBar({ isLoggedIn = false, userName = "", variant = "light" }: NavBarProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const dark = variant === "dark";
   const textColor = dark ? C.white : C.dark;
   const [isOpen, setIsOpen] = useState(false);
@@ -333,7 +336,7 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
                 </button>
               </>
             ) : (
-              !dark && (
+              !dark && !AUTH_PATHS.includes(location.pathname) && (
                 <button
                   onClick={() => navigate("/login")}
                   className="px-5 py-2 rounded-full border-2 text-[14px] font-bold whitespace-nowrap transition-colors"
