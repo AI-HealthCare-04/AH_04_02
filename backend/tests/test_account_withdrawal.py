@@ -85,11 +85,14 @@ class TestWithdrawRequest:
 
     def test_refresh_token_rejected_after_withdraw(self, client: TestClient):
         """[2026-07-15 추가, PR #48 팀원 리뷰 반영 — HIGH] 탈퇴 후에도 refresh_token
-        쿠키로 새 access_token을 계속 발급받을 수 있던 문제."""
+        쿠키로 새 access_token을 계속 발급받을 수 있던 문제.
+
+        [2026-07-22 수정] /auth/token/refresh가 GET에서 POST로 바뀌어(계정 전환 기능이
+        refresh_token을 요청 바디로 명시 전달해야 해서) client.get은 이제 405를 받는다."""
         token = _signup_and_login(client)  # 로그인 응답의 Set-Cookie가 client 쿠키 저장소에 남음
         client.post("/auth/withdraw", json={"password": "pw123456"}, headers={"Authorization": f"Bearer {token}"})
 
-        r = client.get("/auth/token/refresh")
+        r = client.post("/auth/token/refresh", json={})
         assert r.status_code == 401
 
     def test_login_blocked_after_withdraw(self, client: TestClient):

@@ -145,8 +145,15 @@ def _find_by_identifiers(session: Session, model, identifier: str) -> list:
 
 def _find_by_identifier(session: Session, model, identifier: str):
     """단일 계정만 다루는 기존 호출부(비밀번호 재설정/탈퇴 취소)용 — 여러 계정이 걸려도
-    첫 번째만 본다. 이 세 곳까지 멀티 계정 대응하는 건 지금 범위 밖(TODO)."""
-    return next(iter(_find_by_identifiers(session, model, identifier)), None)
+    하나만 본다. 이 세 곳까지 멀티 계정 대응하는 건 지금 범위 밖(TODO).
+
+    [2026-07-22 추가, 팀원 리뷰 반영] 여러 계정이 걸리면 id가 가장 큰(가장 최근 가입한)
+    계정을 고른다 — 이전엔 정렬 없이 DB가 반환하는 순서(보통 삽입 순서)의 첫 번째를
+    그대로 썼는데, per-role 전화번호 dedup이 없던 시절 실수로 쌓인 중복 계정이 있으면
+    가장 오래된(보통 안 쓰는) 계정이 걸려 방금 가입한 계정의 비밀번호 재설정/탈퇴
+    취소가 엉뚱한 계정에 적용되는 문제의 안전망이다."""
+    candidates = _find_by_identifiers(session, model, identifier)
+    return max(candidates, key=lambda account: account.id, default=None)
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -163,18 +170,38 @@ def login(payload: LoginRequest, response: Response, session: Session = Depends(
     기관 계정을 같은 전화번호로 여러 개 가질 수 있다 — 후보 전부를 비밀번호가 맞는 계정을
     찾을 때까지 순회한다(첫 번째만 보면 다른 역할 계정에 걸려 정작 본인 계정 로그인이
     실패하는 버그가 남).
+
+    [2026-07-22 수정 — HIGH, 팀원 리뷰(security-reviewer) 지적 반영] 후보를 순회하며 바로
+    _authenticate()(실패 시 failed_login_attempts를 올리는 부작용 있음)를 호출하면, 올바른
+    계정에 도달하기 전에 "지나쳐가는" 다른 역할의 계정들이 비밀번호가 안 맞다는 이유로
+    실패 횟수가 쌓였다 — 실제로 재현: 환자 계정에 정확한 비밀번호로 5번 로그인만 해도
+    같은 전화번호의 형제 보호자 계정이 한 번도 잘못 시도된 적 없이 잠겨버렸다. 이제
+    먼저 부작용 없이(_check_credentials) 전체 후보를 확인해 일치하는 계정을 찾고, 그
+    계정에 대해서만 성공 처리를 하며, 전부 불일치할 때만 실패 기록(_register_failed_login)을
+    남긴다.
     """
     caregivers = _find_by_identifiers(session, Caregiver, payload.identifier)
     for caregiver in caregivers:
-        if _authenticate(session, "caregiver", caregiver, payload.password) is not None:
+        if _check_credentials(caregiver, payload.password):
+            _register_successful_login(session, caregiver)
             return _issue_login_response(
                 response, caregiver.id, "caregiver", caregiver.name, session, relation_type=caregiver.relation_type
             )
 
     patients = _find_by_identifiers(session, Patient, payload.identifier)
     for patient in patients:
-        if _authenticate(session, "patient", patient, payload.password) is not None:
+        if _check_credentials(patient, payload.password):
+            _register_successful_login(session, patient)
             return _issue_login_response(response, patient.id, "patient", patient.name, session)
+
+    # 일치하는 후보가 하나도 없을 때만 실패 기록을 남긴다 — 전화번호가 여러 역할 계정에
+    # 걸쳐 있으면 여기서도 어느 계정이 진짜 대상인지 알 수 없어 후보 전부에 기록되는
+    # 한계는 남아있다(잔여 리스크로 문서화, 이번 수정 범위는 "성공한 로그인이 무관한
+    # 형제 계정을 잠그는" 버그로 한정).
+    for caregiver in caregivers:
+        _register_failed_login(session, "caregiver", caregiver)
+    for patient in patients:
+        _register_failed_login(session, "patient", patient)
 
     if not caregivers and not patients:
         logger.info("login failed: no caregiver/patient matches identifier")
@@ -182,54 +209,78 @@ def login(payload: LoginRequest, response: Response, session: Session = Depends(
     raise HTTPException(status.HTTP_400_BAD_REQUEST, "이메일/전화번호 또는 비밀번호가 올바르지 않습니다.")
 
 
-def _authenticate(session: Session, subject_type: str, account, password: str) -> bool | None:
-    """비밀번호를 확인하고 실패 횟수/잠금을 갱신한다. 성공하면 True, 실패하면 None을 반환
-    (locked-and-still-wrong도 실패로 취급 — 호출부는 항상 같은 통합 에러 메시지를 던짐).
+def _is_actively_locked(account) -> bool:
+    """locked_at이 있고 아직 LOCKOUT_DURATION_MINUTES가 지나지 않았으면 True — 기간이
+    지났으면(자동 해제 대상) False (호출부가 상태 초기화까지 책임진다)."""
+    return account.locked_at is not None and datetime.now() - account.locked_at < timedelta(
+        minutes=LOCKOUT_DURATION_MINUTES
+    )
+
+
+def _check_credentials(account, password: str) -> bool:
+    """비밀번호가 실제로 맞는지만 확인한다 — 실패 횟수/잠금 갱신 같은 부작용은 없다
+    (전화번호가 여러 역할 계정에 걸쳐 있을 때, 대상이 아닌 다른 후보를 "확인만" 하다가
+    건드리지 않기 위함 — 부작용은 실제로 해당하는 계정에만 별도로 적용한다).
+
+    [2026-07-15 추가, REQ-039] 이미 잠긴 계정은 비밀번호가 맞아도 거부(재설정으로만 해제).
+    [2026-07-15 추가, REQ-035] 탈퇴(비활성화)된 계정도 비밀번호가 맞아도 로그인 거부.
+    """
+    if account.deactivated_at is not None:
+        return False
+    if _is_actively_locked(account):
+        return False
+    return bool(account.hashed_password) and verify_password(password, account.hashed_password)
+
+
+def _register_successful_login(session: Session, account) -> None:
+    """로그인 성공 시 잠금 관련 상태를 정리한다 — 잠금 기간이 지나 자동 해제됐거나
+    (locked_at은 있지만 위 _check_credentials가 이미 기간 경과로 통과시킨 경우) 실패
+    횟수가 남아있으면 초기화한다."""
+    if account.locked_at is not None or account.failed_login_attempts:
+        account.locked_at = None
+        account.failed_login_attempts = 0
+        session.add(account)
+        session.commit()
+
+
+def _register_failed_login(session: Session, subject_type: str, account) -> None:
+    """비밀번호 불일치를 실패 횟수에 반영하고, 임계치를 넘으면 잠근다.
 
     [2026-07-15 추가, REQ-039] 이미 잠긴 계정은 비밀번호가 맞아도 거부하고(재설정으로만
     해제), 실패 횟수를 5회에서 더 늘리지 않는다(이미 임시번호를 보낸 상태 유지).
 
-    [2026-07-15 추가, REQ-035] 탈퇴(비활성화)된 계정도 비밀번호가 맞아도 로그인 거부 —
-    30일 유예기간 안에 되돌리려면 POST /auth/withdraw/cancel을 쓴다(로그인 자체가
-    막혀 있으니 access_token이 아니라 identifier+password로 본인 확인하는 별도 경로).
-    """
+    [2026-07-15 추가, REQ-035] 탈퇴(비활성화)된 계정은 실패 기록 대상에서 제외 — 이미
+    로그인 자체가 막혀 있어 무의미하다.
+
+    [2026-07-22 수정] locked_at이 있지만 기간이 지난(자동 해제 대상) 경우, 여기서 먼저
+    비워서 실패 횟수를 0부터 다시 세도록 한다 — 그렇지 않으면 만료된 옛 잠금의 실패
+    횟수(이미 임계치 근처) 위에 그대로 누적돼 자동 해제 직후 단 한 번의 오타로도 곧바로
+    재잠금되는(원래 의도한 "자동 해제 시 새 기회"와 다른) 부작용이 생긴다."""
     if account.deactivated_at is not None:
         logger.info("login rejected: %s_id=%s account deactivated (pending deletion)", subject_type, account.id)
-        return None
-
+        return
+    if _is_actively_locked(account):
+        logger.info("login rejected: %s_id=%s account locked", subject_type, account.id)
+        return
     if account.locked_at is not None:
-        if datetime.now() - account.locked_at >= timedelta(minutes=LOCKOUT_DURATION_MINUTES):
-            logger.info("account auto-unlocked: %s_id=%s (lockout duration elapsed)", subject_type, account.id)
-            account.locked_at = None
-            account.failed_login_attempts = 0
-            session.add(account)
-            session.commit()
-        else:
-            logger.info("login rejected: %s_id=%s account locked", subject_type, account.id)
-            return None
-
-    if not account.hashed_password or not verify_password(password, account.hashed_password):
-        account.failed_login_attempts += 1
-        if account.failed_login_attempts >= MAX_FAILED_LOGIN_ATTEMPTS:
-            account.locked_at = datetime.now()
-            session.add(account)
-            session.commit()
-            logger.info("account locked: %s_id=%s, sending reset code", subject_type, account.id)
-            _issue_reset_code(session, subject_type, account)
-        else:
-            session.add(account)
-            session.commit()
-            logger.info(
-                "login failed: %s_id=%s wrong password (%d/%d)",
-                subject_type, account.id, account.failed_login_attempts, MAX_FAILED_LOGIN_ATTEMPTS,
-            )
-        return None
-
-    if account.failed_login_attempts:
+        logger.info("account auto-unlocked: %s_id=%s (lockout duration elapsed)", subject_type, account.id)
+        account.locked_at = None
         account.failed_login_attempts = 0
+
+    account.failed_login_attempts += 1
+    if account.failed_login_attempts >= MAX_FAILED_LOGIN_ATTEMPTS:
+        account.locked_at = datetime.now()
         session.add(account)
         session.commit()
-    return True
+        logger.info("account locked: %s_id=%s, sending reset code", subject_type, account.id)
+        _issue_reset_code(session, subject_type, account)
+    else:
+        session.add(account)
+        session.commit()
+        logger.info(
+            "login failed: %s_id=%s wrong password (%d/%d)",
+            subject_type, account.id, account.failed_login_attempts, MAX_FAILED_LOGIN_ATTEMPTS,
+        )
 
 
 def _issue_reset_code(session: Session, subject_type: str, account) -> None:
