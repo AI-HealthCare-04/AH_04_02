@@ -135,6 +135,18 @@ guides = rawGuides
 | 날짜 | 2026.07.22 |
 |---|---|
 | **작성자** | 김영혜 |
+| **이슈** | 복약가이드의 `주의사항`·`생활습관` 탭이 다시 비어 보임 |
+| **발생 위치** | `backend/routers/rag_router.py`, `rag/rag/rag_chain.py` |
+| **원인 1 — 기존 가이드 캐시 재사용** | 이전에 `precautions=[]` 또는 `lifestyle_guide.guides=[]`처럼 빈 결과가 `GuideCache`에 저장된 경우, 이후 코드를 고쳐도 같은 처방 조합은 캐시 히트가 나서 최신 생성 로직을 타지 않는다. 기본 `GUIDE_DATA_VERSION`이 계속 `v1.0`이라 이전 빈 캐시가 자연 무효화되지 않았다. |
+| **원인 2 — 생활습관 LLM 빈 본문 방어 부족** | 의약품 주의사항은 `_fallback_precautions_from_context()`로 보강했지만, 생활습관은 LLM이 `lifestyle_guide`를 빈 문자열로 반환하면 검색 근거가 있어도 빈 본문 그대로 저장될 수 있었다. |
+| **해결** | `GUIDE_DATA_VERSION` 기본값을 `v1.1`로 올려 기존 빈 캐시를 우회하도록 했다. 또한 `rag_chain.py`에 `_fallback_lifestyle_guide_from_context()`를 추가해 LLM이 생활습관 본문을 비워 보내면 질병관리청/curated 생활지침 컨텍스트 문구를 표시용으로 보강하도록 했다. |
+| **재발 방지** | RAG 응답 구조 또는 표시용 fallback을 바꿀 때는 캐시 키에 쓰는 `GUIDE_DATA_VERSION`도 함께 올린다. LLM이 구조화 필드를 비워 보내는 케이스는 의약품 주의사항뿐 아니라 생활습관 본문에도 동일하게 방어한다. |
+
+---
+
+| 날짜 | 2026.07.22 |
+|---|---|
+| **작성자** | 김영혜 |
 | **이슈** | 챗봇/가이드 생성이 느리게 느껴지고, Langfuse에서 ChromaDB retrieve와 LLM generation 구간을 분리해서 확인하기 어려움 |
 | **발생 위치** | `rag/rag/rag_chain.py`, `rag/rag/vectorstore.py`, `backend/routers/chat_router.py` |
 | **원인 1 — 복약가이드 생성 비용 구조** | 복약가이드 생성은 self-consistency를 위해 `SELF_CONSISTENCY_SAMPLES=3` 기본값으로 같은 질문을 3회 생성하고 가장 일관된 답을 고른다. 처방전 약이 3개이고 고유 진단명이 1개면 `3 * (약 3개 + 진단명 1개) = 12회` LLM 호출이 직렬로 발생한다. 따라서 RAG 검색 자체보다 LLM 반복 호출이 전체 지연의 주된 원인이 될 수 있다. |
