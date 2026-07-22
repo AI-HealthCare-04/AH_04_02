@@ -16,6 +16,7 @@ from routers.care_router import (
     InvitationCreate,
     accept_invitation,
     create_invitation,
+    delete_pending_invitation,
 )
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -69,14 +70,74 @@ def test_invitation_create_rejects_arbitrary_relation_type():
         InvitationCreate(patient_id=1, relation_type="totally_arbitrary_garbage_value")
 
 
-def test_invitation_create_no_longer_accepts_guardian_direction():
-    """[2026-07-21 회의 반영] "초대하기"(환자→보호자류 초대 생성) 삭제 — relation_type은
-    이제 "patient"(보호자→환자 초대)만 허용된다. guardian/caregiver/life_support_worker/
-    social_worker로 새 초대를 만들려는 시도는 스키마 단계에서 거부돼야 한다(과거에 이미
-    생성된 이런 초대들은 accept_invitation()으로 여전히 수락 가능 — 이 테스트는 생성만 막혔는지 확인)."""
-    for relation_type in ("guardian", "caregiver", "life_support_worker", "social_worker"):
-        with pytest.raises(ValidationError):
-            InvitationCreate(patient_id=1, relation_type=relation_type)
+def test_create_guardian_invitation_from_patient_account():
+    """환자→보호자류 초대 생성도 유지돼야 한다.
+
+    보호자→환자 초대(relation_type="patient")와 함께 쓰는 양방향 연결 흐름이다.
+    """
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        patient = models.Patient()
+        patient.name = "테스트 환자"
+        session.add(patient)
+        session.commit()
+        session.refresh(patient)
+
+        result = create_invitation(
+            InvitationCreate(
+                patient_id=patient.id,
+                relation_type="guardian",
+                invited_phone="010-1234-5678",
+            ),
+            ("patient", patient),
+            session,
+        )
+
+        assert "token" in result
+        invitation = session.exec(select(models.Invitation)).one()
+        assert invitation.patient_id == patient.id
+        assert invitation.relation_type == "guardian"
+        assert invitation.inviter_caregiver_id is None
+        assert invitation.invited_phone == "010-1234-5678"
+
+
+def test_delete_pending_guardian_invitation_cancels_token():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        patient = models.Patient()
+        patient.name = "테스트 환자"
+        session.add(patient)
+        session.commit()
+        session.refresh(patient)
+
+        create_invitation(
+            InvitationCreate(patient_id=patient.id, relation_type="guardian"),
+            ("patient", patient),
+            session,
+        )
+        invitation = session.exec(select(models.Invitation)).one()
+
+        result = delete_pending_invitation(invitation.id, ("patient", patient), session)
+
+        session.refresh(invitation)
+        assert result == {"deleted": invitation.id, "status": "cancelled"}
+        assert invitation.status == "cancelled"
+
+
+def test_delete_pending_patient_invitation_requires_inviter_caregiver():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        owner = _make_caregiver(session, "초대한 보호자")
+        other = _make_caregiver(session, "다른 보호자")
+        invitation = _make_pending_patient_invitation(session, owner)
+
+        with pytest.raises(Exception) as exc:
+            delete_pending_invitation(invitation.id, ("caregiver", other), session)
+
+        assert getattr(exc.value, "status_code", None) == 403
 
 
 def test_accept_invitation_preserves_invitation_relation_type():

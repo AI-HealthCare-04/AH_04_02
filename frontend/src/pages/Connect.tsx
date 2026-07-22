@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { User, AlertCircle } from "lucide-react";
+import { User, AlertCircle, Trash2 } from "lucide-react";
 import NavBar from "../components/NavBar";
 import InvitePatientPanel from "../components/InvitePatientPanel";
-import { listInvitations, type InvitationSummary } from "../api/care";
+import { createInvitation, deleteInvitation, listInvitations, type InvitationSummary } from "../api/care";
 import { getPatientCaregivers, unlinkCaregiverPatient, type Caregiver } from "../api/monitoring";
 import { getCurrentCaregiverId, getCurrentUserName, useGuardedPatientId } from "../lib/session";
 
@@ -24,6 +24,12 @@ export default function Connect() {
   const [invitations, setInvitations] = useState<InvitationSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [relationType, setRelationType] = useState<RelationType>("guardian");
+  const [invitedPhone, setInvitedPhone] = useState("");
+  const [inviteUrl, setInviteUrl] = useState("");
+  const [creatingInvite, setCreatingInvite] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [deletingInvitationId, setDeletingInvitationId] = useState<number | null>(null);
 
   const loadConnections = async (pid: number) => {
     try {
@@ -56,11 +62,53 @@ export default function Connect() {
     }
   };
 
+  const handleCreateInvite = async () => {
+    if (patientId == null) return;
+    setCreatingInvite(true);
+    setError("");
+    setInviteUrl("");
+    try {
+      const created = await createInvitation({
+        patient_id: patientId,
+        relation_type: relationType,
+        invited_phone: invitedPhone.trim() || undefined,
+      });
+      setInviteUrl(window.location.origin + created.invite_url);
+      await loadConnections(patientId);
+    } catch {
+      setError("초대를 만들지 못했어요.");
+    } finally {
+      setCreatingInvite(false);
+    }
+  };
+
+  const handleCopyInviteUrl = () => {
+    if (!inviteUrl) return;
+    navigator.clipboard?.writeText(inviteUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleDeleteInvitation = async (invitationId: number) => {
+    if (patientId == null || deletingInvitationId !== null) return;
+    if (!window.confirm("대기중인 초대를 삭제할까요? 이미 보낸 초대 링크도 사용할 수 없게 돼요.")) return;
+    setDeletingInvitationId(invitationId);
+    setError("");
+    try {
+      await deleteInvitation(invitationId);
+      await loadConnections(patientId);
+    } catch {
+      setError("초대를 삭제하지 못했어요.");
+    } finally {
+      setDeletingInvitationId(null);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#FAF6F1]">
       <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
-        <h1 className="text-[26px] font-black text-[#1E1A17] mb-1">환자 연결관리</h1>
+        <h1 className="text-[26px] font-black text-[#1E1A17] mb-1">연결관리</h1>
         <p className="text-[14px] text-[#8A7E75] mb-7">복약 관리를 함께할 사람을 초대하고 관리하세요.</p>
 
         {error && (
@@ -80,8 +128,62 @@ export default function Connect() {
           </div>
         )}
 
-        {/* 대기중인 초대 — [2026-07-21 회의 반영] "초대하기"(환자→보호자류 초대 생성) UI는
-            삭제됐다. 이 목록은 삭제 이전에 이미 생성된 대기중 초대만 보여준다(신규 생성 불가). */}
+        {/* 보호자·지원인력 초대하기 (환자 로그인일 때만) */}
+        {caregiverId == null && patientId != null && (
+          <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
+            <h2 className="text-[16px] font-black text-[#1E1A17] mb-1">보호자·지원인력 초대하기</h2>
+            <p className="text-[13px] text-[#8A7E75] mb-4">
+              함께 복약을 확인할 사람에게 초대 링크를 보내세요.
+            </p>
+
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              {(Object.keys(RELATION_LABEL) as RelationType[]).map((type) => (
+                <button
+                  key={type}
+                  onClick={() => setRelationType(type)}
+                  className={`py-2.5 rounded-xl text-[13px] font-bold border transition-all ${
+                    relationType === type
+                      ? "border-[#C1653D] bg-[#C1653D]/10 text-[#C1653D]"
+                      : "border-[rgba(30,26,23,0.12)] bg-[#FAF6F1] text-[#8A7E75]"
+                  }`}
+                >
+                  {RELATION_LABEL[type]}
+                </button>
+              ))}
+            </div>
+
+            <input
+              value={invitedPhone}
+              onChange={(event) => setInvitedPhone(event.target.value)}
+              placeholder="초대받을 사람 전화번호 (선택)"
+              className="w-full px-4 py-3.5 rounded-xl border border-[rgba(30,26,23,0.12)] bg-[#FAF6F1] text-[15px] outline-none mb-3"
+            />
+
+            <button
+              onClick={handleCreateInvite}
+              disabled={creatingInvite}
+              className="w-full py-3.5 rounded-full text-white font-bold text-[16px] bg-[#C1653D] disabled:opacity-60"
+            >
+              {creatingInvite ? "생성 중..." : "초대 링크 만들기"}
+            </button>
+
+            {inviteUrl && (
+              <div className="flex items-center gap-2 px-4 py-3.5 mt-4 rounded-xl bg-[#FAF6F1] border border-[rgba(30,26,23,0.10)]">
+                <span className="flex-1 text-[13px] font-mono truncate text-[#1E1A17]">{inviteUrl}</span>
+                <button
+                  onClick={handleCopyInviteUrl}
+                  className={`shrink-0 px-4 py-2 rounded-full text-[13px] font-bold ${
+                    copied ? "bg-[#8FAE8B]/20 text-[#4A7A47]" : "bg-[#C1653D]/15 text-[#C1653D]"
+                  }`}
+                >
+                  {copied ? "복사됨" : "복사"}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 대기중인 초대 */}
         {invitations.length > 0 && (
           <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden mb-6">
             <div className="px-6 py-4 border-b border-[rgba(30,26,23,0.06)]">
@@ -93,7 +195,18 @@ export default function Connect() {
                   {RELATION_LABEL[inv.relation_type as RelationType] ?? inv.relation_type}
                   {inv.invited_phone ? ` · ${inv.invited_phone}` : ""}
                 </span>
-                <span className="px-3 py-1 rounded-full text-[12px] font-bold bg-[#F4F0EA] text-[#8A7E75]">대기중</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="px-3 py-1 rounded-full text-[12px] font-bold bg-[#F4F0EA] text-[#8A7E75]">대기중</span>
+                  <button
+                    onClick={() => handleDeleteInvitation(inv.id)}
+                    disabled={deletingInvitationId === inv.id}
+                    aria-label="대기중인 초대 삭제"
+                    className="w-8 h-8 rounded-lg flex items-center justify-center disabled:opacity-50"
+                    style={{ background: "rgba(217,79,79,0.10)" }}
+                  >
+                    <Trash2 className="w-4 h-4 text-[#D94F4F]" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
