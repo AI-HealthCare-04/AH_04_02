@@ -13,8 +13,11 @@ const RELATION_LABEL: Record<string, string> = {
   patient: "환자",
 };
 
-/** "2025.07.09 오전 10:00" 형식 — Figma 목업(App.figma-export.tsx.bak) 참고 */
-function formatExpiry(iso: string): string {
+/** "2025.07.09 오전 10:00" 형식 — Figma 목업(App.figma-export.tsx.bak) 참고.
+ * [2026-07-22 추가] expires_at 컬럼이 생기기 전에 만들어진 pending 초대는 null일 수
+ * 있다 — new Date(null)이 1970.01.01로 렌더링되는 오해를 막기 위해 그 경우 안내 문구로 대체. */
+function formatExpiry(iso: string | null): string {
+  if (!iso) return "만료일 정보 없음";
   const d = new Date(iso);
   const date = `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
   const time = d.toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit", hour12: true });
