@@ -212,6 +212,12 @@ export default function SchedulePage() {
     });
   };
 
+  // [2026-07-22 추가] 전체선택/해제
+  const allGroupsSelected = groups.length > 0 && groups.every((g) => selectedDrugs.has(g.drugName));
+  const toggleSelectAllDrugs = () => {
+    setSelectedDrugs(allGroupsSelected ? new Set() : new Set(groups.map((g) => g.drugName)));
+  };
+
   const handleBulkDelete = async () => {
     if (bulkDeleting || selectedDrugs.size === 0) return;
     if (!window.confirm(`선택한 ${selectedDrugs.size}개 약물 일정을 모두 삭제할까요?`)) return;
@@ -298,7 +304,10 @@ export default function SchedulePage() {
 
         {selectMode && (
           <div className="rounded-xl px-5 py-3 mb-5 flex items-center justify-between" style={{ background: `${C.terracotta}12` }}>
-            <span className="text-[13px] font-bold" style={{ color: C.terracotta }}>{selectedDrugs.size}개 선택됨</span>
+            <label className="flex items-center gap-2 text-[13px] font-bold cursor-pointer" style={{ color: C.terracotta }}>
+              <input type="checkbox" checked={allGroupsSelected} onChange={toggleSelectAllDrugs} className="w-4 h-4 accent-current" />
+              전체선택 · {selectedDrugs.size}개 선택됨
+            </label>
             <button
               onClick={handleBulkDelete}
               disabled={selectedDrugs.size === 0 || bulkDeleting}

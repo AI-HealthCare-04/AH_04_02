@@ -113,6 +113,12 @@ export default function Records() {
       (!dateFilter || r.created_at.slice(0, 10) === dateFilter)
   );
 
+  // [2026-07-22 추가] 지금 보이는(검색/날짜 필터 적용된) 목록 기준 전체선택/해제
+  const allFilteredSelected = filtered.length > 0 && filtered.every((r) => selectedIds.has(r.record_id));
+  const toggleSelectAll = () => {
+    setSelectedIds(allFilteredSelected ? new Set() : new Set(filtered.map((r) => r.record_id)));
+  };
+
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
       <NavBar isLoggedIn userName={getCurrentUserName()} />
@@ -135,7 +141,10 @@ export default function Records() {
 
         {selectMode && (
           <div className="rounded-xl px-5 py-3 mb-5 flex items-center justify-between" style={{ background: `${C.terracotta}12` }}>
-            <span className="text-[13px] font-bold" style={{ color: C.terracotta }}>{selectedIds.size}개 선택됨</span>
+            <label className="flex items-center gap-2 text-[13px] font-bold cursor-pointer" style={{ color: C.terracotta }}>
+              <input type="checkbox" checked={allFilteredSelected} onChange={toggleSelectAll} className="w-4 h-4 accent-current" />
+              전체선택 · {selectedIds.size}개 선택됨
+            </label>
             <button
               onClick={handleBulkDelete}
               disabled={selectedIds.size === 0 || bulkDeleting}

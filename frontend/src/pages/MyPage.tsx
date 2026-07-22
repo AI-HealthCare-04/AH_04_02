@@ -42,6 +42,7 @@ export default function MyPage() {
     : { text: "복약관리 대상자", bg: `${C.success}20`, color: "#4A7A47" };
 
   const menu: MenuItem[] = [
+    { label: "내 정보", icon: "🪪", to: "/mypage/info" },
     { label: "복약 일정", icon: "💊", to: "/schedule" },
     { label: "알림 설정", icon: "🔔", to: "/notification" },
     { label: "등록내역", icon: "📋", to: "/records" },

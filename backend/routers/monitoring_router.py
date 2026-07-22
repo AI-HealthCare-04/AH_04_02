@@ -76,6 +76,10 @@ class PatientUpdate(BaseModel):
     email: str | None = None
     birth_date: str | None = None
     gender: Literal["male", "female"] | None = None
+    # [2026-07-22 추가] "내 정보"(MyInfo.tsx)에서 회원가입 때 받은 알림 수신 설정도 같이 수정
+    push_enabled: bool | None = None
+    sms_enabled: bool | None = None
+    email_opt_in: bool | None = None
 
 
 class PatientPublic(BaseModel):
@@ -174,14 +178,32 @@ def list_patients(actor: Actor = Depends(get_current_actor), session: Session = 
 def update_patient(
     patient_id: int,
     payload: PatientUpdate,
-    caregiver: Caregiver = Depends(get_current_caregiver),
+    actor: Actor = Depends(get_current_actor),
     session: Session = Depends(get_session),
 ):
-    require_patient_access(patient_id, caregiver, session)
+    """[2026-07-22 수정] 보호자뿐 아니라 환자 본인도 "내 정보"(MyInfo.tsx)에서 자기
+    정보를 고칠 수 있어야 해서 actor 기반 인가로 바꿨다(보호자면 연결된 환자인지,
+    환자 본인이면 자기 자신인지 확인 — require_actor_patient_access)."""
+    require_actor_patient_access(patient_id, actor, session)
     patient = session.get(Patient, patient_id)
     if not patient:
         raise HTTPException(404, "해당 환자를 찾을 수 없어요")
-    for key, value in payload.model_dump(exclude_unset=True).items():
+
+    updates = payload.model_dump(exclude_unset=True)
+    if "email" in updates and updates["email"]:
+        email = normalize_email(updates["email"])
+        existing = session.exec(select(Patient).where(Patient.email == email)).first()
+        if existing and existing.id != patient_id:
+            raise HTTPException(409, "이미 사용중인 이메일입니다.")
+        updates["email"] = email
+    if "phone" in updates and updates["phone"]:
+        existing = session.exec(
+            select(Patient).where(Patient.phone_hash == hash_phone(updates["phone"]))
+        ).first()
+        if existing and existing.id != patient_id:
+            raise HTTPException(409, "이미 사용중인 전화번호입니다.")
+
+    for key, value in updates.items():
         setattr(patient, key, value)
     session.add(patient)
     session.commit()
@@ -323,6 +345,58 @@ def create_caregiver(payload: CaregiverCreate, session: Session = Depends(get_se
 def list_caregivers(caregiver: Caregiver = Depends(get_current_caregiver)):
     """[7/10] 전체 보호자 목록이 아니라 로그인한 본인만 반환 (MyPage.tsx가 본인 조회용으로만 씀, issue #21)."""
     return [caregiver]
+
+
+class CaregiverUpdate(BaseModel):
+    """[2026-07-22 추가] "내 정보"(MyInfo.tsx)에서 회원가입 때 받은 정보를 수정 —
+    relation_type/password는 여기서 안 바꾼다(전자는 계정 성격 자체를 바꾸는 별개 작업,
+    후자는 이미 있는 비밀번호 재설정 흐름을 쓴다)."""
+    name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    birth_date: str | None = None
+    push_enabled: bool | None = None
+    sms_enabled: bool | None = None
+    email_opt_in: bool | None = None
+    org_name: str | None = None
+    org_type: str | None = None
+    business_reg_no: str | None = None
+    manager_name: str | None = None
+    manager_phone: str | None = None
+
+
+@router.patch("/caregivers/{caregiver_id}", response_model=CaregiverPublic)
+def update_caregiver(
+    caregiver_id: int,
+    payload: CaregiverUpdate,
+    caregiver: Caregiver = Depends(get_current_caregiver),
+    session: Session = Depends(get_session),
+):
+    if caregiver.id != caregiver_id:
+        raise HTTPException(403, "본인 정보만 수정할 수 있어요.")
+
+    updates = payload.model_dump(exclude_unset=True)
+    if "email" in updates and updates["email"]:
+        email = normalize_email(updates["email"])
+        existing = session.exec(select(Caregiver).where(Caregiver.email == email)).first()
+        if existing and existing.id != caregiver_id:
+            raise HTTPException(409, "이미 사용중인 이메일입니다.")
+        updates["email"] = email
+    if "phone" in updates and updates["phone"]:
+        existing = session.exec(
+            select(Caregiver)
+            .where(Caregiver.phone_hash == hash_phone(updates["phone"]))
+            .where(Caregiver.relation_type == caregiver.relation_type)
+        ).first()
+        if existing and existing.id != caregiver_id:
+            raise HTTPException(409, "이미 사용중인 전화번호입니다.")
+
+    for key, value in updates.items():
+        setattr(caregiver, key, value)
+    session.add(caregiver)
+    session.commit()
+    session.refresh(caregiver)
+    return caregiver
 
 
 def _patient_diagnoses(session: Session, patient_id: int) -> str | None:

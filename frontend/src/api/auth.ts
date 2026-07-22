@@ -71,3 +71,10 @@ export async function confirmPasswordReset(resetToken: string, newPassword: stri
   });
   return data;
 }
+
+/** [2026-07-22 추가] "내 정보"(MyInfo.tsx) 열람 전 본인 확인 — 아무 상태도 바꾸지 않고
+ * 로그인된 계정의 현재 비밀번호가 맞는지만 본다. 틀리면 401/400을 그대로 던진다. */
+export async function verifyPassword(password: string) {
+  const { data } = await monitoringClient.post<{ verified: boolean }>("/auth/verify-password", { password });
+  return data;
+}

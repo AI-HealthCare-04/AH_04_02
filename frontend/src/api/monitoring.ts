@@ -132,6 +132,31 @@ export async function createCaregiver(payload: {
   return data;
 }
 
+/** [2026-07-22 추가] "내 정보"(MyInfo.tsx) — 회원가입 때 받은 보호자/기관 정보 수정 */
+export async function updateCaregiver(
+  caregiverId: number,
+  payload: {
+    name?: string;
+    phone?: string;
+    email?: string;
+    birth_date?: string;
+    push_enabled?: boolean;
+    sms_enabled?: boolean;
+    email_opt_in?: boolean;
+    org_name?: string;
+    org_type?: string;
+    business_reg_no?: string;
+    manager_name?: string;
+    manager_phone?: string;
+  }
+) {
+  const { data } = await monitoringClient.patch<Caregiver>(
+    `/monitoring/caregivers/${caregiverId}`,
+    payload
+  );
+  return data;
+}
+
 /**
  * [7/8 추가] 반대 방향 — 이 환자를 케어하는 보호자 전체 목록 (Connect.tsx '연결된 사람' 표)
  */
@@ -192,6 +217,9 @@ export async function updatePatient(
     email?: string;
     birth_date?: string;
     gender?: "male" | "female";
+    push_enabled?: boolean;
+    sms_enabled?: boolean;
+    email_opt_in?: boolean;
   }
 ) {
   const { data } = await monitoringClient.patch<Patient>(
