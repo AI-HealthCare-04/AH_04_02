@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { User, AlertCircle } from "lucide-react";
 import NavBar from "../components/NavBar";
 import InvitePatientPanel from "../components/InvitePatientPanel";
+import InviteCaregiverPanel from "../components/InviteCaregiverPanel";
 import { listInvitations, type InvitationSummary } from "../api/care";
 import { getPatientCaregivers, unlinkCaregiverPatient, type Caregiver } from "../api/monitoring";
 import { getCurrentCaregiverId, getCurrentUserName, useGuardedPatientId } from "../lib/session";
@@ -80,8 +81,14 @@ export default function Connect() {
           </div>
         )}
 
-        {/* 대기중인 초대 — [2026-07-21 회의 반영] "초대하기"(환자→보호자류 초대 생성) UI는
-            삭제됐다. 이 목록은 삭제 이전에 이미 생성된 대기중 초대만 보여준다(신규 생성 불가). */}
+        {/* 보호자류 초대하기 (환자 본인 로그인일 때만) — [2026-07-22 재추가] */}
+        {caregiverId == null && patientId != null && (
+          <div className="mb-6">
+            <InviteCaregiverPanel patientId={patientId} onCreated={() => loadConnections(patientId)} />
+          </div>
+        )}
+
+        {/* 대기중인 초대 */}
         {invitations.length > 0 && (
           <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden mb-6">
             <div className="px-6 py-4 border-b border-[rgba(30,26,23,0.06)]">

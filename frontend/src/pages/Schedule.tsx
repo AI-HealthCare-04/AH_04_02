@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, X } from "lucide-react";
+import { CheckSquare, Plus, Square, X } from "lucide-react";
 import NavBar from "../components/NavBar";
 import {
   createSchedule,
@@ -77,6 +77,12 @@ export default function SchedulePage() {
   const [caregiverAlert, setCaregiverAlert] = useState(true);
   const [saving, setSaving] = useState(false);
   const [modalError, setModalError] = useState("");
+
+  // [2026-07-22 추가] 약물별로 여러 개 선택해서 한 번에 삭제 — Records.tsx의 선택 삭제와
+  // 동일한 패턴(drugName으로 그룹이 묶이므로 id 대신 drugName을 키로 씀).
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedDrugs, setSelectedDrugs] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const load = async (pid: number) => {
     try {
@@ -192,6 +198,37 @@ export default function SchedulePage() {
     }
   };
 
+  const toggleSelectMode = () => {
+    setSelectMode((v) => !v);
+    setSelectedDrugs(new Set());
+  };
+
+  const toggleSelectedDrug = (drugName: string) => {
+    setSelectedDrugs((prev) => {
+      const next = new Set(prev);
+      if (next.has(drugName)) next.delete(drugName);
+      else next.add(drugName);
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    if (bulkDeleting || selectedDrugs.size === 0) return;
+    if (!window.confirm(`선택한 ${selectedDrugs.size}개 약물 일정을 모두 삭제할까요?`)) return;
+    setBulkDeleting(true);
+    try {
+      const targetIds = groups.filter((g) => selectedDrugs.has(g.drugName)).flatMap((g) => g.ids);
+      await Promise.all(targetIds.map((id) => deleteSchedule(id)));
+      setSchedules((prev) => prev.filter((s) => !targetIds.includes(s.id)));
+      setSelectedDrugs(new Set());
+      setSelectMode(false);
+    } catch (e) {
+      setError(describeError(e, "일부 항목을 삭제하지 못했어요."));
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   const save = async () => {
     if (patientId == null) return;
     const name = drugName.trim();
@@ -240,13 +277,38 @@ export default function SchedulePage() {
             <h1 className="text-[26px] font-black text-[#1E1A17]">복약 일정</h1>
             <p className="text-[14px] text-[#8A7E75] mt-1">복용 시간대를 등록하고 관리하세요.</p>
           </div>
-          <button
-            onClick={openAddModal}
-            className="flex items-center gap-2 px-5 py-3 rounded-full text-white font-bold text-[14px] bg-[#C1653D]"
-          >
-            <Plus className="w-4 h-4" /> 새 일정 추가
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {groups.length > 0 && (
+              <button
+                onClick={toggleSelectMode}
+                className="text-[13px] font-bold px-3 py-1.5 rounded-full transition-opacity hover:opacity-70"
+                style={{ background: selectMode ? C.terracotta : `${C.terracotta}12`, color: selectMode ? C.white : C.terracotta }}
+              >
+                {selectMode ? "선택 취소" : "선택하기"}
+              </button>
+            )}
+            <button
+              onClick={openAddModal}
+              className="flex items-center gap-2 px-5 py-3 rounded-full text-white font-bold text-[14px] bg-[#C1653D]"
+            >
+              <Plus className="w-4 h-4" /> 새 일정 추가
+            </button>
+          </div>
         </div>
+
+        {selectMode && (
+          <div className="rounded-xl px-5 py-3 mb-5 flex items-center justify-between" style={{ background: `${C.terracotta}12` }}>
+            <span className="text-[13px] font-bold" style={{ color: C.terracotta }}>{selectedDrugs.size}개 선택됨</span>
+            <button
+              onClick={handleBulkDelete}
+              disabled={selectedDrugs.size === 0 || bulkDeleting}
+              className="px-4 py-2 rounded-full text-[13px] font-bold text-white disabled:opacity-50"
+              style={{ background: "#D94F4F" }}
+            >
+              {bulkDeleting ? "삭제하는 중..." : "선택 삭제"}
+            </button>
+          </div>
+        )}
 
         {error && <p className="text-[13px] text-[#D94F4F] mb-4">{error}</p>}
 
@@ -271,53 +333,72 @@ export default function SchedulePage() {
           ) : groups.length === 0 ? (
             <p className="px-6 py-10 text-center text-[14px] text-[#8A7E75]">등록된 일정이 없어요.</p>
           ) : (
-            groups.map((g) => (
+            groups.map((g) => {
+              const selected = selectedDrugs.has(g.drugName);
+              return (
               <div
                 key={g.drugName}
+                role={selectMode ? "button" : undefined}
+                tabIndex={selectMode ? 0 : undefined}
+                onClick={() => selectMode && toggleSelectedDrug(g.drugName)}
                 className="flex items-center justify-between gap-4 px-6 py-4 border-b border-[#F4F0EA] last:border-0 flex-wrap"
-                style={{ opacity: g.active ? 1 : 0.5 }}
+                style={{ opacity: g.active ? 1 : 0.5, cursor: selectMode ? "pointer" : "default" }}
               >
-                <div className="min-w-[160px]">
-                  <p className="text-[15px] font-bold text-[#1E1A17]">{g.drugName}</p>
-                  <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                    {g.entries.map((e) => (
-                      <span
-                        key={e.id}
-                        className="px-2 py-0.5 rounded-md text-[11px] font-bold"
-                        style={{ background: C.bubbleBg, color: C.muted }}
-                      >
-                        {formatTime12(e.time)}
-                      </span>
-                    ))}
+                <div className="flex items-start gap-3 min-w-[160px]">
+                  {selectMode && (
+                    <span className="mt-0.5 shrink-0">
+                      {selected ? (
+                        <CheckSquare className="w-5 h-5" style={{ color: C.terracotta }} />
+                      ) : (
+                        <Square className="w-5 h-5" style={{ color: "rgba(30,26,23,0.25)" }} />
+                      )}
+                    </span>
+                  )}
+                  <div>
+                    <p className="text-[15px] font-bold text-[#1E1A17]">{g.drugName}</p>
+                    <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                      {g.entries.map((e) => (
+                        <span
+                          key={e.id}
+                          className="px-2 py-0.5 rounded-md text-[11px] font-bold"
+                          style={{ background: C.bubbleBg, color: C.muted }}
+                        >
+                          {formatTime12(e.time)}
+                        </span>
+                      ))}
+                    </div>
+                    <p className="text-[13px] text-[#8A7E75] mt-1">
+                      {Array.from(new Set(g.entries.map((e) => e.doseTiming).filter(Boolean))).join(" · ") || "-"}
+                    </p>
                   </div>
-                  <p className="text-[13px] text-[#8A7E75] mt-1">
-                    {Array.from(new Set(g.entries.map((e) => e.doseTiming).filter(Boolean))).join(" · ") || "-"}
-                  </p>
                 </div>
-                <div className="flex items-center gap-5 shrink-0">
-                  <div className="text-center">
-                    <p className="text-[11px] text-[#8A7E75] mb-1">보호자 알림</p>
-                    <Toggle on={g.caregiverAlert} onClick={() => toggleGroupAlert(g)} />
+                {!selectMode && (
+                  <div className="flex items-center gap-5 shrink-0">
+                    <div className="text-center">
+                      <p className="text-[11px] text-[#8A7E75] mb-1">보호자 알림</p>
+                      <Toggle on={g.caregiverAlert} onClick={() => toggleGroupAlert(g)} />
+                    </div>
+                    <div className="text-center">
+                      <p className="text-[11px] text-[#8A7E75] mb-1">사용 여부</p>
+                      <Toggle on={g.active} onClick={() => toggleGroupActive(g)} />
+                    </div>
+                    <button
+                      onClick={() => openEditModal(g)}
+                      className="px-3 py-1.5 rounded-full text-[12px] font-bold border border-[rgba(30,26,23,0.12)] text-[#1E1A17]"
+                    >
+                      수정
+                    </button>
+                    <button
+                      onClick={() => removeGroup(g)}
+                      className="w-8 h-8 rounded-full flex items-center justify-center text-[#8A7E75] hover:bg-[rgba(30,26,23,0.05)]"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
                   </div>
-                  <div className="text-center">
-                    <p className="text-[11px] text-[#8A7E75] mb-1">사용 여부</p>
-                    <Toggle on={g.active} onClick={() => toggleGroupActive(g)} />
-                  </div>
-                  <button
-                    onClick={() => openEditModal(g)}
-                    className="px-3 py-1.5 rounded-full text-[12px] font-bold border border-[rgba(30,26,23,0.12)] text-[#1E1A17]"
-                  >
-                    수정
-                  </button>
-                  <button
-                    onClick={() => removeGroup(g)}
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-[#8A7E75] hover:bg-[rgba(30,26,23,0.05)]"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
+                )}
               </div>
-            ))
+              );
+            })
           )}
         </div>
       </main>

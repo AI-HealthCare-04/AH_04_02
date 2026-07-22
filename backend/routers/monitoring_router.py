@@ -574,6 +574,16 @@ def delete_schedule(
     ).all()
     for record in records:
         session.delete(record)
+    # [2026-07-22 수정] notification_logs.schedule_id가 이 스케줄을 참조하고 있으면(알림이
+    # 한 번이라도 발송/판정된 적 있으면) FK 제약 위반으로 500이 났다 — 기록도 함께 지운다.
+    # MedicationSchedule<->NotificationLog 사이엔 ORM relationship이 없어 SQLAlchemy가
+    # 삭제 순서를 FK 기준으로 자동 정렬해주지 않는다 — flush로 먼저 실행되게 강제한다.
+    logs = session.exec(
+        select(NotificationLog).where(NotificationLog.schedule_id == schedule_id)
+    ).all()
+    for log in logs:
+        session.delete(log)
+    session.flush()
     session.delete(schedule)
     session.commit()
     return {"deleted": schedule_id}

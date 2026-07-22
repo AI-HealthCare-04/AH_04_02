@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import NavBar from "../components/NavBar";
 import {
+  getPatientCaregivers,
   getTodayMedications,
   checkIntake,
   clearIntake,
@@ -34,6 +35,17 @@ export default function Dashboard() {
       .finally(() => setLoading(false));
     listRecords(patientId)
       .then((list) => setRecentRecords(list.filter((r) => r.status === "completed").slice(0, 2)))
+      .catch(() => {});
+  }, [patientId]);
+
+  // [2026-07-22 추가] 이미 연결된 보호자가 있으면 "보호자를 연결해보세요" 배너 자체가
+  // 더 이상 의미 없다 — X로 닫는 것과 별개로, 연결 여부를 실제로 확인해서 있으면 숨긴다.
+  useEffect(() => {
+    if (patientId == null || getCurrentCaregiverId()) return;
+    getPatientCaregivers(patientId)
+      .then((list) => {
+        if (list.length > 0) setShowBanner(false);
+      })
       .catch(() => {});
   }, [patientId]);
 

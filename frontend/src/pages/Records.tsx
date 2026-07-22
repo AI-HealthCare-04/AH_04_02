@@ -202,7 +202,7 @@ export default function Records() {
                   }
                   className="w-full text-left rounded-2xl p-5 transition-transform hover:-translate-y-0.5 cursor-pointer"
                   style={{
-                    background: C.white,
+                    background: C.surface,
                     boxShadow: "0 2px 16px rgba(30,26,23,0.07)",
                     border: selected ? `2px solid ${C.terracotta}` : "2px solid transparent",
                   }}
