@@ -54,6 +54,17 @@ export interface RecentAccount {
 const RECENT_ACCOUNTS_KEY = "recent_accounts";
 const MAX_RECENT_ACCOUNTS = 5;
 
+/** [2026-07-22 추가, 팀원 리뷰 반영 — MEDIUM] 전화번호가 이제 역할당 유니크라 같은
+ * identifier(전화번호)로 환자 본인/보호자/기관 계정을 각각 가질 수 있다 — identifier만으로
+ * 구분하면 같은 전화번호의 서로 다른 역할 계정이 이 목록에서 서로를 덮어썼다. 실제 계정을
+ * 가리키는 id(역할별 patientId/caregiverId)로 구분한다. 이 필드들이 아직 없는 아주 오래된
+ * 저장값(기능 추가 이전)만 identifier로 폴백한다. */
+function accountKey(account: RecentAccount): string {
+  if (account.role === "patient" && account.patientId != null) return `patient:${account.patientId}`;
+  if (account.caregiverId != null) return `${account.role ?? "guardian"}:${account.caregiverId}`;
+  return `identifier:${account.identifier}`;
+}
+
 export function getRecentAccounts(): RecentAccount[] {
   try {
     const raw = JSON.parse(localStorage.getItem(RECENT_ACCOUNTS_KEY) ?? "[]");
@@ -65,17 +76,16 @@ export function getRecentAccounts(): RecentAccount[] {
 
 /** 로그인 성공 직후(Login.tsx) 호출 — 같은 계정이 이미 있으면 맨 앞으로 갱신, 5개까지만 유지. */
 export function saveRecentAccount(account: RecentAccount): void {
-  const next = [account, ...getRecentAccounts().filter((a) => a.identifier !== account.identifier)].slice(
-    0,
-    MAX_RECENT_ACCOUNTS
-  );
+  const key = accountKey(account);
+  const next = [account, ...getRecentAccounts().filter((a) => accountKey(a) !== key)].slice(0, MAX_RECENT_ACCOUNTS);
   localStorage.setItem(RECENT_ACCOUNTS_KEY, JSON.stringify(next));
 }
 
-export function removeRecentAccount(identifier: string): void {
+export function removeRecentAccount(account: RecentAccount): void {
+  const key = accountKey(account);
   localStorage.setItem(
     RECENT_ACCOUNTS_KEY,
-    JSON.stringify(getRecentAccounts().filter((a) => a.identifier !== identifier))
+    JSON.stringify(getRecentAccounts().filter((a) => accountKey(a) !== key))
   );
 }
 

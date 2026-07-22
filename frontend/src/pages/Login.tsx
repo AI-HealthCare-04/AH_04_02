@@ -76,7 +76,7 @@ export default function Login() {
     // [사용자 요청] "자동로그인에 체크하는 계정만 저장되게" — 체크 안 하면 계정 전환
     // 목록에도 안 남아야 하므로, 이전에 체크해서 저장돼있었더라도 지금 체크를 껐으면 제거한다.
     if (autoLogin) saveRecentAccount(account);
-    else removeRecentAccount(account.identifier);
+    else removeRecentAccount(account);
     setRecentAccounts(getRecentAccounts());
   };
 
@@ -173,15 +173,15 @@ export default function Login() {
       // [2026-07-22 추가] refresh_token까지 만료·무효화됐으면(오래 방치했거나 이미 다른
       // 곳에서 갱신에 써버려 로테이션된 경우) 더 이상 이 계정으로 조용히 전환할 수 없다 —
       // 목록에서 지우고 다시 로그인하라고 안내한다.
-      removeRecentAccount(account.identifier);
+      removeRecentAccount(account);
       setRecentAccounts(getRecentAccounts());
       setError("로그인이 만료됐어요. 비밀번호로 다시 로그인해주세요.");
     }
   };
 
-  const handleRemoveRecent = (e: MouseEvent, identifierToRemove: string) => {
+  const handleRemoveRecent = (e: MouseEvent, accountToRemove: RecentAccount) => {
     e.stopPropagation();
-    removeRecentAccount(identifierToRemove);
+    removeRecentAccount(accountToRemove);
     setRecentAccounts(getRecentAccounts());
   };
 
@@ -240,7 +240,7 @@ export default function Login() {
                     <p className="text-[12px] truncate" style={{ color: C.muted }}>{account.identifier}</p>
                   </div>
                   <span
-                    onClick={(e) => handleRemoveRecent(e, account.identifier)}
+                    onClick={(e) => handleRemoveRecent(e, account)}
                     className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 hover:opacity-70"
                     style={{ background: "rgba(30,26,23,0.06)" }}
                     aria-label={`${account.name} 계정 목록에서 제거`}

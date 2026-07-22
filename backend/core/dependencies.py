@@ -15,6 +15,11 @@ from core.auth import decode_token
 from core.database import get_session
 
 security = HTTPBearer()
+# [2026-07-22 추가, 팀원 리뷰 반영 — HIGH] auto_error=False — Authorization 헤더가 아예
+# 없어도 401을 던지지 않고 credential만 None으로 넘긴다. care_router.py의
+# POST /invitations/{token}/accept처럼 "완전 비인증도 허용하되, 로그인된 상태면 그 계정을
+# 검증에 쓰는" 선택적 인증이 필요한 공개 엔드포인트 전용.
+_optional_security = HTTPBearer(auto_error=False)
 
 
 def get_current_caregiver(
@@ -34,6 +39,33 @@ def get_current_caregiver(
     # [2026-07-15 추가, PR #48 팀원 리뷰 반영 — HIGH] deactivated_at 체크가 login()에만
     # 있어서, 탈퇴(POST /auth/withdraw) 후에도 이미 발급된 access_token은 만료 전까지
     # 계속 통했다 — 매 요청마다 DB에서 다시 확인하는 이 지점에서 막아야 실제로 끊긴다.
+    if caregiver.deactivated_at is not None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="탈퇴 처리된 계정입니다.")
+    return caregiver
+
+
+def get_current_caregiver_optional(
+    credential: HTTPAuthorizationCredentials | None = Depends(_optional_security),
+    session: Session = Depends(get_session),
+) -> Caregiver | None:
+    """[2026-07-22 추가, 팀원 리뷰 반영 — HIGH] get_current_caregiver의 "선택적" 버전 —
+    Authorization 헤더가 없으면 조용히 None을 반환한다(완전 비인증 흐름을 막지 않기 위함).
+    단, 헤더가 있는데 토큰이 무효/만료됐거나 caregiver 역할이 아니면 여전히 401을 던진다
+    (있는데 잘못된 토큰까지 "로그인 안 한 것"으로 조용히 넘기면 호출부가 잘못된 신뢰를
+    할 수 있다 — care_router.accept_invitation()이 이 값으로 payload.caregiver_id를
+    검증하는 용도로 쓴다)."""
+    if credential is None:
+        return None
+    try:
+        subject_id, role = decode_token(credential.credentials, expected_type="access")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="유효하지 않거나 만료된 토큰입니다.")
+    if role != "caregiver":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="보호자 계정 토큰이 아닙니다.")
+
+    caregiver = session.get(Caregiver, subject_id)
+    if not caregiver:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증에 실패했습니다.")
     if caregiver.deactivated_at is not None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="탈퇴 처리된 계정입니다.")
     return caregiver

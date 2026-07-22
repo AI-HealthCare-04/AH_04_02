@@ -18,7 +18,13 @@ from datetime import datetime, timedelta
 from typing import Literal, Optional
 
 from core.database import get_session
-from core.dependencies import Actor, get_current_actor, get_current_caregiver, require_actor_patient_access
+from core.dependencies import (
+    Actor,
+    get_current_actor,
+    get_current_caregiver,
+    get_current_caregiver_optional,
+    require_actor_patient_access,
+)
 from core.security import hash_phone, hash_token, normalize_phone
 from fastapi import APIRouter, Depends, HTTPException
 from models import (
@@ -210,7 +216,18 @@ def get_invitation(token: str, session: Session = Depends(get_session)):
 
 
 @router.post("/invitations/{token}/accept")
-def accept_invitation(token: str, payload: InvitationAccept, session: Session = Depends(get_session)):
+def accept_invitation(
+    token: str,
+    payload: InvitationAccept,
+    session: Session = Depends(get_session),
+    actor: Caregiver | None = Depends(get_current_caregiver_optional),
+):
+    """[2026-07-22 수정 — HIGH, 팀원 리뷰(fkmc10101-hub) 지적 반영] 이 엔드포인트는 계정이
+    없는 사람도 써야 해서(인증 없이 새 보호자 계정을 만드는 경로) 여전히 로그인을 강제하지
+    않는다 — 다만 `payload.caregiver_id`(기존 로그인 계정으로 그대로 수락)를 아무 검증 없이
+    믿으면, 초대 토큰만 가진 누구나 임의의 caregiver_id를 넣어 그 계정을 남의 환자에
+    연결시킬 수 있었다(실제로 재현 — 인증 전혀 없이 성공). 이제 `caregiver_id`가 오면
+    `get_current_caregiver_optional`로 실제 로그인된 그 계정인지 검증하고, 아니면 거부한다."""
     # [알려진 한계] 이 pending 체크와 아래 최종 commit 사이에 행 잠금이 없어, 같은 토큰으로
     # 동시에 두 번 수락 요청이 오면(예: 링크를 두 기기에서 거의 동시에 열기) 둘 다 이 체크를
     # 통과해 patient 분기에서 계정이 2개 생길 수 있다 — 이 앱 규모(소규모 팀, 낮은 동시성)에선
@@ -255,9 +272,11 @@ def accept_invitation(token: str, payload: InvitationAccept, session: Session = 
         return {"patient_id": new_patient.id, "status": "accepted"}
 
     if payload.caregiver_id:
-        caregiver = session.get(Caregiver, payload.caregiver_id)
-        if not caregiver:
-            raise HTTPException(404, "해당 보호자를 찾을 수 없어요")
+        # [2026-07-22 수정 — HIGH] payload.caregiver_id를 그대로 신뢰하지 않는다 — 실제로
+        # 로그인된 보호자(actor)가 그 id 본인일 때만 허용한다.
+        if actor is None or actor.id != payload.caregiver_id:
+            raise HTTPException(403, "본인 계정으로 로그인한 상태에서만 기존 계정으로 수락할 수 있어요.")
+        caregiver = actor
     else:
         # [7/9] name은 프로퍼티(암호화 setter)라 생성자 kwarg로 못 받음 — 생성 후 대입.
         # [7/13] commit 대신 flush — caregiver.id만 미리 확정하고, 아래 CaregiverPatient
