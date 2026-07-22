@@ -137,6 +137,7 @@ export default function MedGuide() {
           const dietAvoid = guide.lifestyle_guide.diet?.avoid ?? [];
           const dietSpecific = guide.lifestyle_guide.diet?.drug_specific ?? [];
           const hasDietWarning = dietAvoid.length > 0 || dietSpecific.length > 0;
+          const lifestyleWarnings = guide.lifestyle_guide.guides ?? [];
           return (
             <div className="space-y-4">
               {drugsWithCaution.length > 0 && (
@@ -148,6 +149,21 @@ export default function MedGuide() {
                         <div className="w-1.5 h-1.5 rounded-full mt-2 shrink-0" style={{ background: C.terracotta }} />
                         <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>
                           <span className="font-bold">{d.drug_name}</span> — {cautionText}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {lifestyleWarnings.length > 0 && (
+                <div className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
+                  <p className="text-[15px] font-black mb-3" style={{ color: C.dark }}>🌿 진단명별 생활 속 주의사항</p>
+                  <ul className="space-y-2.5">
+                    {lifestyleWarnings.map((entry, i) => (
+                      <li key={`lifestyle-warning-${i}`} className="flex items-start gap-2.5">
+                        <div className="w-1.5 h-1.5 rounded-full mt-2 shrink-0" style={{ background: C.terracottaLight }} />
+                        <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>
+                          <span className="font-bold">{entry.diagnosis || "생활습관"}</span> — {entry.guide}
                         </p>
                       </li>
                     ))}
@@ -173,7 +189,7 @@ export default function MedGuide() {
                   </ul>
                 </div>
               )}
-              {drugsWithCaution.length === 0 && !hasDietWarning && (
+              {drugsWithCaution.length === 0 && lifestyleWarnings.length === 0 && !hasDietWarning && (
                 <p className="text-[14px]" style={{ color: C.muted }}>특별히 주의할 사항이 없어요.</p>
               )}
             </div>

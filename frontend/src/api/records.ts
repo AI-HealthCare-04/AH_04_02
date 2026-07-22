@@ -122,6 +122,45 @@ export interface RecordResult {
   } | null;
 }
 
+function normalizeLifestyleGuide(guide: LifestyleGuide): LifestyleGuide {
+  const rawGuides = guide.guides as unknown;
+  if (!Array.isArray(rawGuides)) return guide;
+
+  const guides = rawGuides
+    .map((entry): LifestyleGuideEntry | null => {
+      if (typeof entry === "string") {
+        const text = entry.trim();
+        return text ? { diagnosis: guide.diagnosis || "", guide: text } : null;
+      }
+      if (!entry || typeof entry !== "object") return null;
+
+      const rawEntry = entry as Partial<LifestyleGuideEntry>;
+      const text = String(rawEntry.guide ?? "").trim();
+      if (!text) return null;
+
+      return {
+        diagnosis: String(rawEntry.diagnosis ?? guide.diagnosis ?? "").trim(),
+        guide: text,
+        review_required: rawEntry.review_required,
+        review_reason: rawEntry.review_reason,
+      };
+    })
+    .filter((entry): entry is LifestyleGuideEntry => entry !== null);
+
+  return { ...guide, guides };
+}
+
+function normalizeRecordResult(result: RecordResult): RecordResult {
+  if (!result.guide) return result;
+  return {
+    ...result,
+    guide: {
+      ...result.guide,
+      lifestyle_guide: normalizeLifestyleGuide(result.guide.lifestyle_guide),
+    },
+  };
+}
+
 /** 등록내역(목록) 화면용 요약 — GET /records 응답 그대로 */
 export interface RecordSummary {
   record_id: number;
@@ -150,13 +189,13 @@ export async function createRecord(patientId: number, file: File, caregiverId?: 
     // 오는데도 프론트가 먼저 타임아웃 나서 OcrError 화면이 뜨던 문제 수정.
     timeout: 120000,
   });
-  return data;
+  return normalizeRecordResult(data);
 }
 
 /** 새로고침 등으로 결과 화면을 다시 열었을 때 재조회용 */
 export async function getRecord(recordId: number) {
   const { data } = await monitoringClient.get<RecordResult>(`/records/${recordId}`);
-  return data;
+  return normalizeRecordResult(data);
 }
 
 /**
@@ -167,19 +206,19 @@ export async function createManualRecord(patientId: number, caregiverId?: number
   const { data } = await monitoringClient.post<RecordResult>("/records/manual", null, {
     params: { patient_id: patientId, caregiver_id: caregiverId },
   });
-  return data;
+  return normalizeRecordResult(data);
 }
 
 /** 처방전확인 화면 — "약물 추가" 버튼, 빈 항목을 하나 더 만들어 직접 입력할 수 있게 함 */
 export async function addMedicationItem(recordId: number) {
   const { data } = await monitoringClient.post<RecordResult>(`/records/${recordId}/medications`);
-  return data;
+  return normalizeRecordResult(data);
 }
 
 /** 처방전확인 화면 — 잘못 추가했거나 필요 없는 항목 삭제 (최소 1개는 남아 있어야 함) */
 export async function removeMedicationItem(recordId: number, medicationId: number) {
   const { data } = await monitoringClient.delete<RecordResult>(`/records/${recordId}/medications/${medicationId}`);
-  return data;
+  return normalizeRecordResult(data);
 }
 
 /** 등록내역 목록 (RecordsPage) */
@@ -221,7 +260,7 @@ export async function confirmMedications(recordId: number, medications: Medicati
     { medications },
     { timeout: 120000 }
   );
-  return data;
+  return normalizeRecordResult(data);
 }
 
 /** DUR 노인주의/연령금기/임부금기 — "약 하나" 자체의 속성(다른 약과 무관하게 표시됨) */

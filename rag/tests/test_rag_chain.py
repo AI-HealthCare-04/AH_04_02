@@ -20,6 +20,7 @@ from rag.schemas import (
     GuideResponse,
     HiraDrugMasterEntry,
     LifestyleGuideResult,
+    SourceRef,
 )
 
 FAKE_DOC = Document(
@@ -228,6 +229,41 @@ def test_build_context_adds_no_precaution_items_when_detail_not_matched():
         context_items = _build_context("암로디핀정5밀리그램", situation=None)
 
     assert len(context_items) == 1
+
+
+def test_generate_guide_falls_back_to_permit_precaution_when_llm_omits_precautions():
+    """LLM이 precautions를 비워도 사용상의주의사항 근거가 있으면 화면에 표시할 주의문구를 보강한다."""
+    context_items = [
+        {
+            "kind": "drug",
+            "idx": 1,
+            "text": "과량 복용 시 저혈압이 나타날 수 있습니다.",
+            "source_ref": SourceRef(
+                item_seq="1",
+                item_name="암로디핀정5밀리그램",
+                field="사용상의주의사항 - 1. 경고",
+            ),
+        }
+    ]
+
+    with (
+        patch("rag.rag_chain._build_context", return_value=context_items),
+        patch("rag.rag_chain.settings.OPENAI_API_KEY", "test-key"),
+        patch("rag.rag_chain.settings.SELF_CONSISTENCY_SAMPLES", 1),
+        patch("langchain_openai.ChatOpenAI", return_value=object()),
+        patch(
+            "rag.rag_chain._llm_generate_once",
+            return_value={
+                "medication_guide": "암로디핀은 고혈압 치료에 사용합니다.",
+                "precautions": [],
+                "source_refs": [1],
+            },
+        ),
+    ):
+        guide = generate_guide("암로디핀정5밀리그램")
+
+    assert guide.precautions == ["과량 복용 시 저혈압이 나타날 수 있습니다."]
+    assert guide.source_refs[0].field == "사용상의주의사항 - 1. 경고"
 
 
 def test_build_context_permit_detail_lookup_failure_does_not_break_citation():
