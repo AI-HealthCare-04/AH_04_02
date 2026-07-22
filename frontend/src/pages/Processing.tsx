@@ -19,6 +19,12 @@ export default function Processing() {
 
   const [current, setCurrent] = useState(0);
   const visualRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // [2026-07-22 추가] React StrictMode(main.tsx)는 개발 모드에서 마운트 이펙트를 일부러
+  // 두 번 실행한다 — 여기 가드가 없으면 그때마다 POST /records가 두 번 나가서 같은
+  // 처방전이 등록내역에 중복으로 쌓였다(실제 공유 DB에서 확인된 원인). 컴포넌트가 같은
+  // 인스턴스로 두 번째 이펙트를 도는 것뿐이라 ref 값은 그대로 살아있으므로, 이미 한 번
+  // 시작했으면 두 번째 실행은 건너뛴다.
+  const startedRef = useRef(false);
 
   const runUpload = async () => {
     if (!file || !patientId) {
@@ -48,6 +54,8 @@ export default function Processing() {
   };
 
   useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
     runUpload();
     return () => {
       if (visualRef.current) clearInterval(visualRef.current);
