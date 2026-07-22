@@ -286,57 +286,86 @@ export default function Connect() {
 
         {/* 보호자·지원인력 초대하기 (환자 로그인일 때만) */}
         {caregiverId == null && patientId != null && (
-          <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
-            <h2 className="text-[16px] font-black text-[#1E1A17] mb-1">보호자·지원인력 초대하기</h2>
-            <p className="text-[13px] text-[#8A7E75] mb-4">
-              함께 복약을 확인할 사람에게 초대 링크를 보내세요.
-            </p>
-
-            <div className="grid grid-cols-2 gap-2 mb-4">
-              {(Object.keys(RELATION_LABEL) as RelationType[]).map((type) => (
+          <>
+            <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
+              <h2 className="text-[16px] font-black text-[#1E1A17] mb-1">받은 초대 수락하기</h2>
+              <p className="text-[13px] text-[#8A7E75] mb-4">
+                보호자나 지원인력에게 받은 초대 링크 또는 코드를 입력하세요.
+              </p>
+              <div className="flex gap-2 flex-wrap">
+                <input
+                  value={inviteUrlInput}
+                  onChange={(event) => {
+                    setInviteUrlInput(event.target.value);
+                    setInviteUrlError("");
+                  }}
+                  placeholder="초대 링크나 코드를 붙여넣으세요"
+                  className="flex-1 min-w-[200px] px-4 py-3 rounded-xl border border-[rgba(30,26,23,0.15)] bg-white text-[14px] outline-none"
+                />
                 <button
-                  key={type}
-                  onClick={() => setRelationType(type)}
-                  className={`py-2.5 rounded-xl text-[13px] font-bold border transition-all ${
-                    relationType === type
-                      ? "border-[#C1653D] bg-[#C1653D]/10 text-[#C1653D]"
-                      : "border-[rgba(30,26,23,0.12)] bg-[#FAF6F1] text-[#8A7E75]"
-                  }`}
+                  onClick={handleOpenInviteUrl}
+                  className="px-5 py-3 rounded-full font-bold text-[14px] shrink-0 bg-[#C1653D]/15 text-[#C1653D]"
                 >
-                  {RELATION_LABEL[type]}
-                </button>
-              ))}
-            </div>
-
-            <input
-              value={invitedPhone}
-              onChange={(event) => setInvitedPhone(event.target.value)}
-              placeholder="초대받을 사람 전화번호 (선택)"
-              className="w-full px-4 py-3.5 rounded-xl border border-[rgba(30,26,23,0.12)] bg-[#FAF6F1] text-[15px] outline-none mb-3"
-            />
-
-            <button
-              onClick={handleCreateInvite}
-              disabled={creatingInvite}
-              className="w-full py-3.5 rounded-full text-white font-bold text-[16px] bg-[#C1653D] disabled:opacity-60"
-            >
-              {creatingInvite ? "생성 중..." : "초대 링크 만들기"}
-            </button>
-
-            {inviteUrl && (
-              <div className="flex items-center gap-2 px-4 py-3.5 mt-4 rounded-xl bg-[#FAF6F1] border border-[rgba(30,26,23,0.10)]">
-                <span className="flex-1 text-[13px] font-mono truncate text-[#1E1A17]">{inviteUrl}</span>
-                <button
-                  onClick={handleCopyInviteUrl}
-                  className={`shrink-0 px-4 py-2 rounded-full text-[13px] font-bold ${
-                    copied ? "bg-[#8FAE8B]/20 text-[#4A7A47]" : "bg-[#C1653D]/15 text-[#C1653D]"
-                  }`}
-                >
-                  {copied ? "복사됨" : "복사"}
+                  확인
                 </button>
               </div>
-            )}
-          </div>
+              {inviteUrlError && (
+                <p className="text-[12px] mt-2 text-[#D94F4F]">{inviteUrlError}</p>
+              )}
+            </div>
+
+            <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
+              <h2 className="text-[16px] font-black text-[#1E1A17] mb-1">보호자·지원인력 초대하기</h2>
+              <p className="text-[13px] text-[#8A7E75] mb-4">
+                함께 복약을 확인할 사람에게 초대 링크를 보내세요.
+              </p>
+
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                {(Object.keys(RELATION_LABEL) as RelationType[]).map((type) => (
+                  <button
+                    key={type}
+                    onClick={() => setRelationType(type)}
+                    className={`py-2.5 rounded-xl text-[13px] font-bold border transition-all ${
+                      relationType === type
+                        ? "border-[#C1653D] bg-[#C1653D]/10 text-[#C1653D]"
+                        : "border-[rgba(30,26,23,0.12)] bg-[#FAF6F1] text-[#8A7E75]"
+                    }`}
+                  >
+                    {RELATION_LABEL[type]}
+                  </button>
+                ))}
+              </div>
+
+              <input
+                value={invitedPhone}
+                onChange={(event) => setInvitedPhone(event.target.value)}
+                placeholder="초대받을 사람 전화번호 (선택)"
+                className="w-full px-4 py-3.5 rounded-xl border border-[rgba(30,26,23,0.12)] bg-[#FAF6F1] text-[15px] outline-none mb-3"
+              />
+
+              <button
+                onClick={handleCreateInvite}
+                disabled={creatingInvite}
+                className="w-full py-3.5 rounded-full text-white font-bold text-[16px] bg-[#C1653D] disabled:opacity-60"
+              >
+                {creatingInvite ? "생성 중..." : "초대 링크 만들기"}
+              </button>
+
+              {inviteUrl && (
+                <div className="flex items-center gap-2 px-4 py-3.5 mt-4 rounded-xl bg-[#FAF6F1] border border-[rgba(30,26,23,0.10)]">
+                  <span className="flex-1 text-[13px] font-mono truncate text-[#1E1A17]">{inviteUrl}</span>
+                  <button
+                    onClick={handleCopyInviteUrl}
+                    className={`shrink-0 px-4 py-2 rounded-full text-[13px] font-bold ${
+                      copied ? "bg-[#8FAE8B]/20 text-[#4A7A47]" : "bg-[#C1653D]/15 text-[#C1653D]"
+                    }`}
+                  >
+                    {copied ? "복사됨" : "복사"}
+                  </button>
+                </div>
+              )}
+            </div>
+          </>
         )}
 
         {/* 대기중인 초대 */}
