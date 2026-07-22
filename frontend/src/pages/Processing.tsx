@@ -63,7 +63,10 @@ export default function Processing() {
           className="w-full border rounded-[20px] p-7 sm:px-10 sm:py-12 text-center"
           style={{ background: C.white, borderColor: "rgba(30,26,23,0.12)" }}
         >
-          <div className="text-4xl sm:text-5xl mb-4 sm:mb-5">⏳</div>
+          {/* [2026-07-22 추가] 마지막 단계(맞춤 가이드 생성)는 실제 LLM 호출이라 화면상
+              가짜 진행바가 멈춰 보여도 실제로는 계속 처리 중이다 — 모래시계 회전 애니메이션으로
+              "멈춘 게 아니라 로딩 중"임을 보여준다. */}
+          <div className="text-4xl sm:text-5xl mb-4 sm:mb-5 animate-spin" style={{ animationDuration: "2s" }}>⏳</div>
           <h1 className="text-[22px] sm:text-[26px] font-bold mb-2 sm:mb-2.5" style={{ color: C.dark }}>분석을 시작할게요</h1>
           <p className="text-[14px] sm:text-[15px] mb-8 sm:mb-10" style={{ color: C.muted }}>잠시만 기다려 주세요. 보통 10초 이내에 완료돼요.</p>
 
@@ -74,7 +77,7 @@ export default function Processing() {
               return (
                 <div key={step.id} className="flex items-start gap-3 sm:gap-4 px-3.5 py-3.5 sm:px-4 rounded-xl" style={{ background: C.ivory }}>
                   <div
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-[13px] font-bold shrink-0"
+                    className={`w-8 h-8 rounded-full flex items-center justify-center text-[13px] font-bold shrink-0 ${active ? "animate-pulse" : ""}`}
                     style={{
                       background: done ? C.success : active ? C.terracotta : C.bubbleBg,
                       color: done || active ? C.white : C.muted,
