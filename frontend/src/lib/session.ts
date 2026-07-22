@@ -75,10 +75,28 @@ function accountKey(account: RecentAccount): string {
   return `identifier:${account.identifier}`;
 }
 
+/** [2026-07-22 추가, 팀원 리뷰(fkmc10101-hub) 지적 반영] 이 PR 이전 버전(PR#66)이 저장해둔
+ * 항목엔 accessToken/refreshToken이 그대로 남아있을 수 있다 — 이 함수 자체는 그 필드를
+ * 더 이상 안 쓰지만, 필드가 여전히 localStorage에 남아있으면 XSS로 읽힐 수 있는 건
+ * 마찬가지다. 읽을 때마다 지우고, 지운 값을 즉시 다시 저장해 자체 치유(self-heal)한다. */
+function stripLegacyTokenFields(raw: unknown[]): RecentAccount[] {
+  return raw.map((entry) => {
+    if (entry && typeof entry === "object") {
+      const { accessToken: _accessToken, refreshToken: _refreshToken, ...rest } = entry as Record<string, unknown>;
+      return rest as unknown as RecentAccount;
+    }
+    return entry as RecentAccount;
+  });
+}
+
 export function getRecentAccounts(): RecentAccount[] {
   try {
     const raw = JSON.parse(localStorage.getItem(RECENT_ACCOUNTS_KEY) ?? "[]");
-    return Array.isArray(raw) ? raw : [];
+    if (!Array.isArray(raw)) return [];
+    const hadLegacyFields = raw.some((entry) => entry && ("accessToken" in entry || "refreshToken" in entry));
+    const cleaned = stripLegacyTokenFields(raw);
+    if (hadLegacyFields) localStorage.setItem(RECENT_ACCOUNTS_KEY, JSON.stringify(cleaned));
+    return cleaned;
   } catch {
     return [];
   }
