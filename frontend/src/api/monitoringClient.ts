@@ -10,6 +10,12 @@ import axios from "axios";
 export const monitoringClient = axios.create({
   baseURL: import.meta.env.VITE_MONITORING_API_URL || "http://localhost:8000",
   timeout: 10000,
+  // [2026-07-22 추가, 팀원 리뷰 반영 — HIGH 재설계] 계정 전환 기능이 이제 httpOnly 쿠키
+  // (switch_{role}_{subject_id})로 재로그인 능력을 다룬다 — 백엔드는 이미 CORS
+  // allow_credentials=True + 특정 오리진 allowlist라 이 설정만 있으면 된다. 이게 없으면
+  // 브라우저가 cross-origin 응답의 Set-Cookie를 조용히 버려서 로그인해도 전환 쿠키가
+  // 전혀 저장되지 않는다.
+  withCredentials: true,
 });
 
 // [7/10] 로그인이 켜지면서(issue #21) 일부 엔드포인트가 토큰을 요구하게 됨 — 호출부마다

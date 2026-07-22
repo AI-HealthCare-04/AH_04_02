@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { refreshAccessToken } from "../api/auth";
+import { forgetSwitchAccount, switchAccount } from "../api/auth";
 import { getCaregiverPatients } from "../api/monitoring";
 
 /**
@@ -32,23 +32,33 @@ export function isLoggedIn(): boolean {
 /**
  * [2026-07-21 추가] "다른 사용자로 전환"(MyPage.tsx) — 네이버 등에서처럼 이 기기에서
  * 로그인했던 계정을 기억해뒀다가 클릭 한 번으로 다시 로그인할 수 있게 함.
- * [2026-07-22 수정] 처음엔 access_token(60분)을 그대로 저장해뒀다가 재사용하는 방식이라
- * 만료되면 그냥 로그인 화면으로 튕겨나갔다 — refresh_token(14일)도 같이 저장해두고
- * switchToRecentAccount()가 전환 시점에 새 access_token을 스스로 받아오게 바꿨다.
+ * [2026-07-22 재설계 — 팀원 리뷰(fkmc10101-hub) 지적 반영, HIGH] 처음엔 access_token(60분)
+ * 뿐 아니라 refresh_token(14일)까지 이 객체에 담아 localStorage에 그대로 저장했다 — XSS
+ * 한 번으로 저장된 계정 전부의 refresh_token(14일)이 털릴 수 있는 회귀였다. 이제 이
+ * 객체는 화면 표시용 정보만 담고(누구인지 보여주는 데는 필요하지만 그 자체로는 아무
+ * 권한도 없음), 실제 재로그인 능력은 서버의 httpOnly 쿠키(switch_{role}_{subject_id})에만
+ * 있다 — switchAccount()/forgetSwitchAccount()가 role+subject_id만 넘겨 그 쿠키를
+ * 간접적으로 다룬다.
  */
 export interface RecentAccount {
   identifier: string; // 로그인에 쓴 이메일/전화번호 — 계정 식별 및 표시용
   name: string;
-  accessToken: string;
-  // [2026-07-22 추가] access_token 만료 후 재발급용. 재사용 방지로 쓸 때마다 새로 발급되니
-  // switchToRecentAccount()가 매번 이 값도 최신 것으로 갱신해서 다시 저장한다.
-  refreshToken: string;
   // [2026-07-22 추가] 계정 전환 목록에 "환자 본인/보호자/기관" 표시용.
   role: "patient" | "guardian" | "organization";
   // [2026-07-22 수정] 케어하는 환자가 아직 없는 보호자는 로그인 시점엔 patientId가 없다 —
   // 이 경우까지 저장 대상에서 빠지면 "체크했는데 목록에 안 뜬다" 버그가 된다.
   patientId?: number;
   caregiverId?: number;
+}
+
+/** switchAccount/forgetSwitchAccount가 서버에 넘길 "어느 계정인지"만 가리키는 슬롯
+ * 식별자 — role은 서버 쪽 role("caregiver"/"patient")과 맞춰야 하므로 guardian/organization을
+ * "caregiver"로 합친다(둘 다 Caregiver 테이블이므로 서버 입장에선 동일한 role이다). */
+function toServerSlot(account: RecentAccount): { role: "caregiver" | "patient"; subjectId: number } | null {
+  if (account.role === "patient") {
+    return account.patientId != null ? { role: "patient", subjectId: account.patientId } : null;
+  }
+  return account.caregiverId != null ? { role: "caregiver", subjectId: account.caregiverId } : null;
 }
 
 const RECENT_ACCOUNTS_KEY = "recent_accounts";
@@ -65,10 +75,28 @@ function accountKey(account: RecentAccount): string {
   return `identifier:${account.identifier}`;
 }
 
+/** [2026-07-22 추가, 팀원 리뷰(fkmc10101-hub) 지적 반영] 이 PR 이전 버전(PR#66)이 저장해둔
+ * 항목엔 accessToken/refreshToken이 그대로 남아있을 수 있다 — 이 함수 자체는 그 필드를
+ * 더 이상 안 쓰지만, 필드가 여전히 localStorage에 남아있으면 XSS로 읽힐 수 있는 건
+ * 마찬가지다. 읽을 때마다 지우고, 지운 값을 즉시 다시 저장해 자체 치유(self-heal)한다. */
+function stripLegacyTokenFields(raw: unknown[]): RecentAccount[] {
+  return raw.map((entry) => {
+    if (entry && typeof entry === "object") {
+      const { accessToken: _accessToken, refreshToken: _refreshToken, ...rest } = entry as Record<string, unknown>;
+      return rest as unknown as RecentAccount;
+    }
+    return entry as RecentAccount;
+  });
+}
+
 export function getRecentAccounts(): RecentAccount[] {
   try {
     const raw = JSON.parse(localStorage.getItem(RECENT_ACCOUNTS_KEY) ?? "[]");
-    return Array.isArray(raw) ? raw : [];
+    if (!Array.isArray(raw)) return [];
+    const hadLegacyFields = raw.some((entry) => entry && ("accessToken" in entry || "refreshToken" in entry));
+    const cleaned = stripLegacyTokenFields(raw);
+    if (hadLegacyFields) localStorage.setItem(RECENT_ACCOUNTS_KEY, JSON.stringify(cleaned));
+    return cleaned;
   } catch {
     return [];
   }
@@ -81,24 +109,30 @@ export function saveRecentAccount(account: RecentAccount): void {
   localStorage.setItem(RECENT_ACCOUNTS_KEY, JSON.stringify(next));
 }
 
+/** [2026-07-22 수정] localStorage에서 지우는 것뿐 아니라, 서버에 심어둔 전환용 httpOnly
+ * 쿠키도 같이 지워달라고 요청한다(fire-and-forget — 실패해도 목록에서는 어차피 지운다). */
 export function removeRecentAccount(account: RecentAccount): void {
   const key = accountKey(account);
   localStorage.setItem(
     RECENT_ACCOUNTS_KEY,
     JSON.stringify(getRecentAccounts().filter((a) => accountKey(a) !== key))
   );
+  const slot = toServerSlot(account);
+  if (slot) forgetSwitchAccount(slot.role, slot.subjectId).catch(() => {});
 }
 
 /** 목록에서 계정을 클릭했을 때 — 비밀번호 없이 그 계정의 세션으로 바로 전환한다.
- * [2026-07-22 수정] access_token(60분)이 만료됐을 수 있으니 refresh_token(14일)으로 새
- * access_token을 받아온 뒤 저장한다 — refresh_token은 재사용 방지로 매번 새로 발급되므로
- * (rotation) 이 계정 항목도 새 토큰들로 갱신해서 다음 전환 때도 계속 쓸 수 있게 한다.
- * refresh_token 자체가 만료·무효화됐으면(오래돼서, 혹은 갱신 중 갱신 실패로 값이 어긋나서)
- * 여기서 예외를 던진다 — 호출부(Login.tsx)가 이 계정을 목록에서 지우고 안내해야 한다. */
+ * [2026-07-22 재설계 — 팀원 리뷰 반영, HIGH] refresh_token을 이 함수(또는 localStorage)가
+ * 직접 다루지 않는다 — role+subject_id만 서버에 넘기면, 서버가 그 계정 전용 httpOnly
+ * 쿠키를 직접 읽어 검증·회전하고 새 access_token만 돌려준다. 그 쿠키가 없거나 만료·
+ * 무효화됐으면 여기서 예외를 던진다 — 호출부(Login.tsx)가 이 계정을 목록에서 지우고
+ * 안내해야 한다. */
 export async function switchToRecentAccount(account: RecentAccount): Promise<void> {
-  const refreshed = await refreshAccessToken(account.refreshToken);
-  localStorage.setItem("access_token", refreshed.access_token);
-  localStorage.setItem("user_name", refreshed.name);
+  const slot = toServerSlot(account);
+  if (!slot) throw new Error("전환할 수 없는 계정이에요.");
+  const result = await switchAccount(slot.role, slot.subjectId);
+  localStorage.setItem("access_token", result.access_token);
+  localStorage.setItem("user_name", result.name);
   // [2026-07-22 수정] 케어하는 환자가 없는 보호자는 patientId가 없다 — 억지로 지우거나
   // "0"을 넣지 않고 그대로 둔다(Login.tsx가 이 값 유무로 /patients vs /dashboard를 정한다).
   if (account.patientId) localStorage.setItem("patient_id", String(account.patientId));
@@ -106,7 +140,7 @@ export async function switchToRecentAccount(account: RecentAccount): Promise<voi
   if (account.caregiverId) localStorage.setItem("caregiver_id", String(account.caregiverId));
   else localStorage.removeItem("caregiver_id");
 
-  saveRecentAccount({ ...account, accessToken: refreshed.access_token, refreshToken: refreshed.refresh_token });
+  saveRecentAccount({ ...account, name: result.name });
 }
 
 /** [2026-07-21 추가] "아이디 저장" 체크박스 — 비밀번호/토큰 없이 이메일·전화번호 입력칸만
