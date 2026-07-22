@@ -24,6 +24,7 @@ from rag.schemas import (
     DurWarning,
     GuideResponse,
     HiraDrugMasterEntry,
+    LifestyleGuideResult,
     LifestyleSourceRef,
     MedicationInput,
     SourceRef,
@@ -40,18 +41,36 @@ from rag.vectorstore import (
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
-당신은 고령 만성질환 환자와 보호자를 위한 복약·생활습관 가이드를 작성하는 보조자입니다.
-[참고자료]에는 의약품 정보와 만성질환 생활지침(질병관리청·학회 진료지침 기반)이 함께 섞여 있을 수 있습니다.
+당신은 고령 만성질환 환자와 보호자를 위한 복약 안내를 작성하는 보조자입니다.
+[참고자료]는 이 의약품 하나에 대한 정보(효능·용법·주의사항·부작용 등)입니다.
+생활습관·식이·운동 안내는 여기서 다루지 않습니다 — 그 내용은 진단명 기준으로 별도 생성되므로,
+medication_guide/precautions에 식이·운동 같은 일반 생활습관 조언을 넣지 마세요.
 아래 [참고자료]에 없는 내용은 절대로 지어내지 마세요 (hallucination 금지).
 모든 문장은 [참고자료]의 번호를 근거로 작성하고, 사용한 번호를 source_refs에 정수 배열로 포함하세요.
-lifestyle_guide는 [참고자료]의 생활지침 항목이 있다면 그것을 우선 근거로 작성하세요.
 쉬운 말로, 고령자도 이해할 수 있도록 짧은 문장으로 작성하세요.
 반드시 아래 JSON 형식으로만 답하세요. 다른 텍스트를 추가하지 마세요.
 
 {
   "medication_guide": "복약 안내 (효능, 복용법, 핵심 주의사항 요약)",
-  "lifestyle_guide": "이 약과 관련된 생활습관 개선 가이드",
-  "precautions": ["반드시 확인해야 할 주의사항 1", "..."],
+  "precautions": ["이 약을 복용할 때 반드시 확인해야 할 주의사항 1", "..."],
+  "source_refs": [1, 2]
+}
+"""
+
+# [2026-07-21 회의 반영] 생활습관 안내는 의약품별이 아니라 "진단명" 기준으로 별도 생성한다 —
+# 위 SYSTEM_PROMPT(의약품 전용)와 완전히 분리된 프롬프트를 써서, 같은 LLM 호출 안에서
+# 두 성격이 섞이지 않게 한다(generate_lifestyle_guide_for_diagnosis 전용).
+LIFESTYLE_SYSTEM_PROMPT = """\
+당신은 고령 만성질환 환자와 보호자를 위한 "진단명 기준" 생활습관 안내를 작성하는 보조자입니다.
+[참고자료]는 특정 진단명(질환)에 대한 생활습관 지침(질병관리청·학회 진료지침 기반)입니다.
+이 안내는 특정 의약품이 아니라 진단명 자체를 기준으로 작성해야 합니다 — 약 이름은 절대 언급하지 마세요.
+아래 [참고자료]에 없는 내용은 절대로 지어내지 마세요 (hallucination 금지).
+모든 문장은 [참고자료]의 번호를 근거로 작성하고, 사용한 번호를 source_refs에 정수 배열로 포함하세요.
+쉬운 말로, 고령자도 이해할 수 있도록 짧은 문장으로 작성하세요.
+반드시 아래 JSON 형식으로만 답하세요. 다른 텍스트를 추가하지 마세요.
+
+{
+  "lifestyle_guide": "이 진단명과 관련된 생활습관 개선 가이드 (식이·운동·주의사항 등, 약물 이름 언급 금지)",
   "source_refs": [1, 2]
 }
 """
@@ -201,11 +220,59 @@ def _lookup_permit_precautions(
     return sections
 
 
+def _lifestyle_context_items(diagnosis: str | None) -> list[dict]:
+    """진단명 기준 생활습관 컨텍스트 아이템만 뽑아온다(질병관리청 우선, 없으면 curated 학회
+    요약으로 보강) — drug_name 없이 diagnosis만으로 호출 가능하도록 _build_context에서
+    분리했다. idx는 호출부(_build_context 또는 generate_lifestyle_guide_for_diagnosis)가
+    부여한다.
+
+    [2026-07-21 회의 반영] 이 헬퍼는 의약품 가이드 생성(generate_guide)과 생활습관 안내
+    생성(generate_lifestyle_guide_for_diagnosis) 양쪽에서 재사용된다 — 로직은 하나만
+    유지하고, "누가 몇 번 호출하는지"만 호출부에서 다르게 제어한다(의약품별이 아니라
+    진단명별로 한 번만 부르는 것은 generate_guides_from_medications의 책임).
+    """
+    items: list[dict] = []
+    lifestyle_found = False
+    if diagnosis:
+        for doc in search_kdca_health_info(diagnosis, k=3):
+            lifestyle_found = True
+            items.append(
+                {
+                    "kind": "lifestyle",
+                    "text": doc.page_content,
+                    "source_ref": LifestyleSourceRef(
+                        guideline_id=f"kdca-{doc.metadata['cntnts_sn']}-{doc.metadata['section_sn']}-{doc.metadata['index']}",
+                        disease=doc.metadata["title"],
+                        category=doc.metadata["section_name"],
+                        source=doc.metadata["source"],
+                    ),
+                }
+            )
+
+    if not lifestyle_found:
+        for disease_code in _resolve_disease_codes(diagnosis):
+            for doc in search_by_disease(disease_code):
+                items.append(
+                    {
+                        "kind": "lifestyle",
+                        "text": doc.page_content,
+                        "source_ref": LifestyleSourceRef(
+                            guideline_id=doc.metadata["guideline_id"],
+                            disease=doc.metadata["disease"],
+                            category=doc.metadata["category"],
+                            source=doc.metadata["source"],
+                        ),
+                    }
+                )
+    return items
+
+
 def _build_context(
     drug_name: str,
     situation: str | None,
     dosage: str = "",
     diagnosis: str | None = None,
+    include_lifestyle: bool = True,
 ) -> list[dict]:
     docs: list[Document] = []
     for candidate in resolve_drug_name_candidates(drug_name):
@@ -286,38 +353,11 @@ def _build_context(
     # 인용하고 당뇨병/이상지질혈증/만성콩팥병은 질병관리청 인용이 아예 없다. 생활습관(음식/
     # 운동/주의사항) 안내는 질병관리청 국가건강정보포털 실제 수집분(search_kdca_health_info)을
     # 최우선 소스로 삼고, 그걸로 못 찾을 때만 이 curated 학회 요약으로 보강한다.
-    lifestyle_found = False
-    if diagnosis:
-        for doc in search_kdca_health_info(diagnosis, k=3):
-            lifestyle_found = True
-            context_items.append(
-                {
-                    "kind": "lifestyle",
-                    "text": doc.page_content,
-                    "source_ref": LifestyleSourceRef(
-                        guideline_id=f"kdca-{doc.metadata['cntnts_sn']}-{doc.metadata['section_sn']}-{doc.metadata['index']}",
-                        disease=doc.metadata["title"],
-                        category=doc.metadata["section_name"],
-                        source=doc.metadata["source"],
-                    ),
-                }
-            )
-
-    if not lifestyle_found:
-        for disease_code in _resolve_disease_codes(diagnosis):
-            for doc in search_by_disease(disease_code):
-                context_items.append(
-                    {
-                        "kind": "lifestyle",
-                        "text": doc.page_content,
-                        "source_ref": LifestyleSourceRef(
-                            guideline_id=doc.metadata["guideline_id"],
-                            disease=doc.metadata["disease"],
-                            category=doc.metadata["category"],
-                            source=doc.metadata["source"],
-                        ),
-                    }
-                )
+    #
+    # [2026-07-21 회의 반영] include_lifestyle=False(generate_guide가 씀)면 이 약의 컨텍스트에
+    # 생활습관 항목을 아예 섞지 않는다 — 생활습관 안내는 별도로(진단명당 한 번만) 생성한다.
+    if include_lifestyle:
+        context_items += _lifestyle_context_items(diagnosis)
 
     for idx, item in enumerate(context_items, start=1):
         item["idx"] = idx
@@ -329,22 +369,13 @@ def _context_text(context_items: list[dict]) -> str:
 
 
 def _dry_run_guide(drug_name: str, context_items: list[dict]) -> GuideResponse:
-    drug_items = [item for item in context_items if item["kind"] == "drug"]
-    lifestyle_items = [item for item in context_items if item["kind"] == "lifestyle"]
-
-    lifestyle_lines = [item["text"] for item in lifestyle_items]
-
+    """[2026-07-21] generate_guide()는 이제 include_lifestyle=False로 컨텍스트를 만들므로
+    context_items는 항상 전부 kind=="drug"다 — 별도 필터링이 필요 없다."""
     return GuideResponse(
         drug_name=drug_name,
-        medication_guide="\n".join(item["text"] for item in drug_items) or "검색된 정보가 없습니다.",
-        lifestyle_guide=(
-            "\n".join(lifestyle_lines)
-            if lifestyle_lines
-            else "OPENAI_API_KEY가 설정되지 않아 생활습관 가이드 자동 생성을 건너뛰었습니다."
-        ),
+        medication_guide="\n".join(item["text"] for item in context_items) or "검색된 정보가 없습니다.",
         precautions=[],
-        source_refs=[item["source_ref"] for item in drug_items],
-        lifestyle_source_refs=[item["source_ref"] for item in lifestyle_items],
+        source_refs=[item["source_ref"] for item in context_items],
         disclaimer=settings.DISCLAIMER,
         self_consistency_score=None,
         review_required=True,
@@ -383,7 +414,11 @@ def generate_guide(
     dosage: str = "",
     diagnosis: str | None = None,
 ) -> GuideResponse:
-    context_items = _build_context(drug_name, situation, dosage=dosage, diagnosis=diagnosis)
+    # [2026-07-21 회의 반영] include_lifestyle=False — 이 약의 컨텍스트에 생활습관 항목을
+    # 섞지 않는다. diagnosis는 여전히 situation 텍스트(진단명: ...)로 LLM에 전달돼 이 약의
+    # 복약 안내 자체를 더 맥락에 맞게 만드는 데는 쓰이지만, 생활습관 안내 생성에는 관여하지
+    # 않는다(그건 generate_lifestyle_guide_for_diagnosis가 진단명당 한 번만 담당).
+    context_items = _build_context(drug_name, situation, dosage=dosage, diagnosis=diagnosis, include_lifestyle=False)
     if not context_items:
         raise NoContextFoundError(f"'{drug_name}'에 대한 식약처 데이터를 찾을 수 없습니다. 먼저 ingest를 실행하세요.")
 
@@ -407,7 +442,7 @@ def generate_guide(
         for _ in range(settings.SELF_CONSISTENCY_SAMPLES)
     ]
 
-    candidate_texts = [f"{c.get('medication_guide') or ''}\n{c.get('lifestyle_guide') or ''}" for c in raw_candidates]
+    candidate_texts = [c.get("medication_guide") or "" for c in raw_candidates]
     best_idx, avg_similarity = pick_consistent_answer(candidate_texts)
     best = raw_candidates[best_idx]
 
@@ -419,9 +454,9 @@ def generate_guide(
         raw_refs = [raw_refs]
     # 원소가 dict/list 같은 해시 불가능한 값이면 `i in ref_by_idx`가 TypeError로
     # 생성을 중단시키므로, 정수 참고번호만 대조한다 (그 외는 무시 -> 인용 없음이면 아래에서 검토 표시).
+    # context_items가 전부 kind=="drug"이므로(include_lifestyle=False) kind 필터가 필요 없다.
     used_items = [ref_by_idx[i] for i in raw_refs if isinstance(i, int) and i in ref_by_idx]
-    source_refs = [item["source_ref"] for item in used_items if item["kind"] == "drug"]
-    lifestyle_source_refs = [item["source_ref"] for item in used_items if item["kind"] == "lifestyle"]
+    source_refs = [item["source_ref"] for item in used_items]
 
     # precautions는 list[str] 필드다. LLM이 항목이 하나뿐일 때 배열 대신 단일 문자열
     # (예: "precautions": "주의하세요")을 반환하면 GuideResponse 생성 시 pydantic이
@@ -447,12 +482,109 @@ def generate_guide(
     return GuideResponse(
         drug_name=drug_name,
         medication_guide=best.get("medication_guide") or "",
-        lifestyle_guide=best.get("lifestyle_guide") or "",
         precautions=precautions,
         source_refs=source_refs,
-        lifestyle_source_refs=lifestyle_source_refs,
         disclaimer=settings.DISCLAIMER,
         self_consistency_score=avg_similarity,
+        review_required=bool(reasons),
+        review_reason=" ".join(reasons) if reasons else None,
+        review_flags=flags,
+    )
+
+
+def generate_lifestyle_guide_for_diagnosis(diagnosis: str | None) -> LifestyleGuideResult:
+    """진단명 기준으로 생활습관 안내를 생성한다 — 의약품과 무관하며, 이 함수는 drug_name을
+    받지 않는다(구조적으로 "의약품별"이 아니라 "진단명별" 생성임을 강제).
+
+    [2026-07-21 회의 반영] generate_guides_from_medications()가 처방전의 고유 진단명마다
+    이 함수를 정확히 1회씩만 호출한다 — 같은 진단명의 약이 여러 개 있어도 중복 생성하지 않는다.
+
+    진단명이 없거나(diagnosis=None/빈 문자열) 매칭되는 생활지침을 하나도 못 찾으면, 지어내지
+    않고 안전한 일반 안내 문구로 폴백한다(hallucination 방지 — SYSTEM_PROMPT와 동일한 원칙).
+    """
+    if not diagnosis:
+        return LifestyleGuideResult(
+            diagnosis="",
+            guide="진단명 정보가 부족해 자세한 생활습관 안내를 드리기 어려워요. 처방전에 진단명을 등록하면 더 정확한 안내를 받을 수 있어요.",
+            source_refs=[],
+            review_required=True,
+            review_reason="진단명 미상 — 안전한 일반 안내로 대체",
+            review_flags=["no_diagnosis"],
+        )
+
+    context_items = _lifestyle_context_items(diagnosis)
+    for idx, item in enumerate(context_items, start=1):
+        item["idx"] = idx
+
+    if not context_items:
+        return LifestyleGuideResult(
+            diagnosis=diagnosis,
+            guide=f"'{diagnosis}'에 대한 생활습관 안내 자료를 아직 찾지 못했어요. 담당 의료진과 상담해 주세요.",
+            source_refs=[],
+            review_required=True,
+            review_reason=f"'{diagnosis}'에 대한 생활지침 검색 결과 없음",
+            review_flags=["no_lifestyle_context"],
+        )
+
+    if not settings.OPENAI_API_KEY:
+        return LifestyleGuideResult(
+            diagnosis=diagnosis,
+            guide="\n".join(item["text"] for item in context_items),
+            source_refs=[item["source_ref"] for item in context_items],
+            review_required=True,
+            review_reason="OPENAI_API_KEY 미설정 (dry-run 모드: 검색 결과만 반환)",
+            review_flags=["dry_run"],
+        )
+
+    from langchain_openai import ChatOpenAI
+
+    ref_by_idx = {item["idx"]: item for item in context_items}
+    context_text = _context_text(context_items)
+    user_prompt = f"진단명: {diagnosis}\n\n[참고자료]\n{context_text}"
+
+    chat = ChatOpenAI(
+        model=settings.OPENAI_MODEL,
+        api_key=settings.OPENAI_API_KEY,
+        temperature=0.4,
+        model_kwargs={"response_format": {"type": "json_object"}},
+    )
+
+    raw_candidates = [
+        json.loads(
+            chat.invoke(
+                [
+                    {"role": "system", "content": LIFESTYLE_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ]
+            ).content
+        )
+        for _ in range(settings.SELF_CONSISTENCY_SAMPLES)
+    ]
+    candidate_texts = [c.get("lifestyle_guide") or "" for c in raw_candidates]
+    best_idx, avg_similarity = pick_consistent_answer(candidate_texts)
+    best = raw_candidates[best_idx]
+
+    raw_refs = best.get("source_refs") or []
+    if not isinstance(raw_refs, list):
+        raw_refs = [raw_refs]
+    used_items = [ref_by_idx[i] for i in raw_refs if isinstance(i, int) and i in ref_by_idx]
+    source_refs = [item["source_ref"] for item in used_items]
+
+    reasons: list[str] = []
+    flags: list[str] = []
+    if not used_items:
+        reasons.append("참고자료 인용(source_refs)이 없어 근거를 확인할 수 없습니다.")
+        flags.append("no_citation")
+    if avg_similarity < settings.SELF_CONSISTENCY_SIMILARITY_THRESHOLD:
+        reasons.append(
+            f"self-consistency 점수({avg_similarity:.2f})가 임계값({settings.SELF_CONSISTENCY_SIMILARITY_THRESHOLD}) 미만입니다."
+        )
+        flags.append("low_self_consistency")
+
+    return LifestyleGuideResult(
+        diagnosis=diagnosis,
+        guide=best.get("lifestyle_guide") or "",
+        source_refs=source_refs,
         review_required=bool(reasons),
         review_reason=" ".join(reasons) if reasons else None,
         review_flags=flags,
@@ -613,12 +745,19 @@ def generate_guide_from_medication(medication, other_drug_names: list[str] | Non
     return guide
 
 
-def generate_guides_from_medications(medications: list) -> list[GuideResponse]:
-    """OCR `OCRResult.medications` 리스트를 순회해 항목별 가이드를 생성한다 (실패 격리).
+def generate_guides_from_medications(medications: list) -> tuple[list[GuideResponse], list[LifestyleGuideResult]]:
+    """OCR `OCRResult.medications` 리스트를 순회해 항목별 의약품 가이드를 생성하고(실패 격리),
+    진단명 기준 생활습관 안내를 별도로 생성한다.
 
-    비용 주의: generate_guide()는 항목당 SELF_CONSISTENCY_SAMPLES(기본 3)회 LLM 호출을
-    하므로, 배치 처리 비용은 3 * N회 직렬 호출이다 (약 10건짜리 처방전이면 30회).
-    규모가 커지면 병렬화나 샘플 수 조정을 검토해야 한다.
+    Returns:
+        (guides, lifestyle_guides) — guides는 medications와 1:1(의약품별). lifestyle_guides는
+        medications의 고유 진단명 집합 기준(1:1이 아님) — 여러 약이 같은 진단명을 공유해도
+        그 진단명의 생활습관 안내는 한 번만 생성된다(2026-07-21 회의 반영: "의약품별이 아니라
+        진단명 기준"). 진단명이 하나도 없으면(전부 미상) 안전한 폴백 안내 1건만 반환한다.
+
+    비용 주의: generate_guide()/generate_lifestyle_guide_for_diagnosis()는 호출당
+    SELF_CONSISTENCY_SAMPLES(기본 3)회 LLM 호출을 한다. 배치 비용은 대략
+    3 * (약 개수 + 고유 진단명 개수)회 직렬 호출이다.
 
     항목 하나가 NoContextFoundError 등으로 실패해도 나머지 약 처리를 막지 않도록,
     실패한 항목은 review_required=True인 GuideResponse로 대체한다. 집계/통계가 필요한
@@ -645,17 +784,33 @@ def generate_guides_from_medications(medications: list) -> list[GuideResponse]:
                 GuideResponse(
                     drug_name=drug_name,
                     medication_guide="",
-                    lifestyle_guide="",
                     disclaimer=settings.DISCLAIMER,
                     review_required=True,
                     review_reason=f"가이드 생성 실패: {exc}",
                     review_flags=["generation_error"],
                 )
             )
-    return guides
+
+    # [2026-07-21 회의 반영] 진단명 기준 생활습관 안내 — 고유 진단명(첫 등장 순서 유지)마다
+    # 정확히 한 번씩만 생성한다. 전부 미상이면 폴백 안내 1건(diagnosis="")만 반환한다.
+    seen_diagnoses: list[str] = []
+    for medication in medications:
+        raw_diagnosis = (
+            medication.get("diagnosis") if isinstance(medication, dict) else getattr(medication, "diagnosis", "")
+        ) or ""
+        diagnosis = raw_diagnosis.strip()
+        if diagnosis and diagnosis not in seen_diagnoses:
+            seen_diagnoses.append(diagnosis)
+
+    if seen_diagnoses:
+        lifestyle_guides = [generate_lifestyle_guide_for_diagnosis(d) for d in seen_diagnoses]
+    else:
+        lifestyle_guides = [generate_lifestyle_guide_for_diagnosis(None)]
+
+    return guides, lifestyle_guides
 
 
-def generate_guides_from_ocr_result(ocr_result) -> list[GuideResponse]:
+def generate_guides_from_ocr_result(ocr_result) -> tuple[list[GuideResponse], list[LifestyleGuideResult]]:
     """OCR `OCRResult`(dataclass 또는 dict) 전체를 받는 검증된 배치 진입점.
 
     내부 medications만 꺼내 generate_guides_from_medications()에 위임한다.

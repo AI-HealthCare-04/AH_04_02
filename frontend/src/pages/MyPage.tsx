@@ -45,7 +45,7 @@ export default function MyPage() {
     { label: "복약 일정", icon: "💊", to: "/schedule" },
     { label: "알림 설정", icon: "🔔", to: "/notification" },
     { label: "등록내역", icon: "📋", to: "/records" },
-    { label: "보호자 연결 관리", icon: "👥", to: "/connect" },
+    { label: "환자 연결관리", icon: "👥", to: "/connect" },
     { label: "화면·챗봇 설정", icon: "⚙️", to: "/settings" },
     ...(caregiverId
       ? [

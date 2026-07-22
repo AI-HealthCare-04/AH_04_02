@@ -231,12 +231,18 @@ class LifestyleSourceRef(BaseModel):
 
 
 class GuideResponse(BaseModel):
+    """의약품(drug) 기준 가이드 — 생활습관 안내는 여기 없다.
+
+    [2026-07-21 회의 반영] 생활습관 안내는 의약품별이 아니라 진단명별로 1회만 생성해야
+    하므로, 의약품 하나당 생성되는 이 응답에서 lifestyle_guide/lifestyle_source_refs를
+    분리해 별도의 LifestyleGuideResult(진단명 기준, generate_lifestyle_guide_for_diagnosis)로
+    옮겼다. 이 모델은 순수하게 "이 약"에 대한 정보(효능·복용법·주의사항·DUR)만 담는다.
+    """
+
     drug_name: str
     medication_guide: str = Field(description="복약 안내: 효능, 복용법, 핵심 주의사항 요약")
-    lifestyle_guide: str = Field(description="약물 연계 생활습관 개선 가이드")
     precautions: list[str] = Field(default_factory=list, description="반드시 확인해야 할 주의사항 목록")
     source_refs: list[SourceRef] = Field(default_factory=list)
-    lifestyle_source_refs: list[LifestyleSourceRef] = Field(default_factory=list)
     dur_warnings: list[DurWarning] = Field(
         default_factory=list, description="같은 처방전의 다른 약과 DUR 병용금기 관계가 확인된 경우만 채워짐"
     )
@@ -261,4 +267,23 @@ class GuideResponse(BaseModel):
     cached: bool = Field(default=False, description="True이면 DB 캐시에서 반환된 결과 (REQ-020)")
     cache_expires_at: str | None = Field(
         default=None, description="캐시 만료 시각 ISO-8601 문자열 (cached=True 일 때만 채워짐)"
+    )
+
+
+class LifestyleGuideResult(BaseModel):
+    """진단명(diagnosis) 기준 생활습관 안내 — 의약품과 무관하게 진단명 하나당 1회만 생성된다.
+
+    [2026-07-21 회의 반영] 여러 의약품이 같은 진단명을 공유해도 이 결과는 한 번만
+    만들어진다(generate_guides_from_medications가 진단명 집합 기준으로 중복 제거).
+    diagnosis가 비어 있으면 안전한 일반 안내 문구로 폴백한다(hallucination 방지).
+    """
+
+    diagnosis: str = Field(description="이 안내가 대상으로 하는 진단명 — 진단명이 없으면 빈 문자열")
+    guide: str = Field(description="진단명 기준 생활습관 개선 가이드(식이/운동/주의사항 등). 약물 이름은 언급하지 않는다")
+    source_refs: list[LifestyleSourceRef] = Field(default_factory=list)
+    review_required: bool = False
+    review_reason: str | None = None
+    review_flags: list[str] = Field(
+        default_factory=list,
+        description="검토 사유 코드: no_diagnosis | no_lifestyle_context | no_citation | low_self_consistency | dry_run",
     )

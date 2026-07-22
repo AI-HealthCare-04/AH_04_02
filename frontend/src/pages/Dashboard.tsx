@@ -83,12 +83,6 @@ export default function Dashboard() {
             <p className="text-[13px] mb-1" style={{ color: C.muted }}>오늘</p>
             <h1 className="text-2xl sm:text-[28px] font-extrabold" style={{ color: C.dark }}>{dateLabel}</h1>
           </div>
-          <span
-            className="text-xs sm:text-[13px] font-bold rounded-[20px] px-3 sm:px-4 py-1.5 sm:py-2 whitespace-nowrap shrink-0"
-            style={{ color: C.terracotta, background: C.bubbleBg, border: `1px solid ${C.terracotta}40` }}
-          >
-            제3자 도움 필요
-          </span>
         </div>
 
         {showBanner && (

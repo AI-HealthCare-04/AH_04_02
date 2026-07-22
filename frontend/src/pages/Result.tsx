@@ -144,11 +144,11 @@ export default function Result() {
             <div className={cardCls} style={cardStyle}>
               <h2 className={cardTitleCls} style={{ color: C.dark }}>🌿 생활습관 개선 가이드</h2>
               {guide.lifestyle_guide.guides?.length ? (
-                // [7/9] 실제 파이프라인 모양 — 약별 생활습관 안내 전문
-                guide.lifestyle_guide.guides.map((text, i) => (
+                // [2026-07-21 회의 반영] 실제 파이프라인 모양 — 진단명별 생활습관 안내(약별이 아님)
+                guide.lifestyle_guide.guides.map((entry, i) => (
                   <div key={i} className={guideItemCls} style={{ borderColor: C.bubbleBg }}>
-                    <p className={guideLabelCls} style={{ color: C.dark }}>🌿 안내 {i + 1}</p>
-                    <p className={guideTextCls} style={{ color: C.dark }}>{text}</p>
+                    <p className={guideLabelCls} style={{ color: C.dark }}>🌿 {entry.diagnosis || "생활습관 안내"}</p>
+                    <p className={guideTextCls} style={{ color: C.dark }}>{entry.guide}</p>
                   </div>
                 ))
               ) : (

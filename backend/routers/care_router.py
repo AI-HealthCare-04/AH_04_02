@@ -107,13 +107,12 @@ def get_latest_assessment(
 # 2. 보호자 초대 (Invitation)
 # ══════════════════════════════════════════
 class InvitationCreate(BaseModel):
-    # "patient"는 보호자→환자 초대(REQ-037)로, 아직 계정이 없는 환자를 초대하는 흐름이라
-    # patient_id가 없다 — 그래서 Optional. 나머지 4개는 기존 환자→보호자 초대(Connect.tsx)다.
-    patient_id: int | None = None
-    # Connect.tsx의 보호자 초대 UI에서 실제로 선택 가능한 4개 값 + 보호자→환자 초대용 "patient".
-    # 직접 가입(CaregiverCreate)은 guardian/organization 흐름이고, 초대는 현장 돌봄 관계라
-    # caregiver/life_support_worker/social_worker까지 별도로 허용한다.
-    relation_type: Literal["guardian", "caregiver", "life_support_worker", "social_worker", "patient"] = "guardian"
+    # [2026-07-21 회의 반영] "초대하기"(환자→보호자류 초대 생성, Connect.tsx)는 삭제됐다 —
+    # 이제 새로 만들 수 있는 초대는 "patient"(보호자→환자 초대, REQ-037/REQ-058)뿐이다.
+    # 이미 생성된 guardian/caregiver/life_support_worker/social_worker 초대(과거 데이터)는
+    # 여전히 accept_invitation()으로 수락 가능하다 — 이 변경은 "생성"만 막는다.
+    patient_id: int | None = None  # patient 방향은 수락 전까지 환자 계정이 없어 항상 None
+    relation_type: Literal["patient"] = "patient"
     invited_phone: str | None = None
     inviter_caregiver_id: int | None = None
 
@@ -160,24 +159,21 @@ def create_invitation(
     actor: Actor = Depends(get_current_actor),
     session: Session = Depends(get_session),
 ):
-    if payload.relation_type == "patient":
-        # 보호자→환자 초대: 아직 환자 계정이 없어 patient_id로는 인가할 수 없으므로,
-        # 초대 주체(inviter_caregiver_id)가 로그인한 보호자 본인인지만 확인한다.
-        if payload.inviter_caregiver_id is None:
-            raise HTTPException(400, "초대하는 보호자 정보가 필요해요.")
-        role, subject = actor
-        if role != "caregiver" or subject.id != payload.inviter_caregiver_id:
-            raise HTTPException(403, "본인 계정으로만 환자를 초대할 수 있어요.")
-        patient_id = None
-    else:
-        if payload.patient_id is None:
-            raise HTTPException(400, "대상 환자를 지정해야 해요.")
-        require_actor_patient_access(payload.patient_id, actor, session)
-        patient_id = payload.patient_id
+    """보호자→환자 초대(REQ-037/REQ-058) 생성 — "환자 연결하기"(InvitePatientPanel.tsx) 전용.
+
+    [2026-07-21 회의 반영] 환자→보호자류 초대("초대하기", Connect.tsx) 생성 경로는 삭제됐다.
+    아직 환자 계정이 없어 patient_id로는 인가할 수 없으므로, 초대 주체(inviter_caregiver_id)가
+    로그인한 보호자 본인인지만 확인한다.
+    """
+    if payload.inviter_caregiver_id is None:
+        raise HTTPException(400, "초대하는 보호자 정보가 필요해요.")
+    role, subject = actor
+    if role != "caregiver" or subject.id != payload.inviter_caregiver_id:
+        raise HTTPException(403, "본인 계정으로만 환자를 초대할 수 있어요.")
 
     token = secrets.token_urlsafe(8)
     invitation = Invitation(
-        patient_id=patient_id,
+        patient_id=None,
         relation_type=payload.relation_type,
         inviter_caregiver_id=payload.inviter_caregiver_id,
         token_hash=hash_token(token),

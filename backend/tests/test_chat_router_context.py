@@ -100,10 +100,20 @@ def test_summarize_source_refs_empty_or_invalid_json_returns_empty():
 
 
 def test_summarize_lifestyle_guide_still_works_unaffected():
-    """회귀 확인 — 이번 수정이 기존 생활습관 가이드 요약에 영향을 주지 않았는지."""
-    lifestyle_guide_json = json.dumps({"guides": ["규칙적으로 운동하세요."]})
+    """[2026-07-21 회의 반영] 실제 파이프라인의 guides는 이제 진단명별 {diagnosis, guide}
+    객체 배열이다(약별이 아님) — 각 항목의 guide 텍스트를 뽑아 요약에 포함하는지 확인."""
+    lifestyle_guide_json = json.dumps(
+        {"guides": [{"diagnosis": "고혈압", "guide": "규칙적으로 운동하세요."}]}
+    )
     lines = _summarize_lifestyle_guide(lifestyle_guide_json)
     assert any("규칙적으로 운동" in line for line in lines)
+
+
+def test_summarize_lifestyle_guide_handles_legacy_string_list():
+    """구 캐시(문자열 배열 모양)가 아직 남아있어도 죽지 않고 그대로 사용한다."""
+    lifestyle_guide_json = json.dumps({"guides": ["옛날 모양 문자열"]})
+    lines = _summarize_lifestyle_guide(lifestyle_guide_json)
+    assert any("옛날 모양 문자열" in line for line in lines)
 
 
 def test_dur_question_does_not_use_general_kdca_rag_context():
