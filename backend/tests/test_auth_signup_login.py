@@ -8,6 +8,7 @@ import pytest
 from core.database import get_session
 from fastapi.testclient import TestClient
 from main import app
+from routers.auth_router import MAX_FAILED_LOGIN_ATTEMPTS
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
 
@@ -139,3 +140,35 @@ class TestAuthFlow:
         )
         assert r.status_code == 200
         assert r.json()["relation_type"] == "organization"
+
+    def test_repeated_correct_login_to_one_role_does_not_lock_sibling_account_same_phone(
+        self, client: TestClient
+    ):
+        """[2026-07-22 추가, 팀원 리뷰 반영 — HIGH 회귀 테스트] 전화번호가 이제 역할(관계)당
+        유니크라 같은 사람이 환자 본인 계정과 보호자 계정을 같은 전화번호로 가질 수 있다.
+        login()이 후보를 순회하며 비밀번호를 확인하는 과정에서, 대상이 아닌 형제 계정까지
+        "비밀번호가 안 맞다"는 이유로 실패 횟수를 올리면 안 된다 — 환자 계정에 정확한
+        비밀번호로 여러 번 로그인해도 형제 보호자 계정은 절대 잠기면 안 된다."""
+        phone = "010-9999-0000"
+        r = client.post(
+            "/monitoring/patients",
+            json={"name": "환자", "phone": phone, "password": "patientpw123"},
+        )
+        assert r.status_code == 200
+
+        r = client.post(
+            "/monitoring/caregivers",
+            json={"name": "보호자", "phone": phone, "password": "guardianpw123", "relation_type": "guardian"},
+        )
+        assert r.status_code == 200
+
+        for _ in range(MAX_FAILED_LOGIN_ATTEMPTS):
+            r = client.post("/auth/login", json={"identifier": phone, "password": "patientpw123"})
+            assert r.status_code == 200
+            assert r.json()["role"] == "patient"
+
+        # 형제 보호자 계정은 한 번도 잘못된 비밀번호로 시도된 적이 없으므로 여전히
+        # 자기 비밀번호로 정상 로그인할 수 있어야 한다 (잠겨있으면 400이 난다).
+        r = client.post("/auth/login", json={"identifier": phone, "password": "guardianpw123"})
+        assert r.status_code == 200
+        assert r.json()["role"] == "caregiver"

@@ -151,6 +151,24 @@ def _recipients(session: Session, patient: Patient, schedule: MedicationSchedule
     return recipients
 
 
+def _same_slot_drug_names(session: Session, schedule: MedicationSchedule) -> list[str]:
+    """같은 환자·같은 시간대(time_slot)에 걸린 다른 활성 일정들의 약품명 — 알림 한 통에서
+    "이 시간에 뭘 먹어야 하는지" 전부 보여주기 위함(REQ 아님, 사용자 요청: 시간별 그룹핑).
+    NotificationLog의 (schedule_id, ...) 유니크 제약/멱등성 로직은 그대로 두고, 메시지
+    내용만 풍부하게 만든다 — 스케줄러당 발송 건수는 기존과 동일(일정당 1건)."""
+    siblings = session.exec(
+        select(MedicationSchedule)
+        .where(MedicationSchedule.patient_id == schedule.patient_id)
+        .where(MedicationSchedule.time_slot == schedule.time_slot)
+        .where(MedicationSchedule.active == True)  # noqa: E712
+    ).all()
+    names = [s.drug_name for s in siblings if s.drug_name]
+    # 자기 자신이 맨 앞에 오도록(다른 약 우선순위를 임의로 매기지 않기 위해 순서만 보정)
+    if schedule.drug_name in names:
+        names.remove(schedule.drug_name)
+    return [schedule.drug_name, *names]
+
+
 def _deliver(session: Session, schedule: MedicationSchedule, patient: Patient, kind: str) -> tuple[str, list[str]]:
     """opt-out(NotificationSetting.medication_reminder_enabled)을 존중한다 — 꺼져 있으면
     NotificationLog는 남기되(놓침 판정 로직이 알림 설정과 무관하게 계속 동작하도록)
@@ -166,8 +184,10 @@ def _deliver(session: Session, schedule: MedicationSchedule, patient: Patient, k
         return "sent", []
 
     verb = "복약 시간이에요" if kind == "reminder" else "복약을 놓치신 것 같아요"
-    subject = f"[건강동행] {schedule.drug_name} {verb}"
-    body = f"{schedule.drug_name} ({schedule.time_slot}) — {verb}. 앱에서 확인해 주세요."
+    drug_names = _same_slot_drug_names(session, schedule)
+    drug_list = ", ".join(drug_names)
+    subject = f"[건강동행] {schedule.time_slot} {verb}"
+    body = f"{schedule.time_slot}에 복용할 약: {drug_list} — {verb}. 앱에서 확인해 주세요."
     channels: list[str] = []
     for label, email in recipients:
         send_email(to=email, subject=subject, body=body)

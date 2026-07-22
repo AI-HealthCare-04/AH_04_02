@@ -18,8 +18,14 @@ from datetime import datetime, timedelta
 from typing import Literal, Optional
 
 from core.database import get_session
-from core.dependencies import Actor, get_current_actor, require_actor_patient_access
-from core.security import hash_token, normalize_phone
+from core.dependencies import (
+    Actor,
+    get_current_actor,
+    get_current_caregiver,
+    get_current_caregiver_optional,
+    require_actor_patient_access,
+)
+from core.security import hash_phone, hash_token, normalize_phone
 from fastapi import APIRouter, Depends, HTTPException
 from models import (
     Caregiver,
@@ -204,11 +210,24 @@ def get_invitation(token: str, session: Session = Depends(get_session)):
         "patient_name": patient.name if patient else "알 수 없음",
         "inviter_name": inviter.name if inviter else None,
         "phone_verification_required": bool(invitation.invited_phone),
+        # [2026-07-22 추가] InviteAccept.tsx가 "초대 만료" 표시에 씀 (Figma 목업 참고)
+        "expires_at": invitation.expires_at,
     }
 
 
 @router.post("/invitations/{token}/accept")
-def accept_invitation(token: str, payload: InvitationAccept, session: Session = Depends(get_session)):
+def accept_invitation(
+    token: str,
+    payload: InvitationAccept,
+    session: Session = Depends(get_session),
+    actor: Caregiver | None = Depends(get_current_caregiver_optional),
+):
+    """[2026-07-22 수정 — HIGH, 팀원 리뷰(fkmc10101-hub) 지적 반영] 이 엔드포인트는 계정이
+    없는 사람도 써야 해서(인증 없이 새 보호자 계정을 만드는 경로) 여전히 로그인을 강제하지
+    않는다 — 다만 `payload.caregiver_id`(기존 로그인 계정으로 그대로 수락)를 아무 검증 없이
+    믿으면, 초대 토큰만 가진 누구나 임의의 caregiver_id를 넣어 그 계정을 남의 환자에
+    연결시킬 수 있었다(실제로 재현 — 인증 전혀 없이 성공). 이제 `caregiver_id`가 오면
+    `get_current_caregiver_optional`로 실제 로그인된 그 계정인지 검증하고, 아니면 거부한다."""
     # [알려진 한계] 이 pending 체크와 아래 최종 commit 사이에 행 잠금이 없어, 같은 토큰으로
     # 동시에 두 번 수락 요청이 오면(예: 링크를 두 기기에서 거의 동시에 열기) 둘 다 이 체크를
     # 통과해 patient 분기에서 계정이 2개 생길 수 있다 — 이 앱 규모(소규모 팀, 낮은 동시성)에선
@@ -253,9 +272,11 @@ def accept_invitation(token: str, payload: InvitationAccept, session: Session = 
         return {"patient_id": new_patient.id, "status": "accepted"}
 
     if payload.caregiver_id:
-        caregiver = session.get(Caregiver, payload.caregiver_id)
-        if not caregiver:
-            raise HTTPException(404, "해당 보호자를 찾을 수 없어요")
+        # [2026-07-22 수정 — HIGH] payload.caregiver_id를 그대로 신뢰하지 않는다 — 실제로
+        # 로그인된 보호자(actor)가 그 id 본인일 때만 허용한다.
+        if actor is None or actor.id != payload.caregiver_id:
+            raise HTTPException(403, "본인 계정으로 로그인한 상태에서만 기존 계정으로 수락할 수 있어요.")
+        caregiver = actor
     else:
         # [7/9] name은 프로퍼티(암호화 setter)라 생성자 kwarg로 못 받음 — 생성 후 대입.
         # [7/13] commit 대신 flush — caregiver.id만 미리 확정하고, 아래 CaregiverPatient
@@ -270,6 +291,13 @@ def accept_invitation(token: str, payload: InvitationAccept, session: Session = 
         session.flush()
         session.refresh(caregiver)
 
+    _link_caregiver_to_invitation(session, invitation, caregiver)
+    return {"caregiver_id": caregiver.id, "patient_id": invitation.patient_id, "status": "accepted"}
+
+
+def _link_caregiver_to_invitation(session: Session, invitation: Invitation, caregiver: Caregiver) -> None:
+    """환자→보호자 초대 수락 공통 로직 — 토큰 기반 accept_invitation과 로그인 기반
+    accept_invitation_as_caregiver(아래) 양쪽에서 재사용한다."""
     existing_link = session.exec(
         select(CaregiverPatient)
         .where(CaregiverPatient.caregiver_id == caregiver.id)
@@ -283,12 +311,107 @@ def accept_invitation(token: str, payload: InvitationAccept, session: Session = 
     session.add(invitation)
     session.commit()
 
-    return {"caregiver_id": caregiver.id, "patient_id": invitation.patient_id, "status": "accepted"}
-
 
 @router.post("/invitations/{token}/reject")
 def reject_invitation(token: str, session: Session = Depends(get_session)):
     invitation = _get_invitation_by_token(session, token)
+    invitation.status = "rejected"
+    session.add(invitation)
+    session.commit()
+    return {"status": "rejected"}
+
+
+@router.get("/caregivers/{caregiver_id}/pending-invitations")
+def list_pending_invitations_for_caregiver(
+    caregiver_id: int,
+    caregiver: Caregiver = Depends(get_current_caregiver),
+    session: Session = Depends(get_session),
+):
+    """[2026-07-22 추가] "받은 초대" — 환자가 이 보호자/기관의 전화번호를 지정해서 초대를
+    보내면(invited_phone), 링크를 열지 않고도 로그인만 하면 여기서 바로 볼 수 있다.
+    invited_phone_hash로 매칭하므로 가입 시 등록한 전화번호와 초대에 적힌 전화번호가
+    정확히 같아야 뜬다 — 전화번호를 지정하지 않은(누구나 열 수 있는 공유용) 초대는
+    애초에 "누구에게 온" 초대인지 알 수 없어 여기 안 뜨고, 링크로만 수락 가능하다.
+    """
+    if caregiver_id != caregiver.id:
+        raise HTTPException(403, "본인 계정의 초대만 볼 수 있어요")
+    if not caregiver.phone:
+        return []
+
+    invitations = session.exec(
+        select(Invitation)
+        .where(Invitation.invited_phone_hash == hash_phone(caregiver.phone))
+        .where(Invitation.relation_type != "patient")
+        .where(Invitation.status == "pending")
+        .order_by(Invitation.created_at.desc())
+    ).all()
+
+    result = []
+    for inv in invitations:
+        if inv.is_expired:
+            inv.status = "expired"
+            session.add(inv)
+            continue
+        patient = session.get(Patient, inv.patient_id) if inv.patient_id else None
+        result.append(
+            {
+                "id": inv.id,
+                "relation_type": inv.relation_type,
+                "patient_name": patient.name if patient else "알 수 없음",
+                "created_at": inv.created_at,
+                "expires_at": inv.expires_at,
+            }
+        )
+    session.commit()
+    return result
+
+
+def _require_own_matching_invitation(invitation_id: int, caregiver: Caregiver, session: Session) -> Invitation:
+    """받은 초대함(위 목록)에서 토큰 없이 수락/거절할 때 공용 검증 — 초대가 실제로 이
+    보호자에게 온 것인지(전화번호 일치) 확인한다. 목록에 뜬 것만 골라 액션을 호출하는
+    게 정상 흐름이지만, id를 직접 조작해서 다른 사람 초대를 건드리는 걸 막기 위한 서버측
+    재검증(REQ-003과 동일한 보장을 토큰 없이 재현)이다."""
+    invitation = session.get(Invitation, invitation_id)
+    if not invitation:
+        raise HTTPException(404, "초대를 찾을 수 없어요")
+    if invitation.status == "pending" and invitation.is_expired:
+        invitation.status = "expired"
+        session.add(invitation)
+        session.commit()
+    if invitation.status != "pending":
+        raise HTTPException(409, f"이미 {invitation.status} 처리된 초대예요")
+    if invitation.relation_type == "patient":
+        raise HTTPException(400, "이 방식으로는 환자 초대를 수락할 수 없어요")
+    if (
+        not caregiver.phone
+        or not invitation.invited_phone
+        or normalize_phone(caregiver.phone) != normalize_phone(invitation.invited_phone)
+    ):
+        raise HTTPException(403, "본인에게 온 초대가 아니에요")
+    return invitation
+
+
+@router.post("/invitations/{invitation_id}/accept-as-caregiver")
+def accept_invitation_as_caregiver(
+    invitation_id: int,
+    caregiver: Caregiver = Depends(get_current_caregiver),
+    session: Session = Depends(get_session),
+):
+    """[2026-07-22 추가] 링크 없이 "받은 초대" 목록에서 바로 수락 — 이미 로그인해 있는
+    계정을 그대로 사용한다(토큰 기반 accept_invitation처럼 새 보호자 계정을 만들지 않음)."""
+    invitation = _require_own_matching_invitation(invitation_id, caregiver, session)
+    _link_caregiver_to_invitation(session, invitation, caregiver)
+    return {"caregiver_id": caregiver.id, "patient_id": invitation.patient_id, "status": "accepted"}
+
+
+@router.post("/invitations/{invitation_id}/reject-as-caregiver")
+def reject_invitation_as_caregiver(
+    invitation_id: int,
+    caregiver: Caregiver = Depends(get_current_caregiver),
+    session: Session = Depends(get_session),
+):
+    """[2026-07-22 추가] accept_invitation_as_caregiver와 동일한 방식의 거절."""
+    invitation = _require_own_matching_invitation(invitation_id, caregiver, session)
     invitation.status = "rejected"
     session.add(invitation)
     session.commit()

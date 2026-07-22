@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Heart, Check, X } from "lucide-react";
 import NavBar from "../components/NavBar";
 import { acceptInvitation, getInvitation, rejectInvitation, type InvitationInfo } from "../api/care";
+import { getCurrentCaregiverId, getCurrentUserName, isLoggedIn } from "../lib/session";
 
 const RELATION_LABEL: Record<string, string> = {
   guardian: "보호자",
@@ -11,6 +12,17 @@ const RELATION_LABEL: Record<string, string> = {
   social_worker: "사회복지사",
   patient: "환자",
 };
+
+/** "2025.07.09 오전 10:00" 형식 — Figma 목업(App.figma-export.tsx.bak) 참고.
+ * [2026-07-22 추가] expires_at 컬럼이 생기기 전에 만들어진 pending 초대는 null일 수
+ * 있다 — new Date(null)이 1970.01.01로 렌더링되는 오해를 막기 위해 그 경우 안내 문구로 대체. */
+function formatExpiry(iso: string | null): string {
+  if (!iso) return "만료일 정보 없음";
+  const d = new Date(iso);
+  const date = `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
+  const time = d.toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit", hour12: true });
+  return `${date} ${time}`;
+}
 
 export default function InviteAccept() {
   const navigate = useNavigate();
@@ -28,6 +40,15 @@ export default function InviteAccept() {
 
   // 보호자→환자 초대(REQ-037): 수락자가 실제 환자 계정을 만드는 흐름
   const isPatientInvite = invite?.relation_type === "patient";
+  // [2026-07-22 추가] "환자→보호자 초대"(Connect.tsx)는 대부분 환자 본인이 직접 보내서
+  // inviter_name(보호자 초대자)이 없다 — 그 경우 환자 자신의 이름을 "초대한 사람"으로 보여준다.
+  const inviterDisplayName = invite?.inviter_name ?? invite?.patient_name;
+  // [2026-07-22 추가] 이미 로그인된 보호자/기관 계정으로 링크에 접속한 경우 — 새 계정을
+  // 또 만들지 않고 지금 로그인된 계정으로 바로 수락/거절한다("초대주소로 접속하면 바로
+  // 접속되어있는 계정으로 수락·거절"). 환자 본인 가입용 초대는 애초에 계정이 없는
+  // 사람을 위한 흐름이라 해당 없음.
+  const existingCaregiverId = getCurrentCaregiverId();
+  const useExistingCaregiver = !isPatientInvite && isLoggedIn() && existingCaregiverId !== null;
 
   useEffect(() => {
     if (!token) return;
@@ -36,6 +57,10 @@ export default function InviteAccept() {
         setInvite(data);
         if (data.status !== "pending") {
           setDecided(data.status === "accepted" ? "accepted" : "rejected");
+        } else if (data.relation_type !== "patient" && isLoggedIn()) {
+          // [2026-07-22 추가] 이름 입력칸을 로그인된 계정 이름으로 자동 채워둔다 —
+          // 다른 이름으로 수락하고 싶으면 그대로 고쳐 쓸 수 있다(자동 채움 + 수정 가능).
+          setCaregiverName(getCurrentUserName());
         }
       })
       .catch(() => setError("유효하지 않거나 만료된 초대예요."))
@@ -72,6 +97,9 @@ export default function InviteAccept() {
     try {
       const result = await acceptInvitation(token, {
         caregiver_name: caregiverName.trim(),
+        // [2026-07-22 추가] 이미 로그인된 계정이면 그 id를 같이 보내서, 새 보호자
+        // 계정을 또 만드는 대신 지금 로그인된 계정에 이 환자를 연결한다.
+        caregiver_id: useExistingCaregiver && existingCaregiverId ? existingCaregiverId : undefined,
         phone: phone.trim() || undefined,
       });
       localStorage.setItem("caregiver_id", String(result.caregiver_id));
@@ -103,7 +131,10 @@ export default function InviteAccept() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#FAF6F1]">
-      <NavBar />
+      {/* [2026-07-22 수정] isLoggedIn/userName을 안 넘겨서 로그인 중인 보호자/기관도 이
+          페이지에선 항상 "로그인" 버튼이 뜨는 로그아웃 화면처럼 보였다("로그인이 풀린다"는
+          제보의 실제 원인 — 세션 자체는 안 지워졌지만 화면은 그렇게 보였음). */}
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <div className="flex-1 flex items-center justify-center px-6 py-16">
         {loading ? (
           <p className="text-[14px] text-[#8A7E75]">불러오는 중이에요...</p>
@@ -162,24 +193,33 @@ export default function InviteAccept() {
                   </>
                 ) : (
                   <>
-                    {invite.patient_name}님을<br />
-                    {RELATION_LABEL[invite.relation_type] ?? invite.relation_type}로 돌보게 돼요
+                    {inviterDisplayName}님이<br />
+                    {RELATION_LABEL[invite.relation_type] ?? invite.relation_type}로 초대했어요
                   </>
                 )}
               </h1>
 
               <div className="rounded-2xl p-5 mb-6 bg-[#F4F0EA] text-left space-y-2.5">
+                <div className="flex justify-between text-[13px]">
+                  <span className="text-[#8A7E75]">초대한 사람</span>
+                  <span className="font-bold text-[#1E1A17]">{inviterDisplayName}</span>
+                </div>
+                {/* [2026-07-22 추가] "관계"/"초대 만료"는 환자→보호자 초대에만 표시 —
+                    보호자→환자 초대는 아직 계정이 없는 사람에게 보내는 가입 초대라
+                    관계·만료 개념이 덜 중요해서 Figma 목업에도 안 나온다. */}
                 {!isPatientInvite && (
-                  <div className="flex justify-between text-[13px]">
-                    <span className="text-[#8A7E75]">대상자</span>
-                    <span className="font-bold text-[#1E1A17]">{invite.patient_name}</span>
-                  </div>
-                )}
-                {invite.inviter_name && (
-                  <div className="flex justify-between text-[13px]">
-                    <span className="text-[#8A7E75]">초대한 사람</span>
-                    <span className="font-bold text-[#1E1A17]">{invite.inviter_name}</span>
-                  </div>
+                  <>
+                    <div className="flex justify-between text-[13px]">
+                      <span className="text-[#8A7E75]">관계</span>
+                      <span className="font-bold text-[#1E1A17]">
+                        {RELATION_LABEL[invite.relation_type] ?? invite.relation_type}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-[13px]">
+                      <span className="text-[#8A7E75]">초대 만료</span>
+                      <span className="font-bold text-[#1E1A17]">{formatExpiry(invite.expires_at)}</span>
+                    </div>
+                  </>
                 )}
               </div>
 

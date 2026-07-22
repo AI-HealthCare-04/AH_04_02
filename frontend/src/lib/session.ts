@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { refreshAccessToken } from "../api/auth";
 import { getCaregiverPatients } from "../api/monitoring";
 
 /**
@@ -26,6 +27,102 @@ export function getCurrentUserName(): string {
  * API를 호출하면 401 → 강제로 /login 리다이렉트되는 걸 막을 때 이걸로 먼저 가드한다. */
 export function isLoggedIn(): boolean {
   return !!localStorage.getItem("access_token");
+}
+
+/**
+ * [2026-07-21 추가] "다른 사용자로 전환"(MyPage.tsx) — 네이버 등에서처럼 이 기기에서
+ * 로그인했던 계정을 기억해뒀다가 클릭 한 번으로 다시 로그인할 수 있게 함.
+ * [2026-07-22 수정] 처음엔 access_token(60분)을 그대로 저장해뒀다가 재사용하는 방식이라
+ * 만료되면 그냥 로그인 화면으로 튕겨나갔다 — refresh_token(14일)도 같이 저장해두고
+ * switchToRecentAccount()가 전환 시점에 새 access_token을 스스로 받아오게 바꿨다.
+ */
+export interface RecentAccount {
+  identifier: string; // 로그인에 쓴 이메일/전화번호 — 계정 식별 및 표시용
+  name: string;
+  accessToken: string;
+  // [2026-07-22 추가] access_token 만료 후 재발급용. 재사용 방지로 쓸 때마다 새로 발급되니
+  // switchToRecentAccount()가 매번 이 값도 최신 것으로 갱신해서 다시 저장한다.
+  refreshToken: string;
+  // [2026-07-22 추가] 계정 전환 목록에 "환자 본인/보호자/기관" 표시용.
+  role: "patient" | "guardian" | "organization";
+  // [2026-07-22 수정] 케어하는 환자가 아직 없는 보호자는 로그인 시점엔 patientId가 없다 —
+  // 이 경우까지 저장 대상에서 빠지면 "체크했는데 목록에 안 뜬다" 버그가 된다.
+  patientId?: number;
+  caregiverId?: number;
+}
+
+const RECENT_ACCOUNTS_KEY = "recent_accounts";
+const MAX_RECENT_ACCOUNTS = 5;
+
+/** [2026-07-22 추가, 팀원 리뷰 반영 — MEDIUM] 전화번호가 이제 역할당 유니크라 같은
+ * identifier(전화번호)로 환자 본인/보호자/기관 계정을 각각 가질 수 있다 — identifier만으로
+ * 구분하면 같은 전화번호의 서로 다른 역할 계정이 이 목록에서 서로를 덮어썼다. 실제 계정을
+ * 가리키는 id(역할별 patientId/caregiverId)로 구분한다. 이 필드들이 아직 없는 아주 오래된
+ * 저장값(기능 추가 이전)만 identifier로 폴백한다. */
+function accountKey(account: RecentAccount): string {
+  if (account.role === "patient" && account.patientId != null) return `patient:${account.patientId}`;
+  if (account.caregiverId != null) return `${account.role ?? "guardian"}:${account.caregiverId}`;
+  return `identifier:${account.identifier}`;
+}
+
+export function getRecentAccounts(): RecentAccount[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(RECENT_ACCOUNTS_KEY) ?? "[]");
+    return Array.isArray(raw) ? raw : [];
+  } catch {
+    return [];
+  }
+}
+
+/** 로그인 성공 직후(Login.tsx) 호출 — 같은 계정이 이미 있으면 맨 앞으로 갱신, 5개까지만 유지. */
+export function saveRecentAccount(account: RecentAccount): void {
+  const key = accountKey(account);
+  const next = [account, ...getRecentAccounts().filter((a) => accountKey(a) !== key)].slice(0, MAX_RECENT_ACCOUNTS);
+  localStorage.setItem(RECENT_ACCOUNTS_KEY, JSON.stringify(next));
+}
+
+export function removeRecentAccount(account: RecentAccount): void {
+  const key = accountKey(account);
+  localStorage.setItem(
+    RECENT_ACCOUNTS_KEY,
+    JSON.stringify(getRecentAccounts().filter((a) => accountKey(a) !== key))
+  );
+}
+
+/** 목록에서 계정을 클릭했을 때 — 비밀번호 없이 그 계정의 세션으로 바로 전환한다.
+ * [2026-07-22 수정] access_token(60분)이 만료됐을 수 있으니 refresh_token(14일)으로 새
+ * access_token을 받아온 뒤 저장한다 — refresh_token은 재사용 방지로 매번 새로 발급되므로
+ * (rotation) 이 계정 항목도 새 토큰들로 갱신해서 다음 전환 때도 계속 쓸 수 있게 한다.
+ * refresh_token 자체가 만료·무효화됐으면(오래돼서, 혹은 갱신 중 갱신 실패로 값이 어긋나서)
+ * 여기서 예외를 던진다 — 호출부(Login.tsx)가 이 계정을 목록에서 지우고 안내해야 한다. */
+export async function switchToRecentAccount(account: RecentAccount): Promise<void> {
+  const refreshed = await refreshAccessToken(account.refreshToken);
+  localStorage.setItem("access_token", refreshed.access_token);
+  localStorage.setItem("user_name", refreshed.name);
+  // [2026-07-22 수정] 케어하는 환자가 없는 보호자는 patientId가 없다 — 억지로 지우거나
+  // "0"을 넣지 않고 그대로 둔다(Login.tsx가 이 값 유무로 /patients vs /dashboard를 정한다).
+  if (account.patientId) localStorage.setItem("patient_id", String(account.patientId));
+  else localStorage.removeItem("patient_id");
+  if (account.caregiverId) localStorage.setItem("caregiver_id", String(account.caregiverId));
+  else localStorage.removeItem("caregiver_id");
+
+  saveRecentAccount({ ...account, accessToken: refreshed.access_token, refreshToken: refreshed.refresh_token });
+}
+
+/** [2026-07-21 추가] "아이디 저장" 체크박스 — 비밀번호/토큰 없이 이메일·전화번호 입력칸만
+ * 다음에 미리 채워둔다("자동 로그인"보다 약한, 그냥 타이핑 한 번 줄여주는 기능). */
+const REMEMBERED_IDENTIFIER_KEY = "remembered_identifier";
+
+export function getRememberedIdentifier(): string {
+  return localStorage.getItem(REMEMBERED_IDENTIFIER_KEY) ?? "";
+}
+
+export function setRememberedIdentifier(identifier: string): void {
+  localStorage.setItem(REMEMBERED_IDENTIFIER_KEY, identifier);
+}
+
+export function clearRememberedIdentifier(): void {
+  localStorage.removeItem(REMEMBERED_IDENTIFIER_KEY);
 }
 
 /** [2026-07-14 추가] 마이페이지 글자 크기 설정 — 컴포넌트 대부분이 rem이 아닌 고정 px로

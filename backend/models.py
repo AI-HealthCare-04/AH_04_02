@@ -461,6 +461,10 @@ class Invitation(SQLModel, table=True):
     inviter_caregiver_id: int | None = Field(default=None, foreign_key="caregivers.id")
     relation_type: str = "guardian"
     invited_phone_encrypted: str | None = None
+    # [2026-07-22 추가] 로그인한 보호자/기관이 "받은 초대" 목록을 조회할 때 자기 전화번호로
+    # 찾아야 하는데, invited_phone_encrypted(Fernet)는 암호화할 때마다 값이 달라져 WHERE로
+    # 못 찾는다 — Caregiver/Patient.phone과 동일하게 조회용 해시를 별도로 둔다.
+    invited_phone_hash: str | None = Field(default=None, index=True)
     token_hash: str = Field(unique=True, index=True)
     status: str = "pending"  # pending / accepted / rejected / expired
     created_at: datetime = Field(default_factory=datetime.now)
@@ -474,6 +478,7 @@ class Invitation(SQLModel, table=True):
     @invited_phone.setter
     def invited_phone(self, value: str | None) -> None:
         self.invited_phone_encrypted = encrypt_pii(value) if value else None
+        self.invited_phone_hash = hash_phone(value) if value else None
 
     @property
     def is_expired(self) -> bool:

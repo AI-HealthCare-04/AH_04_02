@@ -80,6 +80,20 @@ class LoginResponse(BaseModel):
     caregiver_id: int
     name: str
     role: str  # "caregiver" / "patient" — 프론트가 로그인 후 흐름(보호자용/환자 본인용)을 분기하는 데 씀
+    # [2026-07-22 추가] role == "caregiver"일 때만 의미있음("guardian"/"organization") — 프론트의
+    # 계정 전환 목록이 "환자 본인/보호자/기관" 표시에 쓴다.
+    relation_type: str | None = None
+    # [2026-07-22 추가] "저장된 계정" 전환 기능 전용 — access_token(60분)이 만료돼도 이 값으로
+    # 새 access_token을 스스로 받아올 수 있게 계정별로 저장해둔다. 재사용 방지로 매번 새로
+    # 발급되므로(POST /auth/token/refresh), 쓸 때마다 이 값도 같이 새로 저장해야 한다.
+    refresh_token: str
+
+
+class RefreshTokenRequest(BaseModel):
+    # [2026-07-22 추가] 계정 전환 기능은 계정마다 refresh_token이 달라서 브라우저 쿠키
+    # 하나(로그인 하나만 담을 수 있음)로는 표현이 안 된다 — 명시적으로 넘기면 그걸 쓰고,
+    # 없으면 기존처럼 쿠키를 쓴다(일반 로그인 흐름과 호환).
+    refresh_token: str | None = None
 
 
 class PasswordResetRequestRequest(BaseModel):
@@ -109,18 +123,37 @@ class WithdrawCancelRequest(BaseModel):
     password: str
 
 
-def _find_by_identifier(session: Session, model, identifier: str):
-    """identifier가 이메일 형식이면 email로, 아니면 전화번호로 보고 phone_hash로 조회.
+def _find_by_identifiers(session: Session, model, identifier: str) -> list:
+    """identifier가 이메일 형식이면 email로, 아니면 전화번호로 보고 phone_hash로 조회 —
+    일치하는 계정을 전부 반환한다.
 
     [2026-07-14] 이메일은 대소문자·좌우공백 차이(모바일 자동대문자화 등)로 가입 때와
     다르게 입력돼도 같은 계정으로 찾아야 한다. 가입 시(monitoring_router.py)부터
     normalize_email()로 정규화해서 저장하므로, 조회할 때도 같은 정규화 함수로 비교한다
     — DB의 `func.lower()` 비교는 가입 시 저장값 자체가 정규화돼 있지 않으면 여전히
     " Test@x.com "과 "test@x.com"이 별개 계정으로 남는 문제를 못 막아서 채택하지 않았다.
+
+    [2026-07-22 추가] 전화번호는 이메일과 달리 테이블 전체가 아니라 관계(역할)당 유니크로
+    바뀌었다 — 같은 사람이 환자 본인/보호자/기관 계정을 각각 하나씩 같은 전화번호로 가질 수
+    있다(monitoring_router.py). 그래서 phone_hash 조회는 이제 여러 계정을 반환할 수 있고,
+    login()은 비밀번호가 맞는 계정을 찾을 때까지 이 목록을 순회한다.
     """
     if "@" in identifier:
-        return session.exec(select(model).where(model.email == normalize_email(identifier))).first()
-    return session.exec(select(model).where(model.phone_hash == hash_phone(identifier))).first()
+        return list(session.exec(select(model).where(model.email == normalize_email(identifier))).all())
+    return list(session.exec(select(model).where(model.phone_hash == hash_phone(identifier))).all())
+
+
+def _find_by_identifier(session: Session, model, identifier: str):
+    """단일 계정만 다루는 기존 호출부(비밀번호 재설정/탈퇴 취소)용 — 여러 계정이 걸려도
+    하나만 본다. 이 세 곳까지 멀티 계정 대응하는 건 지금 범위 밖(TODO).
+
+    [2026-07-22 추가, 팀원 리뷰 반영] 여러 계정이 걸리면 id가 가장 큰(가장 최근 가입한)
+    계정을 고른다 — 이전엔 정렬 없이 DB가 반환하는 순서(보통 삽입 순서)의 첫 번째를
+    그대로 썼는데, per-role 전화번호 dedup이 없던 시절 실수로 쌓인 중복 계정이 있으면
+    가장 오래된(보통 안 쓰는) 계정이 걸려 방금 가입한 계정의 비밀번호 재설정/탈퇴
+    취소가 엉뚱한 계정에 적용되는 문제의 안전망이다."""
+    candidates = _find_by_identifiers(session, model, identifier)
+    return max(candidates, key=lambda account: account.id, default=None)
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -132,73 +165,122 @@ def login(payload: LoginRequest, response: Response, session: Session = Depends(
 
     [2026-07-15 추가, REQ-039] 계정 잠금 — 이 함수가 다루는 것은 caregiver/patient
     양쪽 다 같은 원칙이라 공용 헬퍼(_authenticate)로 뺐다.
-    """
-    caregiver = _find_by_identifier(session, Caregiver, payload.identifier)
-    if caregiver:
-        result = _authenticate(session, "caregiver", caregiver, payload.password)
-        if result is not None:
-            return _issue_login_response(response, caregiver.id, "caregiver", caregiver.name, session)
 
-    patient = _find_by_identifier(session, Patient, payload.identifier)
-    if patient:
-        result = _authenticate(session, "patient", patient, payload.password)
-        if result is not None:
+    [2026-07-22 추가] 전화번호가 이제 관계(역할)당 유니크라 한 사람이 환자 본인/보호자/
+    기관 계정을 같은 전화번호로 여러 개 가질 수 있다 — 후보 전부를 비밀번호가 맞는 계정을
+    찾을 때까지 순회한다(첫 번째만 보면 다른 역할 계정에 걸려 정작 본인 계정 로그인이
+    실패하는 버그가 남).
+
+    [2026-07-22 수정 — HIGH, 팀원 리뷰(security-reviewer) 지적 반영] 후보를 순회하며 바로
+    _authenticate()(실패 시 failed_login_attempts를 올리는 부작용 있음)를 호출하면, 올바른
+    계정에 도달하기 전에 "지나쳐가는" 다른 역할의 계정들이 비밀번호가 안 맞다는 이유로
+    실패 횟수가 쌓였다 — 실제로 재현: 환자 계정에 정확한 비밀번호로 5번 로그인만 해도
+    같은 전화번호의 형제 보호자 계정이 한 번도 잘못 시도된 적 없이 잠겨버렸다. 이제
+    먼저 부작용 없이(_check_credentials) 전체 후보를 확인해 일치하는 계정을 찾고, 그
+    계정에 대해서만 성공 처리를 하며, 전부 불일치할 때만 실패 기록(_register_failed_login)을
+    남긴다.
+    """
+    caregivers = _find_by_identifiers(session, Caregiver, payload.identifier)
+    for caregiver in caregivers:
+        if _check_credentials(caregiver, payload.password):
+            _register_successful_login(session, caregiver)
+            return _issue_login_response(
+                response, caregiver.id, "caregiver", caregiver.name, session, relation_type=caregiver.relation_type
+            )
+
+    patients = _find_by_identifiers(session, Patient, payload.identifier)
+    for patient in patients:
+        if _check_credentials(patient, payload.password):
+            _register_successful_login(session, patient)
             return _issue_login_response(response, patient.id, "patient", patient.name, session)
 
-    if not caregiver and not patient:
+    # 일치하는 후보가 하나도 없을 때만 실패 기록을 남긴다 — 전화번호가 여러 역할 계정에
+    # 걸쳐 있으면 여기서도 어느 계정이 진짜 대상인지 알 수 없어 후보 전부에 기록되는
+    # 한계는 남아있다(잔여 리스크로 문서화, 이번 수정 범위는 "성공한 로그인이 무관한
+    # 형제 계정을 잠그는" 버그로 한정).
+    for caregiver in caregivers:
+        _register_failed_login(session, "caregiver", caregiver)
+    for patient in patients:
+        _register_failed_login(session, "patient", patient)
+
+    if not caregivers and not patients:
         logger.info("login failed: no caregiver/patient matches identifier")
 
     raise HTTPException(status.HTTP_400_BAD_REQUEST, "이메일/전화번호 또는 비밀번호가 올바르지 않습니다.")
 
 
-def _authenticate(session: Session, subject_type: str, account, password: str) -> bool | None:
-    """비밀번호를 확인하고 실패 횟수/잠금을 갱신한다. 성공하면 True, 실패하면 None을 반환
-    (locked-and-still-wrong도 실패로 취급 — 호출부는 항상 같은 통합 에러 메시지를 던짐).
+def _is_actively_locked(account) -> bool:
+    """locked_at이 있고 아직 LOCKOUT_DURATION_MINUTES가 지나지 않았으면 True — 기간이
+    지났으면(자동 해제 대상) False (호출부가 상태 초기화까지 책임진다)."""
+    return account.locked_at is not None and datetime.now() - account.locked_at < timedelta(
+        minutes=LOCKOUT_DURATION_MINUTES
+    )
+
+
+def _check_credentials(account, password: str) -> bool:
+    """비밀번호가 실제로 맞는지만 확인한다 — 실패 횟수/잠금 갱신 같은 부작용은 없다
+    (전화번호가 여러 역할 계정에 걸쳐 있을 때, 대상이 아닌 다른 후보를 "확인만" 하다가
+    건드리지 않기 위함 — 부작용은 실제로 해당하는 계정에만 별도로 적용한다).
+
+    [2026-07-15 추가, REQ-039] 이미 잠긴 계정은 비밀번호가 맞아도 거부(재설정으로만 해제).
+    [2026-07-15 추가, REQ-035] 탈퇴(비활성화)된 계정도 비밀번호가 맞아도 로그인 거부.
+    """
+    if account.deactivated_at is not None:
+        return False
+    if _is_actively_locked(account):
+        return False
+    return bool(account.hashed_password) and verify_password(password, account.hashed_password)
+
+
+def _register_successful_login(session: Session, account) -> None:
+    """로그인 성공 시 잠금 관련 상태를 정리한다 — 잠금 기간이 지나 자동 해제됐거나
+    (locked_at은 있지만 위 _check_credentials가 이미 기간 경과로 통과시킨 경우) 실패
+    횟수가 남아있으면 초기화한다."""
+    if account.locked_at is not None or account.failed_login_attempts:
+        account.locked_at = None
+        account.failed_login_attempts = 0
+        session.add(account)
+        session.commit()
+
+
+def _register_failed_login(session: Session, subject_type: str, account) -> None:
+    """비밀번호 불일치를 실패 횟수에 반영하고, 임계치를 넘으면 잠근다.
 
     [2026-07-15 추가, REQ-039] 이미 잠긴 계정은 비밀번호가 맞아도 거부하고(재설정으로만
     해제), 실패 횟수를 5회에서 더 늘리지 않는다(이미 임시번호를 보낸 상태 유지).
 
-    [2026-07-15 추가, REQ-035] 탈퇴(비활성화)된 계정도 비밀번호가 맞아도 로그인 거부 —
-    30일 유예기간 안에 되돌리려면 POST /auth/withdraw/cancel을 쓴다(로그인 자체가
-    막혀 있으니 access_token이 아니라 identifier+password로 본인 확인하는 별도 경로).
-    """
+    [2026-07-15 추가, REQ-035] 탈퇴(비활성화)된 계정은 실패 기록 대상에서 제외 — 이미
+    로그인 자체가 막혀 있어 무의미하다.
+
+    [2026-07-22 수정] locked_at이 있지만 기간이 지난(자동 해제 대상) 경우, 여기서 먼저
+    비워서 실패 횟수를 0부터 다시 세도록 한다 — 그렇지 않으면 만료된 옛 잠금의 실패
+    횟수(이미 임계치 근처) 위에 그대로 누적돼 자동 해제 직후 단 한 번의 오타로도 곧바로
+    재잠금되는(원래 의도한 "자동 해제 시 새 기회"와 다른) 부작용이 생긴다."""
     if account.deactivated_at is not None:
         logger.info("login rejected: %s_id=%s account deactivated (pending deletion)", subject_type, account.id)
-        return None
-
+        return
+    if _is_actively_locked(account):
+        logger.info("login rejected: %s_id=%s account locked", subject_type, account.id)
+        return
     if account.locked_at is not None:
-        if datetime.now() - account.locked_at >= timedelta(minutes=LOCKOUT_DURATION_MINUTES):
-            logger.info("account auto-unlocked: %s_id=%s (lockout duration elapsed)", subject_type, account.id)
-            account.locked_at = None
-            account.failed_login_attempts = 0
-            session.add(account)
-            session.commit()
-        else:
-            logger.info("login rejected: %s_id=%s account locked", subject_type, account.id)
-            return None
-
-    if not account.hashed_password or not verify_password(password, account.hashed_password):
-        account.failed_login_attempts += 1
-        if account.failed_login_attempts >= MAX_FAILED_LOGIN_ATTEMPTS:
-            account.locked_at = datetime.now()
-            session.add(account)
-            session.commit()
-            logger.info("account locked: %s_id=%s, sending reset code", subject_type, account.id)
-            _issue_reset_code(session, subject_type, account)
-        else:
-            session.add(account)
-            session.commit()
-            logger.info(
-                "login failed: %s_id=%s wrong password (%d/%d)",
-                subject_type, account.id, account.failed_login_attempts, MAX_FAILED_LOGIN_ATTEMPTS,
-            )
-        return None
-
-    if account.failed_login_attempts:
+        logger.info("account auto-unlocked: %s_id=%s (lockout duration elapsed)", subject_type, account.id)
+        account.locked_at = None
         account.failed_login_attempts = 0
+
+    account.failed_login_attempts += 1
+    if account.failed_login_attempts >= MAX_FAILED_LOGIN_ATTEMPTS:
+        account.locked_at = datetime.now()
         session.add(account)
         session.commit()
-    return True
+        logger.info("account locked: %s_id=%s, sending reset code", subject_type, account.id)
+        _issue_reset_code(session, subject_type, account)
+    else:
+        session.add(account)
+        session.commit()
+        logger.info(
+            "login failed: %s_id=%s wrong password (%d/%d)",
+            subject_type, account.id, account.failed_login_attempts, MAX_FAILED_LOGIN_ATTEMPTS,
+        )
 
 
 def _issue_reset_code(session: Session, subject_type: str, account) -> None:
@@ -270,11 +352,13 @@ def _issue_reset_code(session: Session, subject_type: str, account) -> None:
         )
 
 
-def _issue_login_response(response: Response, subject_id: int, role: str, name: str, session: Session) -> LoginResponse:
+def _issue_login_response(
+    response: Response, subject_id: int, role: str, name: str, session: Session, relation_type: str | None = None
+) -> LoginResponse:
     """[2026-07-15] refresh 토큰 발급마다 jti를 RefreshToken 테이블에 기록 — /token/refresh가
     회전(재발급) 시 이 jti를 revoke해서 재사용을 막는다(REQ-001)."""
     access_token = create_access_token(subject_id, role)
-    refresh_token, jti = create_refresh_token(subject_id, role)
+    refresh_token_value, jti = create_refresh_token(subject_id, role)
     session.add(RefreshToken(
         jti=jti,
         subject_id=subject_id,
@@ -282,24 +366,36 @@ def _issue_login_response(response: Response, subject_id: int, role: str, name: 
         expires_at=datetime.now() + timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES),
     ))
     session.commit()
-    response.set_cookie(key="refresh_token", value=refresh_token, httponly=True)
-    return LoginResponse(access_token=access_token, caregiver_id=subject_id, name=name, role=role)
+    response.set_cookie(key="refresh_token", value=refresh_token_value, httponly=True)
+    return LoginResponse(
+        access_token=access_token,
+        caregiver_id=subject_id,
+        name=name,
+        role=role,
+        relation_type=relation_type,
+        refresh_token=refresh_token_value,
+    )
 
 
-@router.get("/token/refresh", response_model=LoginResponse)
+@router.post("/token/refresh", response_model=LoginResponse)
 def refresh_token(
+    payload: RefreshTokenRequest,
     response: Response,
-    refresh_token: str | None = Cookie(default=None),
+    refresh_token_cookie: str | None = Cookie(default=None, alias="refresh_token"),
     session: Session = Depends(get_session),
 ):
-    """login에서 set_cookie로 심어둔 refresh_token 쿠키를 검증하고, 새 access_token과
-    함께 새 refresh_token도 발급한다(rotation) — 이전 jti는 revoke 처리해 재사용을 막는다.
+    """login에서 심어둔 refresh_token(쿠키 또는 계정 전환 기능이 명시적으로 넘긴 값)을
+    검증하고, 새 access_token과 함께 새 refresh_token도 발급한다(rotation) — 이전 jti는
+    revoke 처리해 재사용을 막는다.
     [2026-07-15] 예전엔 access_token만 새로 발급하고 같은 refresh_token을 계속 재사용해서,
-    탈취된 refresh_token이 만료(14일) 전까지 계속 유효했다(REQ-001)."""
-    if not refresh_token:
+    탈취된 refresh_token이 만료(14일) 전까지 계속 유효했다(REQ-001).
+    [2026-07-22 수정] GET에서 POST로 변경 — 계정 전환 기능은 요청 바디로 refresh_token을
+    명시적으로 넘겨야 해서(쿠키 하나로는 계정별 값을 구분 못 함) 더 이상 GET만으로는 부족했다."""
+    token = payload.refresh_token or refresh_token_cookie
+    if not token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Refresh token이 없습니다.")
     try:
-        subject_id, role, jti = decode_refresh_token(refresh_token)
+        subject_id, role, jti = decode_refresh_token(token)
     except jwt.PyJWTError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "유효하지 않거나 만료된 refresh token입니다.")
 
@@ -328,7 +424,8 @@ def refresh_token(
     if subject.deactivated_at is not None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "탈퇴 처리된 계정입니다.")
 
-    return _issue_login_response(response, subject_id, role, subject.name, session)
+    relation_type = subject.relation_type if role == "caregiver" else None
+    return _issue_login_response(response, subject_id, role, subject.name, session, relation_type=relation_type)
 
 
 # ── 비밀번호 재설정 [2026-07-15 추가, REQ-039] ──

@@ -28,6 +28,11 @@ monitoringClient.interceptors.response.use(
     if (error.response?.status === 401) {
       localStorage.removeItem("access_token");
       localStorage.removeItem("caregiver_id");
+      // [2026-07-22 추가] 예전엔 아무 설명 없이 로그인 화면으로만 돌려보내서, 특히
+      // "저장된 계정" 목록에서 만료된 토큰으로 전환을 시도했을 때 사용자 입장에선
+      // "눌러도 아무 반응이 없는" 버그처럼 보였다 — Login.tsx가 마운트 시 이 값을
+      // 읽어 이유를 보여주고 지운다.
+      sessionStorage.setItem("login_notice", "로그인이 만료됐어요. 다시 로그인해주세요.");
       if (window.location.pathname !== "/login") window.location.href = "/login";
     }
     return Promise.reject(error);

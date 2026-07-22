@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import type { FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ChevronDown, ChevronRight, Menu, Pill, Search, X } from "lucide-react";
 import { C } from "../theme";
 
@@ -45,8 +45,11 @@ const ALL_MENU_ENTRIES: { label: string; to: string }[] = NAV_ITEMS.flatMap((ite
  * [이후] 색상을 theme.ts(C)로 통일 — 인라인 hex 제거.
  * [7/13] lg 미만 구간용 햄버거 드로어 추가 — ESC/바깥클릭 닫기, 스크롤 잠금.
  */
+const AUTH_PATHS = ["/login", "/register", "/reset-password"];
+
 export default function NavBar({ isLoggedIn = false, userName = "", variant = "light" }: NavBarProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const dark = variant === "dark";
   const textColor = dark ? C.white : C.dark;
   const [isOpen, setIsOpen] = useState(false);
@@ -54,6 +57,9 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
   const [allOpen, setAllOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
+  // [2026-07-20] 통합검색이 lg 미만(모바일 포함 전체)에서 아예 안 보이던 문제 —
+  // 데스크톱 입력창 대신, 돋보기 버튼을 누르면 헤더 아래로 펼쳐지는 검색줄을 추가.
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const allMenuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLDivElement>(null);
   const trimmedQuery = searchQuery.trim();
@@ -66,6 +72,7 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
         setHoveredTo(null);
         setAllOpen(false);
         setSearchFocused(false);
+        setMobileSearchOpen(false);
       }
     };
     document.addEventListener("keydown", onKey);
@@ -112,6 +119,7 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
     if (!q) return;
     navigate(`/records?search=${encodeURIComponent(q)}`);
     setSearchFocused(false);
+    setMobileSearchOpen(false);
   };
 
   const handleSearch = (e: FormEvent<HTMLFormElement>) => {
@@ -125,7 +133,7 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
         className={dark ? "sticky top-0 z-40 bg-transparent" : "sticky top-0 z-40 backdrop-blur-sm border-b"}
         style={dark ? undefined : { background: "rgba(255,255,255,0.95)", borderColor: "rgba(30,26,23,0.10)" }}
       >
-        <div className="max-w-7xl mx-auto px-6 sm:px-10 h-16 flex items-center justify-between gap-4">
+        <div className="max-w-7xl mx-auto px-6 sm:px-10 h-16 grid grid-cols-[auto_1fr_auto] items-center gap-4">
           <Link to="/" className="flex items-center gap-2 shrink-0">
             <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: C.terracotta }}>
               <Pill className="w-4 h-4 text-white" strokeWidth={2.4} />
@@ -134,7 +142,7 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
           </Link>
 
           {isLoggedIn && (
-            <nav className="hidden lg:flex items-center gap-6 min-w-0">
+            <nav className="hidden lg:flex items-center justify-center gap-6 min-w-0">
               {NAV_ITEMS.map((item) => (
                 <div
                   key={item.to}
@@ -188,18 +196,20 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
                   <ChevronDown className={`w-5 h-5 transition-transform ${allOpen ? "rotate-180" : ""}`} />
                 </button>
 
+                {/* [2026-07-20] 화살표 자기 자리에 붙는 세로 목록 대신, 메가메뉴처럼 nav 전체
+                    중앙 아래로 내려와 상단 메뉴별 열(column)로 나란히 보여주는 형태로 변경. */}
                 {allOpen && (
-                  <div className="absolute top-full right-0 pt-3 -mt-px">
+                  <div className="fixed left-0 right-0 top-16 pt-3 -mt-px flex justify-center">
                     <div
-                      className="rounded-2xl p-4 flex flex-col gap-1 min-w-[160px]"
+                      className="rounded-2xl p-6 flex gap-10"
                       style={{ background: C.white, border: "1px solid rgba(30,26,23,0.10)", boxShadow: C.shadowDropdown }}
                     >
                       {NAV_ITEMS.map((item) => (
-                        <div key={item.to}>
+                        <div key={item.to} className="flex flex-col gap-2 min-w-[110px]">
                           <Link
                             to={item.to}
                             onClick={() => setAllOpen(false)}
-                            className="block py-1.5 text-[14px] font-medium whitespace-nowrap transition-opacity hover:opacity-60"
+                            className="py-1 text-[14px] font-bold whitespace-nowrap transition-opacity hover:opacity-60"
                             style={{ color: C.dark }}
                           >
                             {item.label}
@@ -209,7 +219,7 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
                               key={child.to}
                               to={child.to}
                               onClick={() => setAllOpen(false)}
-                              className="block py-1.5 pl-3 text-[13px] font-medium whitespace-nowrap transition-opacity hover:opacity-60"
+                              className="text-[13px] font-medium whitespace-nowrap transition-opacity hover:opacity-60"
                               style={{ color: C.muted }}
                             >
                               {child.label}
@@ -224,6 +234,7 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
             </nav>
           )}
 
+          <div className="flex items-center gap-3 shrink-0">
           {isLoggedIn && (
             <div className="hidden lg:block relative shrink-0 w-48" ref={searchRef}>
               <form onSubmit={handleSearch} className="flex items-center relative">
@@ -280,9 +291,21 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
             </div>
           )}
 
-          <div className="flex items-center gap-3 shrink-0">
             {isLoggedIn ? (
               <>
+                <button
+                  className="lg:hidden flex items-center justify-center w-8 h-8 transition-opacity hover:opacity-60"
+                  onClick={() => {
+                    setMobileSearchOpen((v) => !v);
+                    setIsOpen(false);
+                  }}
+                  aria-expanded={mobileSearchOpen}
+                  aria-label="통합 검색"
+                  style={{ color: textColor }}
+                >
+                  {mobileSearchOpen ? <X className="w-5 h-5" /> : <Search className="w-5 h-5" />}
+                </button>
+
                 <button
                   onClick={() => navigate("/mypage")}
                   className="flex items-center gap-2.5 transition-opacity hover:opacity-75"
@@ -301,7 +324,10 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
 
                 <button
                   className="lg:hidden flex items-center justify-center w-8 h-8 transition-opacity hover:opacity-60"
-                  onClick={() => setIsOpen((v) => !v)}
+                  onClick={() => {
+                    setIsOpen((v) => !v);
+                    setMobileSearchOpen(false);
+                  }}
                   aria-expanded={isOpen}
                   aria-label="메뉴"
                   style={{ color: textColor }}
@@ -310,7 +336,7 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
                 </button>
               </>
             ) : (
-              !dark && (
+              !dark && !AUTH_PATHS.includes(location.pathname) && (
                 <button
                   onClick={() => navigate("/login")}
                   className="px-5 py-2 rounded-full border-2 text-[14px] font-bold whitespace-nowrap transition-colors"
@@ -360,6 +386,64 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
               </div>
             ))}
           </nav>
+        </>
+      )}
+
+      {isLoggedIn && mobileSearchOpen && (
+        <>
+          <div className="fixed inset-0 z-30 bg-black/40 lg:hidden" onClick={() => setMobileSearchOpen(false)} />
+          <div
+            className="fixed top-16 left-0 right-0 z-40 lg:hidden border-b backdrop-blur-sm px-4 py-3"
+            style={{ background: "rgba(255,255,255,0.97)", borderColor: "rgba(30,26,23,0.10)" }}
+          >
+            <form onSubmit={handleSearch} className="flex items-center relative">
+              <Search className="absolute left-3 w-4 h-4 pointer-events-none" style={{ color: C.muted }} />
+              <input
+                autoFocus
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="통합 검색"
+                aria-label="통합 검색"
+                className="w-full pl-9 pr-3 py-3 rounded-full border text-[15px] outline-none bg-white"
+                style={{ borderColor: "rgba(30,26,23,0.15)" }}
+              />
+            </form>
+
+            {trimmedQuery && (
+              <div
+                className="mt-2 rounded-2xl p-2 flex flex-col gap-0.5 max-h-72 overflow-y-auto"
+                style={{ background: C.white, border: "1px solid rgba(30,26,23,0.10)", boxShadow: C.shadowDropdown }}
+              >
+                {menuMatches.length > 0 && (
+                  <>
+                    <p className="px-3 pt-1 pb-0.5 text-[11px] font-bold" style={{ color: C.muted }}>메뉴</p>
+                    {menuMatches.map((m) => (
+                      <Link
+                        key={m.to}
+                        to={m.to}
+                        onClick={() => {
+                          setMobileSearchOpen(false);
+                          setSearchQuery("");
+                        }}
+                        className="px-3 py-2.5 rounded-xl text-[14px] font-medium whitespace-nowrap transition-opacity hover:opacity-60"
+                        style={{ color: C.dark }}
+                      >
+                        {m.label}
+                      </Link>
+                    ))}
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={() => goToRecordsSearch(trimmedQuery)}
+                  className="px-3 py-2.5 rounded-xl text-left text-[14px] font-medium transition-opacity hover:opacity-60"
+                  style={{ color: C.terracotta }}
+                >
+                  등록내역에서 "{trimmedQuery}" 검색
+                </button>
+              </div>
+            )}
+          </div>
         </>
       )}
     </>

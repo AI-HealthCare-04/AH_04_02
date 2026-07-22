@@ -30,6 +30,7 @@ dependencies = [
     "pymysql>=1.2.0",
     "alembic>=1.18.5",
     "langfuse>=3.0",
+    "torch",  # sentence-transformers 간접 의존성 — CPU 전용 wheel 강제하려고 직접 명시(아래 tool.uv.sources)
 ]
 
 # backend(routers/chat_router.py)가 rag/를 sys.path에 얹어 같은 프로세스에서 import하므로
@@ -43,6 +44,18 @@ dev = [
     "pillow>=10.0",       # generate_mock_*.py 스크립트 + TesseractOCRProvider 폴백
     "pytesseract>=0.3",   # TesseractOCRProvider CLOVA 장애 폴백 (시스템: brew install tesseract)
 ]
+
+# torch가 sentence-transformers/langchain-huggingface의 간접 의존성으로 들어오는데,
+# 지정 안 하면 기본 registry가 리눅스용 CUDA 툴킷(nvidia-* 15종, 수GB)까지 같이
+# 끌고 온다 — 개발 컨테이너/서버 다 GPU 패스스루가 없어서 100% 낭비. CPU 전용
+# wheel로 고정해서 uv.lock 자체가 가벼운 버전을 가리키게 한다.
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.ty.environment]
 # rag/, backend/, backend/scripts/는 venv 외부의 내부 패키지 경로
