@@ -63,6 +63,15 @@ export default function MyPage() {
     navigate("/login");
   };
 
+  const logout = () => {
+    if (!window.confirm("로그아웃할까요?")) return;
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("patient_id");
+    localStorage.removeItem("caregiver_id");
+    localStorage.removeItem("user_name");
+    navigate("/");
+  };
+
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
       <NavBar isLoggedIn userName={displayName} />
@@ -119,6 +128,13 @@ export default function MyPage() {
           style={{ borderColor: "rgba(30,26,23,0.15)", color: C.dark }}
         >
           다른 사용자로 전환
+        </button>
+        <button
+          onClick={logout}
+          className="w-full py-3 mt-2 font-bold text-[14px] transition-opacity hover:opacity-70"
+          style={{ color: C.muted }}
+        >
+          로그아웃
         </button>
       </main>
     </div>

@@ -157,6 +157,28 @@ export async function updateCaregiver(
   return data;
 }
 
+/** [2026-07-23 추가] 회원가입(SignUp.tsx) — 이메일/전화번호 입력 필드에서 포커스를 잃을 때
+ * 중복 여부를 미리 알려주기 위한 조회 전용 호출(계정을 만들지 않음). */
+export async function checkPatientDuplicate(params: { email?: string; phone?: string }) {
+  const { data } = await monitoringClient.get<{ email_taken: boolean; phone_taken: boolean }>(
+    "/monitoring/patients/check-duplicate",
+    { params }
+  );
+  return data;
+}
+
+export async function checkCaregiverDuplicate(params: {
+  relation_type: "guardian" | "organization";
+  email?: string;
+  phone?: string;
+}) {
+  const { data } = await monitoringClient.get<{ email_taken: boolean; phone_taken: boolean }>(
+    "/monitoring/caregivers/check-duplicate",
+    { params }
+  );
+  return data;
+}
+
 /**
  * [7/8 추가] 반대 방향 — 이 환자를 케어하는 보호자 전체 목록 (Connect.tsx '연결된 사람' 표)
  */

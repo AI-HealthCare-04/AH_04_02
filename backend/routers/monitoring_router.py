@@ -158,6 +158,27 @@ def create_patient(payload: PatientCreate, session: Session = Depends(get_sessio
     return _register_patient(payload, session)
 
 
+@router.get("/patients/check-duplicate")
+def check_patient_duplicate(
+    email: str | None = None,
+    phone: str | None = None,
+    session: Session = Depends(get_session),
+):
+    """[2026-07-23 추가] 회원가입(SignUp.tsx)에서 이메일/전화번호를 입력하고 다른 필드로
+    넘어갈 때(onBlur) 바로 중복 여부를 알려주기 위한 조회용 엔드포인트 — 계정을 만들지
+    않고 _register_patient와 동일한 중복 판정 규칙만 재사용한다."""
+    email_taken = False
+    if email:
+        normalized = normalize_email(email)
+        email_taken = session.exec(select(Patient).where(Patient.email == normalized)).first() is not None
+    phone_taken = False
+    if phone:
+        phone_taken = session.exec(
+            select(Patient).where(Patient.phone_hash == hash_phone(phone))
+        ).first() is not None
+    return {"email_taken": email_taken, "phone_taken": phone_taken}
+
+
 @router.get("/patients", response_model=list[PatientPublic])
 def list_patients(actor: Actor = Depends(get_current_actor), session: Session = Depends(get_session)):
     """[7/13] MyPage.tsx가 "본인"을 찾는 데만 쓴다 — 전체 목록이 아니라 토큰의 본인
@@ -339,6 +360,32 @@ def create_caregiver(payload: CaregiverCreate, session: Session = Depends(get_se
     session.commit()
     session.refresh(caregiver)
     return caregiver
+
+
+@router.get("/caregivers/check-duplicate")
+def check_caregiver_duplicate(
+    relation_type: Literal["guardian", "organization"],
+    email: str | None = None,
+    phone: str | None = None,
+    session: Session = Depends(get_session),
+):
+    """[2026-07-23 추가] check_patient_duplicate와 동일한 목적 — create_caregiver의 중복
+    판정 규칙(전화번호는 relation_type끼리만 비교)을 그대로 재사용한다."""
+    email_taken = False
+    if email:
+        normalized = normalize_email(email)
+        email_taken = session.exec(select(Caregiver).where(Caregiver.email == normalized)).first() is not None
+    phone_taken = False
+    if phone:
+        phone_taken = (
+            session.exec(
+                select(Caregiver)
+                .where(Caregiver.phone_hash == hash_phone(phone))
+                .where(Caregiver.relation_type == relation_type)
+            ).first()
+            is not None
+        )
+    return {"email_taken": email_taken, "phone_taken": phone_taken}
 
 
 @router.get("/caregivers", response_model=list[CaregiverPublic])
