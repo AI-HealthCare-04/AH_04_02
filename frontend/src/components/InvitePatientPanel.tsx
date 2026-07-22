@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Phone } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { createInvitation } from "../api/care";
+import { copyTextToClipboard } from "../lib/clipboard";
 
 /**
  * 문자 앱(sms:)으로 초대 링크를 보내기 위한 href를 만든다.
@@ -52,8 +53,13 @@ export default function InvitePatientPanel({
     }
   };
 
-  const copyUrl = () => {
-    navigator.clipboard?.writeText(inviteUrl);
+  const copyUrl = async () => {
+    const copied = await copyTextToClipboard(inviteUrl);
+    if (!copied) {
+      setError("초대 링크를 복사하지 못했어요. 링크를 길게 눌러 직접 복사해 주세요.");
+      return;
+    }
+    setError("");
     setUrlCopied(true);
     setTimeout(() => setUrlCopied(false), 2000);
   };

@@ -1,10 +1,21 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { User, AlertCircle, Trash2 } from "lucide-react";
 import NavBar from "../components/NavBar";
 import InvitePatientPanel from "../components/InvitePatientPanel";
-import { createInvitation, deleteInvitation, listInvitations, type InvitationSummary } from "../api/care";
+import {
+  acceptInvitationAsCaregiver,
+  createInvitation,
+  deleteInvitation,
+  listInvitations,
+  listReceivedInvitations,
+  rejectInvitationAsCaregiver,
+  type InvitationSummary,
+  type ReceivedInvitation,
+} from "../api/care";
 import { getPatientCaregivers, unlinkCaregiverPatient, type Caregiver } from "../api/monitoring";
-import { getCurrentCaregiverId, getCurrentUserName, useGuardedPatientId } from "../lib/session";
+import { copyTextToClipboard } from "../lib/clipboard";
+import { getCurrentCaregiverId, getCurrentPatientId, getCurrentUserName } from "../lib/session";
 
 type RelationType = "guardian" | "caregiver" | "life_support_worker" | "social_worker";
 
@@ -15,14 +26,25 @@ const RELATION_LABEL: Record<RelationType, string> = {
   social_worker: "사회복지사",
 };
 
+function extractInviteToken(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(/\/invite\/([^/?#\s]+)/);
+  if (match) return match[1];
+  if (!trimmed.includes("/") && !trimmed.includes(" ")) return trimmed;
+  return null;
+}
+
 export default function Connect() {
-  const patientId = useGuardedPatientId();
+  const navigate = useNavigate();
   // 보호자류 로그인이면(값이 있으면) "환자 연결하기" 패널을 추가로 보여준다.
   const caregiverId = getCurrentCaregiverId();
+  const patientId = caregiverId == null ? getCurrentPatientId() : null;
 
   const [caregivers, setCaregivers] = useState<Caregiver[]>([]);
   const [invitations, setInvitations] = useState<InvitationSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [receivedInvitations, setReceivedInvitations] = useState<ReceivedInvitation[]>([]);
+  const [loading, setLoading] = useState(caregiverId == null);
   const [error, setError] = useState("");
   const [relationType, setRelationType] = useState<RelationType>("guardian");
   const [invitedPhone, setInvitedPhone] = useState("");
@@ -30,6 +52,9 @@ export default function Connect() {
   const [creatingInvite, setCreatingInvite] = useState(false);
   const [copied, setCopied] = useState(false);
   const [deletingInvitationId, setDeletingInvitationId] = useState<number | null>(null);
+  const [actingInvitationId, setActingInvitationId] = useState<number | null>(null);
+  const [inviteUrlInput, setInviteUrlInput] = useState("");
+  const [inviteUrlError, setInviteUrlError] = useState("");
 
   const loadConnections = async (pid: number) => {
     try {
@@ -46,11 +71,28 @@ export default function Connect() {
     }
   };
 
+  const loadReceivedInvitations = async () => {
+    if (caregiverId == null) return;
+    try {
+      setReceivedInvitations(await listReceivedInvitations(caregiverId));
+    } catch {
+      setError("받은 초대를 불러오지 못했어요.");
+    }
+  };
+
   useEffect(() => {
-    if (patientId == null) return;
+    if (caregiverId != null) {
+      setLoading(false);
+      loadReceivedInvitations();
+      return;
+    }
+    if (patientId == null) {
+      setLoading(false);
+      return;
+    }
     loadConnections(patientId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [patientId]);
+  }, [caregiverId, patientId]);
 
   const handleUnlink = async (caregiverId: number) => {
     if (patientId == null) return;
@@ -82,9 +124,14 @@ export default function Connect() {
     }
   };
 
-  const handleCopyInviteUrl = () => {
+  const handleCopyInviteUrl = async () => {
     if (!inviteUrl) return;
-    navigator.clipboard?.writeText(inviteUrl);
+    const copied = await copyTextToClipboard(inviteUrl);
+    if (!copied) {
+      setError("초대 링크를 복사하지 못했어요. 링크를 길게 눌러 직접 복사해 주세요.");
+      return;
+    }
+    setError("");
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -102,6 +149,43 @@ export default function Connect() {
     } finally {
       setDeletingInvitationId(null);
     }
+  };
+
+  const handleAcceptReceived = async (invitationId: number) => {
+    if (actingInvitationId !== null) return;
+    setActingInvitationId(invitationId);
+    setError("");
+    try {
+      await acceptInvitationAsCaregiver(invitationId);
+      setReceivedInvitations((prev) => prev.filter((inv) => inv.id !== invitationId));
+    } catch {
+      setError("초대 수락에 실패했어요.");
+    } finally {
+      setActingInvitationId(null);
+    }
+  };
+
+  const handleRejectReceived = async (invitationId: number) => {
+    if (actingInvitationId !== null) return;
+    setActingInvitationId(invitationId);
+    setError("");
+    try {
+      await rejectInvitationAsCaregiver(invitationId);
+      setReceivedInvitations((prev) => prev.filter((inv) => inv.id !== invitationId));
+    } catch {
+      setError("초대 거절에 실패했어요.");
+    } finally {
+      setActingInvitationId(null);
+    }
+  };
+
+  const handleOpenInviteUrl = () => {
+    const token = extractInviteToken(inviteUrlInput);
+    if (!token) {
+      setInviteUrlError("올바른 초대 링크 또는 코드를 입력해 주세요.");
+      return;
+    }
+    navigate(`/invite/${token}`);
   };
 
   return (
@@ -123,8 +207,80 @@ export default function Connect() {
           <div className="mb-6">
             <InvitePatientPanel
               caregiverId={caregiverId}
-              onCreated={() => patientId != null && loadConnections(patientId)}
+              onCreated={() => loadReceivedInvitations()}
             />
+          </div>
+        )}
+
+        {caregiverId != null && (
+          <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
+            <h2 className="text-[16px] font-black text-[#1E1A17] mb-1">받은 초대</h2>
+            <p className="text-[13px] text-[#8A7E75] mb-4">
+              환자가 전화번호로 보낸 초대는 여기에서 바로 수락하거나 거절할 수 있어요.
+            </p>
+
+            {receivedInvitations.length > 0 ? (
+              <div className="space-y-2 mb-4">
+                {receivedInvitations.map((inv) => (
+                  <div
+                    key={inv.id}
+                    className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-[#FAF6F1] flex-wrap"
+                  >
+                    <div>
+                      <p className="text-[14px] font-bold text-[#1E1A17]">
+                        {inv.patient_name}님이 {RELATION_LABEL[inv.relation_type as RelationType] ?? inv.relation_type}로 초대했어요
+                      </p>
+                      {inv.expires_at && (
+                        <p className="text-[12px] text-[#8A7E75]">
+                          {new Date(inv.expires_at).toLocaleDateString("ko-KR")}까지 유효
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <button
+                        onClick={() => handleRejectReceived(inv.id)}
+                        disabled={actingInvitationId === inv.id}
+                        className="px-4 py-2 rounded-full text-[13px] font-bold border border-[rgba(30,26,23,0.15)] text-[#1E1A17] disabled:opacity-50"
+                      >
+                        거절
+                      </button>
+                      <button
+                        onClick={() => handleAcceptReceived(inv.id)}
+                        disabled={actingInvitationId === inv.id}
+                        className="px-4 py-2 rounded-full text-[13px] font-bold text-white bg-[#C1653D] disabled:opacity-50"
+                      >
+                        수락
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="px-4 py-4 rounded-xl bg-[#FAF6F1] text-[14px] text-[#8A7E75] mb-4">
+                아직 받은 초대가 없어요.
+              </p>
+            )}
+
+            <div className="flex gap-2 flex-wrap">
+              <input
+                value={inviteUrlInput}
+                onChange={(event) => {
+                  setInviteUrlInput(event.target.value);
+                  setInviteUrlError("");
+                }}
+                placeholder="초대 링크나 코드를 붙여넣으세요"
+                className="flex-1 min-w-[200px] px-4 py-3 rounded-xl border border-[rgba(30,26,23,0.15)] bg-white text-[14px] outline-none"
+              />
+              <button
+                onClick={handleOpenInviteUrl}
+                className="px-5 py-3 rounded-full font-bold text-[14px] shrink-0 bg-[#C1653D]/15 text-[#C1653D]"
+              >
+                확인
+              </button>
+            </div>
+            {inviteUrlError && (
+              <p className="text-[12px] mt-2 text-[#D94F4F]">{inviteUrlError}</p>
+            )}
           </div>
         )}
 
@@ -184,7 +340,7 @@ export default function Connect() {
         )}
 
         {/* 대기중인 초대 */}
-        {invitations.length > 0 && (
+        {caregiverId == null && invitations.length > 0 && (
           <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden mb-6">
             <div className="px-6 py-4 border-b border-[rgba(30,26,23,0.06)]">
               <h2 className="text-[15px] font-black text-[#1E1A17]">대기중인 초대 ({invitations.length}건)</h2>
@@ -213,36 +369,38 @@ export default function Connect() {
         )}
 
         {/* 연결된 사람 */}
-        <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden">
-          <div className="px-6 py-4 border-b border-[rgba(30,26,23,0.06)]">
-            <h2 className="text-[15px] font-black text-[#1E1A17]">연결된 사람 ({caregivers.length}명)</h2>
-          </div>
-          {loading ? (
-            <p className="px-6 py-8 text-center text-[14px] text-[#8A7E75]">불러오는 중이에요...</p>
-          ) : caregivers.length === 0 ? (
-            <div className="py-14 text-center">
-              <User className="w-9 h-9 mx-auto mb-3 text-[#8A7E75] opacity-30" />
-              <p className="text-[14px] text-[#8A7E75]">아직 연결된 사람이 없어요</p>
+        {caregiverId == null && (
+          <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-[rgba(30,26,23,0.06)]">
+              <h2 className="text-[15px] font-black text-[#1E1A17]">연결된 사람 ({caregivers.length}명)</h2>
             </div>
-          ) : (
-            caregivers.map((c) => (
-              <div key={c.id} className="flex items-center justify-between px-6 py-4 border-b border-[#F4F0EA] last:border-0">
-                <div>
-                  <p className="text-[14px] font-bold text-[#1E1A17]">{c.name}</p>
-                  <p className="text-[13px] text-[#8A7E75]">
-                    {RELATION_LABEL[c.relation_type as RelationType] ?? c.relation_type}
-                  </p>
-                </div>
-                <button
-                  onClick={() => handleUnlink(c.id)}
-                  className="px-4 py-2 rounded-full text-[12px] font-bold border border-[#C1653D]/35 text-[#C1653D]"
-                >
-                  연결 해제
-                </button>
+            {loading ? (
+              <p className="px-6 py-8 text-center text-[14px] text-[#8A7E75]">불러오는 중이에요...</p>
+            ) : caregivers.length === 0 ? (
+              <div className="py-14 text-center">
+                <User className="w-9 h-9 mx-auto mb-3 text-[#8A7E75] opacity-30" />
+                <p className="text-[14px] text-[#8A7E75]">아직 연결된 사람이 없어요</p>
               </div>
-            ))
-          )}
-        </div>
+            ) : (
+              caregivers.map((c) => (
+                <div key={c.id} className="flex items-center justify-between px-6 py-4 border-b border-[#F4F0EA] last:border-0">
+                  <div>
+                    <p className="text-[14px] font-bold text-[#1E1A17]">{c.name}</p>
+                    <p className="text-[13px] text-[#8A7E75]">
+                      {RELATION_LABEL[c.relation_type as RelationType] ?? c.relation_type}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleUnlink(c.id)}
+                    className="px-4 py-2 rounded-full text-[12px] font-bold border border-[#C1653D]/35 text-[#C1653D]"
+                  >
+                    연결 해제
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </main>
     </div>
   );
