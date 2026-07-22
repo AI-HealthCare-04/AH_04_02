@@ -60,6 +60,9 @@ class PatientCreate(BaseModel):
     phone: str | None = None  # [7/8 추가] 회원가입(SignUp.tsx)
     email: str | None = None  # [7/8 추가] 회원가입 "아이디"
     birth_date: str | None = None  # [7/8 추가]
+    # [2026-07-22 추가] 환자 관리 테이블(Figma 목업)의 "성별" 컬럼용 — 가입 화면 select가
+    # "male"/"female" 둘 중 하나만 보낸다(모르면 그냥 비워둠 — 지어내지 않음).
+    gender: Literal["male", "female"] | None = None
     password: str | None = None  # [7/8 추가] 평문으로 받아서 저장 전에 반드시 해시 처리
     push_enabled: bool = True
     sms_enabled: bool = False
@@ -72,6 +75,7 @@ class PatientUpdate(BaseModel):
     phone: str | None = None
     email: str | None = None
     birth_date: str | None = None
+    gender: Literal["male", "female"] | None = None
 
 
 class PatientPublic(BaseModel):
@@ -82,6 +86,7 @@ class PatientPublic(BaseModel):
     phone: str | None = None
     email: str | None = None
     birth_date: str | None = None
+    gender: str | None = None
     push_enabled: bool = True
     sms_enabled: bool = False
     email_opt_in: bool = False
@@ -92,6 +97,11 @@ class PatientPublic(BaseModel):
     lunch_regular: bool | None = None
     dinner_time: str | None = None
     dinner_regular: bool | None = None
+    # [2026-07-22 추가] 환자 관리 테이블(PatientManagement.tsx)의 "진단명"/"상태" 컬럼용 —
+    # 다른 엔드포인트에서는 계산 안 하고 기본값(None/"none")으로 둔다. 계산 비용이 있는
+    # 값이라 실제로 표로 보여줄 GET /caregivers/{id}/patients에서만 채운다.
+    diagnoses: str | None = None
+    medication_status: Literal["active", "paused", "none"] = "none"
 
 
 class MealTimesUpdate(BaseModel):
@@ -315,13 +325,42 @@ def list_caregivers(caregiver: Caregiver = Depends(get_current_caregiver)):
     return [caregiver]
 
 
+def _patient_diagnoses(session: Session, patient_id: int) -> str | None:
+    """환자 관리 테이블 "진단명" 컬럼용 — diagnosis는 MedicalRecord(처방전 1건)가 아니라
+    OcrResult(약 1개당 1행)에 있다 — 등록내역(soft-delete 제외)에 딸린 결과들의 진단명을
+    중복 없이 등장 순서대로 모아 "·"로 이어붙인다. 실제로 값이 있는 것만."""
+    rows = session.exec(
+        select(OcrResult.diagnosis)
+        .join(MedicalRecord, OcrResult.record_id == MedicalRecord.id)
+        .where(MedicalRecord.patient_id == patient_id)
+        .where(MedicalRecord.deleted_at.is_(None))
+        .where(OcrResult.diagnosis != "")
+    ).all()
+    distinct = list(dict.fromkeys(rows))
+    return "·".join(distinct) if distinct else None
+
+
+def _patient_medication_status(session: Session, patient_id: int) -> Literal["active", "paused", "none"]:
+    """환자 관리 테이블 "상태" 컬럼용 — 활성 복약 일정이 하나라도 있으면 복약중, 일정
+    자체는 있는데 전부 비활성이면 중단, 아예 없으면 none(표에서 "-"로 표시)."""
+    schedules = session.exec(
+        select(MedicationSchedule.active).where(MedicationSchedule.patient_id == patient_id)
+    ).all()
+    if not schedules:
+        return "none"
+    return "active" if any(schedules) else "paused"
+
+
 @router.get("/caregivers/{caregiver_id}/patients", response_model=list[PatientPublic])
 def list_patients_of_caregiver(
     caregiver_id: int,
     caregiver: Caregiver = Depends(get_current_caregiver),
     session: Session = Depends(get_session),
 ):
-    """핵심 기능: 이 보호자가 케어하는 환자 전체 목록 (여러 명 가능)"""
+    """핵심 기능: 이 보호자가 케어하는 환자 전체 목록 (여러 명 가능)
+
+    [2026-07-22 수정] 환자 관리 테이블(Figma 목업)이 진단명·복약상태도 보여줘야 해서,
+    ORM 객체를 그대로 반환하는 대신 PatientPublic으로 변환한 뒤 계산한 값을 채워 넣는다."""
     if caregiver_id != caregiver.id:
         raise HTTPException(403, "다른 보호자의 환자 목록은 볼 수 없어요")
 
@@ -331,7 +370,19 @@ def list_patients_of_caregiver(
     patient_ids = [link.patient_id for link in links]
     if not patient_ids:
         return []
-    return session.exec(select(Patient).where(Patient.id.in_(patient_ids))).all()
+    patients = session.exec(select(Patient).where(Patient.id.in_(patient_ids))).all()
+    result = []
+    for patient in patients:
+        public = PatientPublic.model_validate(patient, from_attributes=True)
+        result.append(
+            public.model_copy(
+                update={
+                    "diagnoses": _patient_diagnoses(session, patient.id),
+                    "medication_status": _patient_medication_status(session, patient.id),
+                }
+            )
+        )
+    return result
 
 
 @router.get("/patients/{patient_id}/caregivers", response_model=list[CaregiverPublic])

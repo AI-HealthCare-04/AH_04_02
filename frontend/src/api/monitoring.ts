@@ -21,6 +21,7 @@ export interface Patient {
   phone: string | null;
   email: string | null;
   birth_date: string | null;
+  gender: "male" | "female" | null;
   push_enabled: boolean;
   sms_enabled: boolean;
   email_opt_in: boolean;
@@ -31,6 +32,10 @@ export interface Patient {
   lunch_regular: boolean | null;
   dinner_time: string | null;
   dinner_regular: boolean | null;
+  // [2026-07-22 추가] 환자 관리 테이블(PatientManagement.tsx) 전용 — GET /caregivers/{id}/patients만
+  // 채워 보내고, 다른 곳(회원가입 응답 등)에서는 항상 기본값(null/"none")으로 온다.
+  diagnoses: string | null;
+  medication_status: "active" | "paused" | "none";
 }
 
 export interface Caregiver {
@@ -168,6 +173,7 @@ export async function createPatient(payload: {
   phone?: string;
   email?: string;
   birth_date?: string;
+  gender?: "male" | "female";
   password?: string;
   push_enabled?: boolean;
   sms_enabled?: boolean;
@@ -179,7 +185,14 @@ export async function createPatient(payload: {
 
 export async function updatePatient(
   patientId: number,
-  payload: { name?: string; note?: string; phone?: string; email?: string; birth_date?: string }
+  payload: {
+    name?: string;
+    note?: string;
+    phone?: string;
+    email?: string;
+    birth_date?: string;
+    gender?: "male" | "female";
+  }
 ) {
   const { data } = await monitoringClient.patch<Patient>(
     `/monitoring/patients/${patientId}`,

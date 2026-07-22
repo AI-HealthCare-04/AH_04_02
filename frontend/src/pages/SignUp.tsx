@@ -141,6 +141,9 @@ export default function SignUp() {
   const [pRole, setPRole] = useState<PatientRole>("patient");
   const [name, setName] = useState("");
   const [birthDate, setBirthDate] = useState("");
+  // [2026-07-22 추가] 환자 관리 테이블(PatientManagement.tsx)의 "성별" 컬럼용 — 환자 본인
+  // 가입에서만 받는다(보호자/기관 계정엔 해당 없는 필드). 모르면 그냥 비워둔다.
+  const [gender, setGender] = useState<"male" | "female" | "">("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
@@ -215,6 +218,7 @@ export default function SignUp() {
           phone: phone.trim(),
           email: email.trim() || undefined,
           birth_date: birthDate.trim() || undefined,
+          gender: gender || undefined,
           password,
           push_enabled: notifPrefs.push,
           sms_enabled: notifPrefs.sms,
@@ -428,6 +432,28 @@ export default function SignUp() {
                     <>
                       <Field label="이름" value={name} onChange={setName} placeholder="홍길동" error={nameError} />
                       <Field label="생년월일" value={birthDate} onChange={setBirthDate} placeholder="1945.03.15" />
+                      {pRole === "patient" && (
+                        <div>
+                          <label className="block text-[13px] font-bold mb-1.5" style={{ color: C.dark }}>성별</label>
+                          <div className="flex gap-3">
+                            {(["female", "male"] as const).map((g) => (
+                              <button
+                                key={g}
+                                type="button"
+                                onClick={() => setGender(g)}
+                                className="flex-1 py-3 rounded-xl font-bold text-[14px] transition-all"
+                                style={{
+                                  background: gender === g ? C.terracotta : C.ivory,
+                                  color: gender === g ? C.white : C.dark,
+                                  border: `1.5px solid ${gender === g ? C.terracotta : "rgba(30,26,23,0.12)"}`,
+                                }}
+                              >
+                                {g === "female" ? "여성" : "남성"}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       <Field label="이메일" value={email} onChange={setEmail} placeholder="example@email.com" type="email" />
                       <Field label="전화번호" value={phone} onChange={setPhone} placeholder="010-0000-0000" error={phoneError} />
                     </>
