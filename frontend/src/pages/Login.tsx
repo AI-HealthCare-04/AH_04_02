@@ -42,14 +42,10 @@ export default function Login() {
   const [error, setError] = useState("");
   // [2026-07-21 추가] "다른 사용자로 전환" — 이 기기에서 로그인했던 계정 목록
   const [recentAccounts, setRecentAccounts] = useState<RecentAccount[]>(getRecentAccounts());
-  // 보호자가 케어하는 환자가 여럿이라 선택 화면을 거칠 때, 그 사이에 로그인 응답의
-  // access_token/refresh_token/역할을 들고 있다가 환자를 고른 시점에 saveRecentAccount에
-  // 같이 넘긴다.
-  const [pendingLogin, setPendingLogin] = useState<{
-    accessToken: string;
-    refreshToken: string;
-    role: "guardian" | "organization";
-  } | null>(null);
+  // 보호자가 케어하는 환자가 여럿이라 선택 화면을 거칠 때, 그 사이에 로그인 응답의 역할을
+  // 들고 있다가 환자를 고른 시점에 saveRecentAccount에 같이 넘긴다(access_token은 이미
+  // handleLogin에서 저장했으므로 여기서 따로 들고 있을 필요 없음).
+  const [pendingLogin, setPendingLogin] = useState<{ role: "guardian" | "organization" } | null>(null);
   // [2026-07-21 추가] 아이디 저장(이메일/전화번호만 미리 채움) vs 자동 로그인(비밀번호 없이
   // 바로 전환되는 계정 목록에 추가) — 이미 저장된 아이디가 있으면 체크박스도 켜서 보여준다.
   const [rememberId, setRememberId] = useState(() => getRememberedIdentifier() !== "");
@@ -84,13 +80,11 @@ export default function Login() {
     caregiverId: number,
     patient: Patient,
     name: string,
-    accessToken: string,
-    refreshToken: string,
     role: "guardian" | "organization"
   ) => {
     localStorage.setItem("caregiver_id", String(caregiverId));
     localStorage.setItem("patient_id", String(patient.id));
-    persistLoginChoice({ identifier: identifier.trim(), name, accessToken, refreshToken, role, patientId: patient.id, caregiverId });
+    persistLoginChoice({ identifier: identifier.trim(), name, role, patientId: patient.id, caregiverId });
     navigate("/dashboard");
   };
 
@@ -99,9 +93,13 @@ export default function Login() {
     setError("");
     setLoading(true);
     try {
-      const { access_token, caregiver_id, name, role, relation_type, refresh_token } = await login(
+      // [2026-07-22 재설계] autoLogin 체크 여부를 그대로 remember_device로 넘긴다 — 서버가
+      // 이 계정 전용 httpOnly 전환 쿠키를 심을지 말지는 여기서 결정된다. refresh_token은
+      // 더 이상 응답에 없다(HIGH 재설계, 팀원 리뷰 반영).
+      const { access_token, caregiver_id, name, role, relation_type } = await login(
         identifier.trim(),
-        password
+        password,
+        autoLogin
       );
       localStorage.setItem("access_token", access_token);
       // [2026-07-19 추가] NavBar가 화면마다 "김건강"으로 하드코딩돼있던 문제 수정 —
@@ -116,8 +114,6 @@ export default function Login() {
         persistLoginChoice({
           identifier: identifier.trim(),
           name,
-          accessToken: access_token,
-          refreshToken: refresh_token,
           role: "patient",
           patientId: caregiver_id,
         });
@@ -142,18 +138,16 @@ export default function Login() {
         persistLoginChoice({
           identifier: identifier.trim(),
           name,
-          accessToken: access_token,
-          refreshToken: refresh_token,
           role: accountRole,
           caregiverId: caregiver_id,
         });
         navigate("/patients");
         return;
       } else if (list.length === 1) {
-        proceedWithPatient(caregiver_id, list[0], name, access_token, refresh_token, accountRole);
+        proceedWithPatient(caregiver_id, list[0], name, accountRole);
         return;
       } else {
-        setPendingLogin({ accessToken: access_token, refreshToken: refresh_token, role: accountRole });
+        setPendingLogin({ role: accountRole });
         setPatients(list);
       }
     } catch {
@@ -337,14 +331,7 @@ export default function Login() {
                   style={{ color: C.dark, background: C.ivory, borderColor: "rgba(30,26,23,0.12)" }}
                   onClick={() =>
                     pendingLogin &&
-                    proceedWithPatient(
-                      selectedCaregiver.id,
-                      p,
-                      selectedCaregiver.name,
-                      pendingLogin.accessToken,
-                      pendingLogin.refreshToken,
-                      pendingLogin.role
-                    )
+                    proceedWithPatient(selectedCaregiver.id, p, selectedCaregiver.name, pendingLogin.role)
                   }
                 >
                   <span className="text-[15px] font-bold" style={{ color: C.dark }}>{p.name}</span>

@@ -34,7 +34,7 @@ from core.database import get_session
 from core.dependencies import Actor, get_current_actor
 from core.email import send_password_reset_email
 from core.security import generate_reset_code, hash_phone, hash_reset_code, normalize_email
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from models import Caregiver, PasswordResetCode, Patient, PrivacyPurgeAudit, RefreshToken
 from pydantic import BaseModel
 from sqlalchemy import update
@@ -72,6 +72,11 @@ WITHDRAWAL_GRACE_DAYS = 30
 class LoginRequest(BaseModel):
     identifier: str  # 이메일 또는 전화번호
     password: str
+    # [2026-07-22 추가, 팀원 리뷰(fkmc10101-hub) 반영 — HIGH 재설계] "이 기기에서 자동
+    # 로그인" 체크박스 — true면 이 계정 전용 전환 쿠키(switch_{role}_{subject_id}, httpOnly)를
+    # 추가로 심어서, 프론트가 refresh_token 원문을 전혀 몰라도 나중에 POST /auth/switch로
+    # 이 계정에 다시 들어올 수 있게 한다.
+    remember_device: bool = False
 
 
 class LoginResponse(BaseModel):
@@ -83,17 +88,24 @@ class LoginResponse(BaseModel):
     # [2026-07-22 추가] role == "caregiver"일 때만 의미있음("guardian"/"organization") — 프론트의
     # 계정 전환 목록이 "환자 본인/보호자/기관" 표시에 쓴다.
     relation_type: str | None = None
-    # [2026-07-22 추가] "저장된 계정" 전환 기능 전용 — access_token(60분)이 만료돼도 이 값으로
-    # 새 access_token을 스스로 받아올 수 있게 계정별로 저장해둔다. 재사용 방지로 매번 새로
-    # 발급되므로(POST /auth/token/refresh), 쓸 때마다 이 값도 같이 새로 저장해야 한다.
-    refresh_token: str
+    # [2026-07-22 추가, 이후 재설계로 제거 — 팀원 리뷰(fkmc10101-hub) HIGH 반영] 처음엔
+    # 여기에 refresh_token(14일)을 그대로 담아 프론트가 localStorage에 저장해뒀었다 — XSS
+    # 한 번으로 14일짜리 토큰이 전부 털릴 수 있는 회귀였다. 이제 refresh_token은 응답
+    # body에 절대 나오지 않고 httpOnly 쿠키(switch_{role}_{subject_id})로만 존재하며,
+    # 전환은 POST /auth/switch가 그 쿠키를 서버에서 직접 읽어 처리한다.
 
 
 class RefreshTokenRequest(BaseModel):
-    # [2026-07-22 추가] 계정 전환 기능은 계정마다 refresh_token이 달라서 브라우저 쿠키
-    # 하나(로그인 하나만 담을 수 있음)로는 표현이 안 된다 — 명시적으로 넘기면 그걸 쓰고,
-    # 없으면 기존처럼 쿠키를 쓴다(일반 로그인 흐름과 호환).
+    # [2026-07-22] 계정 전환 기능과는 무관 — 현재 세션 자체의 조용한 갱신 흐름에서, 쿠키
+    # 대신 명시적으로 refresh_token을 넘기고 싶은 호출부를 위한 기존 선택지. 그대로 유지.
     refresh_token: str | None = None
+
+
+class SwitchAccountRequest(BaseModel):
+    # [2026-07-22 추가, 팀원 리뷰 반영 — HIGH 재설계] 비밀이 아니다 — "어느 전환 쿠키를
+    # 읽을지"만 가리키는 슬롯 식별자다. 실제 인증력은 서버만 아는 httpOnly 쿠키 값에 있다.
+    role: str  # "caregiver" | "patient"
+    subject_id: int
 
 
 class PasswordResetRequestRequest(BaseModel):
@@ -185,14 +197,22 @@ def login(payload: LoginRequest, response: Response, session: Session = Depends(
         if _check_credentials(caregiver, payload.password):
             _register_successful_login(session, caregiver)
             return _issue_login_response(
-                response, caregiver.id, "caregiver", caregiver.name, session, relation_type=caregiver.relation_type
+                response,
+                caregiver.id,
+                "caregiver",
+                caregiver.name,
+                session,
+                relation_type=caregiver.relation_type,
+                remember_device=payload.remember_device,
             )
 
     patients = _find_by_identifiers(session, Patient, payload.identifier)
     for patient in patients:
         if _check_credentials(patient, payload.password):
             _register_successful_login(session, patient)
-            return _issue_login_response(response, patient.id, "patient", patient.name, session)
+            return _issue_login_response(
+                response, patient.id, "patient", patient.name, session, remember_device=payload.remember_device
+            )
 
     # 일치하는 후보가 하나도 없을 때만 실패 기록을 남긴다 — 전화번호가 여러 역할 계정에
     # 걸쳐 있으면 여기서도 어느 계정이 진짜 대상인지 알 수 없어 후보 전부에 기록되는
@@ -352,11 +372,31 @@ def _issue_reset_code(session: Session, subject_type: str, account) -> None:
         )
 
 
+def _switch_cookie_name(role: str, subject_id: int) -> str:
+    """[2026-07-22 추가, 팀원 리뷰 반영 — HIGH 재설계] 계정 전환 기능 전용 httpOnly 쿠키
+    이름 — 계정마다 이름이 다른 쿠키를 따로 심어서, 값(refresh_token 원문)은 절대
+    JS/localStorage로 새어나가지 않으면서도 여러 계정을 동시에 "기억"할 수 있게 한다.
+    role/subject_id는 비밀이 아니다(그냥 "어느 쿠키인지"만 가리키는 슬롯 식별자) — 실제
+    인증력은 서버만 읽는 쿠키 값(JWT refresh_token) 자체에 있다."""
+    return f"switch_{role}_{subject_id}"
+
+
 def _issue_login_response(
-    response: Response, subject_id: int, role: str, name: str, session: Session, relation_type: str | None = None
+    response: Response,
+    subject_id: int,
+    role: str,
+    name: str,
+    session: Session,
+    relation_type: str | None = None,
+    remember_device: bool = False,
 ) -> LoginResponse:
     """[2026-07-15] refresh 토큰 발급마다 jti를 RefreshToken 테이블에 기록 — /token/refresh가
-    회전(재발급) 시 이 jti를 revoke해서 재사용을 막는다(REQ-001)."""
+    회전(재발급) 시 이 jti를 revoke해서 재사용을 막는다(REQ-001).
+
+    [2026-07-22 수정 — HIGH, 팀원 리뷰(fkmc10101-hub) 반영] remember_device=True면(로그인
+    화면의 "이 기기에서 자동 로그인" 체크, 또는 계정 전환으로 재로그인한 경우) 이 계정
+    전용 전환 쿠키(_switch_cookie_name)도 같이 심는다 — 이제 refresh_token 원문은 응답
+    body/localStorage 어디에도 나가지 않고, 이 httpOnly 쿠키로만 존재한다."""
     access_token = create_access_token(subject_id, role)
     refresh_token_value, jti = create_refresh_token(subject_id, role)
     session.add(RefreshToken(
@@ -367,13 +407,19 @@ def _issue_login_response(
     ))
     session.commit()
     response.set_cookie(key="refresh_token", value=refresh_token_value, httponly=True)
+    if remember_device:
+        response.set_cookie(
+            key=_switch_cookie_name(role, subject_id),
+            value=refresh_token_value,
+            httponly=True,
+            max_age=REFRESH_TOKEN_EXPIRE_MINUTES * 60,
+        )
     return LoginResponse(
         access_token=access_token,
         caregiver_id=subject_id,
         name=name,
         role=role,
         relation_type=relation_type,
-        refresh_token=refresh_token_value,
     )
 
 
@@ -384,26 +430,36 @@ def refresh_token(
     refresh_token_cookie: str | None = Cookie(default=None, alias="refresh_token"),
     session: Session = Depends(get_session),
 ):
-    """login에서 심어둔 refresh_token(쿠키 또는 계정 전환 기능이 명시적으로 넘긴 값)을
-    검증하고, 새 access_token과 함께 새 refresh_token도 발급한다(rotation) — 이전 jti는
-    revoke 처리해 재사용을 막는다.
+    """login에서 심어둔 refresh_token(쿠키 또는 명시적으로 넘긴 값)을 검증하고, 새
+    access_token과 함께 새 refresh_token도 발급한다(rotation) — 이전 jti는 revoke
+    처리해 재사용을 막는다.
     [2026-07-15] 예전엔 access_token만 새로 발급하고 같은 refresh_token을 계속 재사용해서,
     탈취된 refresh_token이 만료(14일) 전까지 계속 유효했다(REQ-001).
-    [2026-07-22 수정] GET에서 POST로 변경 — 계정 전환 기능은 요청 바디로 refresh_token을
-    명시적으로 넘겨야 해서(쿠키 하나로는 계정별 값을 구분 못 함) 더 이상 GET만으로는 부족했다."""
+    [2026-07-22 수정, 이후 재설계로 사유 변경] 이 세션 본인의 갱신 전용 — 계정 전환은
+    이제 POST /auth/switch가 별도로 담당한다(쿠키 이름으로 계정을 구분하므로 body로
+    refresh_token을 넘길 필요가 없어졌다. body 파라미터는 기존 호출부 호환을 위해 유지)."""
     token = payload.refresh_token or refresh_token_cookie
     if not token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Refresh token이 없습니다.")
+    subject_id, role, subject = _rotate_refresh_token_or_401(token, session)
+    relation_type = subject.relation_type if role == "caregiver" else None
+    return _issue_login_response(response, subject_id, role, subject.name, session, relation_type=relation_type)
+
+
+def _rotate_refresh_token_or_401(token: str, session: Session) -> tuple[int, str, Caregiver | Patient]:
+    """refresh_token(JWT)을 검증하고 원자적으로 revoke한 뒤, 대상 계정을 반환한다 —
+    /token/refresh와 /switch 양쪽이 공유하는 회전 로직(REQ-001).
+
+    [수정] 예전엔 session.get()으로 읽어서 revoked 여부를 확인한 다음 따로 True로
+    갱신하는 2단계였는데, 같은 refresh_token으로 동시에 두 요청이 들어오면 둘 다
+    revoked=False를 읽고 둘 다 회전에 성공하는 레이스가 있었다(순차적인 재사용 차단
+    자체는 되지만 동시 요청에는 취약). UPDATE ... WHERE revoked=false를 원자적으로
+    실행해서, 이 요청이 실제로 false -> true로 바꾼 행이 있는지(rowcount)로 판단한다."""
     try:
         subject_id, role, jti = decode_refresh_token(token)
     except jwt.PyJWTError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "유효하지 않거나 만료된 refresh token입니다.")
 
-    # [수정] 예전엔 session.get()으로 읽어서 revoked 여부를 확인한 다음 따로 True로
-    # 갱신하는 2단계였는데, 같은 refresh_token으로 동시에 두 요청이 들어오면 둘 다
-    # revoked=False를 읽고 둘 다 회전에 성공하는 레이스가 있었다(순차적인 재사용 차단
-    # 자체는 되지만 동시 요청에는 취약). UPDATE ... WHERE revoked=false를 원자적으로
-    # 실행해서, 이 요청이 실제로 false -> true로 바꾼 행이 있는지(rowcount)로 판단한다.
     result = session.execute(
         update(RefreshToken)
         .where(RefreshToken.jti == jti)
@@ -423,9 +479,50 @@ def refresh_token(
     # access_token을 계속 발급받을 수 있었다 — get_current_actor 등과 동일하게 여기서도 막는다.
     if subject.deactivated_at is not None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "탈퇴 처리된 계정입니다.")
+    return subject_id, role, subject
+
+
+@router.post("/switch", response_model=LoginResponse)
+def switch_account(
+    payload: SwitchAccountRequest,
+    request: Request,
+    response: Response,
+    session: Session = Depends(get_session),
+):
+    """[2026-07-22 추가, 팀원 리뷰(fkmc10101-hub) 반영 — HIGH 재설계] "이 기기에 로그인했던
+    계정" 전환 전용 — payload.role/subject_id는 비밀이 아니라 "어느 전환 쿠키를 읽을지"만
+    가리키는 슬롯 식별자다. 실제 refresh_token은 이 요청 자체에도, 응답 body에도 없다 —
+    서버가 _switch_cookie_name()으로 이름 붙인 httpOnly 쿠키를 직접 읽어서 검증·회전한다.
+    쿠키가 없거나(그 계정으로 "자동 로그인"을 켠 적이 없거나, 이미 지워짐) 무효/만료면
+    401 — 프론트는 이 경우 그 계정을 목록에서 지우고 비밀번호로 다시 로그인하라고 안내한다."""
+    if payload.role not in ("caregiver", "patient"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "role은 caregiver 또는 patient여야 해요.")
+
+    cookie_name = _switch_cookie_name(payload.role, payload.subject_id)
+    token = request.cookies.get(cookie_name)
+    if not token:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "저장된 로그인 정보가 없어요. 다시 로그인해주세요.")
+
+    subject_id, role, subject = _rotate_refresh_token_or_401(token, session)
+    if subject_id != payload.subject_id or role != payload.role:
+        # 쿠키 이름과 실제 토큰 내용이 어긋남 — 정상 흐름에서는 발생하지 않는다(이름이
+        # 곧 발급 당시의 role/subject_id였으므로). 방어적으로만 막는다.
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "저장된 로그인 정보가 일치하지 않아요.")
 
     relation_type = subject.relation_type if role == "caregiver" else None
-    return _issue_login_response(response, subject_id, role, subject.name, session, relation_type=relation_type)
+    return _issue_login_response(
+        response, subject_id, role, subject.name, session, relation_type=relation_type, remember_device=True
+    )
+
+
+@router.post("/switch/forget")
+def forget_switch_account(payload: SwitchAccountRequest, response: Response):
+    """[2026-07-22 추가] "저장된 계정" 목록에서 계정을 지우거나 "자동 로그인" 체크를 끌 때
+    호출 — 이 브라우저에 심어둔 전환 쿠키를 지운다. 인증을 요구하지 않는다: 이 요청이
+    지울 수 있는 건 호출자 자신의 브라우저에 있는 쿠키뿐이라(Set-Cookie는 응답을 받는
+    브라우저에만 적용됨) 다른 사람 것을 지울 방법이 없다."""
+    response.delete_cookie(_switch_cookie_name(payload.role, payload.subject_id))
+    return {"status": "ok"}
 
 
 # ── 비밀번호 재설정 [2026-07-15 추가, REQ-039] ──
