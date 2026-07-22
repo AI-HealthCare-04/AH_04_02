@@ -7,6 +7,7 @@ question_id/question 해석 규칙, IDOR 보호, SSE 폴백 응답 형태, ChatM
 결정적으로 검증한다.
 """
 import json
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -247,6 +248,35 @@ class TestSourceRefs:
         assert done["source_refs"] == [
             {"item_name": "타이레놀정500밀리그람(아세트아미노펜)", "field": "주의사항"}
         ]
+
+    def test_ask_stream_creates_langfuse_generation_observation(
+        self, client: TestClient, session: Session, monkeypatch
+    ):
+        """스트리밍 답변도 Langfuse에서 LLM 생성 구간을 별도 generation으로 확인할 수 있어야 한다."""
+        pt = _make_patient(session)
+        headers = {"Authorization": f"Bearer {create_access_token(pt.id, 'patient')}"}
+        _mock_llm(monkeypatch)
+        monkeypatch.setattr("rag.vectorstore.similarity_search", lambda *a, **k: self._fake_docs())
+
+        observations = []
+
+        @contextmanager
+        def fake_observation(**kwargs):
+            observations.append(kwargs)
+            observation = MagicMock()
+            yield observation
+
+        monkeypatch.setattr(chat_router, "optional_observation", fake_observation)
+
+        r = client.post(
+            "/chat/ask/stream", json={"patient_id": pt.id, "question": "이 약 먹어도 되나요?"}, headers=headers
+        )
+
+        assert r.status_code == 200
+        assert any(
+            item.get("name") == "chat-stream-llm-answer" and item.get("as_type") == "generation"
+            for item in observations
+        )
 
     def test_preset_question_has_no_source_refs(self, client: TestClient, session: Session):
         """preset/dynamic 매칭은 RAG 조회 자체를 안 하므로(_CHAT_LLM_AVAILABLE=False,
