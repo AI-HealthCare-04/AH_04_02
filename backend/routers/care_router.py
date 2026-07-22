@@ -325,6 +325,37 @@ def reject_invitation(token: str, session: Session = Depends(get_session)):
     return {"status": "rejected"}
 
 
+def _hide_unowned_invitation() -> None:
+    raise HTTPException(404, "초대를 찾을 수 없어요")
+
+
+def _require_invitation_delete_owner(invitation: Invitation, actor: Actor, session: Session) -> None:
+    """초대 삭제 권한 검증.
+
+    상태 확인보다 먼저 호출해, 권한 없는 사용자가 초대 ID로 처리 상태를 유추하지 못하게 한다.
+    """
+    role, subject = actor
+    if invitation.relation_type == "patient":
+        if role != "caregiver" or subject.id != invitation.inviter_caregiver_id:
+            _hide_unowned_invitation()
+        return
+
+    if invitation.patient_id is None:
+        raise HTTPException(400, "환자 정보가 없는 초대예요")
+    if role == "patient":
+        if subject.id != invitation.patient_id:
+            _hide_unowned_invitation()
+        return
+
+    link = session.exec(
+        select(CaregiverPatient)
+        .where(CaregiverPatient.caregiver_id == subject.id)
+        .where(CaregiverPatient.patient_id == invitation.patient_id)
+    ).first()
+    if not link:
+        _hide_unowned_invitation()
+
+
 @router.delete("/invitations/{invitation_id}")
 def delete_pending_invitation(
     invitation_id: int,
@@ -338,21 +369,14 @@ def delete_pending_invitation(
     invitation = session.get(Invitation, invitation_id)
     if not invitation:
         raise HTTPException(404, "초대를 찾을 수 없어요")
+    _require_invitation_delete_owner(invitation, actor, session)
+
     if invitation.status == "pending" and invitation.is_expired:
         invitation.status = "expired"
         session.add(invitation)
         session.commit()
     if invitation.status != "pending":
         raise HTTPException(409, f"이미 {invitation.status} 처리된 초대예요")
-
-    if invitation.relation_type == "patient":
-        role, subject = actor
-        if role != "caregiver" or subject.id != invitation.inviter_caregiver_id:
-            raise HTTPException(403, "본인이 보낸 초대만 삭제할 수 있어요")
-    else:
-        if invitation.patient_id is None:
-            raise HTTPException(400, "환자 정보가 없는 초대예요")
-        require_actor_patient_access(invitation.patient_id, actor, session)
 
     invitation.status = "cancelled"
     session.add(invitation)
@@ -413,20 +437,16 @@ def _require_own_matching_invitation(invitation_id: int, caregiver: Caregiver, s
     invitation = session.get(Invitation, invitation_id)
     if not invitation:
         raise HTTPException(404, "초대를 찾을 수 없어요")
+    if invitation.relation_type == "patient":
+        _hide_unowned_invitation()
+    if not caregiver.phone_hash or invitation.invited_phone_hash != caregiver.phone_hash:
+        _hide_unowned_invitation()
     if invitation.status == "pending" and invitation.is_expired:
         invitation.status = "expired"
         session.add(invitation)
         session.commit()
     if invitation.status != "pending":
         raise HTTPException(409, f"이미 {invitation.status} 처리된 초대예요")
-    if invitation.relation_type == "patient":
-        raise HTTPException(400, "이 방식으로는 환자 초대를 수락할 수 없어요")
-    if (
-        not caregiver.phone
-        or not invitation.invited_phone
-        or normalize_phone(caregiver.phone) != normalize_phone(invitation.invited_phone)
-    ):
-        raise HTTPException(403, "본인에게 온 초대가 아니에요")
     return invitation
 
 

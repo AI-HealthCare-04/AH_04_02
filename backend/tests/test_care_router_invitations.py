@@ -15,6 +15,7 @@ from routers.care_router import (
     InvitationAccept,
     InvitationCreate,
     accept_invitation,
+    accept_invitation_as_caregiver,
     create_invitation,
     delete_pending_invitation,
 )
@@ -31,7 +32,9 @@ def session():
         yield s
 
 
-def _make_pending_invitation(session: Session, relation_type: str = "guardian") -> models.Invitation:
+def _make_pending_invitation(
+    session: Session, relation_type: str = "guardian", invited_phone: str | None = None
+) -> models.Invitation:
     patient = models.Patient()
     patient.name = "테스트 환자"
     session.add(patient)
@@ -44,6 +47,8 @@ def _make_pending_invitation(session: Session, relation_type: str = "guardian") 
         relation_type=relation_type,
         expires_at=datetime.now() + timedelta(days=7),
     )
+    if invited_phone:
+        invitation.invited_phone = invited_phone
     session.add(invitation)
     session.commit()
     session.refresh(invitation)
@@ -137,7 +142,25 @@ def test_delete_pending_patient_invitation_requires_inviter_caregiver():
         with pytest.raises(Exception) as exc:
             delete_pending_invitation(invitation.id, ("caregiver", other), session)
 
-        assert getattr(exc.value, "status_code", None) == 403
+        assert getattr(exc.value, "status_code", None) == 404
+
+
+def test_delete_invitation_hides_status_from_non_owner():
+    """권한 없는 사용자가 초대 ID를 찍어도 accepted/cancelled 같은 상태를 알 수 없어야 한다."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        owner = _make_caregiver(session, "초대한 보호자")
+        other = _make_caregiver(session, "다른 보호자")
+        invitation = _make_pending_patient_invitation(session, owner)
+        invitation.status = "accepted"
+        session.add(invitation)
+        session.commit()
+
+        with pytest.raises(Exception) as exc:
+            delete_pending_invitation(invitation.id, ("caregiver", other), session)
+
+        assert getattr(exc.value, "status_code", None) == 404
 
 
 def test_accept_invitation_preserves_invitation_relation_type():
@@ -152,13 +175,37 @@ def test_accept_invitation_preserves_invitation_relation_type():
         assert caregiver.relation_type == "life_support_worker"
 
 
-def _make_caregiver(session: Session, name: str = "김보호") -> models.Caregiver:
+def _make_caregiver(session: Session, name: str = "김보호", phone: str | None = None) -> models.Caregiver:
     caregiver = models.Caregiver(relation_type="guardian")
     caregiver.name = name
+    caregiver.phone = phone
     session.add(caregiver)
     session.commit()
     session.refresh(caregiver)
     return caregiver
+
+
+def test_accept_matching_invitation_hides_status_from_wrong_caregiver():
+    """받은 초대 처리도 소유권 확인이 먼저라, 다른 보호자는 초대 상태를 유추할 수 없어야 한다."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        invitation = _make_pending_invitation(session, invited_phone="010-1111-2222")
+        owner = _make_caregiver(session, "초대받은 보호자", phone="010-1111-2222")
+        other = _make_caregiver(session, "다른 보호자", phone="010-9999-9999")
+        invitation.status = "accepted"
+        session.add(invitation)
+        session.commit()
+
+        with pytest.raises(Exception) as exc:
+            accept_invitation_as_caregiver(invitation.id, other, session)
+
+        assert getattr(exc.value, "status_code", None) == 404
+
+        with pytest.raises(Exception) as exc:
+            accept_invitation_as_caregiver(invitation.id, owner, session)
+
+        assert getattr(exc.value, "status_code", None) == 409
 
 
 def _make_pending_patient_invitation(
