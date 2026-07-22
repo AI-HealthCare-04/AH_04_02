@@ -57,7 +57,7 @@ export default function Connect() {
   };
 
   return (
-    <div className="min-h-screen bg-[#FAF6F1]">
+    <div className="min-h-screen bg-[#F2E8D8]">
       <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <h1 className="text-[26px] font-black text-[#1E1A17] mb-1">환자 연결관리</h1>

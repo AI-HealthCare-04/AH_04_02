@@ -8,7 +8,7 @@
 export const C = {
   terracotta: "#C1653D",
   terracottaLight: "#E08A5B",
-  ivory: "#FAF6F1",
+  ivory: "#F2E8D8",
   white: "#FFFFFF",
   dark: "#1E1A17",
   muted: "#6E6259", // [2026-07-20] #8A7E75는 흰/아이보리 배경 대비 3.95:1로 WCAG AA(4.5:1) 미달 — 같은 웜브라운 톤에서 명도만 낮춤(5.9:1)

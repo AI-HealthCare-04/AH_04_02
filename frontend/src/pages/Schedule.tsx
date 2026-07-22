@@ -232,7 +232,7 @@ export default function SchedulePage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#FAF6F1]">
+    <div className="min-h-screen bg-[#F2E8D8]">
       <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-3xl mx-auto px-6 sm:px-8 py-10">
         <div className="flex items-center justify-between mb-7 flex-wrap gap-3">
@@ -447,7 +447,7 @@ export default function SchedulePage() {
               + 시간 추가
             </button>
 
-            <div className="flex items-start justify-between gap-3 mb-6 p-4 rounded-xl bg-[#FAF6F1]">
+            <div className="flex items-start justify-between gap-3 mb-6 p-4 rounded-xl bg-[#F2E8D8]">
               <div>
                 <p className="text-[14px] font-bold text-[#1E1A17]">보호자에게도 알림</p>
                 <p className="text-[12px] text-[#8A7E75] mt-0.5">복약 시간에 보호자에게도 알림을 전송합니다</p>

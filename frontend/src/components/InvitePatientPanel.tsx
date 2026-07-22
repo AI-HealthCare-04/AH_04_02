@@ -93,7 +93,7 @@ export default function InvitePatientPanel({
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               placeholder="환자 전화번호 (010-0000-0000)"
-              className="w-full pl-11 pr-4 py-3.5 rounded-xl border border-[rgba(30,26,23,0.12)] bg-[#FAF6F1] text-[15px] outline-none"
+              className="w-full pl-11 pr-4 py-3.5 rounded-xl border border-[rgba(30,26,23,0.12)] bg-[#F2E8D8] text-[15px] outline-none"
             />
           </div>
           {!inviteUrl ? (
@@ -106,7 +106,7 @@ export default function InvitePatientPanel({
             </button>
           ) : (
             <>
-              <div className="rounded-xl px-4 py-3 bg-[#FAF6F1] border border-[rgba(30,26,23,0.08)]">
+              <div className="rounded-xl px-4 py-3 bg-[#F2E8D8] border border-[rgba(30,26,23,0.08)]">
                 <p className="text-[12px] font-bold text-[#8A7E75] mb-1">생성된 초대 링크</p>
                 <p className="text-[13px] break-all text-[#1E1A17]">{inviteUrl}</p>
               </div>
@@ -135,7 +135,7 @@ export default function InvitePatientPanel({
               {sending ? "생성 중..." : "초대 링크 만들기"}
             </button>
           ) : (
-            <div className="flex items-center gap-2 px-4 py-3.5 rounded-xl bg-[#FAF6F1] border border-[rgba(30,26,23,0.10)]">
+            <div className="flex items-center gap-2 px-4 py-3.5 rounded-xl bg-[#F2E8D8] border border-[rgba(30,26,23,0.10)]">
               <span className="flex-1 text-[13px] font-mono truncate text-[#1E1A17]">{inviteUrl}</span>
               <button
                 onClick={copyUrl}

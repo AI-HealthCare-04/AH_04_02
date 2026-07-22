@@ -57,7 +57,7 @@ export default function MealTimeCheck() {
   };
 
   return (
-    <div className="min-h-screen bg-[#FAF6F1]">
+    <div className="min-h-screen bg-[#F2E8D8]">
       <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <h1 className="text-[26px] font-black text-[#1E1A17] mb-2">식사 시간 체크리스트</h1>
@@ -86,7 +86,7 @@ export default function MealTimeCheck() {
                     </button>
                   </div>
                 </div>
-                <div className="flex items-center gap-0.5 justify-center rounded-xl bg-[#FAF6F1] py-1">
+                <div className="flex items-center gap-0.5 justify-center rounded-xl bg-[#F2E8D8] py-1">
                   <WheelColumn
                     options={PERIODS}
                     value={t12.period}

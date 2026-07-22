@@ -130,7 +130,7 @@ export default function InviteAccept() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#FAF6F1]">
+    <div className="min-h-screen flex flex-col bg-[#F2E8D8]">
       {/* [2026-07-22 수정] isLoggedIn/userName을 안 넘겨서 로그인 중인 보호자/기관도 이
           페이지에선 항상 "로그인" 버튼이 뜨는 로그아웃 화면처럼 보였다("로그인이 풀린다"는
           제보의 실제 원인 — 세션 자체는 안 지워졌지만 화면은 그렇게 보였음). */}
