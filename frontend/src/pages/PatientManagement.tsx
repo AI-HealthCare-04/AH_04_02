@@ -210,7 +210,7 @@ export default function PatientManagement() {
 
         {/* [2026-07-22 추가] "받은 초대" — 환자가 전화번호로 보낸 초대를 여기서 바로 확인하고,
             전화번호를 지정하지 않은(공유용) 초대는 링크/코드를 붙여넣어 확인한다. */}
-        <div className="rounded-2xl p-6 mb-6" style={{ background: C.white, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
+        <div className="rounded-2xl p-6 mb-6" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
           <h2 className="text-[16px] font-black mb-1" style={{ color: C.dark }}>받은 초대</h2>
           <p className="text-[13px] mb-4" style={{ color: C.muted }}>
             환자가 전화번호로 보낸 초대는 여기 자동으로 뜨고, 그 외 링크는 아래에 붙여넣어 확인하세요.
@@ -335,7 +335,7 @@ export default function PatientManagement() {
 
         {error && <p className="text-[13px] mb-4" style={{ color: "#D94F4F" }}>{error}</p>}
 
-        <div className="rounded-2xl overflow-hidden overflow-x-auto" style={{ background: C.white, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
+        <div className="rounded-2xl overflow-hidden overflow-x-auto" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
           {loading ? (
             <p className="px-6 py-10 text-center text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>
           ) : filtered.length === 0 ? (

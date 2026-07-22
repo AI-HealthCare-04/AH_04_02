@@ -242,6 +242,8 @@ class MedicalRecord(SQLModel, table=True):
     # [2026-07-16 추가] 등록내역 삭제 기능 — PatientMedication.deleted_at과 동일한 soft-delete
     # 관례. OCR·가이드 등 연결 데이터를 실제로 지우지 않고 목록/조회에서만 감춘다.
     deleted_at: datetime | None = Field(default=None)
+    # [2026-07-21 추가] 등록내역 목록에서 즐겨찾기처럼 위쪽에 고정하는 기능.
+    pinned: bool = False
 
 
 # ── OCR 추출 결과 (약품 1개 = 1행, 담당: 권순현) ──

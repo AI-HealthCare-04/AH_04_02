@@ -297,7 +297,7 @@ export default function SignUp() {
       <main className="flex-1 flex items-start justify-center px-4 py-10">
         <div className="w-full" style={{ maxWidth: 480 }}>
           {!done && <StepIndicator current={step} />}
-          <div className="rounded-3xl p-8" style={{ background: C.white, boxShadow: "0 8px 40px rgba(30,26,23,0.10)" }}>
+          <div className="rounded-3xl p-8" style={{ background: C.surface, boxShadow: "0 8px 40px rgba(30,26,23,0.10)" }}>
             {done ? (
               <div className="text-center py-6">
                 <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6" style={{ background: `${C.success}22` }}>

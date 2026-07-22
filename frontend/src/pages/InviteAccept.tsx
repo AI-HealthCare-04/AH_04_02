@@ -139,11 +139,11 @@ export default function InviteAccept() {
         {loading ? (
           <p className="text-[14px] text-[#8A7E75]">불러오는 중이에요...</p>
         ) : error && !invite ? (
-          <div className="rounded-3xl p-10 w-full max-w-md text-center bg-white shadow-lg">
+          <div className="rounded-3xl p-10 w-full max-w-md text-center bg-[#F9F4EB] shadow-lg">
             <p className="text-[15px] text-[#D94F4F]">{error}</p>
           </div>
         ) : decided ? (
-          <div className="rounded-3xl p-10 w-full max-w-md text-center bg-white shadow-lg">
+          <div className="rounded-3xl p-10 w-full max-w-md text-center bg-[#F9F4EB] shadow-lg">
             <div
               className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-5 ${
                 decided === "accepted" ? "bg-[#8FAE8B]/20" : "bg-[rgba(30,26,23,0.06)]"
@@ -176,7 +176,7 @@ export default function InviteAccept() {
           </div>
         ) : (
           invite && (
-            <div className="rounded-3xl p-8 sm:p-10 w-full max-w-md bg-white shadow-lg text-center">
+            <div className="rounded-3xl p-8 sm:p-10 w-full max-w-md bg-[#F9F4EB] shadow-lg text-center">
               <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 bg-[#C1653D]/12">
                 <Heart className="w-8 h-8 text-[#C1653D]" />
               </div>

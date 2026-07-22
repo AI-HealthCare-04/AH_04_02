@@ -130,6 +130,8 @@ export interface RecordSummary {
   diagnosis: string;
   drug_names: string[];
   uploaded_by_name: string | null;
+  // [2026-07-21 추가] 즐겨찾기처럼 목록 위쪽에 고정 — 목록은 이 값 기준으로 이미 정렬되어 온다
+  pinned: boolean;
 }
 
 /**
@@ -194,6 +196,11 @@ export async function listRecords(patientId: number, signal?: AbortSignal) {
 /** [2026-07-16 추가] 등록내역 삭제 (soft-delete) — 목록/상세 조회에서 이후 제외됨 */
 export async function deleteRecord(recordId: number) {
   await monitoringClient.delete(`/records/${recordId}`);
+}
+
+/** [2026-07-21 추가] 등록내역 즐겨찾기처럼 위쪽에 고정/해제 */
+export async function pinRecord(recordId: number, pinned: boolean) {
+  await monitoringClient.patch(`/records/${recordId}/pin`, { pinned });
 }
 
 /** 처방전확인 화면 — review_required 항목 수정 후 확정 제출용 */

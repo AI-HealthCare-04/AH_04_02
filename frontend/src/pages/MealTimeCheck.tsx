@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import NavBar from "../components/NavBar";
-import { updateMealTimes } from "../api/monitoring";
+import { getPatients, updateMealTimes } from "../api/monitoring";
 import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
 import { from12, HOURS_12, MINUTES_5, PERIODS, to12, WheelColumn } from "../components/WheelTimePicker";
 
@@ -35,6 +35,29 @@ export default function MealTimeCheck() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
+  // [2026-07-21 추가] 처음엔 회원가입 직후에만 들어오던 화면이라 항상 기본값(08:00 등)으로
+  // 시작했는데, 이제 내비바에서 언제든 다시 들어올 수 있으니 기존에 저장한 값이 있으면
+  // 그걸로 미리 채워야 한다 — 안 그러면 실수로 기존 설정을 기본값으로 덮어쓰게 된다.
+  useEffect(() => {
+    if (patientId == null) return;
+    getPatients()
+      .then((patients) => {
+        const me = patients.find((p) => p.id === patientId);
+        if (!me) return;
+        setTime((prev) => ({
+          breakfast: me.breakfast_time ?? prev.breakfast,
+          lunch: me.lunch_time ?? prev.lunch,
+          dinner: me.dinner_time ?? prev.dinner,
+        }));
+        setRegular((prev) => ({
+          breakfast: me.breakfast_regular ?? prev.breakfast,
+          lunch: me.lunch_regular ?? prev.lunch,
+          dinner: me.dinner_regular ?? prev.dinner,
+        }));
+      })
+      .catch(() => {}); // 못 불러와도 기본값으로 그냥 진행 — 새로 입력하면 되니 화면을 막지 않음
+  }, [patientId]);
+
   const handleSubmit = async () => {
     if (patientId == null) return;
     setSubmitting(true);
@@ -65,7 +88,7 @@ export default function MealTimeCheck() {
           평소 식사 시간을 입력하면 복약 알림 시각(식전·식후)을 맞추는 데 사용해요.
         </p>
 
-        <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-7">
+        <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-7">
           <p className="text-[13px] font-bold text-[#8A7E75] mb-4">식사 시간</p>
 
           {MEALS.map(({ key, label }, i) => {

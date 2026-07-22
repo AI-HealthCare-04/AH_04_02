@@ -73,30 +73,18 @@ export default function MonitoringDayLogs() {
           <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>
         ) : (
           <>
-            <div className="rounded-2xl overflow-hidden mb-8" style={{ background: C.white, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
+            <div className="rounded-2xl overflow-hidden mb-8" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
               {dayLogs.length === 0 ? (
                 <p className="px-6 py-10 text-center text-[14px]" style={{ color: C.muted }}>이 날짜엔 복약 기록이 없어요.</p>
               ) : (
-                <table className="w-full">
-                  <thead>
-                    <tr style={{ borderBottom: "1px solid rgba(30,26,23,0.08)" }}>
-                      {["약 이름", "복용 시각", "상태", "확인자"].map((h) => (
-                        <th key={h} className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider" style={{ color: C.muted }}>
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
+                <>
+                  <div className="sm:hidden">
                     {dayLogs.map((log, i) => (
-                      <tr key={log.id} style={{ borderBottom: i < dayLogs.length - 1 ? "1px solid rgba(30,26,23,0.06)" : undefined }}>
-                        <td className="px-5 py-3.5 font-bold text-[14px]" style={{ color: C.dark }}>{log.drug_name}</td>
-                        <td className="px-5 py-3.5 text-[13px]" style={{ color: C.muted }}>
-                          {new Date(log.checked_at).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}
-                        </td>
-                        <td className="px-5 py-3.5">
+                      <div key={log.id} className="px-5 py-4" style={{ borderBottom: i < dayLogs.length - 1 ? "1px solid rgba(30,26,23,0.06)" : undefined }}>
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <span className="font-bold text-[14px]" style={{ color: C.dark }}>{log.drug_name}</span>
                           <span
-                            className="px-3 py-1 rounded-full text-[12px] font-bold"
+                            className="shrink-0 px-3 py-1 rounded-full text-[12px] font-bold"
                             style={{
                               background: log.status === "taken" ? `${C.success}20` : "rgba(217,79,79,0.12)",
                               color: log.status === "taken" ? "#4A7A47" : "#D94F4F",
@@ -104,24 +92,60 @@ export default function MonitoringDayLogs() {
                           >
                             {log.status === "taken" ? "복용완료" : log.status === "missed" ? "놓침" : "건너뜀"}
                           </span>
-                        </td>
-                        <td className="px-5 py-3.5 text-[13px]" style={{ color: C.muted }}>{log.confirmed_by_name}</td>
-                      </tr>
+                        </div>
+                        <p className="text-[13px]" style={{ color: C.muted }}>
+                          {new Date(log.checked_at).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}
+                          {log.confirmed_by_name ? ` · 확인자 ${log.confirmed_by_name}` : ""}
+                        </p>
+                      </div>
                     ))}
-                  </tbody>
-                </table>
+                  </div>
+                  <table className="w-full hidden sm:table">
+                    <thead>
+                      <tr style={{ borderBottom: "1px solid rgba(30,26,23,0.08)" }}>
+                        {["약 이름", "복용 시각", "상태", "확인자"].map((h) => (
+                          <th key={h} className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider" style={{ color: C.muted }}>
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dayLogs.map((log, i) => (
+                        <tr key={log.id} style={{ borderBottom: i < dayLogs.length - 1 ? "1px solid rgba(30,26,23,0.06)" : undefined }}>
+                          <td className="px-5 py-3.5 font-bold text-[14px]" style={{ color: C.dark }}>{log.drug_name}</td>
+                          <td className="px-5 py-3.5 text-[13px]" style={{ color: C.muted }}>
+                            {new Date(log.checked_at).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}
+                          </td>
+                          <td className="px-5 py-3.5">
+                            <span
+                              className="px-3 py-1 rounded-full text-[12px] font-bold"
+                              style={{
+                                background: log.status === "taken" ? `${C.success}20` : "rgba(217,79,79,0.12)",
+                                color: log.status === "taken" ? "#4A7A47" : "#D94F4F",
+                              }}
+                            >
+                              {log.status === "taken" ? "복용완료" : log.status === "missed" ? "놓침" : "건너뜀"}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3.5 text-[13px]" style={{ color: C.muted }}>{log.confirmed_by_name}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
               )}
             </div>
 
             <h2 className="text-[18px] font-black mb-4" style={{ color: C.dark }}>전체 처방 기록</h2>
             <div className="space-y-4">
               {records.length === 0 ? (
-                <div className="rounded-2xl p-10 text-center" style={{ background: C.white, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
+                <div className="rounded-2xl p-10 text-center" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
                   <p className="text-[14px]" style={{ color: C.muted }}>아직 업로드한 처방전이 없어요.</p>
                 </div>
               ) : (
                 records.map((r) => (
-                  <div key={r.record_id} className="rounded-2xl overflow-hidden" style={{ background: C.white, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
+                  <div key={r.record_id} className="rounded-2xl overflow-hidden" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
                     {r.uploaded_by_name && (
                       <div className="flex items-center gap-1.5 px-6 py-2.5" style={{ background: `${C.terracotta}08` }}>
                         <Heart className="w-3.5 h-3.5" style={{ color: C.terracotta }} />

@@ -39,11 +39,11 @@ export default function PrescriptionDetail() {
         {loading ? (
           <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>
         ) : error || !result ? (
-          <div className="rounded-2xl p-10 text-center" style={{ background: C.white }}>
+          <div className="rounded-2xl p-10 text-center" style={{ background: C.surface }}>
             <p className="text-[14px]" style={{ color: "#D94F4F" }}>{error || "기록을 찾을 수 없어요."}</p>
           </div>
         ) : result.status === "review_required" ? (
-          <div className="rounded-2xl p-10 text-center" style={{ background: C.white }}>
+          <div className="rounded-2xl p-10 text-center" style={{ background: C.surface }}>
             <p className="text-[15px] font-bold mb-2" style={{ color: C.dark }}>확인이 필요해요</p>
             <p className="text-[13px] mb-5" style={{ color: C.muted }}>
               OCR 인식 정확도가 낮은 항목이 있어요. 직접 확인·수정하면 복약 가이드를 만들어드려요.
@@ -57,7 +57,7 @@ export default function PrescriptionDetail() {
             </button>
           </div>
         ) : result.status === "failed" || !result.guide ? (
-          <div className="rounded-2xl p-10 text-center" style={{ background: C.white }}>
+          <div className="rounded-2xl p-10 text-center" style={{ background: C.surface }}>
             <p className="text-[15px] font-bold mb-2" style={{ color: C.dark }}>결과를 생성하지 못했어요</p>
             <p className="text-[13px]" style={{ color: C.muted }}>
               {result.failure_reason || "안내를 만들지 못했어요."}

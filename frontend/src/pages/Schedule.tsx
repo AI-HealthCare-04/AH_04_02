@@ -265,7 +265,7 @@ export default function SchedulePage() {
           </div>
         )}
 
-        <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden">
+        <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden">
           {loading ? (
             <p className="px-6 py-8 text-center text-[14px] text-[#8A7E75]">불러오는 중이에요...</p>
           ) : groups.length === 0 ? (
@@ -329,7 +329,7 @@ export default function SchedulePage() {
           onClick={() => setModalOpen(false)}
         >
           <div
-            className="bg-white rounded-2xl p-7 w-full max-w-sm my-auto max-h-[calc(100vh-4rem)] overflow-y-auto"
+            className="bg-[#F9F4EB] rounded-2xl p-7 w-full max-w-sm my-auto max-h-[calc(100vh-4rem)] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-[19px] font-black text-[#1E1A17] mb-5">

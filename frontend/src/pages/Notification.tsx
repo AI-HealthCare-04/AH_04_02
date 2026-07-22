@@ -84,7 +84,7 @@ export default function Notification() {
         {error && <p className="text-[13px] text-[#D94F4F] mb-4">{error}</p>}
 
         {settings && (
-          <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl p-6">
+          <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl p-6">
             {rows.map(({ key, label, desc, locked }) => (
               <div key={key} className="flex items-start justify-between py-5 border-b border-[#F4F0EA] last:border-0">
                 <div className="flex-1 pr-4">

@@ -64,7 +64,7 @@ export default function Settings() {
         {error && <p className="text-[13px] text-[#D94F4F] mb-4">{error}</p>}
 
         {settings && (
-          <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
+          <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
             <p className="text-[16px] font-bold text-[#1E1A17] mb-1">챗봇 이름</p>
             <p className="text-[14px] text-[#8A7E75] mb-4">기본값은 "{DEFAULT_CHATBOT_NAME}"예요. 원하는 이름으로 바꿔보세요.</p>
             <div className="flex gap-2">
@@ -88,7 +88,7 @@ export default function Settings() {
           </div>
         )}
 
-        <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl p-6">
+        <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl p-6">
           <p className="text-[16px] font-bold text-[#1E1A17] mb-1">글자 크기</p>
           <p className="text-[14px] text-[#8A7E75] mb-4">화면 전체의 글자와 여백 크기가 함께 조절돼요.</p>
           <div className="flex gap-2">

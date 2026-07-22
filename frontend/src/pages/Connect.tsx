@@ -83,7 +83,7 @@ export default function Connect() {
         {/* 대기중인 초대 — [2026-07-21 회의 반영] "초대하기"(환자→보호자류 초대 생성) UI는
             삭제됐다. 이 목록은 삭제 이전에 이미 생성된 대기중 초대만 보여준다(신규 생성 불가). */}
         {invitations.length > 0 && (
-          <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden mb-6">
+          <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden mb-6">
             <div className="px-6 py-4 border-b border-[rgba(30,26,23,0.06)]">
               <h2 className="text-[15px] font-black text-[#1E1A17]">대기중인 초대 ({invitations.length}건)</h2>
             </div>
@@ -100,7 +100,7 @@ export default function Connect() {
         )}
 
         {/* 연결된 사람 */}
-        <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden">
+        <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden">
           <div className="px-6 py-4 border-b border-[rgba(30,26,23,0.06)]">
             <h2 className="text-[15px] font-black text-[#1E1A17]">연결된 사람 ({caregivers.length}명)</h2>
           </div>

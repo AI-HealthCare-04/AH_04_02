@@ -68,7 +68,7 @@ export default function MyPage() {
       <main className="max-w-xl mx-auto px-6 sm:px-8 py-10">
         <h1 className="text-[26px] font-black mb-7" style={{ color: C.dark }}>마이페이지</h1>
 
-        <div className="rounded-2xl p-6 mb-6" style={{ background: C.white, boxShadow: "0 2px 20px rgba(30,26,23,0.07)" }}>
+        <div className="rounded-2xl p-6 mb-6" style={{ background: C.surface, boxShadow: "0 2px 20px rgba(30,26,23,0.07)" }}>
           <div className="flex items-center gap-4 mb-1">
             <div
               className="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-xl font-black shrink-0"
@@ -93,7 +93,7 @@ export default function MyPage() {
           )}
         </div>
 
-        <div className="rounded-2xl overflow-hidden mb-8" style={{ background: C.white, boxShadow: "0 2px 20px rgba(30,26,23,0.07)" }}>
+        <div className="rounded-2xl overflow-hidden mb-8" style={{ background: C.surface, boxShadow: "0 2px 20px rgba(30,26,23,0.07)" }}>
           {menu.map(({ label, icon, to }) => (
             <button
               key={label}

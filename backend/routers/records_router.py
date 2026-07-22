@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import Sequence
 from datetime import datetime
 
@@ -22,11 +23,11 @@ from core.dependencies import Actor, get_current_actor, require_actor_patient_ac
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from models import Caregiver, GuideResult, MedicalRecord, MedicationSchedule, OcrResult, Patient
 from pydantic import BaseModel
+from services.drug_matcher import MATCH_THRESHOLD, match_drug
 from sqlmodel import Session, select
 
 from routers.ocr_router import run_ocr
 from routers.rag_router import run_rag
-from services.drug_matcher import MATCH_THRESHOLD, match_drug
 
 router = APIRouter(prefix="/records", tags=["Records"])
 
@@ -57,9 +58,15 @@ _MEAL_OFFSET_MINUTES: dict[str, tuple[str, int]] = {
 # 환자가 식사시간 설문을 건너뛴 경우(필드가 None)의 폴백 — 기존 _DEFAULT_TIME_SLOTS의
 # "1일 3회" 기본값과 동일하게 맞춰 일관성을 유지한다.
 _MEAL_TIME_FALLBACK = {"breakfast": "08:00", "lunch": "13:00", "dinner": "19:00"}
+# [2026-07-21 추가] PrescriptionReview.tsx의 "직접 시간 설정"/"몇 시간마다 반복"은 식사시간
+# 라벨이 아니라 실제 "HH:MM" 문자열을 dose_timings 배열에 그대로 담아 보낸다 — 이 형식이면
+# 식사시간 계산 없이 그 시각 그대로 쓴다.
+_TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 
 
 def _resolve_time_slot(dose_timing: str, patient: Patient | None) -> str:
+    if _TIME_RE.match(dose_timing):
+        return dose_timing
     meal, offset = _MEAL_OFFSET_MINUTES.get(dose_timing, (None, 0))
     if meal is None:
         return _MEAL_TIME_FALLBACK["breakfast"]  # DOSE_TIMINGS 6종 외 값은 들어올 일이 없지만 방어적으로
@@ -391,7 +398,8 @@ def list_records(
         select(MedicalRecord)
         .where(MedicalRecord.patient_id == patient_id)
         .where(MedicalRecord.deleted_at.is_(None))
-        .order_by(MedicalRecord.created_at.desc())  # ty: ignore[unresolved-attribute]
+        # [2026-07-21 추가] 고정(pinned)한 항목을 맨 위로 — 같은 고정 여부 안에서는 최신순 유지
+        .order_by(MedicalRecord.pinned.desc(), MedicalRecord.created_at.desc())  # ty: ignore[unresolved-attribute]
     ).all()
 
     summaries = []
@@ -406,9 +414,33 @@ def list_records(
                 "diagnosis": ocr_items[0].diagnosis if ocr_items else "",
                 "drug_names": [item.drug_name for item in ocr_items],
                 "uploaded_by_name": uploader.name if uploader else None,
+                "pinned": r.pinned,
             }
         )
     return summaries
+
+
+class PinPayload(BaseModel):
+    pinned: bool
+
+
+@router.patch("/{record_id}/pin")
+def pin_record(
+    record_id: int,
+    payload: PinPayload,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """[2026-07-21 추가] 등록내역 목록에서 즐겨찾기처럼 위쪽에 고정/해제."""
+    record = session.get(MedicalRecord, record_id)
+    if not record or record.deleted_at is not None:
+        raise HTTPException(404, "해당 기록을 찾을 수 없어요")
+    require_actor_patient_access(record.patient_id, actor, session)
+
+    record.pinned = payload.pinned
+    session.add(record)
+    session.commit()
+    return {"record_id": record_id, "pinned": record.pinned}
 
 
 @router.delete("/{record_id}")
