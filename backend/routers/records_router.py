@@ -82,11 +82,27 @@ def _create_schedules_from_ocr(
     ocr_items: Sequence[OcrResult],
     session: Session,
     dose_timings_by_id: dict[int, list[str]] | None = None,
-) -> None:
+) -> list[str]:
+    """[2026-07-23 수정] 이 환자에게 같은 약 이름으로 이미 활성 일정이 있으면(다른 처방전
+    기록에서 등록된 것) 다시 만들지 않고 건너뛴다 — 반환값(중복으로 건너뛴 약 이름 목록)을
+    confirm_medications가 응답에 실어 "이미 등록된 처방이에요"를 화면에 보여줄 수 있게 한다.
+    같은 record_id 안에서 재등록하는 경우는 제외(에러 케이스가 아니라 이 record의 이전
+    확인 결과와 비교하는 게 아니므로 애초에 없음 — record당 confirm은 한 번뿐)."""
     dose_timings_by_id = dose_timings_by_id or {}
     patient = session.get(Patient, record.patient_id)
+    duplicate_drug_names: list[str] = []
     for item in ocr_items:
         if not item.drug_name:
+            continue
+        drug_name = item.display_name
+        already_registered = session.exec(
+            select(MedicationSchedule)
+            .where(MedicationSchedule.patient_id == record.patient_id)
+            .where(MedicationSchedule.drug_name == drug_name)
+            .where(MedicationSchedule.active == True)  # noqa: E712
+        ).first()
+        if already_registered:
+            duplicate_drug_names.append(drug_name)
             continue
         timings = dose_timings_by_id.get(item.id) or []
         slots = [_resolve_time_slot(t, patient) for t in timings] if timings else None
@@ -99,7 +115,7 @@ def _create_schedules_from_ocr(
                     # 그대로 썼다 — Dashboard.tsx/Schedule.tsx가 이 값을 표시하므로 환자가
                     # 매일 보는 화면에 짧은 이름이 노출되고 있었다. _build_record_response와
                     # 동일한 규칙(item.display_name)으로 통일.
-                    drug_name=item.display_name,
+                    drug_name=drug_name,
                     time_slot=slot,
                     dose_timing=timings[i] if i < len(timings) else None,
                     memo=(
@@ -112,9 +128,15 @@ def _create_schedules_from_ocr(
                 )
             )
     session.commit()
+    return duplicate_drug_names
 
 
-def _build_record_response(record: MedicalRecord, session: Session, guide: GuideResult | None) -> dict:
+def _build_record_response(
+    record: MedicalRecord,
+    session: Session,
+    guide: GuideResult | None,
+    duplicate_drug_names: list[str] | None = None,
+) -> dict:
     ocr_items = session.exec(select(OcrResult).where(OcrResult.record_id == record.id)).all()
     uploader = (
         session.get(Caregiver, record.uploaded_by_caregiver_id)
@@ -153,6 +175,9 @@ def _build_record_response(record: MedicalRecord, session: Session, guide: Guide
             if guide
             else None
         ),
+        # [2026-07-23 추가] confirm_medications가 중복(이미 활성 일정이 있는 약)을 건너뛴
+        # 경우에만 채워진다 — PrescriptionReview.tsx가 "이미 등록된 처방이에요"를 보여줄 때 씀.
+        "duplicate_drug_names": duplicate_drug_names or [],
     }
 
 
@@ -563,14 +588,14 @@ async def confirm_medications(
 
     # [7/9 추가] 확인이 끝난 약을 복약 일정에도 자동으로 등록 — 사용자가 Schedule.tsx에서
     # 매번 손으로 다시 입력하지 않도록.
-    def _register_schedules() -> None:
+    def _register_schedules() -> list[str]:
         ocr_items = session.exec(select(OcrResult).where(OcrResult.record_id == record.id)).all()
         dose_timings_by_id = {c.id: c.dose_timings for c in payload.medications if c.dose_timings}
-        _create_schedules_from_ocr(record, ocr_items, session, dose_timings_by_id)
+        return _create_schedules_from_ocr(record, ocr_items, session, dose_timings_by_id)
 
-    await asyncio.to_thread(_register_schedules)
+    duplicate_drug_names = await asyncio.to_thread(_register_schedules)
 
-    return await asyncio.to_thread(_build_record_response, record, session, guide)
+    return await asyncio.to_thread(_build_record_response, record, session, guide, duplicate_drug_names)
 
 
 @router.get("/{record_id}")

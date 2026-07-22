@@ -340,7 +340,16 @@ export default function PrescriptionReview() {
       const updated = await confirmMedications(record.record_id, corrections);
       done = true;
       setProgress(100);
-      setTimeout(() => navigate(`/records/${updated.record_id}`), 500);
+      // [2026-07-23 추가] 이미 활성 일정이 있던 약은 건너뛰고 등록됐다 — 다음 화면에
+      // "이미 등록된 처방이에요" 배너로 보여주기 위해 넘겨준다(이 정보는 DB에 저장되지
+      // 않는 confirm 응답 한정값이라, 재조회로는 알 수 없어 state로만 전달 가능).
+      setTimeout(
+        () =>
+          navigate(`/records/${updated.record_id}`, {
+            state: { duplicateDrugNames: updated.duplicate_drug_names },
+          }),
+        500
+      );
     } catch {
       done = true;
       setGenerating(false);

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import NavBar from "../components/NavBar";
 import { getRecord, type RecordResult } from "../api/records";
@@ -11,10 +11,14 @@ const STATIC_DISCLAIMER =
 
 export default function PrescriptionDetail() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { recordId } = useParams<{ recordId: string }>();
   const [result, setResult] = useState<RecordResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // [2026-07-23 추가] PrescriptionReview.tsx에서 확정 직후 넘어올 때만 있는 값 —
+  // 이미 활성 일정이 있어 새로 등록하지 않은 약 이름들("이미 등록된 처방" 배너용).
+  const duplicateDrugNames = (location.state as { duplicateDrugNames?: string[] } | null)?.duplicateDrugNames ?? [];
 
   useEffect(() => {
     if (!recordId) return;
@@ -35,6 +39,20 @@ export default function PrescriptionDetail() {
         >
           <ChevronLeft className="w-3.5 h-3.5" /> 등록내역으로
         </button>
+
+        {duplicateDrugNames.length > 0 && (
+          <div
+            className="rounded-xl px-4 py-3 mb-5"
+            style={{ background: C.warningBg, border: `1px solid ${C.warningBorder}` }}
+          >
+            <p className="text-[13px] font-bold" style={{ color: C.warningText }}>
+              {duplicateDrugNames.join(", ")}은(는) 이미 등록된 처방이에요
+            </p>
+            <p className="text-[12px] mt-0.5" style={{ color: C.warningText }}>
+              오늘의 복약에 중복으로 추가하지 않았어요.
+            </p>
+          </div>
+        )}
 
         {loading ? (
           <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>

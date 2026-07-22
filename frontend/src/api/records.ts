@@ -120,6 +120,9 @@ export interface RecordResult {
     lifestyle_guide: LifestyleGuide;
     source_refs: SourceRef[];
   } | null;
+  // [2026-07-23 추가] confirm 시점에 이미 활성 일정이 있던 약이 있으면 그 이름들 —
+  // "오늘의 복약"에 중복 등록하지 않고 건너뛴 약. 없으면 빈 배열.
+  duplicate_drug_names: string[];
 }
 
 /** 등록내역(목록) 화면용 요약 — GET /records 응답 그대로 */
