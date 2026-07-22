@@ -458,7 +458,7 @@ def _rotate_refresh_token_or_401(token: str, session: Session) -> tuple[int, str
     try:
         subject_id, role, jti = decode_refresh_token(token)
     except jwt.PyJWTError:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "유효하지 않거나 만료된 refresh token입니다.")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "유효하지 않거나 만료된 refresh token입니다.") from None
 
     result = session.execute(
         update(RefreshToken)
@@ -603,7 +603,7 @@ def confirm_password_reset(payload: PasswordResetConfirmRequest, session: Sessio
     try:
         subject_id, role = decode_token(payload.reset_token, expected_type="password_reset")
     except jwt.PyJWTError:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "유효하지 않거나 만료된 재설정 토큰입니다.")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "유효하지 않거나 만료된 재설정 토큰입니다.") from None
 
     model = Caregiver if role == "caregiver" else Patient
     account = session.get(model, subject_id)
