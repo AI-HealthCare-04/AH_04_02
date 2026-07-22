@@ -297,6 +297,10 @@ export interface DrugIndicationInfo {
 export async function getDrugIndication(drugName: string) {
   const { data } = await monitoringClient.get<DrugIndicationInfo>("/ocr/drug-info", {
     params: { drug_name: drugName },
+    // e약은요/허가사항/DUR live 조회와 환자용 LLM 요약까지 거치면 약품에 따라
+    // 10초를 넘을 수 있다. 공통 timeout(10초)을 그대로 쓰면 응답이 있는데도
+    // 프론트가 먼저 포기해서 "등록된 주의사항이 없어요"로 보일 수 있다.
+    timeout: 120000,
   });
   return data;
 }

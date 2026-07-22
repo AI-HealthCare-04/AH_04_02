@@ -212,3 +212,15 @@ retrieve-dur-lookup
 | **해결** | DUR 후보 stopword에 `가능`, `가능해`, `가능한가요`, `가능한지`, `가능할까요`를 추가해 질문 의도 표현이 약명 후보로 들어가지 않게 했다. 또한 `_resolve_dur_lookup_names()`의 최종 조회어 수를 10개에서 6개로 줄여 한 질문에서 발생하는 외부 DUR API 호출 수를 제한했다. |
 | **테스트/검증** | `env PYTHONPATH=/Users/kim-yunghye/Documents/Medication_guidance_based_on_medical_records/backend:/Users/kim-yunghye/Documents/Medication_guidance_based_on_medical_records/rag uv run pytest backend/tests/test_chat_router_context.py backend/tests/test_chat_ask_stream.py -q` 결과 39개 통과. `uv run ruff check backend/routers/chat_router.py backend/tests/test_chat_router_context.py` 통과. |
 | **다음 확인** | 같은 질문을 다시 보내 Langfuse에서 `dur-extract-candidates`가 `["노바스크정5밀리그람", "타이레놀"]`처럼 의약품 후보만 남는지 확인한다. 그래도 `dur-query-api`가 길면 외부 API 자체 지연이므로, 다음 단계는 DUR 결과 캐시 TTL 확대 또는 로컬 DUR 마스터 파일/인덱스 전환을 검토한다. |
+
+---
+
+| 날짜 | 2026.07.22 |
+|---|---|
+| **작성자** | 김영혜 |
+| **이슈** | 개별 약품 상세 화면에서 `노바스크정5밀리그람` 주의사항이 백엔드에는 있는데 프론트에는 `등록된 주의사항이 없어요`로 표시됨 |
+| **발생 위치** | `frontend/src/api/records.ts`, `frontend/src/pages/DrugInfo.tsx`, `backend/routers/ocr_router.py` |
+| **관측 결과** | `GET /ocr/drug-info?drug_name=노바스크정5밀리그람`을 직접 호출하면 `precautions`와 `patient_summary`가 정상 반환됐다. 즉 백엔드 조회 실패가 아니라 프론트 요청 처리 문제였다. 같은 live 조회는 약품에 따라 시간이 크게 달라졌고, 직접 호출 기준 `아스피린`은 약 13초, `노바스크정5mg`은 약 22초까지 걸렸다. |
+| **원인** | `getDrugIndication()`이 공통 `monitoringClient` timeout 10초를 그대로 사용했다. `/ocr/drug-info`는 e약은요/허가사항/DUR live 조회와 환자용 LLM 요약을 한 번에 수행하므로 10초를 넘을 수 있다. 이 경우 axios가 먼저 timeout으로 실패하고 `DrugInfo.tsx`가 `setDrugInfo(null)`로 폴백하면서 화면에는 데이터가 없는 것처럼 보였다. |
+| **해결** | `getDrugIndication()` 호출에 OCR 등록/가이드 생성 경로와 같은 `timeout: 120000`을 별도로 지정했다. 서버가 실제로 데이터를 반환하는 느린 약품 상세 조회는 프론트가 중간에 포기하지 않고 기다리도록 한다. |
+| **재발 방지** | 외부 공공 API 또는 LLM 요약이 포함된 화면 조회는 공통 10초 timeout을 그대로 쓰지 않는다. 사용자에게 로딩 문구를 보여주는 화면이라면 API 클라이언트 timeout도 그 로딩 시간에 맞게 별도 지정해야 한다. |
