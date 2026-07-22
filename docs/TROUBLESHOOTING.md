@@ -135,6 +135,18 @@ guides = rawGuides
 | 날짜 | 2026.07.22 |
 |---|---|
 | **작성자** | 김영혜 |
+| **이슈** | 복약가이드의 `주의사항`·`생활습관` 탭이 다시 비어 보임 |
+| **발생 위치** | `backend/routers/rag_router.py`, `rag/rag/rag_chain.py` |
+| **원인 1 — 기존 가이드 캐시 재사용** | 이전에 `precautions=[]` 또는 `lifestyle_guide.guides=[]`처럼 빈 결과가 `GuideCache`에 저장된 경우, 이후 코드를 고쳐도 같은 처방 조합은 캐시 히트가 나서 최신 생성 로직을 타지 않는다. 기본 `GUIDE_DATA_VERSION`이 계속 `v1.0`이라 이전 빈 캐시가 자연 무효화되지 않았다. |
+| **원인 2 — 생활습관 LLM 빈 본문 방어 부족** | 의약품 주의사항은 `_fallback_precautions_from_context()`로 보강했지만, 생활습관은 LLM이 `lifestyle_guide`를 빈 문자열로 반환하면 검색 근거가 있어도 빈 본문 그대로 저장될 수 있었다. |
+| **해결** | `GUIDE_DATA_VERSION` 기본값을 `v1.1`로 올려 기존 빈 캐시를 우회하도록 했다. 또한 `rag_chain.py`에 `_fallback_lifestyle_guide_from_context()`를 추가해 LLM이 생활습관 본문을 비워 보내면 질병관리청/curated 생활지침 컨텍스트 문구를 표시용으로 보강하도록 했다. |
+| **재발 방지** | RAG 응답 구조 또는 표시용 fallback을 바꿀 때는 캐시 키에 쓰는 `GUIDE_DATA_VERSION`도 함께 올린다. LLM이 구조화 필드를 비워 보내는 케이스는 의약품 주의사항뿐 아니라 생활습관 본문에도 동일하게 방어한다. |
+
+---
+
+| 날짜 | 2026.07.22 |
+|---|---|
+| **작성자** | 김영혜 |
 | **이슈** | 챗봇/가이드 생성이 느리게 느껴지고, Langfuse에서 ChromaDB retrieve와 LLM generation 구간을 분리해서 확인하기 어려움 |
 | **발생 위치** | `rag/rag/rag_chain.py`, `rag/rag/vectorstore.py`, `backend/routers/chat_router.py` |
 | **원인 1 — 복약가이드 생성 비용 구조** | 복약가이드 생성은 self-consistency를 위해 `SELF_CONSISTENCY_SAMPLES=3` 기본값으로 같은 질문을 3회 생성하고 가장 일관된 답을 고른다. 처방전 약이 3개이고 고유 진단명이 1개면 `3 * (약 3개 + 진단명 1개) = 12회` LLM 호출이 직렬로 발생한다. 따라서 RAG 검색 자체보다 LLM 반복 호출이 전체 지연의 주된 원인이 될 수 있다. |
@@ -212,3 +224,37 @@ retrieve-dur-lookup
 | **해결** | DUR 후보 stopword에 `가능`, `가능해`, `가능한가요`, `가능한지`, `가능할까요`를 추가해 질문 의도 표현이 약명 후보로 들어가지 않게 했다. 또한 `_resolve_dur_lookup_names()`의 최종 조회어 수를 10개에서 6개로 줄여 한 질문에서 발생하는 외부 DUR API 호출 수를 제한했다. |
 | **테스트/검증** | `env PYTHONPATH=/Users/kim-yunghye/Documents/Medication_guidance_based_on_medical_records/backend:/Users/kim-yunghye/Documents/Medication_guidance_based_on_medical_records/rag uv run pytest backend/tests/test_chat_router_context.py backend/tests/test_chat_ask_stream.py -q` 결과 39개 통과. `uv run ruff check backend/routers/chat_router.py backend/tests/test_chat_router_context.py` 통과. |
 | **다음 확인** | 같은 질문을 다시 보내 Langfuse에서 `dur-extract-candidates`가 `["노바스크정5밀리그람", "타이레놀"]`처럼 의약품 후보만 남는지 확인한다. 그래도 `dur-query-api`가 길면 외부 API 자체 지연이므로, 다음 단계는 DUR 결과 캐시 TTL 확대 또는 로컬 DUR 마스터 파일/인덱스 전환을 검토한다. |
+
+---
+
+| 날짜 | 2026.07.22 |
+|---|---|
+| **작성자** | 김영혜 |
+| **이슈** | 개별 약품 상세 화면에서 `노바스크정5밀리그람` 주의사항이 백엔드에는 있는데 프론트에는 `등록된 주의사항이 없어요`로 표시됨 |
+| **발생 위치** | `frontend/src/api/records.ts`, `frontend/src/pages/DrugInfo.tsx`, `backend/routers/ocr_router.py` |
+| **관측 결과** | `GET /ocr/drug-info?drug_name=노바스크정5밀리그람`을 직접 호출하면 `precautions`와 `patient_summary`가 정상 반환됐다. 즉 백엔드 조회 실패가 아니라 프론트 요청 처리 문제였다. 같은 live 조회는 약품에 따라 시간이 크게 달라졌고, 직접 호출 기준 `아스피린`은 약 13초, `노바스크정5mg`은 약 22초까지 걸렸다. |
+| **원인** | `getDrugIndication()`이 공통 `monitoringClient` timeout 10초를 그대로 사용했다. `/ocr/drug-info`는 e약은요/허가사항/DUR live 조회와 환자용 LLM 요약을 한 번에 수행하므로 10초를 넘을 수 있다. 이 경우 axios가 먼저 timeout으로 실패하고 `DrugInfo.tsx`가 `setDrugInfo(null)`로 폴백하면서 화면에는 데이터가 없는 것처럼 보였다. |
+| **해결** | `getDrugIndication()` 호출에 OCR 등록/가이드 생성 경로와 같은 `timeout: 120000`을 별도로 지정했다. 서버가 실제로 데이터를 반환하는 느린 약품 상세 조회는 프론트가 중간에 포기하지 않고 기다리도록 한다. |
+| **재발 방지** | 외부 공공 API 또는 LLM 요약이 포함된 화면 조회는 공통 10초 timeout을 그대로 쓰지 않는다. 사용자에게 로딩 문구를 보여주는 화면이라면 API 클라이언트 timeout도 그 로딩 시간에 맞게 별도 지정해야 한다. |
+
+---
+
+| 날짜 | 2026.07.22 |
+|---|---|
+| **작성자** | 김영혜 |
+| **이슈** | 환자 화면의 `환자 연결관리`에서 보호자/요양보호사/생활지원사/사회복지사를 초대하는 기능이 사라짐 |
+| **발생 위치** | `frontend/src/pages/Connect.tsx`, `backend/routers/care_router.py` |
+| **원인** | 2026.07.21 회의 내용 반영 과정에서 “보호자/지원인력의 초대하기 삭제”를 보호자류 사용자의 초대 UI 정리로만 적용해야 했는데, 환자가 보호자·지원인력을 초대하는 기존 흐름까지 함께 삭제됐다. 백엔드는 이미 생성된 환자→보호자 초대를 수락하는 코드는 남아 있었지만, `InvitationCreate` 스키마와 `/care/invitations` 생성 로직이 `relation_type="patient"`만 허용하게 줄어 새 초대를 만들 수 없었다. |
+| **해결** | `/care/invitations` 생성 API를 양방향으로 분기했다. `relation_type="patient"`이면 기존처럼 보호자/지원인력이 환자를 초대하고, `guardian/caregiver/life_support_worker/social_worker`이면 환자 접근 권한을 검증한 뒤 환자가 보호자·지원인력을 초대하도록 복구했다. 프론트 `Connect.tsx`에는 환자 로그인일 때만 보이는 보호자·지원인력 초대 패널을 다시 추가했다. |
+| **재발 방지** | 회의 문구가 “삭제”일 때는 어떤 사용자 그룹의 어떤 진입점인지 명확히 구분한다. 특히 같은 `초대하기`라도 환자→보호자 초대와 보호자→환자 초대는 업무 흐름이 다르므로 API 스키마/수락 로직/화면 진입점을 함께 확인해야 한다. |
+
+---
+
+| 날짜 | 2026.07.22 |
+|---|---|
+| **작성자** | 김영혜 |
+| **이슈** | 등록내역에서 삭제를 눌러도 다음 로그인 때 삭제가 안 된 것처럼 보이고, 연결관리의 대기중 초대를 취소할 수 없음. 보호자 `환자 관리`에서도 환자 삭제 버튼이 동작하지 않음 |
+| **발생 위치** | `backend/routers/records_router.py`, `frontend/src/pages/Records.tsx`, `backend/routers/care_router.py`, `frontend/src/pages/Connect.tsx`, `frontend/src/pages/PatientManagement.tsx` |
+| **원인** | 등록내역 삭제 API는 `MedicalRecord.deleted_at`과 `MedicationSchedule.record_id` 기반 일정 비활성화만 처리했다. 따라서 처방전에서 파생된 `PatientMedication.prescription_id` 데이터와 그 내약 기반 일정이 있으면 다른 화면에 계속 남아 “삭제가 안 됐다”고 보일 수 있었다. 프론트도 삭제 성공 후 로컬 배열만 필터링하고 서버 목록을 다시 확인하지 않았다. 연결관리의 대기중 초대는 목록 조회만 있고 보낸 초대를 취소하는 API/버튼이 없었다. 또한 보호자 `환자 관리`의 X 버튼은 보호자-환자 연결 해제가 아니라 환자 계정 자체 삭제 API(`/monitoring/patients/{patient_id}`)를 호출하고 있어, 환자에게 처방/일정/기록이 있으면 삭제가 실패할 수 있었다. |
+| **해결** | 등록내역 삭제 시 `PatientMedication.prescription_id == record_id`인 내약을 soft-delete하고, 해당 내약에 연결된 일정도 비활성화하도록 보강했다. 프론트 `Records.tsx`는 삭제 후 `listRecords()`를 다시 호출해 서버 기준 목록으로 갱신한다. 연결관리에는 `DELETE /care/invitations/{invitation_id}`를 추가해 pending 초대를 `cancelled`로 바꾸고, `Connect.tsx`의 대기중 초대 목록에 삭제 버튼을 추가했다. 보호자 `PatientManagement.tsx`의 X 버튼은 환자 계정 삭제 대신 기존 `unlinkCaregiverPatient(caregiverId, patientId)`를 호출해 현재 보호자와의 연결만 해제하도록 바꿨다. |
+| **재발 방지** | 사용자가 “삭제”라고 인식하는 범위가 화면 카드 1개인지, 그 카드에서 파생된 내약/일정까지인지, 또는 관계 해제인지 확인해야 한다. soft-delete를 쓰는 데이터는 삭제 후 프론트 로컬 상태만 바꾸지 말고 서버 재조회로 실제 영속 상태를 확인한다. |

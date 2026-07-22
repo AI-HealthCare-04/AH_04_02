@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import secrets
 from datetime import datetime, timedelta
-from typing import Literal, Optional
+from typing import Literal
 
 from core.database import get_session
 from core.dependencies import (
@@ -97,7 +97,7 @@ def create_assessment(
     return assessment
 
 
-@router.get("/assessments/latest", response_model=Optional[CareLevelAssessment])
+@router.get("/assessments/latest", response_model=CareLevelAssessment | None)
 def get_latest_assessment(
     patient_id: int, actor: Actor = Depends(get_current_actor), session: Session = Depends(get_session)
 ):
@@ -113,12 +113,8 @@ def get_latest_assessment(
 # 2. 보호자 초대 (Invitation)
 # ══════════════════════════════════════════
 class InvitationCreate(BaseModel):
-    # [2026-07-21 회의 반영] "초대하기"(환자→보호자류 초대 생성, Connect.tsx)는 삭제됐다 —
-    # 이제 새로 만들 수 있는 초대는 "patient"(보호자→환자 초대, REQ-037/REQ-058)뿐이다.
-    # 이미 생성된 guardian/caregiver/life_support_worker/social_worker 초대(과거 데이터)는
-    # 여전히 accept_invitation()으로 수락 가능하다 — 이 변경은 "생성"만 막는다.
     patient_id: int | None = None  # patient 방향은 수락 전까지 환자 계정이 없어 항상 None
-    relation_type: Literal["patient"] = "patient"
+    relation_type: Literal["patient", "guardian", "caregiver", "life_support_worker", "social_worker"]
     invited_phone: str | None = None
     inviter_caregiver_id: int | None = None
 
@@ -165,23 +161,31 @@ def create_invitation(
     actor: Actor = Depends(get_current_actor),
     session: Session = Depends(get_session),
 ):
-    """보호자→환자 초대(REQ-037/REQ-058) 생성 — "환자 연결하기"(InvitePatientPanel.tsx) 전용.
+    """초대 생성.
 
-    [2026-07-21 회의 반영] 환자→보호자류 초대("초대하기", Connect.tsx) 생성 경로는 삭제됐다.
-    아직 환자 계정이 없어 patient_id로는 인가할 수 없으므로, 초대 주체(inviter_caregiver_id)가
-    로그인한 보호자 본인인지만 확인한다.
+    - relation_type="patient": 보호자/지원인력 → 아직 계정이 없는 환자 초대
+    - 그 외 relation_type: 환자 → 보호자/지원인력 초대
     """
-    if payload.inviter_caregiver_id is None:
-        raise HTTPException(400, "초대하는 보호자 정보가 필요해요.")
-    role, subject = actor
-    if role != "caregiver" or subject.id != payload.inviter_caregiver_id:
-        raise HTTPException(403, "본인 계정으로만 환자를 초대할 수 있어요.")
+    if payload.relation_type == "patient":
+        if payload.inviter_caregiver_id is None:
+            raise HTTPException(400, "초대하는 보호자 정보가 필요해요.")
+        role, subject = actor
+        if role != "caregiver" or subject.id != payload.inviter_caregiver_id:
+            raise HTTPException(403, "본인 계정으로만 환자를 초대할 수 있어요.")
+        patient_id = None
+        inviter_caregiver_id = payload.inviter_caregiver_id
+    else:
+        if payload.patient_id is None:
+            raise HTTPException(400, "환자 정보가 필요해요.")
+        require_actor_patient_access(payload.patient_id, actor, session)
+        patient_id = payload.patient_id
+        inviter_caregiver_id = None
 
     token = secrets.token_urlsafe(8)
     invitation = Invitation(
-        patient_id=None,
+        patient_id=patient_id,
         relation_type=payload.relation_type,
-        inviter_caregiver_id=payload.inviter_caregiver_id,
+        inviter_caregiver_id=inviter_caregiver_id,
         token_hash=hash_token(token),
         expires_at=datetime.now() + timedelta(days=INVITATION_EXPIRE_DAYS),
     )
@@ -321,6 +325,65 @@ def reject_invitation(token: str, session: Session = Depends(get_session)):
     return {"status": "rejected"}
 
 
+def _hide_unowned_invitation() -> None:
+    raise HTTPException(404, "초대를 찾을 수 없어요")
+
+
+def _require_invitation_delete_owner(invitation: Invitation, actor: Actor, session: Session) -> None:
+    """초대 삭제 권한 검증.
+
+    상태 확인보다 먼저 호출해, 권한 없는 사용자가 초대 ID로 처리 상태를 유추하지 못하게 한다.
+    """
+    role, subject = actor
+    if invitation.relation_type == "patient":
+        if role != "caregiver" or subject.id != invitation.inviter_caregiver_id:
+            _hide_unowned_invitation()
+        return
+
+    if invitation.patient_id is None:
+        raise HTTPException(400, "환자 정보가 없는 초대예요")
+    if role == "patient":
+        if subject.id != invitation.patient_id:
+            _hide_unowned_invitation()
+        return
+
+    link = session.exec(
+        select(CaregiverPatient)
+        .where(CaregiverPatient.caregiver_id == subject.id)
+        .where(CaregiverPatient.patient_id == invitation.patient_id)
+    ).first()
+    if not link:
+        _hide_unowned_invitation()
+
+
+@router.delete("/invitations/{invitation_id}")
+def delete_pending_invitation(
+    invitation_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """보낸 대기중 초대 삭제.
+
+    초대 링크를 이미 전달했을 수 있으므로 행을 지우지 않고 cancelled로 바꿔 토큰 수락도 막는다.
+    """
+    invitation = session.get(Invitation, invitation_id)
+    if not invitation:
+        raise HTTPException(404, "초대를 찾을 수 없어요")
+    _require_invitation_delete_owner(invitation, actor, session)
+
+    if invitation.status == "pending" and invitation.is_expired:
+        invitation.status = "expired"
+        session.add(invitation)
+        session.commit()
+    if invitation.status != "pending":
+        raise HTTPException(409, f"이미 {invitation.status} 처리된 초대예요")
+
+    invitation.status = "cancelled"
+    session.add(invitation)
+    session.commit()
+    return {"deleted": invitation_id, "status": "cancelled"}
+
+
 @router.get("/caregivers/{caregiver_id}/pending-invitations")
 def list_pending_invitations_for_caregiver(
     caregiver_id: int,
@@ -374,20 +437,16 @@ def _require_own_matching_invitation(invitation_id: int, caregiver: Caregiver, s
     invitation = session.get(Invitation, invitation_id)
     if not invitation:
         raise HTTPException(404, "초대를 찾을 수 없어요")
+    if invitation.relation_type == "patient":
+        _hide_unowned_invitation()
+    if not caregiver.phone_hash or invitation.invited_phone_hash != caregiver.phone_hash:
+        _hide_unowned_invitation()
     if invitation.status == "pending" and invitation.is_expired:
         invitation.status = "expired"
         session.add(invitation)
         session.commit()
     if invitation.status != "pending":
         raise HTTPException(409, f"이미 {invitation.status} 처리된 초대예요")
-    if invitation.relation_type == "patient":
-        raise HTTPException(400, "이 방식으로는 환자 초대를 수락할 수 없어요")
-    if (
-        not caregiver.phone
-        or not invitation.invited_phone
-        or normalize_phone(caregiver.phone) != normalize_phone(invitation.invited_phone)
-    ):
-        raise HTTPException(403, "본인에게 온 초대가 아니에요")
     return invitation
 
 

@@ -12,7 +12,15 @@ from core.auth import create_access_token
 from core.database import get_session
 from fastapi.testclient import TestClient
 from main import app
-from models import Caregiver, CaregiverPatient, MedicalRecord, MedicationSchedule, OcrResult, Patient
+from models import (
+    Caregiver,
+    CaregiverPatient,
+    MedicalRecord,
+    MedicationSchedule,
+    OcrResult,
+    Patient,
+    PatientMedication,
+)
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
 
@@ -232,6 +240,53 @@ class TestDeleteRecord:
         session.refresh(unrelated)
         assert linked.active is False
         assert unrelated.active is True  # 이 처방전과 무관한 일정은 그대로 유지
+
+    def test_deleting_record_soft_deletes_prescription_medications(self, client: TestClient, session: Session):
+        """처방전 기반 내약이 남으면 다음 로그인 때 삭제가 안 된 것처럼 보인다."""
+        cg = _make_caregiver(session, "cgDelPrescriptionMed")
+        pt = _make_patient(session, "ptDelPrescriptionMed")
+        _link(session, cg, pt)
+        rec = _make_record(session, pt.id, status="completed")
+
+        medication = PatientMedication(
+            patient_id=pt.id,
+            medication_name="처방전기반약",
+            prescription_id=rec.id,
+            source_type="prescription_ocr",
+        )
+        unrelated = PatientMedication(
+            patient_id=pt.id,
+            medication_name="직접등록약",
+            source_type="manual",
+        )
+        session.add(medication)
+        session.add(unrelated)
+        session.commit()
+        session.refresh(medication)
+        session.refresh(unrelated)
+
+        linked_schedule = MedicationSchedule(
+            patient_id=pt.id,
+            patient_medication_id=medication.id,
+            drug_name="처방전기반약",
+            time_slot="09:00",
+        )
+        session.add(linked_schedule)
+        session.commit()
+        session.refresh(linked_schedule)
+
+        headers = {"Authorization": f"Bearer {_token(cg.id, 'caregiver')}"}
+        r = client.delete(f"/records/{rec.id}", headers=headers)
+        assert r.status_code == 200
+
+        session.refresh(medication)
+        session.refresh(unrelated)
+        session.refresh(linked_schedule)
+        assert medication.deleted_at is not None
+        assert medication.is_active is False
+        assert linked_schedule.active is False
+        assert unrelated.deleted_at is None
+        assert unrelated.is_active is True
 
     def test_already_deleted_404(self, client: TestClient, session: Session):
         cg = _make_caregiver(session, "cgDelRecTwice")

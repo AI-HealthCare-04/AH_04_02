@@ -44,7 +44,10 @@ router = APIRouter(prefix="/rag", tags=["RAG"])
 # ── REQ-020 가이드 캐시 설정 ──
 # GUIDE_DATA_VERSION: 출처 데이터(e약은요/HIRA/DUR CSV) 버전 식별자.
 # 이 값이 바뀌면 SHA-256 키가 달라져 기존 캐시가 자연스럽게 무효화된다.
-GUIDE_DATA_VERSION = os.environ.get("GUIDE_DATA_VERSION", "v1.0")
+# [2026-07-22] v1.1 — 복약가이드 주의사항/생활습관 빈 응답 fallback 보강.
+# 기존 v1.0 캐시에 빈 precautions/guides가 저장돼 있으면 최신 생성 로직을 타지 않아
+# 화면에 계속 "없음"처럼 보일 수 있으므로 기본 데이터 버전을 올려 자연스럽게 무효화한다.
+GUIDE_DATA_VERSION = os.environ.get("GUIDE_DATA_VERSION", "v1.1")
 GUIDE_CACHE_TTL_DAYS = int(os.environ.get("GUIDE_CACHE_TTL_DAYS", "7"))
 
 
@@ -337,7 +340,7 @@ async def stub_generate_guide(
     try:
         guide, from_cache, cache_expires_at = await run_rag(record_id, session)
     except ValueError as e:
-        raise HTTPException(404, str(e))
+        raise HTTPException(404, str(e)) from e
 
     return {
         "guide_id": guide.id,

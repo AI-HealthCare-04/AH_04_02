@@ -407,6 +407,23 @@ def _fallback_precautions_from_context(context_items: list[dict], limit: int = 3
     return results
 
 
+def _fallback_lifestyle_guide_from_context(context_items: list[dict], limit: int = 3) -> str:
+    """생활습관 근거가 있는데 LLM이 lifestyle_guide를 비워 보내면 검색 문구로 보강한다."""
+    lines: list[str] = []
+    seen: set[str] = set()
+    for item in context_items:
+        if item.get("kind") != "lifestyle":
+            continue
+        text = " ".join(str(item.get("text") or "").split())
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        lines.append(text)
+        if len(lines) >= limit:
+            break
+    return "\n".join(lines)
+
+
 def _llm_generate_once(
     chat,
     drug_name: str,
@@ -606,9 +623,21 @@ def generate_lifestyle_guide_for_diagnosis(diagnosis: str | None) -> LifestyleGu
         )
         flags.append("low_self_consistency")
 
+    guide_text = str(best.get("lifestyle_guide") or "").strip()
+    if not guide_text:
+        guide_text = _fallback_lifestyle_guide_from_context(used_items or context_items)
+        if guide_text:
+            reasons.append("LLM이 생활습관 안내 본문을 비워 검색 근거 문구로 보강했습니다.")
+            flags.append("empty_lifestyle_fallback")
+
+    if not guide_text:
+        guide_text = f"'{diagnosis}'에 대한 생활습관 안내를 생성하지 못했어요. 담당 의료진과 상담해 주세요."
+        reasons.append("생활습관 안내 본문이 비어 있습니다.")
+        flags.append("empty_lifestyle_guide")
+
     return LifestyleGuideResult(
         diagnosis=diagnosis,
-        guide=best.get("lifestyle_guide") or "",
+        guide=guide_text,
         source_refs=source_refs,
         review_required=bool(reasons),
         review_reason=" ".join(reasons) if reasons else None,

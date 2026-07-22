@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ChevronLeft, Plus, Search, X } from "lucide-react";
 import NavBar from "../components/NavBar";
 import InvitePatientPanel from "../components/InvitePatientPanel";
-import { deletePatient, getCaregiverPatients, type Patient } from "../api/monitoring";
+import { getCaregiverPatients, unlinkCaregiverPatient, type Patient } from "../api/monitoring";
 import {
   acceptInvitationAsCaregiver,
   listReceivedInvitations,
@@ -118,12 +118,16 @@ export default function PatientManagement() {
   const filtered = patients.filter((p) => !search || p.name.includes(search));
 
   const remove = async (id: number) => {
-    if (!window.confirm("이 환자 정보를 삭제할까요? 연결된 일정·기록에 영향을 줄 수 있어요.")) return;
+    if (!caregiverId) return;
+    if (!window.confirm("이 환자와의 연결을 해제할까요? 환자 계정과 기록은 삭제되지 않아요.")) return;
     try {
-      await deletePatient(id);
-      setPatients((prev) => prev.filter((p) => p.id !== id));
+      await unlinkCaregiverPatient(caregiverId, id);
+      await load();
+      if (localStorage.getItem("patient_id") === String(id)) {
+        localStorage.removeItem("patient_id");
+      }
     } catch {
-      setError("삭제하지 못했어요.");
+      setError("연결을 해제하지 못했어요.");
     }
   };
 
@@ -297,6 +301,7 @@ export default function PatientManagement() {
                   </button>
                   <button
                     onClick={() => remove(p.id)}
+                    aria-label="환자 연결 해제"
                     className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-black/5"
                     style={{ color: C.muted }}
                   >
