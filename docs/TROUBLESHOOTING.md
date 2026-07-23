@@ -388,3 +388,15 @@ for raw, norm in zip(raw_pool, norm_pool):
 | **해결** | (1) `useGuardedPatientId(options?: { silent?: boolean })`에 `silent` 옵션을 추가해 리다이렉트를 끌 수 있게 하고, `Settings.tsx`는 `{ silent: true }`로 호출 — 환자가 아직 안 정해졌으면 챗봇 이름 카드만 숨기고 글자 크기 설정은 그대로 보여준다. (2) 생년월일 입력란 위에 "현재 이후로도 가입이 가능해요."(대리 가입 등으로 정확한 생년월일을 모를 수 있어 미래 날짜도 허용한다는 안내) 힌트를 추가하고, `isValidBirthDate()`로 연/월/일이 실제 존재하는 날짜인지만 검사해(미래 여부는 검사하지 않음) 형식이 잘못됐을 때 "생년월일이 정확한지 확인해주세요."를 표시하도록 했다. (3) `Caregiver.email`의 DB 유니크 인덱스를 제거하는 마이그레이션을 추가하고(`ix_caregivers_email`을 `unique=False`로 재생성), `create_caregiver`/`check_caregiver_duplicate`/`update_caregiver`의 이메일 중복 검사에 phone_hash와 동일하게 `relation_type` 조건을 추가했다. (4) 인증코드 input에 `min-w-0`을 추가해 실제로 줄어들 수 있게 하고, 폰트 크기(26px→22px)와 자간(0.5em→0.35em)도 여유 있게 줄였다. |
 | **테스트/검증** | `backend/tests/test_auth_signup_login.py`에 "같은 이메일로 relation_type이 다르면 가입 허용, 같으면 409" 회귀 테스트 추가. `uv run pytest tests/test_auth_signup_login.py tests/test_auth_switch_account.py tests/test_care_router_invitations.py tests/test_invitation_accept_caregiver_id_auth.py tests/test_login_lockout_and_password_reset.py tests/test_scheduler.py tests/test_update_email_normalization.py -q` 77개 통과. `npm run build`, `npm run lint` 통과. 복약일정 삭제는 실제 로컬 서버에서 일정 생성→체크인(알림/기록 연결)→삭제→목록 재조회까지 실행해 FK 삭제와 화면 반영(로컬 상태 필터링) 모두 정상 동작을 재확인했다(코드 변경 없음). |
 | **재발 방지** | 여러 화면이 같은 가드 훅(`useGuardedPatientId` 등)을 공유할 때는, 그 화면이 정말로 "환자가 반드시 정해져야만" 보여줄 수 있는 화면인지 먼저 따진다 — 화면 일부만 환자 종속적이면 훅에 silent 옵션을 주거나 화면을 쪼갠다. 관계(역할)별로 중복을 허용해야 하는 필드(phone_hash)가 있다면, 같은 계정에 있는 유사한 필드(email)도 나중에 똑같은 요구가 생길 수 있다는 걸 염두에 두고 한 번에 점검한다. `flex-1` + 큰 `letterSpacing`/폰트 조합의 입력창은 항상 `min-w-0`을 같이 붙여야 실제로 줄어든다. |
+
+---
+
+| 날짜 | 2026.07.23 |
+|---|---|
+| **작성자** | 김영혜 |
+| **이슈** | PR #79 리뷰 코멘트 — `NavBar.tsx`가 `localStorage.getItem("caregiver_id")`를 직접 읽어 나머지 코드베이스가 쓰는 `lib/session.ts`의 `getCurrentCaregiverId()` 관례와 어긋남 |
+| **발생 위치** | `frontend/src/components/NavBar.tsx` |
+| **원인** | NavBar가 지원인력/환자 메뉴를 나누는 로직을 짜면서, 이미 있던 `getCurrentCaregiverId()` 헬퍼를 쓰지 않고 `localStorage.getItem`을 직접 호출했다. |
+| **해결** | `lib/session.ts`의 `getCurrentCaregiverId()`를 import해서 `localStorage.getItem("caregiver_id")` 대신 쓰도록 교체. 동작은 동일(값이 있으면 지원인력 메뉴, 없으면 환자 메뉴). |
+| **테스트/검증** | `npm run build`, `npm run lint` 통과. |
+| **재발 방지** | localStorage의 로그인/역할 관련 키(`caregiver_id`, `patient_id`, `user_name`, `access_token`)는 화면에서 직접 읽지 말고 항상 `lib/session.ts`의 헬퍼를 거친다. |
