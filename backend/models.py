@@ -542,3 +542,23 @@ class GuideCache(SQLModel, table=True):
     guide_result: str = Field(sa_column=Column(Text, nullable=False))
     created_at: datetime = Field(default_factory=datetime.now)
     expires_at: datetime
+
+
+# ── 변경 이력 (REQ-081) ──
+# 복약 일정·환자 정보를 보호자가 수정할 수 있어서, "어제 8시였던 게 왜 9시로 바뀌었는지"
+# 환자가 확인할 방법이 있어야 한다는 요구로 추가했다(최소 버전 — 조회 화면은 아직 없고
+# 테이블·기록만 남긴다). name/phone처럼 암호화 저장되는 PII는 before/after에 실제 값
+# 대신 "***"만 남긴다 — 이 테이블은 name_encrypted 같은 암호화 보호가 없어서, 그대로
+# 남기면 오히려 새로운 평문 PII 유출 경로가 된다(core/audit.py의 SENSITIVE_FIELDS 참고).
+class AuditLog(SQLModel, table=True):
+    __tablename__ = "audit_logs"
+
+    id: int | None = Field(default=None, primary_key=True)
+    table_name: str = Field(index=True)
+    record_id: int = Field(index=True)
+    actor_id: int
+    actor_role: str  # "caregiver" | "patient"
+    action: str = "update"
+    before: str | None = Field(default=None, sa_column=Column(Text))  # JSON
+    after: str | None = Field(default=None, sa_column=Column(Text))  # JSON
+    created_at: datetime = Field(default_factory=datetime.now)

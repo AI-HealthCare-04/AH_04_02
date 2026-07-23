@@ -24,6 +24,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Literal
 
+from core.audit import record_audit_log
 from core.auth import hash_password
 from core.database import get_session
 from core.dependencies import (
@@ -235,9 +236,11 @@ def update_patient(
         if existing and existing.id != patient_id:
             raise HTTPException(409, "이미 사용중인 전화번호입니다.")
 
+    before = {key: getattr(patient, key, None) for key in updates}
     for key, value in updates.items():
         setattr(patient, key, value)
     session.add(patient)
+    record_audit_log(session, "patients", patient_id, actor, before, updates)
     session.commit()
     session.refresh(patient)
     return patient
@@ -756,9 +759,12 @@ def update_schedule(
     if not schedule:
         raise HTTPException(404, "해당 일정을 찾을 수 없어요")
     require_actor_patient_access(schedule.patient_id, actor, session)
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+    before = {key: getattr(schedule, key, None) for key in updates}
+    for key, value in updates.items():
         setattr(schedule, key, value)
     session.add(schedule)
+    record_audit_log(session, "medication_schedules", schedule_id, actor, before, updates)
     session.commit()
     session.refresh(schedule)
     return schedule
