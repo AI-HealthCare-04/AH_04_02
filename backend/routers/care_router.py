@@ -47,6 +47,19 @@ from routers.monitoring_router import PatientCreate, _register_patient
 
 INVITATION_EXPIRE_DAYS = 7
 
+# [2026-07-23 추가] 초대의 relation_type이 곧 "이 계정이 어떤 역할로 가입했는지"와 같은 값이다
+# (Caregiver.relation_type — 개인 가입은 guardian/organization만 고를 수 있지만, 이 4종
+# 초대를 신규 계정으로 수락하면 그 값 그대로 caregiver.relation_type에 찍힌다, 아래
+# accept_invitation 참고). 전화번호 유니크 제약도 relation_type끼리만 걸려있어(한 사람이
+# 역할별로 계정을 따로 만들 수 있음) — 역할별 계정 분리가 이 앱의 의도된 설계다.
+RELATION_TYPE_LABELS = {
+    "guardian": "보호자",
+    "caregiver": "요양보호사",
+    "life_support_worker": "생활지원사",
+    "social_worker": "사회복지사",
+    "organization": "기관",
+}
+
 router = APIRouter(tags=["Care"])
 
 
@@ -287,7 +300,17 @@ def _reactivate_or_create_link(session: Session, caregiver_id: int, patient_id: 
 
 def _link_caregiver_to_invitation(session: Session, invitation: Invitation, caregiver: Caregiver) -> None:
     """환자→보호자 초대 수락 공통 로직 — 토큰 기반 accept_invitation과 로그인 기반
-    accept_invitation_as_caregiver(아래) 양쪽에서 재사용한다."""
+    accept_invitation_as_caregiver(아래) 양쪽에서 재사용한다.
+
+    [2026-07-23 추가] 초대의 relation_type(보호자/요양보호사/생활지원사/사회복지사)과
+    수락하는 계정 자신의 relation_type이 다르면 막는다 — 안 그러면 "보호자"로 가입한
+    계정이 "사회복지사" 초대를 그대로 수락해서, 실제 가입한 역할과 다른 자격으로 연결될
+    수 있었다. 신규 계정 생성 경로(accept_invitation의 caregiver_id 없는 분기)는 애초에
+    invitation.relation_type 그대로 계정을 만들어서 항상 일치하므로 이 체크에 영향받지
+    않는다 — 이미 계정이 있는 사람이 다른 역할의 초대를 그 계정으로 수락하려는 경우만 막는다."""
+    if caregiver.relation_type != invitation.relation_type:
+        expected = RELATION_TYPE_LABELS.get(invitation.relation_type, invitation.relation_type)
+        raise HTTPException(403, f"이 초대는 {expected}로 가입한 계정만 수락할 수 있어요.")
     _reactivate_or_create_link(session, caregiver.id, invitation.patient_id)
 
     invitation.status = "accepted"

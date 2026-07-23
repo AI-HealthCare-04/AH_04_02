@@ -177,8 +177,10 @@ def test_accept_invitation_preserves_invitation_relation_type():
         assert caregiver.relation_type == "life_support_worker"
 
 
-def _make_caregiver(session: Session, name: str = "김보호", phone: str | None = None) -> models.Caregiver:
-    caregiver = models.Caregiver(relation_type="guardian")
+def _make_caregiver(
+    session: Session, name: str = "김보호", phone: str | None = None, relation_type: str = "guardian"
+) -> models.Caregiver:
+    caregiver = models.Caregiver(relation_type=relation_type)
     caregiver.name = name
     caregiver.phone = phone
     session.add(caregiver)
@@ -208,6 +210,65 @@ def test_accept_matching_invitation_hides_status_from_wrong_caregiver():
             accept_invitation_as_caregiver(invitation.id, owner, session)
 
         assert getattr(exc.value, "status_code", None) == 409
+
+
+# [2026-07-23 추가] 초대의 relation_type과 수락 계정 자신의 relation_type이 다르면 막는다 —
+# "사회복지사"로 온 초대를 "보호자"로 가입한 계정이 그대로 수락해버리던 버그.
+
+def test_accept_as_caregiver_rejects_mismatched_relation_type():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        invitation = _make_pending_invitation(
+            session, relation_type="social_worker", invited_phone="010-1111-2222"
+        )
+        wrong_role_caregiver = _make_caregiver(
+            session, "보호자로가입", phone="010-1111-2222", relation_type="guardian"
+        )
+
+        with pytest.raises(HTTPException) as exc:
+            accept_invitation_as_caregiver(invitation.id, wrong_role_caregiver, session)
+
+        assert exc.value.status_code == 403
+        session.refresh(invitation)
+        assert invitation.status == "pending"
+
+
+def test_accept_as_caregiver_succeeds_with_matching_relation_type():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        invitation = _make_pending_invitation(
+            session, relation_type="social_worker", invited_phone="010-1111-2222"
+        )
+        matching_caregiver = _make_caregiver(
+            session, "사회복지사로가입", phone="010-1111-2222", relation_type="social_worker"
+        )
+
+        result = accept_invitation_as_caregiver(invitation.id, matching_caregiver, session)
+
+        assert result["status"] == "accepted"
+        session.refresh(invitation)
+        assert invitation.status == "accepted"
+
+
+def test_accept_invitation_by_token_rejects_mismatched_relation_type_for_existing_account():
+    """토큰 기반 accept_invitation()도 caregiver_id로 기존 계정을 재사용할 때 같은 검증을 받는다."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        _make_pending_invitation(session, relation_type="life_support_worker")
+        wrong_role_caregiver = _make_caregiver(session, "보호자로가입", relation_type="guardian")
+
+        with pytest.raises(HTTPException) as exc:
+            accept_invitation(
+                RAW_TOKEN,
+                InvitationAccept(caregiver_id=wrong_role_caregiver.id),
+                session,
+                wrong_role_caregiver,
+            )
+
+        assert exc.value.status_code == 403
 
 
 def _make_pending_patient_invitation(
