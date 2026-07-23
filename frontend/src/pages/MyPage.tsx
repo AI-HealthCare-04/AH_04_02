@@ -55,6 +55,7 @@ export default function MyPage() {
     { label: "화면·챗봇 설정", icon: "⚙️", to: "/settings" },
   ];
   const caregiverMenu: MenuItem[] = [
+    { label: "내 정보", icon: "🪪", to: "/mypage/info" },
     { label: "환자 관리", icon: "🏥", to: "/patients" },
     { label: "연결관리", icon: "👥", to: "/connect" },
     { label: "화면·챗봇 설정", icon: "⚙️", to: "/settings" },
