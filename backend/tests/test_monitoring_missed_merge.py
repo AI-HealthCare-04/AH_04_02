@@ -75,6 +75,77 @@ def _make_linked_caregiver(session: Session, patient: Patient, name: str = "보�
     return cg
 
 
+class TestPatientListTodayStatus:
+    """[2026-07-23 추가] GET /monitoring/caregivers/{id}/patients의 today_status —
+    환자 관리 테이블에서 여러 환자 중 오늘 누가 약을 놓쳤는지 한눈에 보기 위한 필드."""
+
+    def test_no_active_schedules_is_ok(self, client: TestClient, session: Session):
+        pt = _make_patient(session)
+        cg = _make_linked_caregiver(session, pt)
+
+        r = client.get(f"/monitoring/caregivers/{cg.id}/patients", headers=_caregiver_headers(cg.id))
+        assert r.json()[0]["today_status"] == "ok"
+
+    def test_missed_today_reports_missed(self, client: TestClient, session: Session):
+        pt = _make_patient(session)
+        cg = _make_linked_caregiver(session, pt)
+        sched = MedicationSchedule(patient_id=pt.id, drug_name="약A", time_slot="08:00")
+        session.add(sched)
+        session.commit()
+        session.refresh(sched)
+        today_str = date.today().isoformat()
+        session.add(
+            NotificationLog(
+                schedule_id=sched.id, patient_id=pt.id, due_date=today_str,
+                time_slot="08:00", kind="missed", status="sent",
+            )
+        )
+        session.commit()
+
+        r = client.get(f"/monitoring/caregivers/{cg.id}/patients", headers=_caregiver_headers(cg.id))
+        assert r.json()[0]["today_status"] == "missed"
+
+    def test_missed_on_inactive_schedule_is_ok(self, client: TestClient, session: Session):
+        """비활성화된 일정의 과거 놓침 기록이 남아있어도, 지금은 안 쓰는 일정이라 오늘
+        상태 판정에 영향을 주면 안 된다."""
+        pt = _make_patient(session)
+        cg = _make_linked_caregiver(session, pt)
+        sched = MedicationSchedule(patient_id=pt.id, drug_name="약B", time_slot="08:00", active=False)
+        session.add(sched)
+        session.commit()
+        session.refresh(sched)
+        today_str = date.today().isoformat()
+        session.add(
+            NotificationLog(
+                schedule_id=sched.id, patient_id=pt.id, due_date=today_str,
+                time_slot="08:00", kind="missed", status="sent",
+            )
+        )
+        session.commit()
+
+        r = client.get(f"/monitoring/caregivers/{cg.id}/patients", headers=_caregiver_headers(cg.id))
+        assert r.json()[0]["today_status"] == "ok"
+
+    def test_missed_yesterday_does_not_affect_today(self, client: TestClient, session: Session):
+        pt = _make_patient(session)
+        cg = _make_linked_caregiver(session, pt)
+        sched = MedicationSchedule(patient_id=pt.id, drug_name="약C", time_slot="08:00")
+        session.add(sched)
+        session.commit()
+        session.refresh(sched)
+        yesterday_str = (date.today() - timedelta(days=1)).isoformat()
+        session.add(
+            NotificationLog(
+                schedule_id=sched.id, patient_id=pt.id, due_date=yesterday_str,
+                time_slot="08:00", kind="missed", status="sent",
+            )
+        )
+        session.commit()
+
+        r = client.get(f"/monitoring/caregivers/{cg.id}/patients", headers=_caregiver_headers(cg.id))
+        assert r.json()[0]["today_status"] == "ok"
+
+
 class TestTodayMissedMerge:
     def test_no_log_no_notification_is_pending(self, client: TestClient, session: Session):
         pt = _make_patient(session)

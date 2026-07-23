@@ -107,6 +107,9 @@ class PatientPublic(BaseModel):
     # 값이라 실제로 표로 보여줄 GET /caregivers/{id}/patients에서만 채운다.
     diagnoses: str | None = None
     medication_status: Literal["active", "paused", "none"] = "none"
+    # [2026-07-23 추가] 환자 관리 테이블 맨 오른쪽 "오늘 상태" 동그라미용 — 다른 계산
+    # 필드와 동일하게 GET /caregivers/{id}/patients에서만 채운다.
+    today_status: Literal["ok", "missed"] = "ok"
 
 
 class MealTimesUpdate(BaseModel):
@@ -508,6 +511,28 @@ def _patient_medication_status(session: Session, patient_id: int) -> Literal["ac
     return "active" if any(schedules) else "paused"
 
 
+def _patient_today_status(session: Session, patient_id: int) -> Literal["ok", "missed"]:
+    """환자 관리 테이블 "오늘 상태" 동그라미용 — 여러 환자를 관리할 때 오늘 누가 약을
+    놓쳤는지 한눈에 보기 위함(list_logs가 캘린더/최근기록에 쓰는 것과 동일한 NotificationLog
+    kind="missed" 병합 방식을 재사용). 오늘 놓친 일정이 하나라도 있으면 missed(빨강),
+    없으면 ok(초록) — 활성 일정이 아예 없는 환자도 ok로 둔다(놓칠 일정 자체가 없으므로)."""
+    active_schedule_ids = session.exec(
+        select(MedicationSchedule.id)
+        .where(MedicationSchedule.patient_id == patient_id)
+        .where(MedicationSchedule.active == True)  # noqa: E712
+    ).all()
+    if not active_schedule_ids:
+        return "ok"
+    today_str = date.today().isoformat()
+    missed = session.exec(
+        select(NotificationLog)
+        .where(NotificationLog.kind == "missed")
+        .where(NotificationLog.due_date == today_str)
+        .where(NotificationLog.schedule_id.in_(active_schedule_ids))
+    ).first()
+    return "missed" if missed else "ok"
+
+
 @router.get("/caregivers/{caregiver_id}/patients", response_model=list[PatientPublic])
 def list_patients_of_caregiver(
     caregiver_id: int,
@@ -538,6 +563,7 @@ def list_patients_of_caregiver(
                 update={
                     "diagnoses": _patient_diagnoses(session, patient.id),
                     "medication_status": _patient_medication_status(session, patient.id),
+                    "today_status": _patient_today_status(session, patient.id),
                 }
             )
         )

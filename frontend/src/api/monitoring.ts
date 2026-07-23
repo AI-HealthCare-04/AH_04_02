@@ -36,6 +36,8 @@ export interface Patient {
   // 채워 보내고, 다른 곳(회원가입 응답 등)에서는 항상 기본값(null/"none")으로 온다.
   diagnoses: string | null;
   medication_status: "active" | "paused" | "none";
+  // [2026-07-23 추가] 환자 관리 테이블 "오늘 상태" 동그라미용 — GET /caregivers/{id}/patients만 채움
+  today_status: "ok" | "missed";
 }
 
 export interface Caregiver {

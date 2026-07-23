@@ -208,7 +208,7 @@ export default function PatientManagement() {
             <table className="w-full text-left" style={{ minWidth: 760 }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid rgba(30,26,23,0.08)" }}>
-                  {["ID", "이름", "나이", "성별", "전화번호", "진단명", "상태", "관리"].map((h) => (
+                  {["ID", "이름", "나이", "성별", "전화번호", "진단명", "상태", "관리", "오늘"].map((h) => (
                     <th
                       key={h}
                       className="px-4 py-3 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap"
@@ -282,6 +282,13 @@ export default function PatientManagement() {
                             <X className="w-4 h-4" />
                           </button>
                         </div>
+                      </td>
+                      <td className="px-4 py-4">
+                        <span
+                          title={p.today_status === "missed" ? "오늘 놓친 약이 있어요" : "오늘 복약 정상"}
+                          className="inline-block w-3 h-3 rounded-full"
+                          style={{ background: p.today_status === "missed" ? "#D94F4F" : C.success }}
+                        />
                       </td>
                     </tr>
                   );
