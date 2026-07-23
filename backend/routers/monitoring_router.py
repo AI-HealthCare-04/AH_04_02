@@ -39,6 +39,7 @@ from models import (
     Caregiver,
     CaregiverPatient,
     MedicalRecord,
+    MedicationLog,
     MedicationRecord,
     MedicationSchedule,
     NotificationLog,
@@ -523,6 +524,17 @@ def delete_schedule(
     ).all()
     for record in records:
         session.delete(record)
+    legacy_logs = session.exec(
+        select(MedicationLog).where(MedicationLog.schedule_id == schedule_id)
+    ).all()
+    for legacy_log in legacy_logs:
+        session.delete(legacy_log)
+    notification_logs = session.exec(
+        select(NotificationLog).where(NotificationLog.schedule_id == schedule_id)
+    ).all()
+    for notification_log in notification_logs:
+        session.delete(notification_log)
+    session.flush()
     session.delete(schedule)
     session.commit()
     return {"deleted": schedule_id}

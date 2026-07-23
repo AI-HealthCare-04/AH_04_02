@@ -258,3 +258,16 @@ retrieve-dur-lookup
 | **원인** | 등록내역 삭제 API는 `MedicalRecord.deleted_at`과 `MedicationSchedule.record_id` 기반 일정 비활성화만 처리했다. 따라서 처방전에서 파생된 `PatientMedication.prescription_id` 데이터와 그 내약 기반 일정이 있으면 다른 화면에 계속 남아 “삭제가 안 됐다”고 보일 수 있었다. 프론트도 삭제 성공 후 로컬 배열만 필터링하고 서버 목록을 다시 확인하지 않았다. 연결관리의 대기중 초대는 목록 조회만 있고 보낸 초대를 취소하는 API/버튼이 없었다. 또한 보호자 `환자 관리`의 X 버튼은 보호자-환자 연결 해제가 아니라 환자 계정 자체 삭제 API(`/monitoring/patients/{patient_id}`)를 호출하고 있어, 환자에게 처방/일정/기록이 있으면 삭제가 실패할 수 있었다. |
 | **해결** | 등록내역 삭제 시 `PatientMedication.prescription_id == record_id`인 내약을 soft-delete하고, 해당 내약에 연결된 일정도 비활성화하도록 보강했다. 프론트 `Records.tsx`는 삭제 후 `listRecords()`를 다시 호출해 서버 기준 목록으로 갱신한다. 연결관리에는 `DELETE /care/invitations/{invitation_id}`를 추가해 pending 초대를 `cancelled`로 바꾸고, `Connect.tsx`의 대기중 초대 목록에 삭제 버튼을 추가했다. 보호자 `PatientManagement.tsx`의 X 버튼은 환자 계정 삭제 대신 기존 `unlinkCaregiverPatient(caregiverId, patientId)`를 호출해 현재 보호자와의 연결만 해제하도록 바꿨다. |
 | **재발 방지** | 사용자가 “삭제”라고 인식하는 범위가 화면 카드 1개인지, 그 카드에서 파생된 내약/일정까지인지, 또는 관계 해제인지 확인해야 한다. soft-delete를 쓰는 데이터는 삭제 후 프론트 로컬 상태만 바꾸지 말고 서버 재조회로 실제 영속 상태를 확인한다. |
+
+---
+
+| 날짜 | 2026.07.23 |
+|---|---|
+| **작성자** | 김영혜 |
+| **이슈** | 복약일정에서 복용시간대 삭제가 실제 DB 삭제로 이어지지 않고, 보호자/지원인력 화면의 사용자명·메뉴 구조가 환자 중심 흐름과 맞지 않음 |
+| **발생 위치** | `backend/routers/monitoring_router.py`, `frontend/src/pages/Schedule.tsx`, `frontend/src/pages/Login.tsx`, `frontend/src/pages/MyPage.tsx`, `frontend/src/pages/PatientManagement.tsx`, `frontend/src/components/NavBar.tsx`, `frontend/src/pages/SignUp.tsx`, `frontend/src/pages/MonitoringDashboard.tsx`, `frontend/src/pages/MonitoringDayLogs.tsx`, `frontend/src/pages/DrugDetail.tsx`, `frontend/src/pages/CareEducation.tsx` |
+| **원인** | `DELETE /monitoring/schedules/{schedule_id}`가 `MedicationRecord`만 정리하고 `NotificationLog`, 레거시 `MedicationLog` 참조는 정리하지 않아 알림/체크 기록이 붙은 일정은 FK 제약으로 삭제가 실패할 수 있었다. 일부 보호자 화면은 `NavBar userName="김보호"`를 하드코딩해 실제 로그인 이름과 다르게 보였다. 기관/지원인력 가입은 `Caregiver.name`에 기관명을 저장해 `test.worker@team.local`처럼 개인 이름으로 가입한 계정도 화면 이름이 기관명처럼 보일 수 있었다. 또한 보호자/지원인력도 복약일정·알림설정·등록내역 메뉴를 직접 볼 수 있어, 환자관리 → 환자 리스트 → 환자별 하위 메뉴로 들어가는 흐름이 약했다. |
+| **해결** | 일정 삭제 시 `MedicationRecord`, `MedicationLog`, `NotificationLog`를 먼저 삭제하고 flush한 뒤 `MedicationSchedule`을 삭제하도록 변경했다. 기관/지원인력 가입 시 화면 표시 이름은 담당자 이름(`managerName`)으로 저장하고 기관명은 `org_name`에만 저장하도록 분리했다. 로그인 성공 시 보호자/지원인력은 기존 `patient_id`를 지우고 환자관리 화면으로 이동하도록 변경했다. 마이페이지와 상단 네비게이션은 역할별 메뉴를 분리해 보호자/지원인력은 `환자 관리`, `연결관리`, `설정` 중심으로 보이게 했다. 환자관리 목록에는 환자별 `복약일정`, `알림설정`, `등록내역`, `모니터링` 버튼을 추가해 선택한 환자의 하위 기능으로 이동하게 했다. `김보호` 하드코딩 화면은 `getCurrentUserName()`을 사용하도록 수정했다. |
+| **테스트/검증** | `backend/tests/test_monitoring_missed_merge.py`에 체크 기록, 레거시 로그, 알림 로그가 붙은 일정도 삭제되는 회귀 테스트를 추가했다. 프론트는 빌드 시 보호자/지원인력 메뉴 분기와 하드코딩 이름 제거가 타입 오류 없이 통과하는지 확인한다. |
+| **확인 결과** | 원격 DB 단건 조회 결과 `test.worker@team.local`은 `name=행복요양원`, `relation_type=organization`, `org_name=행복요양원`, `manager_name=테스트요양보호사`로 저장돼 있었다. 따라서 화면 이름이 기관명으로 나온 원인은 기존 데이터의 표시 이름 컬럼이 기관명으로 저장된 것이 맞다. 코드 수정은 신규 가입 데이터부터 적용되며, 기존 테스트 계정은 별도 데이터 보정이 필요하다. |
+| **재발 방지** | 역할별 화면을 수정할 때는 상단 네비게이션, 마이페이지, 로그인 후 이동 경로, 환자 선택 후 하위 화면 진입 경로를 한 세트로 본다. 하드코딩 표시명은 테스트 계정에서는 빨리 눈에 띄지만 실제 사용자 경험을 깨므로 `localStorage.user_name` 또는 인증 API 응답 기반으로 통일한다. |

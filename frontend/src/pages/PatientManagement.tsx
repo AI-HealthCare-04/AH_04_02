@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronLeft, Plus, Search, X } from "lucide-react";
+import { Bell, CalendarClock, ChevronLeft, ClipboardList, LayoutDashboard, Plus, Search, X } from "lucide-react";
 import NavBar from "../components/NavBar";
 import InvitePatientPanel from "../components/InvitePatientPanel";
 import { getCaregiverPatients, unlinkCaregiverPatient, type Patient } from "../api/monitoring";
@@ -117,6 +117,11 @@ export default function PatientManagement() {
 
   const filtered = patients.filter((p) => !search || p.name.includes(search));
 
+  const openPatientMenu = (id: number, path: string) => {
+    localStorage.setItem("patient_id", String(id));
+    navigate(path);
+  };
+
   const remove = async (id: number) => {
     if (!caregiverId) return;
     if (!window.confirm("이 환자와의 연결을 해제할까요? 환자 계정과 기록은 삭제되지 않아요.")) return;
@@ -148,22 +153,13 @@ export default function PatientManagement() {
             <h1 className="text-[26px] font-black" style={{ color: C.dark }}>환자 관리</h1>
             <p className="text-[14px] mt-1" style={{ color: C.muted }}>연결된 환자 {patients.length}명을 관리하세요.</p>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => navigate("/care-education")}
-              className="px-5 py-3 rounded-full font-bold text-[14px] border-2"
-              style={{ borderColor: C.terracotta, color: C.terracotta }}
-            >
-              교육 관리
-            </button>
-            <button
-              onClick={() => setShowInvite((v) => !v)}
-              className="flex items-center gap-2 px-5 py-3 rounded-full text-white font-bold text-[14px]"
-              style={{ background: C.terracotta }}
-            >
-              <Plus className="w-4 h-4" /> 환자 연결
-            </button>
-          </div>
+          <button
+            onClick={() => setShowInvite((v) => !v)}
+            className="flex items-center gap-2 px-5 py-3 rounded-full text-white font-bold text-[14px]"
+            style={{ background: C.terracotta }}
+          >
+            <Plus className="w-4 h-4" /> 환자 연결
+          </button>
         </div>
 
         {/* [2026-07-22 추가] "받은 초대" — 환자가 전화번호로 보낸 초대를 여기서 바로 확인하고,
@@ -284,20 +280,34 @@ export default function PatientManagement() {
                     <p className="text-[13px]" style={{ color: C.muted }}>{p.note || "특이사항 없음"}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
                   <button
-                    onClick={() => {
-                      // [2026-07-21 변경] "상세보기"가 그 환자의 모니터링 대시보드로 바로
-                      // 이어지도록 — MonitoringDashboard.tsx는 쿼리 파라미터가 아니라
-                      // localStorage의 patient_id를 보고 "대상자 선택"을 정하므로, 다른
-                      // 화면들과 동일한 관례로 여기서도 먼저 저장해두고 이동한다.
-                      localStorage.setItem("patient_id", String(p.id));
-                      navigate("/monitoring");
-                    }}
+                    onClick={() => openPatientMenu(p.id, "/schedule")}
                     className="px-4 py-2 rounded-full text-[13px] font-bold"
                     style={{ background: `${C.terracotta}12`, color: C.terracotta }}
                   >
-                    상세보기
+                    <CalendarClock className="inline w-3.5 h-3.5 mr-1" /> 복약일정
+                  </button>
+                  <button
+                    onClick={() => openPatientMenu(p.id, "/notification")}
+                    className="px-4 py-2 rounded-full text-[13px] font-bold"
+                    style={{ background: `${C.terracotta}12`, color: C.terracotta }}
+                  >
+                    <Bell className="inline w-3.5 h-3.5 mr-1" /> 알림설정
+                  </button>
+                  <button
+                    onClick={() => openPatientMenu(p.id, "/records")}
+                    className="px-4 py-2 rounded-full text-[13px] font-bold"
+                    style={{ background: `${C.terracotta}12`, color: C.terracotta }}
+                  >
+                    <ClipboardList className="inline w-3.5 h-3.5 mr-1" /> 등록내역
+                  </button>
+                  <button
+                    onClick={() => openPatientMenu(p.id, "/monitoring")}
+                    className="px-4 py-2 rounded-full text-[13px] font-bold"
+                    style={{ background: `${C.terracotta}12`, color: C.terracotta }}
+                  >
+                    <LayoutDashboard className="inline w-3.5 h-3.5 mr-1" /> 모니터링
                   </button>
                   <button
                     onClick={() => remove(p.id)}

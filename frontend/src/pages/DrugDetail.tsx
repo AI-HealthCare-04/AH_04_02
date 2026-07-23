@@ -4,7 +4,7 @@ import { ChevronLeft } from "lucide-react";
 import NavBar from "../components/NavBar";
 import { checkIntake, getLogs, getSchedules, type MedicationLogEntry, type Schedule } from "../api/monitoring";
 import { getDrugIndication, type DrugIndicationInfo } from "../api/records";
-import { getCurrentCaregiverId, getCurrentPatientId } from "../lib/session";
+import { getCurrentCaregiverId, getCurrentPatientId, getCurrentUserName } from "../lib/session";
 import { C } from "../theme";
 
 export default function DrugDetail() {
@@ -77,7 +77,7 @@ export default function DrugDetail() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName="김보호" />
+      <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <button
           onClick={() => navigate("/monitoring")}
