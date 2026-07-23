@@ -91,11 +91,12 @@ def _create_schedules_from_ocr(
     session: Session,
     dose_timings_by_id: dict[int, list[str]] | None = None,
 ) -> list[str]:
-    """[2026-07-23 수정] 이 환자에게 같은 약 이름으로 이미 활성 일정이 있으면(다른 처방전
-    기록에서 등록된 것) 다시 만들지 않고 건너뛴다 — 반환값(중복으로 건너뛴 약 이름 목록)을
-    confirm_medications가 응답에 실어 "이미 등록된 처방이에요"를 화면에 보여줄 수 있게 한다.
-    같은 record_id 안에서 재등록하는 경우는 제외(에러 케이스가 아니라 이 record의 이전
-    확인 결과와 비교하는 게 아니므로 애초에 없음 — record당 confirm은 한 번뿐)."""
+    """[2026-07-23 수정] 이 환자에게 같은 약 이름으로 이미 활성 일정이 있어도, 이번
+    처방전과 그 일정의 조제일자가 다르면(재처방) 중복이 아니다 — 기존 일정은
+    비활성화하고 새로 만든다. 날짜가 같거나(재확인 등) 둘 중 하나라도 날짜를 모르면
+    (구형 데이터, 수동입력, 날짜 파싱 실패 등) 비교할 근거가 없으니 기존처럼 이름만으로
+    중복 판정한다. 반환값(중복으로 건너뛴 약 이름 목록)을 confirm_medications가 응답에
+    실어 "이미 등록된 처방이에요"를 화면에 보여줄 수 있게 한다."""
     dose_timings_by_id = dose_timings_by_id or {}
     patient = session.get(Patient, record.patient_id)
     duplicate_drug_names: list[str] = []
@@ -103,15 +104,31 @@ def _create_schedules_from_ocr(
         if not item.drug_name:
             continue
         drug_name = item.display_name
-        already_registered = session.exec(
+        existing_active = session.exec(
             select(MedicationSchedule)
             .where(MedicationSchedule.patient_id == record.patient_id)
             .where(MedicationSchedule.drug_name == drug_name)
             .where(MedicationSchedule.active == True)  # noqa: E712
-        ).first()
-        if already_registered:
+        ).all()
+
+        superseded: list[MedicationSchedule] = []
+        is_duplicate = False
+        for sched in existing_active:
+            other_record = session.get(MedicalRecord, sched.record_id) if sched.record_id else None
+            other_date = other_record.prescription_date if other_record else None
+            if not record.prescription_date or not other_date or other_date == record.prescription_date:
+                is_duplicate = True
+                break
+            superseded.append(sched)
+
+        if is_duplicate:
             duplicate_drug_names.append(drug_name)
             continue
+
+        for sched in superseded:
+            sched.active = False
+            session.add(sched)
+
         timings = dose_timings_by_id.get(item.id) or []
         slots = [_resolve_time_slot(t, patient) for t in timings] if timings else None
         slots = slots or _DEFAULT_TIME_SLOTS.get(item.frequency, ["09:00"])

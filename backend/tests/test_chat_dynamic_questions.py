@@ -7,6 +7,14 @@ docs/status-report 참고). 환자가 실제 등록한 약 기반으로 질문�
 (1) 등록 약 있음/OCR만 있음/둘 다 없음 세 갈래 폴백과 (2) 새로 patient_id를 받게 된
 GET /chat/questions의 IDOR 보호, (3) POST /ask가 동적 question_id를 정상 해석하는지를
 검증한다.
+
+[2026-07-23 수정] "챗봇 고정질문 약품 맥락 분리"(어느 화면에서 들어왔는지에 따라 다른 약
+이름을 쓰도록 한 수정) 이후, GET /chat/questions는 더 이상 자체적으로 "환자의 최근 약"을
+DB에서 조회하지 않는다 — 호출부(Chat.tsx)가 넘겨준 drug_name 쿼리 파라미터만 그대로
+템플릿에 채워 넣고, drug_name이 없으면 PRESET_QUESTIONS로 폴백한다. 예전엔 이 DB 조회
+로직이 _build_dynamic_questions(patient_id, session) 안에 있었지만, 이제 그 책임은
+_patient_registered_drug_names(patient_id, session)로 옮겨갔다(여전히 LLM 컨텍스트
+구성에 쓰인다) — 세 갈래 폴백 테스트는 그 함수를 직접 검증하도록 옮겼다.
 """
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -25,7 +33,12 @@ from models import (
     Patient,
     PatientMedication,
 )
-from routers.chat_router import PRESET_QUESTIONS, _build_dynamic_questions, _build_patient_context
+from routers.chat_router import (
+    PRESET_QUESTIONS,
+    _build_dynamic_questions,
+    _build_patient_context,
+    _patient_registered_drug_names,
+)
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
 
@@ -93,12 +106,27 @@ def _token(subject_id: int, role: str) -> str:
 
 
 class TestBuildDynamicQuestions:
-    def test_no_registered_medication_falls_back_to_static_preset(self, session: Session):
-        pt = _make_patient(session, "빈환자")
-        questions = _build_dynamic_questions(pt.id, session)
-        assert questions == PRESET_QUESTIONS
+    """[2026-07-23 수정] 이 템플릿 채우기 자체는 이제 drug_name 문자열 하나만 받는
+    순수 함수라 DB 조회 폴백과 무관하다 — 채워지는 값만 확인한다."""
 
-    def test_registered_medication_generates_drug_specific_questions(self, session: Session):
+    def test_fills_all_three_templates_with_given_drug_name(self):
+        questions = _build_dynamic_questions("암로디핀정5밀리그램")
+        assert len(questions) == 3
+        assert all("암로디핀정5밀리그램" in q["text"] for q in questions)
+        assert all("암로디핀정5밀리그램" in q["answer"] for q in questions)
+        assert all(q["id"].startswith("dyn:") for q in questions)
+
+
+class TestPatientRegisteredDrugNamesFallback:
+    """[2026-07-23 이전엔 _build_dynamic_questions(patient_id, session)가 담당하던 세 갈래
+    폴백(등록 약 우선 → 없으면 OCR → 둘 다 없으면 빈 목록) — 이제 이 책임은
+    _patient_registered_drug_names로 옮겨갔고, 여전히 LLM 컨텍스트 구성에 쓰인다."""
+
+    def test_no_registered_medication_returns_empty(self, session: Session):
+        pt = _make_patient(session, "빈환자")
+        assert _patient_registered_drug_names(pt.id, session) == []
+
+    def test_registered_medication_is_returned(self, session: Session):
         pt = _make_patient(session, "약등록환자")
         session.add(
             PatientMedication(
@@ -110,11 +138,7 @@ class TestBuildDynamicQuestions:
         )
         session.commit()
 
-        questions = _build_dynamic_questions(pt.id, session)
-        assert len(questions) == 3
-        assert all("암로디핀정5밀리그램" in q["text"] for q in questions)
-        assert all("암로디핀정5밀리그램" in q["answer"] for q in questions)
-        assert all(q["id"].startswith("dyn:") for q in questions)
+        assert _patient_registered_drug_names(pt.id, session) == ["암로디핀정5밀리그램"]
 
     def test_inactive_or_deleted_medication_is_ignored(self, session: Session):
         pt = _make_patient(session, "탈퇴약환자")
@@ -129,8 +153,7 @@ class TestBuildDynamicQuestions:
         )
         session.commit()
 
-        questions = _build_dynamic_questions(pt.id, session)
-        assert questions == PRESET_QUESTIONS  # 활성 등록 약이 없으니 정적 폴백
+        assert _patient_registered_drug_names(pt.id, session) == []  # 활성 등록 약이 없으니 빈 목록
 
     def test_no_patient_medication_falls_back_to_latest_ocr_drug_name(self, session: Session):
         pt = _make_patient(session, "OCR환자")
@@ -149,8 +172,7 @@ class TestBuildDynamicQuestions:
         )
         session.commit()
 
-        questions = _build_dynamic_questions(pt.id, session)
-        assert all("타이레놀정500mg" in q["text"] for q in questions)
+        assert _patient_registered_drug_names(pt.id, session) == ["타이레놀정500mg"]
 
 
 class TestQuestionsEndpointAuth:
@@ -183,18 +205,13 @@ class TestQuestionsEndpointAuth:
 class TestAskWithDynamicQuestionId:
     def test_ask_resolves_dynamic_question_id(self, client: TestClient, session: Session):
         pt = _make_patient(session, "askDynPat")
-        session.add(
-            PatientMedication(
-                patient_id=pt.id,
-                medication_name="메트포르민정500mg",
-                source_type="manual",
-                verification_status="user_confirmed",
-            )
-        )
-        session.commit()
         headers = {"Authorization": f"Bearer {_token(pt.id, 'patient')}"}
 
-        listed = client.get("/chat/questions", params={"patient_id": pt.id}, headers=headers)
+        # [2026-07-23 수정] drug_name은 이제 DB에서 자동으로 안 채워진다 — Chat.tsx가
+        # 이 화면이 실제로 어느 약 맥락에서 열렸는지 쿼리로 넘겨줘야 동적 질문이 나온다.
+        listed = client.get(
+            "/chat/questions", params={"patient_id": pt.id, "drug_name": "메트포르민정500mg"}, headers=headers
+        )
         dyn_id = listed.json()[0]["id"]
         assert dyn_id.startswith("dyn:")
 
@@ -202,11 +219,17 @@ class TestAskWithDynamicQuestionId:
         assert r.status_code == 200
         assert "메트포르민정500mg" in r.json()["answer"]
 
-    def test_ask_unknown_question_id_404s(self, client: TestClient, session: Session):
+    def test_ask_unrecognized_template_key_404s(self, client: TestClient, session: Session):
+        """[2026-07-23 수정] question_id에 박힌 약 이름 자체는 더 이상 검증하지 않는다(맥락
+        분리 설계상 의도된 것 — GET /chat/questions?drug_name=X도 X를 검증하지 않는 것과
+        같은 원칙). 다만 템플릿 key(예: meal_timing/side_effect/interaction) 자체가 존재하지
+        않으면 여전히 404여야 한다."""
         pt = _make_patient(session, "askUnknownPat")
         headers = {"Authorization": f"Bearer {_token(pt.id, 'patient')}"}
         r = client.post(
-            "/chat/ask", json={"patient_id": pt.id, "question_id": "dyn:meal_timing:없는약"}, headers=headers
+            "/chat/ask",
+            json={"patient_id": pt.id, "question_id": "dyn:no_such_template_key:아무약"},
+            headers=headers,
         )
         assert r.status_code == 404
 
@@ -235,15 +258,10 @@ class TestAskLlmGating:
     ):
         chat_cls = _install_mock_llm(monkeypatch, "LLM 답변이면 안 됩니다")
         pt = _make_patient(session, "dynGatePat")
-        session.add(
-            PatientMedication(
-                patient_id=pt.id, medication_name="메트포르민정500mg", source_type="manual",
-                verification_status="user_confirmed",
-            )
-        )
-        session.commit()
         headers = {"Authorization": f"Bearer {_token(pt.id, 'patient')}"}
-        dyn_id = client.get("/chat/questions", params={"patient_id": pt.id}, headers=headers).json()[0]["id"]
+        dyn_id = client.get(
+            "/chat/questions", params={"patient_id": pt.id, "drug_name": "메트포르민정500mg"}, headers=headers
+        ).json()[0]["id"]
 
         r = client.post("/chat/ask", json={"patient_id": pt.id, "question_id": dyn_id}, headers=headers)
         assert r.status_code == 200

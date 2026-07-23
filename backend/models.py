@@ -244,6 +244,9 @@ class MedicalRecord(SQLModel, table=True):
     deleted_at: datetime | None = Field(default=None)
     # [2026-07-21 추가] 등록내역 목록에서 즐겨찾기처럼 위쪽에 고정하는 기능.
     pinned: bool = False
+    # [2026-07-23 추가] raw_text에서 뽑아낸 조제일자("YYYY-MM-DD") — 재처방인지(같은 약,
+    # 다른 날짜) 판단하는 근거. 날짜를 못 찾으면 None(기존처럼 이름만으로 중복 판정).
+    prescription_date: str | None = Field(default=None)
 
 
 # ── OCR 추출 결과 (약품 1개 = 1행, 담당: 권순현) ──

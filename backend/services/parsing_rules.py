@@ -104,6 +104,12 @@ _MAX_DIAGNOSIS_LEN = 100  # ocr_results.diagnosis VARCHAR(255)보다 여유 있�
 DRUG_CODE_RE      = re.compile(r"\[(?:급여|비급여)\]\[(\w+)\]")
 DIAGNOSIS_EN_RE   = re.compile(r"Dx\s*[:：]\s*(.+?)(?=\s+Rx\b|\Z)", re.IGNORECASE)
 DIAGNOSIS_CODE_RE = re.compile(r"질병분류기호\s*[:：]\s*\S+\s*[（(]([^)）]+)[)）]")
+# [2026-07-23 추가] 같은 처방인지 판단할 근거로 "처방번호"는 6개 mock 포맷 중 1개에만
+# 등장해 신뢰도가 낮다(별도로 팀원이 조사 중) — 대신 "조제일자/처방일자/진료일자/조제일"은
+# 6개 포맷 전부에 있고 "YYYY-MM-DD"/"YYYY.MM.DD" 두 형식만 확인됐다.
+PRESCRIPTION_DATE_RE = re.compile(
+    r"(?:조제일자|처방일자|진료일자|조제일)\s*[:：]?\s*(\d{4})[.\-](\d{1,2})[.\-](\d{1,2})"
+)
 
 # ── 한방 첩약 포맷 전용 ──────────────────────────────────────────
 # "당귀 8g", "천궁(川芎) 4g" 형태: 한글 약재명(2~6자) + 선택 한자괄호 + 중량g
@@ -190,6 +196,16 @@ def extract_diagnosis(text: str) -> str:
     # [2026-07-20] 정지 조건을 다 못 거른 텍스트가 와도(예: 예상 못 한 OCR 포맷) DB
     # 컬럼(ocr_results.diagnosis VARCHAR(255)) 저장 자체가 실패하지 않도록 방어적으로 자른다.
     return result[:_MAX_DIAGNOSIS_LEN]
+
+
+def extract_prescription_date(text: str) -> str:
+    """조제일자/처방일자/진료일자/조제일 → "YYYY-MM-DD". 못 찾으면 빈 문자열
+    (날짜를 모르면 그냥 모르는 대로 두고, 이름만으로 비교하던 기존 중복판정 방식으로 폴백한다)."""
+    m = PRESCRIPTION_DATE_RE.search(text)
+    if not m:
+        return ""
+    year, month, day = m.groups()
+    return f"{year}-{int(month):02d}-{int(day):02d}"
 
 
 def lookup_drug_class(drug_name: str) -> str:
