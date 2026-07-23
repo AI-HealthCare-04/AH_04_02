@@ -27,7 +27,7 @@ from services.parsing_rules import parse_prescription
 @dataclass
 class MedicationItem:
     drug_name: str
-    dosage: str            # 예: "500mg" (1회 투약량)
+    dosage: str            # 예: "1정" (1회 복용량 — 환자가 한 번에 먹는 개수/단위. mg 등 성분 함량은 drug_name에 있음)
     frequency: str         # 예: "3회" (1일 투약횟수 — "1일"은 라벨에 있어 값엔 안 넣음)
     diagnosis: str          # 예: "고혈압"
     drug_class: str = ""    # 약효분류, 예: "이뇨제"
@@ -167,14 +167,14 @@ class MockOCRProvider(OCRProvider):
     def extract(self, image_path: str) -> OCRResult:
         # [7/9] 일부러 인식 정확도가 낮은 항목을 섞어둠 — review_required가 실제로
         # 트리거돼야 처방전확인(PrescriptionReview.tsx) 화면을 흐름상 볼 수 있음.
-        # "암로디민"(오타), "500"(단위 누락)은 실제 OCR에서 흔한 오류 패턴.
+        # "암로디민"(오타), "1"(복용량 단위 누락)은 실제 OCR에서 흔한 오류 패턴.
         confidences = [0.65, 0.72]
         result = OCRResult(
-            raw_text="암로디민 5mg 1일 1회 / 고혈압, 제2형 당뇨병 / 메트포르민 500 1일 2회",
+            raw_text="암로디민 5mg 1정 1일 1회 / 고혈압, 제2형 당뇨병 / 메트포르민 500mg 1일 2회",
             medications=[
                 MedicationItem(
                     drug_name="암로디민 5mg",
-                    dosage="5mg",
+                    dosage="1정",
                     frequency="1회",
                     diagnosis="고혈압",
                     drug_class="칼슘채널차단제",
@@ -183,7 +183,7 @@ class MockOCRProvider(OCRProvider):
                 ),
                 MedicationItem(
                     drug_name="메트포르민 500mg",
-                    dosage="500",
+                    dosage="1",
                     frequency="2회",
                     diagnosis="제2형 당뇨병",
                     drug_class="당뇨병용제(비구아니드)",

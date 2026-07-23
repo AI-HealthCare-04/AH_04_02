@@ -41,7 +41,7 @@ function expandInterval(startTime: string, intervalHours: number): string[] {
 
 const FIELDS: { key: keyof OcrMedication; label: string }[] = [
   { key: "drug_name", label: "약품명" },
-  { key: "dosage", label: "1회 투약량" },
+  { key: "dosage", label: "1회 복용량" },
   { key: "frequency", label: "1일 투약횟수" },
   { key: "total_days", label: "총 투약일수" },
   { key: "diagnosis", label: "진단명" },
@@ -67,9 +67,9 @@ function computeIssues(m: OcrMedication, drugNameOk: boolean | undefined, nameOv
     issues.push({ field: "drug_name", message: "약품명이 비어있어요. 입력해주세요." });
   }
   if (m.dosage.trim() && !isDosageValid(m.dosage)) {
-    issues.push({ field: "dosage", message: "1회 투약량 형식이 잘못됐어요 (예: 500mg, 1정처럼 단위를 함께 입력)." });
+    issues.push({ field: "dosage", message: "1회 복용량 형식이 잘못됐어요 (예: 1정, 2캡슐처럼 단위를 함께 입력)." });
   } else if (!m.dosage.trim()) {
-    issues.push({ field: "dosage", message: "1회 투약량이 비어있어요. 입력해주세요." });
+    issues.push({ field: "dosage", message: "1회 복용량이 비어있어요. 입력해주세요." });
   }
   // [2026-07-18] 약효분류는 OCR로 못 잡는 경우가 많아 필수에서 제외 — 비어있어도 확인 완료로
   // 넘어갈 수 있다. 총 투약일수도 같은 이유로 필수가 아니다.
@@ -179,9 +179,11 @@ export default function PrescriptionReview() {
 
   // [2026-07-21 변경] 같은 시간대를 여러 번 고를 수 있어야 해서(중복 허용) 토글이 아니라
   // 클릭할 때마다 추가 — 제거는 아래 목록에서 항목별 × 버튼으로.
+  // [2026-07-23 수정] 여기서 바로 maybeConfirm을 부르면 "1일 3회"라 시간대를 3개 골라야
+  // 하는데 1개만 클릭해도 카드가 곧바로 "확인 완료"로 접혀버렸다 — 시간대 추가 자체는
+  // 더 이상 완료 처리를 트리거하지 않고, 아래 "복용시간 확인 완료" 버튼을 눌러야 확정된다.
   const addDoseTiming = (id: number, timing: string) => {
     setDoseTimings((prev) => ({ ...prev, [id]: [...(prev[id] ?? []), timing] }));
-    maybeConfirm(id);
   };
 
   const removeDoseTimingAt = (id: number, index: number) => {
@@ -193,7 +195,6 @@ export default function PrescriptionReview() {
     if (!time) return;
     setDoseTimings((prev) => ({ ...prev, [id]: [...(prev[id] ?? []), time] }));
     setCustomTimeDraft((prev) => ({ ...prev, [id]: "" }));
-    maybeConfirm(id);
   };
 
   const addInterval = (id: number) => {
@@ -203,7 +204,6 @@ export default function PrescriptionReview() {
     const times = expandInterval(draft.start, hours);
     if (times.length === 0) return;
     setDoseTimings((prev) => ({ ...prev, [id]: [...(prev[id] ?? []), ...times] }));
-    maybeConfirm(id);
   };
 
   const fieldIssues = (item: OcrMedication): FieldIssue[] =>
@@ -758,6 +758,18 @@ export default function PrescriptionReview() {
                                 추가
                               </button>
                             </div>
+
+                            {/* [2026-07-23 추가] "1일 N회"만큼 시간대를 다 고르기 전에 카드가
+                                접히면 안 되므로, 시간대 선택은 완료 처리를 자동으로 트리거하지
+                                않는다 — 다 골랐으면 이 버튼을 눌러야 확인 완료로 넘어간다. */}
+                            <button
+                              type="button"
+                              onClick={() => maybeConfirm(item.id)}
+                              className="w-full mt-4 py-2.5 rounded-xl text-[13px] font-bold transition-all hover:opacity-85"
+                              style={{ background: C.terracotta, color: C.white }}
+                            >
+                              복용시간 확인 완료
+                            </button>
                           </>
                         )}
                       </div>
