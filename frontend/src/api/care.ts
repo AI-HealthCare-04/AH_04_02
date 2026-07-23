@@ -95,6 +95,11 @@ export async function rejectInvitation(token: string) {
   return data;
 }
 
+export async function deleteInvitation(invitationId: number) {
+  const { data } = await monitoringClient.delete(`/invitations/${invitationId}`);
+  return data;
+}
+
 export interface InvitationSummary {
   id: number;
   patient_id: number;

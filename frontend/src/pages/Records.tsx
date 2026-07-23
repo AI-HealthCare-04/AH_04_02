@@ -37,18 +37,27 @@ export default function Records() {
   }, [searchParams]);
 
   useEffect(() => {
-    listRecords(patientId)
-      .then(setRecords)
-      .catch(() => setError("등록내역을 불러오지 못했어요."))
-      .finally(() => setLoading(false));
+    loadRecords();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patientId]);
+
+  const loadRecords = async () => {
+    setError("");
+    try {
+      setRecords(await listRecords(patientId));
+    } catch {
+      setError("등록내역을 불러오지 못했어요.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleDelete = async (recordId: number) => {
     if (deletingId !== null || !window.confirm("이 등록내역을 삭제할까요? 되돌릴 수 없어요.")) return;
     setDeletingId(recordId);
     try {
       await deleteRecord(recordId);
-      setRecords((prev) => prev.filter((r) => r.record_id !== recordId));
+      await loadRecords();
     } catch {
       setError("삭제하지 못했어요. 잠시 후 다시 시도해 주세요.");
     } finally {

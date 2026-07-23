@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from routers.chat_router import (
     _build_on_demand_dur_context,
+    _dur_lookup_modes,
     _extract_dur_candidate_drug_names,
     _is_lifestyle_question,
     _menu_map_text,
@@ -122,8 +123,12 @@ def test_dur_question_does_not_use_general_kdca_rag_context():
     assert _should_answer_from_dur_only("혈압약이랑 같이 먹어도 돼?")
     assert _should_answer_from_dur_only("와파린이랑 타이레놀 같이 복용해도 되나요?")
     assert _should_answer_from_dur_only("아스피린과 와파린을 함께 복용해도 괜찮나요?")
+    assert _should_answer_from_dur_only("노바스크정5밀리그람과 타이레놀 병용 가능해?")
     assert _should_answer_from_dur_only("이 약 드셔도 되나요?")
-    assert _retrieve_chat_rag_docs("이 약 임부금기야?") == []
+    with patch("rag.vectorstore.similarity_search") as mock_search:
+        assert _retrieve_chat_rag_docs("노바스크정5밀리그람과 타이레놀 병용 가능해?") == []
+
+    mock_search.assert_not_called()
 
 
 def test_extract_dur_candidate_includes_unregistered_drug_mentioned_in_question():
@@ -136,6 +141,20 @@ def test_extract_dur_candidate_handles_ingredient_name_without_hardcoded_alias()
     names = _extract_dur_candidate_drug_names("심바스타틴이랑 먹으면 안되는 의약품 정보 알려줘", [])
 
     assert "심바스타틴" in names
+
+
+def test_dur_lookup_modes_avoid_unneeded_caution_apis_for_taboo_question():
+    needs_taboo, needs_cautions = _dur_lookup_modes("노바스크정5밀리그람과 타이레놀 병용 가능해?")
+
+    assert needs_taboo is True
+    assert needs_cautions is False
+
+
+def test_dur_lookup_modes_avoid_unneeded_taboo_api_for_pregnancy_question():
+    needs_taboo, needs_cautions = _dur_lookup_modes("타이레놀 임부금기 있어?")
+
+    assert needs_taboo is False
+    assert needs_cautions is True
 
 
 def test_on_demand_dur_context_queries_drug_mentioned_in_question():
@@ -152,6 +171,25 @@ def test_on_demand_dur_context_queries_drug_mentioned_in_question():
     assert lines
     assert "타이레놀" in lines[0]
     assert "안전 판단으로 확정하지 마세요" in lines[0]
+
+
+def test_on_demand_dur_context_skips_caution_lookup_for_taboo_question():
+    taboo = SimpleNamespace(mixture_item_name="타이레놀정500밀리그람", prohbt_content="상호작용 주의")
+
+    with (
+        patch("rag.mfds_client.search_by_name", return_value=[]),
+        patch("rag.mfds_client.search_permit_info", return_value=[]),
+        patch.dict(
+            _build_on_demand_dur_context.__globals__,
+            {
+                "_search_dur_taboo": lambda _name: [taboo],
+                "_search_dur_cautions": lambda _name: (_ for _ in ()).throw(AssertionError("unexpected caution lookup")),
+            },
+        ),
+    ):
+        lines = _build_on_demand_dur_context("노바스크정5밀리그람과 타이레놀 병용 가능해?", [])
+
+    assert any("타이레놀" in line and "병용금기" in line for line in lines)
 
 
 def test_on_demand_dur_context_resolves_drug_name_then_returns_taboo_list():
@@ -220,6 +258,39 @@ def test_retrieve_chat_rag_docs_prefers_drug_docs_for_non_lifestyle_question():
     mock_search.assert_called_once()
     assert mock_search.call_args.kwargs["filter"] == {"doc_type": "drug"}
     assert docs == [drug_doc]
+
+
+def test_retrieve_chat_rag_docs_uses_exact_drug_name_before_similarity_search():
+    """질문에 약명이 명시되면 ChromaDB 유사도 검색보다 item_name 직접 조회를 먼저 사용한다."""
+    novasc_doc = SimpleNamespace(
+        page_content="혈압을 낮추는 데 사용합니다.",
+        metadata={"item_name": "노바스크정5밀리그람", "field_label": "효능·효과", "doc_type": "drug"},
+    )
+    with (
+        patch("rag.vectorstore.search_by_item_name", return_value=[novasc_doc]) as mock_exact,
+        patch("rag.vectorstore.similarity_search") as mock_similarity,
+    ):
+        docs = _retrieve_chat_rag_docs("노바스크정5밀리그람 효능 알려줘")
+
+    mock_exact.assert_called()
+    mock_similarity.assert_not_called()
+    assert docs == [novasc_doc]
+
+
+def test_retrieve_chat_rag_docs_drops_unmatched_drug_sources():
+    """약명이 명시된 질문에서 다른 약 문서가 검색되면 참고자료로 노출하지 않는다."""
+    tylenol_doc = SimpleNamespace(
+        page_content="해열진통제입니다.",
+        metadata={"item_name": "타이레놀정500밀리그람", "field_label": "효능·효과", "doc_type": "drug"},
+    )
+    with (
+        patch("rag.vectorstore.search_by_item_name", return_value=[]),
+        patch("rag.vectorstore.similarity_search", return_value=[tylenol_doc]) as mock_search,
+    ):
+        docs = _retrieve_chat_rag_docs("노바스크정5밀리그람 효능 알려줘")
+
+    assert mock_search.call_count == 2
+    assert docs == []
 
 
 def test_on_demand_dur_context_creates_langfuse_retriever_span():

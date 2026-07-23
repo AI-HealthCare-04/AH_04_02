@@ -1,4 +1,5 @@
 import inspect
+import json
 from unittest.mock import patch
 
 from langchain_core.documents import Document
@@ -20,6 +21,7 @@ from rag.schemas import (
     GuideResponse,
     HiraDrugMasterEntry,
     LifestyleGuideResult,
+    SourceRef,
 )
 
 FAKE_DOC = Document(
@@ -230,6 +232,41 @@ def test_build_context_adds_no_precaution_items_when_detail_not_matched():
     assert len(context_items) == 1
 
 
+def test_generate_guide_falls_back_to_permit_precaution_when_llm_omits_precautions():
+    """LLM이 precautions를 비워도 사용상의주의사항 근거가 있으면 화면에 표시할 주의문구를 보강한다."""
+    context_items = [
+        {
+            "kind": "drug",
+            "idx": 1,
+            "text": "과량 복용 시 저혈압이 나타날 수 있습니다.",
+            "source_ref": SourceRef(
+                item_seq="1",
+                item_name="암로디핀정5밀리그램",
+                field="사용상의주의사항 - 1. 경고",
+            ),
+        }
+    ]
+
+    with (
+        patch("rag.rag_chain._build_context", return_value=context_items),
+        patch("rag.rag_chain.settings.OPENAI_API_KEY", "test-key"),
+        patch("rag.rag_chain.settings.SELF_CONSISTENCY_SAMPLES", 1),
+        patch("langchain_openai.ChatOpenAI", return_value=object()),
+        patch(
+            "rag.rag_chain._llm_generate_once",
+            return_value={
+                "medication_guide": "암로디핀은 고혈압 치료에 사용합니다.",
+                "precautions": [],
+                "source_refs": [1],
+            },
+        ),
+    ):
+        guide = generate_guide("암로디핀정5밀리그램")
+
+    assert guide.precautions == ["과량 복용 시 저혈압이 나타날 수 있습니다."]
+    assert guide.source_refs[0].field == "사용상의주의사항 - 1. 경고"
+
+
 def test_build_context_permit_detail_lookup_failure_does_not_break_citation():
     """상세정보 조회 자체가 예외를 던져도 e약은요 인용 생성은 막히지 않는다."""
     with (
@@ -421,6 +458,30 @@ def test_generate_lifestyle_guide_for_diagnosis_dry_run_uses_context_text():
     assert result.source_refs[0].guideline_id == "htn-diet-1"
     assert "소금" in result.guide
     assert "dry_run" in result.review_flags
+
+
+def test_generate_lifestyle_guide_falls_back_to_context_when_llm_returns_empty_text():
+    """LLM이 lifestyle_guide를 빈 문자열로 보내도 검색된 생활지침 문구를 화면에 표시한다."""
+
+    class FakeResponse:
+        content = json.dumps({"lifestyle_guide": "", "source_refs": [1]})
+
+    class FakeChat:
+        def invoke(self, _messages):
+            return FakeResponse()
+
+    with (
+        patch("rag.rag_chain.search_kdca_health_info", return_value=[FAKE_KDCA_DOC]),
+        patch("rag.rag_chain.search_by_disease", return_value=[]),
+        patch("rag.rag_chain.settings.OPENAI_API_KEY", "test-key"),
+        patch("rag.rag_chain.settings.SELF_CONSISTENCY_SAMPLES", 1),
+        patch("langchain_openai.ChatOpenAI", return_value=FakeChat()),
+    ):
+        result = generate_lifestyle_guide_for_diagnosis("고혈압")
+
+    assert "관절염은 관절에 염증이 생기는 질환입니다." in result.guide
+    assert result.source_refs[0].source == "질병관리청 국가건강정보포털"
+    assert "empty_lifestyle_fallback" in result.review_flags
 
 
 def test_generate_lifestyle_guide_for_diagnosis_has_no_drug_name_param():

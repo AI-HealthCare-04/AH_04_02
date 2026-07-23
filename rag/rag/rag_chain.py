@@ -374,7 +374,7 @@ def _dry_run_guide(drug_name: str, context_items: list[dict]) -> GuideResponse:
     return GuideResponse(
         drug_name=drug_name,
         medication_guide="\n".join(item["text"] for item in context_items) or "검색된 정보가 없습니다.",
-        precautions=[],
+        precautions=_fallback_precautions_from_context(context_items),
         source_refs=[item["source_ref"] for item in context_items],
         disclaimer=settings.DISCLAIMER,
         self_consistency_score=None,
@@ -382,6 +382,46 @@ def _dry_run_guide(drug_name: str, context_items: list[dict]) -> GuideResponse:
         review_reason="OPENAI_API_KEY 미설정 (dry-run 모드: 검색 결과만 반환)",
         review_flags=["dry_run"],
     )
+
+
+def _fallback_precautions_from_context(context_items: list[dict], limit: int = 3) -> list[str]:
+    """허가사항의 사용상의주의사항 근거가 있는데 LLM이 precautions를 비워 보내면 짧게 보강한다."""
+    results: list[str] = []
+    seen: set[str] = set()
+    for item in context_items:
+        source_ref = item.get("source_ref")
+        field = getattr(source_ref, "field", "") if source_ref is not None else ""
+        if not any(keyword in field for keyword in ("주의", "경고", "금기", "상호작용")):
+            continue
+        text = " ".join(str(item.get("text") or "").split())
+        if not text:
+            continue
+        if len(text) > 180:
+            text = f"{text[:180].rstrip()}..."
+        if text in seen:
+            continue
+        seen.add(text)
+        results.append(text)
+        if len(results) >= limit:
+            break
+    return results
+
+
+def _fallback_lifestyle_guide_from_context(context_items: list[dict], limit: int = 3) -> str:
+    """생활습관 근거가 있는데 LLM이 lifestyle_guide를 비워 보내면 검색 문구로 보강한다."""
+    lines: list[str] = []
+    seen: set[str] = set()
+    for item in context_items:
+        if item.get("kind") != "lifestyle":
+            continue
+        text = " ".join(str(item.get("text") or "").split())
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        lines.append(text)
+        if len(lines) >= limit:
+            break
+    return "\n".join(lines)
 
 
 def _llm_generate_once(
@@ -464,7 +504,9 @@ def generate_guide(
     raw_precautions = best.get("precautions") or []
     if not isinstance(raw_precautions, list):
         raw_precautions = [raw_precautions]
-    precautions = [str(p) for p in raw_precautions]
+    precautions = [str(p) for p in raw_precautions if str(p).strip()]
+    if not precautions:
+        precautions = _fallback_precautions_from_context(used_items or context_items)
 
     # hallucination 방어: 인용(source_refs)이 하나도 없으면 참고자료 근거 없이 생성된
     # 답변이므로, self-consistency 점수와 무관하게 사람이 검토하도록 표시한다.
@@ -581,9 +623,21 @@ def generate_lifestyle_guide_for_diagnosis(diagnosis: str | None) -> LifestyleGu
         )
         flags.append("low_self_consistency")
 
+    guide_text = str(best.get("lifestyle_guide") or "").strip()
+    if not guide_text:
+        guide_text = _fallback_lifestyle_guide_from_context(used_items or context_items)
+        if guide_text:
+            reasons.append("LLM이 생활습관 안내 본문을 비워 검색 근거 문구로 보강했습니다.")
+            flags.append("empty_lifestyle_fallback")
+
+    if not guide_text:
+        guide_text = f"'{diagnosis}'에 대한 생활습관 안내를 생성하지 못했어요. 담당 의료진과 상담해 주세요."
+        reasons.append("생활습관 안내 본문이 비어 있습니다.")
+        flags.append("empty_lifestyle_guide")
+
     return LifestyleGuideResult(
         diagnosis=diagnosis,
-        guide=best.get("lifestyle_guide") or "",
+        guide=guide_text,
         source_refs=source_refs,
         review_required=bool(reasons),
         review_reason=" ".join(reasons) if reasons else None,

@@ -21,7 +21,15 @@ from datetime import datetime
 from core.database import get_session
 from core.dependencies import Actor, get_current_actor, require_actor_patient_access
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from models import Caregiver, GuideResult, MedicalRecord, MedicationSchedule, OcrResult, Patient
+from models import (
+    Caregiver,
+    GuideResult,
+    MedicalRecord,
+    MedicationSchedule,
+    OcrResult,
+    Patient,
+    PatientMedication,
+)
 from pydantic import BaseModel
 from services.drug_matcher import MATCH_THRESHOLD, match_drug
 from sqlmodel import Session, select
@@ -482,6 +490,10 @@ def delete_record(
     [2026-07-20 추가] 이 처방전에서 자동 생성된 복약 일정(MedicationSchedule.record_id로
     연결됨)도 함께 비활성화한다 — 안 그러면 "삭제한" 처방전의 약이 대시보드/스케줄러
     알림에 계속 남아있게 된다(리뷰에서 발견).
+
+    [2026-07-22 추가] PatientMedication.prescription_id로 연결된 내약 데이터도 함께
+    soft-delete한다. 등록내역 화면에서는 사라졌지만 내약/일정 화면에 처방전 기반 약이
+    계속 남으면 사용자는 "다음 로그인 때 삭제가 안 됐다"고 느끼게 된다.
     """
     record = session.get(MedicalRecord, record_id)
     if not record or record.deleted_at is not None:
@@ -497,6 +509,26 @@ def delete_record(
     for schedule in schedules:
         schedule.active = False
         session.add(schedule)
+
+    medications = session.exec(
+        select(PatientMedication)
+        .where(PatientMedication.prescription_id == record_id)
+        .where(PatientMedication.deleted_at.is_(None))
+    ).all()
+    medication_ids = [medication.id for medication in medications if medication.id is not None]
+    for medication in medications:
+        medication.deleted_at = datetime.now()
+        medication.is_active = False
+        medication.updated_at = datetime.now()
+        session.add(medication)
+
+    if medication_ids:
+        linked_schedules = session.exec(
+            select(MedicationSchedule).where(MedicationSchedule.patient_medication_id.in_(medication_ids))
+        ).all()
+        for schedule in linked_schedules:
+            schedule.active = False
+            session.add(schedule)
 
     session.commit()
     return {"message": "삭제됐어요"}
