@@ -23,6 +23,7 @@ from core.dependencies import (
     get_current_actor,
     get_current_caregiver,
     get_current_caregiver_optional,
+    get_current_patient_optional,
     require_actor_patient_access,
 )
 from core.security import hash_phone, hash_token, normalize_phone
@@ -129,6 +130,9 @@ class InvitationAccept(BaseModel):
     patient_email: str | None = None
     patient_password: str | None = None
     patient_phone: str | None = None
+    # [2026-07-23 추가] 수락자가 이미 로그인된 기존 환자 계정이면 이 값을 보내 새 계정을
+    # 또 만들지 않고 그 계정을 그대로 연결한다(caregiver_id를 재사용하는 위 패턴과 동일).
+    patient_id: int | None = None
 
 
 class InvitationPublic(BaseModel):
@@ -226,6 +230,7 @@ def accept_invitation(
     payload: InvitationAccept,
     session: Session = Depends(get_session),
     actor: Caregiver | None = Depends(get_current_caregiver_optional),
+    patient_actor: Patient | None = Depends(get_current_patient_optional),
 ):
     """[2026-07-22 수정 — HIGH, 팀원 리뷰(fkmc10101-hub) 지적 반영] 이 엔드포인트는 계정이
     없는 사람도 써야 해서(인증 없이 새 보호자 계정을 만드는 경로) 여전히 로그인을 강제하지
@@ -246,12 +251,40 @@ def accept_invitation(
     # 종류와 무관하게 모든 수락 경로에 공통으로 적용해야 한다(2026-07-20 수정 — patient 분기가
     # 이 체크보다 먼저 return해서 우회되고 있었음).
     if invitation.invited_phone:
-        provided_phone = payload.patient_phone if invitation.relation_type == "patient" else payload.phone
+        if invitation.relation_type == "patient" and payload.patient_id:
+            provided_phone = patient_actor.phone if patient_actor else None
+        else:
+            provided_phone = payload.patient_phone if invitation.relation_type == "patient" else payload.phone
         if not provided_phone or normalize_phone(provided_phone) != normalize_phone(invitation.invited_phone):
             raise HTTPException(403, "초대받은 전화번호와 일치하지 않아요.")
 
     if invitation.relation_type == "patient":
-        # 보호자→환자 초대 수락 = 환자 본인이 실제 로그인 가능한 계정을 만든다.
+        if payload.patient_id:
+            # [2026-07-23 추가] 이미 로그인된 환자 계정으로 수락 — 새 계정을 만들지 않고
+            # 그 계정을 그대로 이 초대를 보낸 보호자에게 연결한다. caregiver_id 재사용
+            # 검증과 동일하게, 실제 로그인된 본인인지부터 확인한다.
+            if patient_actor is None or patient_actor.id != payload.patient_id:
+                raise HTTPException(403, "본인 계정으로 로그인한 상태에서만 기존 계정으로 수락할 수 있어요.")
+            if invitation.inviter_caregiver_id:
+                existing_link = session.exec(
+                    select(CaregiverPatient)
+                    .where(CaregiverPatient.caregiver_id == invitation.inviter_caregiver_id)
+                    .where(CaregiverPatient.patient_id == patient_actor.id)
+                ).first()
+                if not existing_link:
+                    session.add(
+                        CaregiverPatient(
+                            caregiver_id=invitation.inviter_caregiver_id, patient_id=patient_actor.id
+                        )
+                    )
+            invitation.patient_id = patient_actor.id
+            invitation.status = "accepted"
+            invitation.accepted_at = datetime.now()
+            session.add(invitation)
+            session.commit()
+            return {"patient_id": patient_actor.id, "status": "accepted"}
+
+        # 보호자→환자 초대 수락(신규) = 환자 본인이 실제 로그인 가능한 계정을 만든다.
         if not payload.patient_name:
             raise HTTPException(400, "환자 이름을 입력해 주세요.")
         new_patient = _register_patient(

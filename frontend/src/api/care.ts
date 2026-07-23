@@ -84,6 +84,8 @@ export async function acceptInvitation(
     patient_email?: string;
     patient_password?: string;
     patient_phone?: string;
+    // [2026-07-23 추가] 이미 로그인된 환자 계정으로 수락할 때 — 새 계정을 만들지 않고 이 id를 그대로 연결
+    patient_id?: number;
   }
 ) {
   const { data } = await monitoringClient.post(`/invitations/${token}/accept`, payload);

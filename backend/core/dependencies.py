@@ -50,10 +50,14 @@ def get_current_caregiver_optional(
 ) -> Caregiver | None:
     """[2026-07-22 추가, 팀원 리뷰 반영 — HIGH] get_current_caregiver의 "선택적" 버전 —
     Authorization 헤더가 없으면 조용히 None을 반환한다(완전 비인증 흐름을 막지 않기 위함).
-    단, 헤더가 있는데 토큰이 무효/만료됐거나 caregiver 역할이 아니면 여전히 401을 던진다
-    (있는데 잘못된 토큰까지 "로그인 안 한 것"으로 조용히 넘기면 호출부가 잘못된 신뢰를
-    할 수 있다 — care_router.accept_invitation()이 이 값으로 payload.caregiver_id를
-    검증하는 용도로 쓴다)."""
+    토큰이 무효/만료됐으면 여전히 401을 던진다.
+
+    [2026-07-23 수정] role이 "caregiver"가 아닐 때도 이전엔 401을 던졌는데,
+    accept_invitation()이 이제 get_current_patient_optional도 같은 요청에 같이 걸어둔다
+    (수락자가 보호자일지 환자일지 미리 알 수 없어서) — 환자 토큰으로 요청하면 role
+    불일치로 매번 401이 나서 patient_id 검증 로직에 도달하기도 전에 요청이 막혔다. 이제는
+    조용히 None을 반환하고, payload.caregiver_id 검증(아래 accept_invitation)이 actor가
+    None이면 403으로 거부하므로 보안 목적은 동일하게 유지된다."""
     if credential is None:
         return None
     try:
@@ -61,7 +65,7 @@ def get_current_caregiver_optional(
     except jwt.PyJWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="유효하지 않거나 만료된 토큰입니다.")
     if role != "caregiver":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="보호자 계정 토큰이 아닙니다.")
+        return None
 
     caregiver = session.get(Caregiver, subject_id)
     if not caregiver:
@@ -82,6 +86,38 @@ def get_current_patient(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="유효하지 않거나 만료된 토큰입니다.")
     if role != "patient":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="환자 계정 토큰이 아닙니다.")
+
+    patient = session.get(Patient, subject_id)
+    if not patient:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증에 실패했습니다.")
+    if patient.deactivated_at is not None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="탈퇴 처리된 계정입니다.")
+    return patient
+
+
+def get_current_patient_optional(
+    credential: HTTPAuthorizationCredentials | None = Depends(_optional_security),
+    session: Session = Depends(get_session),
+) -> Patient | None:
+    """get_current_caregiver_optional의 환자 버전 — care_router.accept_invitation()이
+    "보호자→환자 초대"를 이미 로그인된 기존 환자 계정으로 바로 수락할 때, payload.patient_id를
+    실제 로그인된 그 계정인지 검증하는 용도로 쓴다.
+
+    [주의] get_current_caregiver_optional과 달리 role이 안 맞으면 401을 던지지 않고 조용히
+    None을 반환한다 — accept_invitation()이 이 함수와 get_current_caregiver_optional을 같은
+    요청에 동시에 걸어두므로(수락자가 보호자일지 환자일지 미리 알 수 없음), 로그인된 보호자
+    토큰으로 요청하면 이 함수 입장에선 "역할이 다른 유효한 토큰"이라 매번 401을 던져
+    caregiver_id 검증 로직까지 도달하기 전에 요청 전체가 막혀버린다. 대신 아래 accept_invitation
+    쪽에서 `patient_id`가 왔는데 patient_actor가 None이면 403으로 거부하므로 보안 목적은
+    동일하게 달성된다."""
+    if credential is None:
+        return None
+    try:
+        subject_id, role = decode_token(credential.credentials, expected_type="access")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="유효하지 않거나 만료된 토큰입니다.")
+    if role != "patient":
+        return None
 
     patient = session.get(Patient, subject_id)
     if not patient:
