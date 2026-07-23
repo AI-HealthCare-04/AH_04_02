@@ -164,9 +164,13 @@ export default function MyInfo() {
       if (caregiverId) {
         await updateCaregiver(caregiverId, {
           name: isOrganization ? orgName.trim() : name.trim(),
-          phone: phone.trim() || undefined,
-          email: email.trim() || undefined,
-          birth_date: birthDate.trim() || undefined,
+          // [2026-07-23 수정, 팀원 리뷰 반영] `|| undefined`를 쓰면 axios가 JSON으로
+          // 직렬화할 때 이 키 자체를 통째로 빼버려서(undefined는 JSON에 안 실림), 백엔드의
+          // model_dump(exclude_unset=True)가 "안 건드림"으로 해석했다 — 필드를 지우고
+          // 저장해도 기존 값이 그대로 남는 버그였다. 빈 문자열도 그대로 보내야 실제로 지워진다.
+          phone: phone.trim(),
+          email: email.trim(),
+          birth_date: birthDate.trim(),
           push_enabled: pushEnabled,
           sms_enabled: smsEnabled,
           email_opt_in: emailOptIn,
@@ -183,9 +187,9 @@ export default function MyInfo() {
       } else if (patientId != null) {
         await updatePatient(patientId, {
           name: name.trim(),
-          phone: phone.trim() || undefined,
-          email: email.trim() || undefined,
-          birth_date: birthDate.trim() || undefined,
+          phone: phone.trim(),
+          email: email.trim(),
+          birth_date: birthDate.trim(),
           gender: gender || undefined,
           push_enabled: pushEnabled,
           sms_enabled: smsEnabled,

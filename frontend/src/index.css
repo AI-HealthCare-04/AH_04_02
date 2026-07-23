@@ -2,7 +2,7 @@
 
 /*
  * [7/8] 예전엔 여기 커스텀 리셋에 `*, *::before, *::after { margin:0; padding:0 }`가 있었는데,
- * 레이어 없이(unlayered) 두면 이게 mx-auto/px-*/py-* 같은 Tailwind 유틸리티를 전부 이겨버려서
+ * 레이어 없이(unlayered) 두면 이게 mx-auto/px-* /py-* 같은 Tailwind 유틸리티를 전부 이겨버려서
  * @layer base로 감싸 우선순위를 낮췄었습니다.
  * [2026-07-20] 그런데 이 프로젝트 빌드 파이프라인(Docker 컨테이너의 Tailwind v4 + Vite)에서
  * 이 파일에 "@layer base"를 다시 열어 쓴 블록 전체가 파싱 단계에서 통째로 유실되는 문제를 발견
