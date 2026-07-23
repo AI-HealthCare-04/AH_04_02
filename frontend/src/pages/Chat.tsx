@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import NavBar from "../components/NavBar";
+import PatientContextBanner from "../components/PatientContextBanner";
 import { askChatFreeformStream, askChatStream, getChatQuestions, type ChatQuestion } from "../api/chat";
 import { getNotificationSettings } from "../api/care";
 import { formatUniqueSourceRefs, type SourceRef } from "../api/records";
@@ -142,6 +143,9 @@ export default function Chat() {
     <div className="h-screen flex flex-col" style={{ background: C.ivory }}>
       <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl lg:max-w-4xl mx-auto w-full px-4 py-6 flex flex-col flex-1 min-h-0">
+        <div className="shrink-0">
+          <PatientContextBanner />
+        </div>
         <div className="mb-5 shrink-0">
           <p className="text-[13px] font-bold mb-1" style={{ color: C.terracotta }}>AI 복약 상담</p>
           <h1 className="text-[24px] font-black" style={{ color: C.dark }}>{chatbotName}</h1>

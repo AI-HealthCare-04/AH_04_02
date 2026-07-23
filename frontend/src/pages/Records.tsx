@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Search, FileText, ChevronRight, Trash2, Star, CheckSquare, Square } from "lucide-react";
 import NavBar from "../components/NavBar";
+import PatientContextBanner from "../components/PatientContextBanner";
 import { deleteRecord, listRecords, pinRecord, type RecordSummary } from "../api/records";
 import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
@@ -135,6 +136,7 @@ export default function Records() {
     <div className="min-h-screen" style={{ background: C.ivory }}>
       <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
+        <PatientContextBanner />
         <div className="flex items-start justify-between mb-1">
           <h1 className="text-[26px] font-black" style={{ color: C.dark }}>등록내역</h1>
           {records.length > 0 && (

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CheckSquare, Plus, Square, X } from "lucide-react";
 import NavBar from "../components/NavBar";
+import PatientContextBanner from "../components/PatientContextBanner";
 import {
   createSchedule,
   deleteSchedule,
@@ -278,6 +279,7 @@ export default function SchedulePage() {
     <div className="min-h-screen bg-[#F2E8D8]">
       <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-3xl mx-auto px-6 sm:px-8 py-10">
+        <PatientContextBanner />
         <div className="flex items-center justify-between mb-7 flex-wrap gap-3">
           <div>
             <h1 className="text-[26px] font-black text-[#1E1A17]">복약 일정</h1>

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import NavBar from "../components/NavBar";
+import PatientContextBanner from "../components/PatientContextBanner";
 import { checkIntake, getLogs, getSchedules, type MedicationLogEntry, type Schedule } from "../api/monitoring";
 import { getDrugIndication, type DrugIndicationInfo } from "../api/records";
 import { getCurrentCaregiverId, getCurrentUserName, useGuardedPatientId } from "../lib/session";
@@ -78,6 +79,7 @@ export default function DrugDetail() {
     <div className="min-h-screen" style={{ background: C.ivory }}>
       <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
+        <PatientContextBanner afterSwitchPath="/monitoring" />
         <button
           onClick={() => navigate("/monitoring")}
           className="flex items-center gap-1 text-[13px] font-bold mb-6 hover:opacity-60 transition-opacity"

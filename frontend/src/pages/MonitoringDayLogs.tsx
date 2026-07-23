@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ChevronLeft, Clock, FileText, Heart } from "lucide-react";
 import NavBar from "../components/NavBar";
+import PatientContextBanner from "../components/PatientContextBanner";
 import { getLogs, type MedicationLogEntry } from "../api/monitoring";
 import { listRecords, type RecordSummary } from "../api/records";
 import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
@@ -48,6 +49,7 @@ export default function MonitoringDayLogs() {
     <div className="min-h-screen" style={{ background: C.ivory }}>
       <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
+        <PatientContextBanner afterSwitchPath="/monitoring" />
         <button
           onClick={() => navigate("/monitoring")}
           className="flex items-center gap-1 text-[13px] font-bold mb-5 hover:opacity-60 transition-opacity"

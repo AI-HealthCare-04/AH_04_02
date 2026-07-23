@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import NavBar from "../components/NavBar";
+import PatientContextBanner from "../components/PatientContextBanner";
 import { getNotificationSettings, updateNotificationSettings, type NotificationSettings } from "../api/care";
 import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
@@ -60,6 +61,7 @@ export default function Notification() {
     <div className="min-h-screen bg-[#F2E8D8]">
       <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-xl mx-auto px-6 sm:px-8 py-10">
+        <PatientContextBanner />
         <h1 className="text-[26px] font-black text-[#1E1A17] mb-1">알림 설정</h1>
         <p className="text-[14px] text-[#8A7E75] mb-7">받고 싶은 알림을 선택하세요.</p>
 

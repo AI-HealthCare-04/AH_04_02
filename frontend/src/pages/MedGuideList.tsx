@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FileText, ChevronRight } from "lucide-react";
 import NavBar from "../components/NavBar";
+import PatientContextBanner from "../components/PatientContextBanner";
 import { listRecords, type RecordSummary } from "../api/records";
 import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
@@ -38,6 +39,7 @@ export default function MedGuideList() {
     <div className="min-h-screen" style={{ background: C.ivory }}>
       <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
+        <PatientContextBanner />
         <h1 className="text-[26px] font-black mb-1" style={{ color: C.dark }}>복약 가이드</h1>
         <p className="text-[14px] mb-7" style={{ color: C.muted }}>
           지금까지 완성된 복약 안내를 모아서 볼 수 있어요.
