@@ -1,43 +1,6 @@
 import { monitoringClient } from "./monitoringClient";
 
-// ── 1. 자가진단 (Assessment) ──
-
-export type Level = "normal" | "mild" | "severe";
-export type CareLevel = "independent" | "guardian_check" | "third_party_needed";
-
-export interface AssessmentResult {
-  id: number;
-  patient_id: number;
-  cognitive_level: Level;
-  mobility_level: Level;
-  vision_level: Level;
-  medication_awareness: boolean;
-  medication_willingness: boolean;
-  care_level: CareLevel;
-  reason: string;
-  evaluated_at: string;
-}
-
-export async function createAssessment(payload: {
-  patient_id: number;
-  cognitive_level: Level;
-  mobility_level: Level;
-  vision_level: Level;
-  medication_awareness: boolean;
-  medication_willingness: boolean;
-}) {
-  const { data } = await monitoringClient.post<AssessmentResult>("/assessments", payload);
-  return data;
-}
-
-export async function getLatestAssessment(patientId: number) {
-  const { data } = await monitoringClient.get<AssessmentResult | null>("/assessments/latest", {
-    params: { patient_id: patientId },
-  });
-  return data;
-}
-
-// ── 2. 보호자 초대 (Invitation) ──
+// ── 1. 보호자 초대 (Invitation) ──
 
 export interface InvitationCreated {
   token: string;
@@ -143,6 +106,37 @@ export async function acceptInvitationAsCaregiver(invitationId: number) {
 
 export async function rejectInvitationAsCaregiver(invitationId: number) {
   const { data } = await monitoringClient.post(`/invitations/${invitationId}/reject-as-caregiver`);
+  return data;
+}
+
+// ── 2. 돌봄관계 해제 승인 (Trust Relation Revocation) ──
+// [2026-07-23 추가] 기관(organization) 계정이 연결을 끊을 때는 사유를 남기고 환자/보호자의
+// 승인을 기다려야 한다(monitoringClient.unlinkCaregiverPatient가 reason을 보내면 서버가
+// 바로 끊는 대신 대기 상태로 전환). 이 두 함수는 그 대기 요청을 받는 쪽(환자/보호자)이
+// 확인·승인/거부하는 데 쓴다.
+
+export interface PendingRevocation {
+  trust_id: number;
+  patient_id: number;
+  patient_name: string;
+  caregiver_id: number;
+  caregiver_name: string;
+  reason: string | null;
+  requested_at: string | null;
+  requested_by_role: string;
+  deadline: string | null;
+  can_finalize: boolean;
+}
+
+export async function listPendingRevocations() {
+  const { data } = await monitoringClient.get<PendingRevocation[]>("/trust/relations/pending");
+  return data;
+}
+
+export async function approveRevocation(trustId: number, approve: boolean) {
+  const { data } = await monitoringClient.post(`/trust/relations/${trustId}/revocation-approval`, {
+    approve,
+  });
   return data;
 }
 

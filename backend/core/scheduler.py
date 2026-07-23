@@ -30,7 +30,6 @@ from datetime import date, datetime, timedelta
 from models import (
     Caregiver,
     CaregiverPatient,
-    CareLevelAssessment,
     MedicationRecord,
     MedicationSchedule,
     NotificationLog,
@@ -107,10 +106,12 @@ def _already_logged(session: Session, schedule_id: int, due_date: str, time_slot
 
 
 def _recipients(session: Session, patient: Patient, schedule: MedicationSchedule) -> list[tuple[str, str]]:
-    """(채널라벨, 이메일) 목록. care_level == third_party_needed면 연결된 caregiver 전원에게
-    보낸다(REQ-026d) — 아니면 첫 연결(caregiver_patients 최초 1건)만 "주 보호자"로 취급한다.
+    """(채널라벨, 이메일) 목록. 첫 연결(caregiver_patients 최초 1건)만 "주 보호자"로 취급한다.
     "최초 연결 = 주 보호자"는 임의의 단순화이며, 실제 주/부 보호자 구분 필드가 생기면
     바꿔야 한다(라운드2에서 확인된 한계, 팀 공유 필요).
+
+    [2026-07-23 삭제] care_level(자가진단) 기반 "전원 알림" 분기를 제거했다 — 자가진단을 만드는
+    화면이 없어 assessment가 항상 None이라 이 분기는 실질적으로 한 번도 탄 적이 없었다.
 
     [2026-07-19 round5 수정] schedule.caregiver_alert(monitoring_router.py 스케줄 생성/수정
     API에 이미 있는 "이 일정만 보호자에게 알릴지" per-schedule 토글)를 지금까지 전혀 참고하지
@@ -128,23 +129,18 @@ def _recipients(session: Session, patient: Patient, schedule: MedicationSchedule
     # 같게 보이지만 SQL 표준상 보장되지 않는다 — 이 팀의 실제 dev/운영 DB는 MySQL이라(공유
     # Aiven DB) 백엔드마다 순서가 달라질 수 있다. id 오름차순으로 명시해 "최초 연결"이 어느
     # 백엔드에서도 실제로 최초 연결을 가리키도록 고정한다.
+    # [2026-07-23 추가] status != "revoked" — 연결이 끊긴(또는 기관이 끊는 중인) 보호자에게
+    # 계속 알림이 가던 걸 막는다. revocation_pending은 아직 실제로 끊긴 게 아니므로 포함한다.
     links = session.exec(
         select(CaregiverPatient)
         .where(CaregiverPatient.patient_id == patient.id)
+        .where(CaregiverPatient.status != "revoked")
         .order_by(CaregiverPatient.id)
     ).all()
     if not links:
         return recipients
 
-    assessment = session.exec(
-        select(CareLevelAssessment)
-        .where(CareLevelAssessment.patient_id == patient.id)
-        .order_by(CareLevelAssessment.evaluated_at.desc(), CareLevelAssessment.id.desc())
-    ).first()
-    notify_all = assessment is not None and assessment.care_level == "third_party_needed"
-
-    target_links = links if notify_all else links[:1]
-    for link in target_links:
+    for link in links[:1]:
         caregiver = session.get(Caregiver, link.caregiver_id)
         if caregiver and caregiver.email_opt_in and caregiver.email:
             recipients.append((f"email:caregiver:{caregiver.id}", caregiver.email))

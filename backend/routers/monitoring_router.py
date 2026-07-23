@@ -188,7 +188,9 @@ def list_patients(actor: Actor = Depends(get_current_actor), session: Session = 
     if role == "patient":
         return [subject]
     links = session.exec(
-        select(CaregiverPatient).where(CaregiverPatient.caregiver_id == subject.id)
+        select(CaregiverPatient)
+        .where(CaregiverPatient.caregiver_id == subject.id)
+        .where(CaregiverPatient.status != "revoked")
     ).all()
     patient_ids = [link.patient_id for link in links]
     if not patient_ids:
@@ -500,7 +502,9 @@ def list_patients_of_caregiver(
         raise HTTPException(403, "다른 보호자의 환자 목록은 볼 수 없어요")
 
     links = session.exec(
-        select(CaregiverPatient).where(CaregiverPatient.caregiver_id == caregiver_id)
+        select(CaregiverPatient)
+        .where(CaregiverPatient.caregiver_id == caregiver_id)
+        .where(CaregiverPatient.status != "revoked")
     ).all()
     patient_ids = [link.patient_id for link in links]
     if not patient_ids:
@@ -528,7 +532,9 @@ def list_caregivers_of_patient(
     require_actor_patient_access(patient_id, actor, session)
 
     links = session.exec(
-        select(CaregiverPatient).where(CaregiverPatient.patient_id == patient_id)
+        select(CaregiverPatient)
+        .where(CaregiverPatient.patient_id == patient_id)
+        .where(CaregiverPatient.status != "revoked")
     ).all()
     caregiver_ids = [link.caregiver_id for link in links]
     if not caregiver_ids:
@@ -563,10 +569,23 @@ def link_caregiver_to_patient(
         .where(CaregiverPatient.patient_id == patient_id)
     ).first()
     if existing:
+        if existing.status == "revoked":
+            # [2026-07-23 추가] 과거에 해제된 연결이면 새 행을 또 만들지 않고 재활성화한다.
+            existing.status = "active"
+            existing.revoked_at = None
+            existing.revocation_requested_by = None
+            existing.requested_by_role = None
+            existing.revocation_reason = None
+            existing.revocation_requested_at = None
+            session.add(existing)
+            session.commit()
+            return {"linked": True, "caregiver_id": caregiver_id, "patient_id": patient_id}
         return {"already_linked": True}
 
     has_any_caregiver = session.exec(
-        select(CaregiverPatient).where(CaregiverPatient.patient_id == patient_id)
+        select(CaregiverPatient)
+        .where(CaregiverPatient.patient_id == patient_id)
+        .where(CaregiverPatient.status != "revoked")
     ).first()
     if has_any_caregiver:
         raise HTTPException(403, "이미 다른 보호자가 연결된 환자예요. 추가 연결은 초대 링크를 통해서만 가능해요.")
@@ -580,10 +599,21 @@ def link_caregiver_to_patient(
 def unlink_caregiver_from_patient(
     caregiver_id: int,
     patient_id: int,
+    reason: str | None = None,
     actor: Actor = Depends(get_current_actor),
     session: Session = Depends(get_session),
 ):
-    """Connect.tsx — 보호자 본인이거나 환자 본인이어야 그 연결을 해제할 수 있다."""
+    """Connect.tsx/PatientManagement.tsx — 보호자 본인이거나 환자 본인이어야 그 연결을 해제할 수 있다.
+
+    [2026-07-23 수정] 기관(organization) 계정이 연결을 끊을 때는 즉시 끊지 않는다 — 환자·보호자가
+    스스로 관리하기 어려운 상황에서 기관이 사유 없이 일방적으로 손을 떼는 걸 막기 위해, 상대(환자
+    또는 다른 보호자)가 승인해야 실제로 끊긴다(POST /trust/relations/{trust_id}/revocation-approval).
+    대신 정당한 사유로 끊으려는 기관이 상대의 무응답에 무기한 묶이지 않도록, 사유 입력을 필수로
+    하고 14일 안에 응답이 없으면 요청자 스스로 확정할 수 있다(approve_revocation의 타임아웃 처리).
+    개인 보호자·환자 본인이 끊을 때는 기존과 동일하게 즉시 처리한다.
+
+    [2026-07-23 수정] 하드 삭제 대신 status를 남기는 소프트 삭제로 바꿨다 — 이 앱의 다른 모델들과
+    같은 소프트 삭제 관례를 따르고, 감사 이력(누가 언제 왜 끊었는지)을 보존한다."""
     role, subject = actor
     if (role == "caregiver" and subject.id != caregiver_id) or (role == "patient" and subject.id != patient_id):
         raise HTTPException(403, "이 연결을 해제할 권한이 없어요")
@@ -591,12 +621,31 @@ def unlink_caregiver_from_patient(
         select(CaregiverPatient)
         .where(CaregiverPatient.caregiver_id == caregiver_id)
         .where(CaregiverPatient.patient_id == patient_id)
+        .where(CaregiverPatient.status != "revoked")
     ).first()
     if not link:
         raise HTTPException(404, "연결된 내역이 없어요")
-    session.delete(link)
+    if link.status == "revocation_pending":
+        raise HTTPException(409, "이미 해제 승인 대기 중인 연결이에요")
+
+    is_institution = role == "caregiver" and getattr(subject, "relation_type", None) == "organization"
+    if is_institution:
+        if not reason or not reason.strip():
+            raise HTTPException(400, "연결을 끊는 사유를 입력해 주세요.")
+        link.status = "revocation_pending"
+        link.revocation_requested_by = subject.id
+        link.requested_by_role = role
+        link.revocation_reason = reason.strip()
+        link.revocation_requested_at = datetime.now()
+        session.add(link)
+        session.commit()
+        return {"unlinked": False, "status": "revocation_pending"}
+
+    link.status = "revoked"
+    link.revoked_at = datetime.now()
+    session.add(link)
     session.commit()
-    return {"unlinked": True}
+    return {"unlinked": True, "status": "revoked"}
 
 
 # ══════════════════════════════════════════

@@ -186,6 +186,12 @@ class CaregiverPatient(SQLModel, table=True):
     revocation_requested_by: int | None = Field(default=None)
     # requested_by_role: 요청자가 caregiver인지 patient인지 구분 — 자기승인 가드에 사용
     requested_by_role: str | None = Field(default=None)  # "caregiver" | "patient"
+    # [2026-07-23 추가] 기관이 연결을 끊을 때 반드시 남겨야 하는 사유 — 환자/보호자가 승인
+    # 여부를 판단하는 근거가 된다.
+    revocation_reason: str | None = Field(default=None)
+    # [2026-07-23 추가] 승인 대기 시작 시각 — 2주(14일) 안에 상대가 응답하지 않으면 요청자가
+    # 스스로 확정(자동 승인)할 수 있게 하는 타임아웃 기준점.
+    revocation_requested_at: datetime | None = Field(default=None)
 
 
 # ── 비밀번호 재설정 임시코드 [2026-07-15 추가, REQ-039] ──
@@ -441,22 +447,6 @@ class MedicationRecord(SQLModel, table=True):
 # ══════════════════════════════════════════════════════════
 # [7/7 추가] Figma 화면 전체 연결을 위한 신규 테이블
 # ══════════════════════════════════════════════════════════
-
-# ── 자가진단 결과 (담당: 박소정) — Check.tsx/AssessmentPage 저장용 ──
-class CareLevelAssessment(SQLModel, table=True):
-    __tablename__ = "care_level_assessments"
-
-    id: int | None = Field(default=None, primary_key=True)
-    patient_id: int = Field(foreign_key="patients.id")
-    cognitive_level: str = "normal"  # normal / mild / severe
-    mobility_level: str = "normal"
-    vision_level: str = "normal"
-    medication_awareness: bool = True
-    medication_willingness: bool = True
-    care_level: str = "independent"  # independent / guardian_check / third_party_needed
-    reason: str = ""
-    evaluated_at: datetime = Field(default_factory=datetime.now)
-
 
 # ── 보호자 초대 (담당: 박소정) — CaregiverPage/InvitePage 실제 연동용 ──
 # [2026-07-15] 보안 검토 반영: 토큰 원문 대신 해시 저장(token_hash), 만료시각 추가(expires_at),

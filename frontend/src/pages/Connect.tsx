@@ -5,12 +5,15 @@ import NavBar from "../components/NavBar";
 import InvitePatientPanel from "../components/InvitePatientPanel";
 import {
   acceptInvitationAsCaregiver,
+  approveRevocation,
   createInvitation,
   deleteInvitation,
   listInvitations,
+  listPendingRevocations,
   listReceivedInvitations,
   rejectInvitationAsCaregiver,
   type InvitationSummary,
+  type PendingRevocation,
   type ReceivedInvitation,
 } from "../api/care";
 import { getPatientCaregivers, unlinkCaregiverPatient, type Caregiver } from "../api/monitoring";
@@ -55,6 +58,11 @@ export default function Connect() {
   const [actingInvitationId, setActingInvitationId] = useState<number | null>(null);
   const [inviteUrlInput, setInviteUrlInput] = useState("");
   const [inviteUrlError, setInviteUrlError] = useState("");
+  // [2026-07-23 추가] "받은 해제 요청" — 기관이 사유를 남기고 연결 해제를 요청하면, 환자
+  // 본인이나 그 환자와 연결된 다른 보호자가 여기서 승인/거부한다(역할에 따라 백엔드가
+  // 알아서 필터링해 주므로 프론트는 역할 분기 없이 같은 목록을 그대로 쓴다).
+  const [pendingRevocations, setPendingRevocations] = useState<PendingRevocation[]>([]);
+  const [actingRevocationId, setActingRevocationId] = useState<number | null>(null);
 
   const loadConnections = async (pid: number) => {
     try {
@@ -80,7 +88,14 @@ export default function Connect() {
     }
   };
 
+  const loadPendingRevocations = () => {
+    listPendingRevocations()
+      .then(setPendingRevocations)
+      .catch(() => {});
+  };
+
   useEffect(() => {
+    loadPendingRevocations();
     if (caregiverId != null) {
       setLoading(false);
       loadReceivedInvitations();
@@ -93,6 +108,21 @@ export default function Connect() {
     loadConnections(patientId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caregiverId, patientId]);
+
+  const handleRevocationDecision = async (trustId: number, approve: boolean) => {
+    if (actingRevocationId !== null) return;
+    setActingRevocationId(trustId);
+    setError("");
+    try {
+      await approveRevocation(trustId, approve);
+      setPendingRevocations((prev) => prev.filter((r) => r.trust_id !== trustId));
+      if (approve && patientId != null) await loadConnections(patientId);
+    } catch {
+      setError(approve ? "승인 처리에 실패했어요." : "거부 처리에 실패했어요.");
+    } finally {
+      setActingRevocationId(null);
+    }
+  };
 
   const handleUnlink = async (caregiverId: number) => {
     if (patientId == null) return;
@@ -199,6 +229,50 @@ export default function Connect() {
           <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-[#D94F4F]/8 border border-[#D94F4F]/20 mb-5">
             <AlertCircle className="w-4 h-4 text-[#D94F4F] shrink-0" />
             <p className="text-[13px] text-[#D94F4F]">{error}</p>
+          </div>
+        )}
+
+        {/* [2026-07-23 추가] 받은 해제 요청 — 기관이 사유를 남기고 연결 해제를 요청하면
+            여기서 승인/거부한다. 역할(환자/보호자) 무관하게 같은 목록을 그대로 쓴다. */}
+        {pendingRevocations.length > 0 && (
+          <div className="bg-[#F9F4EB] border border-[#D94F4F]/25 rounded-2xl p-6 mb-6">
+            <h2 className="text-[16px] font-black text-[#1E1A17] mb-1">받은 해제 요청</h2>
+            <p className="text-[13px] text-[#8A7E75] mb-4">
+              연결을 끊으려는 사유를 확인하고 승인하거나 거부하세요. 2주 안에 응답하지 않으면 요청자가 직접 확정할 수 있어요.
+            </p>
+            <div className="space-y-3">
+              {pendingRevocations.map((rev) => (
+                <div key={rev.trust_id} className="px-4 py-3.5 rounded-xl bg-[#F2E8D8]">
+                  <p className="text-[14px] font-bold text-[#1E1A17]">
+                    {rev.caregiver_name}님이 {rev.patient_name}님과의 연결을 끊으려고 해요
+                  </p>
+                  {rev.reason && (
+                    <p className="text-[13px] text-[#8A7E75] mt-1">사유: {rev.reason}</p>
+                  )}
+                  {rev.deadline && (
+                    <p className="text-[12px] text-[#8A7E75] mt-1">
+                      {new Date(rev.deadline).toLocaleDateString("ko-KR")}까지 응답하지 않으면 자동으로 처리돼요.
+                    </p>
+                  )}
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={() => handleRevocationDecision(rev.trust_id, false)}
+                      disabled={actingRevocationId === rev.trust_id}
+                      className="px-4 py-2 rounded-full text-[13px] font-bold border border-[rgba(30,26,23,0.15)] text-[#1E1A17] disabled:opacity-50"
+                    >
+                      거부
+                    </button>
+                    <button
+                      onClick={() => handleRevocationDecision(rev.trust_id, true)}
+                      disabled={actingRevocationId === rev.trust_id}
+                      className="px-4 py-2 rounded-full text-[13px] font-bold text-white bg-[#D94F4F] disabled:opacity-50"
+                    >
+                      승인(연결 해제)
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

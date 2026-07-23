@@ -129,11 +129,17 @@ def get_current_patient_optional(
 
 def require_patient_access(patient_id: int, caregiver: Caregiver, session: Session) -> None:
     """[7/10 추가] caregiver가 이 patient_id를 실제로 케어하는지 확인 — issue #21.
-    monitoring_router.py/care_router.py의 모든 patient_id 기반 엔드포인트에서 공용으로 씀."""
+    monitoring_router.py/care_router.py의 모든 patient_id 기반 엔드포인트에서 공용으로 씀.
+
+    [2026-07-23 수정] status != "revoked" 필터 추가 — 연결 해제(unlink)가 하드 삭제 대신
+    상태값(revoked)으로 남는 방식으로 바뀌면서, 이 필터가 없으면 해제된 보호자도 행이 여전히
+    존재한다는 이유로 계속 이 환자에 접근할 수 있었다(권한 우회). revocation_pending은 아직
+    실제로 끊긴 게 아니므로(기관이 사유를 남기고 승인을 기다리는 중) 접근을 계속 허용한다."""
     link = session.exec(
         select(CaregiverPatient)
         .where(CaregiverPatient.caregiver_id == caregiver.id)
         .where(CaregiverPatient.patient_id == patient_id)
+        .where(CaregiverPatient.status != "revoked")
     ).first()
     if not link:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="이 환자에 대한 권한이 없습니다.")

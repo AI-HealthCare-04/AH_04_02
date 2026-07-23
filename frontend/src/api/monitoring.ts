@@ -192,9 +192,13 @@ export async function getPatientCaregivers(patientId: number) {
 /**
  * [7/8 추가] 보호자-환자 연결 해제 ("연결 해제" 버튼)
  */
-export async function unlinkCaregiverPatient(caregiverId: number, patientId: number) {
+// [2026-07-23 수정] 기관(organization) 계정이 끊을 때는 reason이 필수 — 서버가 즉시 끊는
+// 대신 환자/보호자 승인 대기(status="revocation_pending")로 돌린다. 개인 보호자·환자
+// 본인은 reason 없이 호출하면 기존처럼 즉시 처리된다.
+export async function unlinkCaregiverPatient(caregiverId: number, patientId: number, reason?: string) {
   const { data } = await monitoringClient.delete(
-    `/monitoring/caregivers/${caregiverId}/patients/${patientId}`
+    `/monitoring/caregivers/${caregiverId}/patients/${patientId}`,
+    { params: reason ? { reason } : undefined }
   );
   return data;
 }
