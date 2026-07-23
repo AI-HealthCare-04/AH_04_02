@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Search, FileText, ChevronRight, Trash2, Star, CheckSquare, Square } from "lucide-react";
 import NavBar from "../components/NavBar";
 import { deleteRecord, listRecords, pinRecord, type RecordSummary } from "../api/records";
-import { getCurrentPatientId, getCurrentUserName } from "../lib/session";
+import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
 
 const STATUS_LABEL: Record<RecordSummary["status"], { text: string; bg: string; color: string }> = {
@@ -16,7 +16,8 @@ const STATUS_LABEL: Record<RecordSummary["status"], { text: string; bg: string; 
 export default function Records() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const patientId = Number(searchParams.get("patient_id")) || getCurrentPatientId();
+  const guardedPatientId = useGuardedPatientId();
+  const patientId = Number(searchParams.get("patient_id")) || guardedPatientId;
   const [records, setRecords] = useState<RecordSummary[]>([]);
   const [search, setSearch] = useState(searchParams.get("search") ?? "");
   const [dateFilter, setDateFilter] = useState("");
@@ -37,11 +38,13 @@ export default function Records() {
   }, [searchParams]);
 
   useEffect(() => {
+    if (patientId == null) return;
     loadRecords();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patientId]);
 
   const loadRecords = async () => {
+    if (patientId == null) return;
     setError("");
     try {
       setRecords(await listRecords(patientId));

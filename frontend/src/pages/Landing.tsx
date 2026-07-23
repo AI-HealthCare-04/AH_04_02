@@ -47,8 +47,9 @@ export default function Landing() {
   // 로그인 상태일 때만 호출하고, 아니면 빈 상태 그대로 둬서 아래 "등록된 일정이
   // 없어요" 안내를 자연스러운 비로그인 미리보기로 쓴다.
   useEffect(() => {
-    if (!loggedIn) return;
-    getTodayMedications(getCurrentPatientId())
+    const patientId = getCurrentPatientId();
+    if (!loggedIn || patientId == null) return;
+    getTodayMedications(patientId)
       .then(setMeds)
       .catch(() => {});
   }, [loggedIn]);
@@ -58,8 +59,8 @@ export default function Landing() {
   // 실제 알림 켜짐/꺼짐 상태(getNotificationSettings). "건강 점수"·"다음 병원 방문"은
   // 앱에 그런 데이터 자체가 없어서 실제로 존재하는 이 두 값으로 대체한다.
   useEffect(() => {
-    if (!loggedIn) return;
     const patientId = getCurrentPatientId();
+    if (!loggedIn || patientId == null) return;
     getLogs(patientId, 7)
       .then(setLogs)
       .catch(() => {});

@@ -4,7 +4,7 @@ import { ChevronLeft } from "lucide-react";
 import NavBar from "../components/NavBar";
 import { checkIntake, getLogs, getSchedules, type MedicationLogEntry, type Schedule } from "../api/monitoring";
 import { getDrugIndication, type DrugIndicationInfo } from "../api/records";
-import { getCurrentCaregiverId, getCurrentPatientId, getCurrentUserName } from "../lib/session";
+import { getCurrentCaregiverId, getCurrentUserName, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
 
 export default function DrugDetail() {
@@ -12,6 +12,7 @@ export default function DrugDetail() {
   const location = useLocation();
   const { scheduleId } = useParams<{ scheduleId: string }>();
   const stateSchedule = (location.state as { schedule?: Schedule } | null)?.schedule;
+  const patientId = useGuardedPatientId();
 
   const [schedule, setSchedule] = useState<Schedule | null>(stateSchedule ?? null);
   const [logs, setLogs] = useState<MedicationLogEntry[]>([]);
@@ -22,9 +23,8 @@ export default function DrugDetail() {
   const [checking, setChecking] = useState(false);
 
   useEffect(() => {
-    if (!scheduleId) return;
+    if (!scheduleId || patientId == null) return;
     const id = Number(scheduleId);
-    const patientId = getCurrentPatientId();
 
     const loadSchedule = stateSchedule
       ? Promise.resolve(stateSchedule)
@@ -38,7 +38,7 @@ export default function DrugDetail() {
       .catch(() => setError("약품 정보를 불러오지 못했어요."))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scheduleId]);
+  }, [scheduleId, patientId]);
 
   useEffect(() => {
     if (!schedule) return;
@@ -61,11 +61,10 @@ export default function DrugDetail() {
 
   // 모니터링(보호자용) 화면에서만 오는 경로라, 여기서 체크하면 "보호자가 대신" 기록으로 남깁니다.
   const handleCheck = async (status: "taken" | "skipped") => {
-    if (!scheduleId || checking) return;
+    if (!scheduleId || checking || patientId == null) return;
     setChecking(true);
     try {
       await checkIntake(scheduleId, status, getCurrentCaregiverId() ?? undefined);
-      const patientId = getCurrentPatientId();
       const allLogs = await getLogs(patientId, 60);
       setLogs(allLogs.filter((l) => l.schedule_id === Number(scheduleId)));
     } catch {

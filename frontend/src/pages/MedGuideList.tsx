@@ -3,19 +3,20 @@ import { useNavigate } from "react-router-dom";
 import { FileText, ChevronRight } from "lucide-react";
 import NavBar from "../components/NavBar";
 import { listRecords, type RecordSummary } from "../api/records";
-import { getCurrentPatientId, getCurrentUserName } from "../lib/session";
+import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
 
 // [2026-07-20] 등록내역(모든 상태)과 달리, 여기는 실제로 완성된 복약 가이드만 모아 보여준다 —
 // 각 카드는 상세(/records/:id)가 아니라 가이드 화면(/records/:id/guide)으로 바로 연결된다.
 export default function MedGuideList() {
   const navigate = useNavigate();
-  const patientId = getCurrentPatientId();
+  const patientId = useGuardedPatientId();
   const [records, setRecords] = useState<RecordSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (patientId == null) return;
     // StrictMode(개발 모드)가 effect를 두 번 실행하면서 동일한 요청이 2개 동시에 나가는데,
     // 어느 쪽이 살아남을지는 브라우저/네트워크 레이어의 우연에 달려있어 취소 플래그만으론
     // "취소된 게 항상 옛(첫 번째) 요청"이라고 보장할 수 없었다 — AbortController로 옛

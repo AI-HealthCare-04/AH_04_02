@@ -4,7 +4,7 @@ import { ChevronLeft, Clock, FileText, Heart } from "lucide-react";
 import NavBar from "../components/NavBar";
 import { getLogs, type MedicationLogEntry } from "../api/monitoring";
 import { listRecords, type RecordSummary } from "../api/records";
-import { getCurrentPatientId, getCurrentUserName } from "../lib/session";
+import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
 
 function dateKey(iso: string) {
@@ -19,7 +19,8 @@ export default function MonitoringDayLogs() {
   const navigate = useNavigate();
   const { date } = useParams<{ date: string }>();
   const [searchParams] = useSearchParams();
-  const patientId = Number(searchParams.get("patient_id")) || getCurrentPatientId();
+  const guardedPatientId = useGuardedPatientId();
+  const patientId = Number(searchParams.get("patient_id")) || guardedPatientId;
 
   const [logs, setLogs] = useState<MedicationLogEntry[]>([]);
   const [records, setRecords] = useState<RecordSummary[]>([]);
@@ -27,6 +28,7 @@ export default function MonitoringDayLogs() {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (patientId == null) return;
     Promise.all([getLogs(patientId, 366), listRecords(patientId)])
       .then(([l, r]) => {
         setLogs(l);

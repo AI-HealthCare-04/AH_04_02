@@ -7,8 +7,14 @@ import { getCaregiverPatients } from "../api/monitoring";
  * 로그인이 없어서 "지금 보고 있는 환자/보호자가 누구인지"를 localStorage로 관리합니다.
  * Login.tsx에서 보호자·환자 선택 시 이 값들을 저장합니다.
  */
-export function getCurrentPatientId(): number {
-  return Number(localStorage.getItem("patient_id") ?? 1);
+/** [2026-07-23 수정] localStorage에 patient_id가 없으면 1번 환자로 조용히 폴백하던
+ * 걸 제거했다 — 이 저장소의 최초 커밋 때부터 있던 스캐폴딩이었는데, 이 폴백을 거치지
+ * 않는 화면(Records/MonitoringDayLogs/Chat/MedGuideList/DrugDetail 등)에서 patient_id가
+ * 없으면 엉뚱한 1번 환자 데이터를 그대로 보여주는 문제가 있었다. 반환 타입을
+ * `number | null`로 바꿔 호출부가 컴파일 타임에 null 처리를 하도록 강제한다. */
+export function getCurrentPatientId(): number | null {
+  const value = localStorage.getItem("patient_id");
+  return value ? Number(value) : null;
 }
 
 export function getCurrentCaregiverId(): number | null {
@@ -209,9 +215,6 @@ export function useGuardedPatientId(options?: { silent?: boolean }): number | nu
           if (!silent) navigate("/patients", { replace: true });
           return;
         }
-        // [주의] getCurrentPatientId()는 값이 없으면 1로 폴백하는데, 그 1이 우연히
-        // 이 보호자의 진짜 환자 목록에 있으면 "이미 명시적으로 골랐다"고 오판하게
-        // 된다 — 그래서 여기서는 폴백 없이 localStorage 원값만 그대로 확인한다.
         const stored = localStorage.getItem("patient_id");
         const current = stored ? Number(stored) : null;
         if (current !== null && patients.some((p) => p.id === current)) {

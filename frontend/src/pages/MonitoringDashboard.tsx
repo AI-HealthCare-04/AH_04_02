@@ -23,7 +23,7 @@ export default function MonitoringDashboard() {
   const caregiverId = getCurrentCaregiverId();
 
   const [patients, setPatients] = useState<Patient[]>([]);
-  const [patientId, setPatientId] = useState<number>(getCurrentPatientId());
+  const [patientId, setPatientId] = useState<number | null>(getCurrentPatientId());
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [logs, setLogs] = useState<MedicationLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,6 +48,7 @@ export default function MonitoringDashboard() {
   }, [caregiverId]);
 
   useEffect(() => {
+    if (patientId == null) return;
     setLoading(true);
     Promise.all([getSchedules(patientId, false), getLogs(patientId, 45)])
       .then(([s, l]) => {

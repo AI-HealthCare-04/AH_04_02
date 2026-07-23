@@ -21,10 +21,15 @@ export default function OcrError() {
   const [error, setError] = useState("");
 
   const startManualEntry = async () => {
+    const patientId = getCurrentPatientId();
+    if (patientId == null) {
+      setError("환자 정보를 확인할 수 없어요. 처음부터 다시 시도해 주세요.");
+      return;
+    }
     setCreating(true);
     setError("");
     try {
-      const record = await createManualRecord(getCurrentPatientId(), getCurrentCaregiverId() ?? undefined);
+      const record = await createManualRecord(patientId, getCurrentCaregiverId() ?? undefined);
       navigate(`/records/${record.record_id}/review`);
     } catch {
       setError("직접 입력을 시작하지 못했어요. 잠시 후 다시 시도해 주세요.");
