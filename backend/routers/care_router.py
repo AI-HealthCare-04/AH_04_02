@@ -38,6 +38,7 @@ from models import (
     Invitation,
     NotificationSetting,
     Patient,
+    RevocationNotice,
 )
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -654,6 +655,19 @@ def approve_revocation(
             "응답하지 않으면 직접 확정할 수 있어요.",
         )
 
+    # [2026-07-23 추가] 승인/거부 시 link의 requested_by 관련 필드가 지워지거나(거부) 요청자가
+    # 접근권을 잃을 수 있어(승인) — 결과 알림을 남기려면 지워지기 전에 스냅샷을 떠야 한다.
+    patient = session.get(Patient, link.patient_id)
+    notice = RevocationNotice(
+        recipient_role=link.requested_by_role or "caregiver",
+        recipient_id=link.revocation_requested_by,
+        patient_id=link.patient_id,
+        patient_name=patient.name if patient else "알 수 없음",
+        counterpart_name=subject.name,
+        approved=payload.approve,
+        reason=link.revocation_reason,
+    )
+
     if payload.approve:
         link.status = "revoked"
         link.revoked_at = datetime.now()
@@ -672,6 +686,8 @@ def approve_revocation(
         remaining_active = [True]  # 복원됐으므로 최소 1개 active
 
     session.add(link)
+    if notice.recipient_id is not None:
+        session.add(notice)
     session.commit()
     session.refresh(link)
 
@@ -686,6 +702,53 @@ def approve_revocation(
         revoked_at=link.revoked_at,
         should_alert_now=should_alert,
     )
+
+
+# [2026-07-23 추가] 해제 요청자가 자기 요청의 승인/거부 결과를 확인하는 알림함.
+# 대상 환자에 대한 접근권을 승인 시점에 잃을 수 있어(revoked) require_actor_patient_access로
+# 게이팅하지 않고, recipient_id/recipient_role == 현재 로그인한 본인인지로만 확인한다.
+class RevocationNoticePublic(BaseModel):
+    id: int
+    patient_id: int
+    patient_name: str
+    counterpart_name: str
+    approved: bool
+    reason: str | None = None
+    created_at: datetime
+    read_at: datetime | None = None
+
+
+@router.get("/trust/relations/notices", response_model=list[RevocationNoticePublic])
+def list_revocation_notices(
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    role, subject = actor
+    notices = session.exec(
+        select(RevocationNotice)
+        .where(RevocationNotice.recipient_role == role)
+        .where(RevocationNotice.recipient_id == subject.id)
+        .order_by(RevocationNotice.created_at.desc())
+    ).all()
+    return notices
+
+
+@router.post("/trust/relations/notices/{notice_id}/read", response_model=RevocationNoticePublic)
+def mark_revocation_notice_read(
+    notice_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    role, subject = actor
+    notice = session.get(RevocationNotice, notice_id)
+    if not notice or notice.recipient_role != role or notice.recipient_id != subject.id:
+        raise HTTPException(404, "존재하지 않는 알림이에요")
+    if notice.read_at is None:
+        notice.read_at = datetime.now()
+        session.add(notice)
+        session.commit()
+        session.refresh(notice)
+    return notice
 
 
 class DismissAlertResult(BaseModel):

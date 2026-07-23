@@ -197,6 +197,26 @@ class CaregiverPatient(SQLModel, table=True):
     revocation_requested_at: datetime | None = Field(default=None)
 
 
+# [2026-07-23 추가] 해제 요청 승인/거부 결과를 요청자에게 알려주는 용도.
+# CaregiverPatient 링크 자체는 승인 시 revoked(요청자가 그 환자에 대한 접근권을 잃을 수 있음),
+# 거부 시 revocation_requested_by 등이 지워지므로 결과를 별도로 스냅샷 남겨야 요청자가
+# 나중에도 "승인/거부됐다"를 확인할 수 있다. patient_name/counterpart_name은 승인 후 접근권
+# 상실·개인정보 변경에 영향받지 않도록 그 시점 값을 복사해서 저장한다.
+class RevocationNotice(SQLModel, table=True):
+    __tablename__ = "revocation_notices"
+
+    id: int | None = Field(default=None, primary_key=True)
+    recipient_role: str  # "caregiver" | "patient" — 원래 해제를 요청한 쪽
+    recipient_id: int
+    patient_id: int
+    patient_name: str
+    counterpart_name: str  # 승인/거부를 처리한 사람 이름
+    approved: bool
+    reason: str | None = None
+    created_at: datetime = Field(default_factory=datetime.now)
+    read_at: datetime | None = None
+
+
 # ── 비밀번호 재설정 임시코드 [2026-07-15 추가, REQ-039] ──
 # Patient/Caregiver 둘 다 로그인 대상이라 subject_type으로 구분한다(다형 참조) — FK를
 # 어느 한쪽 테이블로 고정할 수 없어 애플리케이션 레벨에서만 유효성을 검증한다.

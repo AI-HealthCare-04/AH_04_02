@@ -156,6 +156,31 @@ export async function approveRevocation(trustId: number, approve: boolean) {
   return data;
 }
 
+// [2026-07-23 추가] 해제 요청자용 — 내가 요청한 해제가 승인/거부됐을 때 결과를 확인하는 알림함.
+// 승인되면 그 환자에 대한 접근권을 잃을 수 있어 patient_name/counterpart_name을 스냅샷으로 받는다.
+export interface RevocationNotice {
+  id: number;
+  patient_id: number;
+  patient_name: string;
+  counterpart_name: string;
+  approved: boolean;
+  reason: string | null;
+  created_at: string;
+  read_at: string | null;
+}
+
+export async function listRevocationNotices() {
+  const { data } = await monitoringClient.get<RevocationNotice[]>("/trust/relations/notices");
+  return data;
+}
+
+export async function markRevocationNoticeRead(noticeId: number) {
+  const { data } = await monitoringClient.post<RevocationNotice>(
+    `/trust/relations/notices/${noticeId}/read`
+  );
+  return data;
+}
+
 // ── 3. 알림 설정 (NotificationSetting) ──
 
 export interface NotificationSettings {

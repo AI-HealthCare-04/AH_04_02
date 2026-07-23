@@ -324,3 +324,111 @@ def test_unrelated_caregiver_does_not_see_pending_revocation(client: TestClient,
 
     assert r.status_code == 200
     assert r.json() == []
+
+
+# ── 11. 해제 요청 처리 결과 알림 (2026-07-23 추가) ──────────────────────────
+
+def test_approve_creates_notice_for_requester(client: TestClient, session: Session):
+    requester = _caregiver(session, "요청기관")
+    approver = _caregiver(session, "승인자")
+    pt = _patient(session)
+    pending = _pending_link(session, requester, pt)
+    _link(session, approver, pt)
+
+    r = client.post(URL.format(pending.id), json={"approve": True}, headers=_headers(approver.id, "caregiver"))
+    assert r.status_code == 200
+
+    notices = client.get("/trust/relations/notices", headers=_headers(requester.id, "caregiver"))
+    assert notices.status_code == 200
+    body = notices.json()
+    assert len(body) == 1
+    assert body[0]["approved"] is True
+    assert body[0]["patient_name"] == "환자"
+    assert body[0]["counterpart_name"] == "승인자"
+    assert body[0]["read_at"] is None
+
+
+def test_reject_creates_notice_for_requester(client: TestClient, session: Session):
+    requester = _caregiver(session, "요청기관")
+    approver = _caregiver(session, "승인자")
+    pt = _patient(session)
+    pending = _pending_link(session, requester, pt)
+    _link(session, approver, pt)
+
+    r = client.post(URL.format(pending.id), json={"approve": False}, headers=_headers(approver.id, "caregiver"))
+    assert r.status_code == 200
+
+    notices = client.get("/trust/relations/notices", headers=_headers(requester.id, "caregiver"))
+    assert notices.status_code == 200
+    body = notices.json()
+    assert len(body) == 1
+    assert body[0]["approved"] is False
+
+
+def test_notice_not_visible_to_unrelated_caregiver(client: TestClient, session: Session):
+    requester = _caregiver(session, "요청기관")
+    approver = _caregiver(session, "승인자")
+    outsider = _caregiver(session, "무관자")
+    pt = _patient(session)
+    pending = _pending_link(session, requester, pt)
+    _link(session, approver, pt)
+
+    client.post(URL.format(pending.id), json={"approve": True}, headers=_headers(approver.id, "caregiver"))
+
+    r = client.get("/trust/relations/notices", headers=_headers(outsider.id, "caregiver"))
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_mark_notice_read(client: TestClient, session: Session):
+    requester = _caregiver(session, "요청기관")
+    approver = _caregiver(session, "승인자")
+    pt = _patient(session)
+    pending = _pending_link(session, requester, pt)
+    _link(session, approver, pt)
+
+    client.post(URL.format(pending.id), json={"approve": True}, headers=_headers(approver.id, "caregiver"))
+    notice_id = client.get(
+        "/trust/relations/notices", headers=_headers(requester.id, "caregiver")
+    ).json()[0]["id"]
+
+    r = client.post(
+        f"/trust/relations/notices/{notice_id}/read", headers=_headers(requester.id, "caregiver")
+    )
+    assert r.status_code == 200
+    assert r.json()["read_at"] is not None
+
+
+def test_mark_notice_read_forbidden_for_other_caregiver(client: TestClient, session: Session):
+    requester = _caregiver(session, "요청기관")
+    approver = _caregiver(session, "승인자")
+    outsider = _caregiver(session, "무관자")
+    pt = _patient(session)
+    pending = _pending_link(session, requester, pt)
+    _link(session, approver, pt)
+
+    client.post(URL.format(pending.id), json={"approve": True}, headers=_headers(approver.id, "caregiver"))
+    notice_id = client.get(
+        "/trust/relations/notices", headers=_headers(requester.id, "caregiver")
+    ).json()[0]["id"]
+
+    r = client.post(
+        f"/trust/relations/notices/{notice_id}/read", headers=_headers(outsider.id, "caregiver")
+    )
+    assert r.status_code == 404
+
+
+def test_patient_requester_receives_notice(client: TestClient, session: Session):
+    """환자가 요청한 해제를 보호자가 승인하면, 환자에게도(role=patient) 알림이 남는다."""
+    caregiver = _caregiver(session, "보호자")
+    pt = _patient(session)
+    pending = _pending_link(session, caregiver, pt, requested_by_role="patient", requested_by_id=pt.id)
+
+    r = client.post(URL.format(pending.id), json={"approve": True}, headers=_headers(caregiver.id, "caregiver"))
+    assert r.status_code == 200
+
+    notices = client.get("/trust/relations/notices", headers=_headers(pt.id, "patient"))
+    assert notices.status_code == 200
+    body = notices.json()
+    assert len(body) == 1
+    assert body[0]["counterpart_name"] == "보호자"

@@ -11,11 +11,14 @@ import {
   listInvitations,
   listPendingRevocations,
   listReceivedInvitations,
+  listRevocationNotices,
   listSentPatientInvitations,
+  markRevocationNoticeRead,
   rejectInvitationAsCaregiver,
   type InvitationSummary,
   type PendingRevocation,
   type ReceivedInvitation,
+  type RevocationNotice,
   type SentPatientInvitation,
 } from "../api/care";
 import {
@@ -72,6 +75,10 @@ export default function Connect() {
   // 알아서 필터링해 주므로 프론트는 역할 분기 없이 같은 목록을 그대로 쓴다).
   const [pendingRevocations, setPendingRevocations] = useState<PendingRevocation[]>([]);
   const [actingRevocationId, setActingRevocationId] = useState<number | null>(null);
+  // [2026-07-23 추가] "해제 요청 처리 결과" — 내가 요청한 해제를 상대가 승인/거부하면
+  // 여기에 뜬다. 승인 시 그 환자에 대한 접근권을 잃을 수 있어 별도 알림함으로 확인한다.
+  const [revocationNotices, setRevocationNotices] = useState<RevocationNotice[]>([]);
+  const [dismissingNoticeId, setDismissingNoticeId] = useState<number | null>(null);
   // [2026-07-23 추가] 보호자/기관 쪽에도 "내가 보낸 초대"와 "연결된 환자" 목록을 보여준다 —
   // 지금까진 이 화면(caregiverId != null 쪽)에 둘 다 없어서, 초대를 보내도 확인할 방법이 없고
   // 연결 해제도 PatientManagement.tsx에서만 가능했다.
@@ -127,8 +134,28 @@ export default function Connect() {
       .catch(() => {});
   };
 
+  const loadRevocationNotices = () => {
+    listRevocationNotices()
+      .then((notices) => setRevocationNotices(notices.filter((n) => n.read_at == null)))
+      .catch(() => {});
+  };
+
+  const handleDismissNotice = async (noticeId: number) => {
+    if (dismissingNoticeId !== null) return;
+    setDismissingNoticeId(noticeId);
+    try {
+      await markRevocationNoticeRead(noticeId);
+      setRevocationNotices((prev) => prev.filter((n) => n.id !== noticeId));
+    } catch {
+      setError("알림을 확인 처리하지 못했어요.");
+    } finally {
+      setDismissingNoticeId(null);
+    }
+  };
+
   useEffect(() => {
     loadPendingRevocations();
+    loadRevocationNotices();
     if (caregiverId != null) {
       setLoading(false);
       loadReceivedInvitations();
@@ -302,6 +329,35 @@ export default function Connect() {
           <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-[#D94F4F]/8 border border-[#D94F4F]/20 mb-5">
             <AlertCircle className="w-4 h-4 text-[#D94F4F] shrink-0" />
             <p className="text-[13px] text-[#D94F4F]">{error}</p>
+          </div>
+        )}
+
+        {/* [2026-07-23 추가] 해제 요청 처리 결과 — 내가 요청한 해제를 상대가 승인/거부하면 여기 뜬다. */}
+        {revocationNotices.length > 0 && (
+          <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
+            <h2 className="text-[16px] font-black text-[#1E1A17] mb-1">해제 요청 처리 결과</h2>
+            <div className="space-y-3 mt-3">
+              {revocationNotices.map((notice) => (
+                <div key={notice.id} className="px-4 py-3.5 rounded-xl bg-[#F2E8D8] flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[14px] font-bold text-[#1E1A17]">
+                      {notice.patient_name}님과의 연결 해제 요청이 {notice.approved ? "승인" : "거부"}됐어요
+                      {notice.counterpart_name !== notice.patient_name && ` (${notice.counterpart_name}님이 처리)`}
+                    </p>
+                    <p className="text-[12px] text-[#8A7E75] mt-1">
+                      {new Date(notice.created_at).toLocaleDateString("ko-KR")}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleDismissNotice(notice.id)}
+                    disabled={dismissingNoticeId === notice.id}
+                    className="px-3 py-1.5 rounded-full text-[12px] font-bold border border-[rgba(30,26,23,0.15)] text-[#1E1A17] disabled:opacity-50 shrink-0"
+                  >
+                    확인
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
