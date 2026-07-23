@@ -115,13 +115,12 @@ def _patient_registered_drug_names(patient_id: int, session: Session, limit: int
     return _latest_ocr_drug_names(patient_id, session)[:limit]
 
 
-def _build_dynamic_questions(patient_id: int, session: Session) -> list[dict]:
-    """환자가 등록한 약이 하나도 없으면(신규 가입 직후 등) 기존 고정 질문으로 폴백한다 —
-    실제로 참고할 약이 없는 상태에서 억지로 약 이름을 지어내지 않기 위함."""
-    drug_names = _patient_registered_drug_names(patient_id, session, limit=1)
-    if not drug_names:
-        return PRESET_QUESTIONS
-    drug_name = drug_names[0]
+def _build_dynamic_questions(drug_name: str) -> list[dict]:
+    """[2026-07-23 수정] 예전엔 patient_id로 "환자의 최근 약"을 자체 조회해서 항상 그
+    약 이름으로 질문을 만들었다 — 그래서 어느 약 상세화면에서 챗봇에 들어가든, 심지어
+    우측 하단 플로팅 버튼으로 들어가도 늘 같은(가장 최근 등록된) 약 이름이 붙었다.
+    이제는 호출부(list_questions)가 이 화면이 실제로 어떤 약 맥락에서 열렸는지 넘겨준
+    drug_name만 그대로 채워 넣는다 — 맥락이 없으면 애초에 이 함수를 호출하지 않는다."""
     return [
         {
             "id": f"dyn:{key}:{drug_name}",
@@ -130,6 +129,22 @@ def _build_dynamic_questions(patient_id: int, session: Session) -> list[dict]:
         }
         for key, text_tpl, answer_tpl in _DYNAMIC_QUESTION_TEMPLATES
     ]
+
+
+def _resolve_dynamic_question_by_id(question_id: str) -> dict | None:
+    """question_id 형식 "dyn:{key}:{drug_name}"엔 약 이름이 이미 포함돼 있으므로,
+    /ask에서 답을 재구성할 때 patient_id로 "지금 환자의 최근 약"을 다시 조회할 필요가
+    없다 — 그 사이 최근 약이 바뀌었으면 재조회 방식은 다른 약 이름으로 어긋난 id를
+    만들어 매칭에 실패했다(잠재 버그, 이번에 같이 해결)."""
+    parts = question_id.split(":", 2)
+    if len(parts) != 3 or parts[0] != "dyn":
+        return None
+    _, key, drug_name = parts
+    template = next((t for t in _DYNAMIC_QUESTION_TEMPLATES if t[0] == key), None)
+    if not template:
+        return None
+    _, text_tpl, answer_tpl = template
+    return {"id": question_id, "text": text_tpl.format(drug=drug_name), "answer": answer_tpl.format(drug=drug_name)}
 
 CHAT_SYSTEM_PROMPT = """\
 당신은 고령 만성질환 환자와 보호자를 위한 복약 상담 챗봇입니다.
@@ -974,8 +989,11 @@ def _resolve_question(payload: ChatAsk, session: Session) -> tuple[str, str, str
     LLM을 호출한다(use_llm=True). (버그: 예전엔 종류와 무관하게 _CHAT_LLM_AVAILABLE이면
     무조건 LLM을 태워 고정 답변이 LLM으로 새어나갔다.)"""
     if payload.question_id:
-        candidates = _build_dynamic_questions(payload.patient_id, session)
-        match = next((q for q in candidates if q["id"] == payload.question_id), None)
+        match = (
+            _resolve_dynamic_question_by_id(payload.question_id)
+            if payload.question_id.startswith("dyn:")
+            else None
+        )
         if not match:
             match = next((q for q in PRESET_QUESTIONS if q["id"] == payload.question_id), None)
         if not match:
@@ -1026,15 +1044,21 @@ def _sse_event(data: dict) -> str:
 @router.get("/questions")
 def list_questions(
     patient_id: int,
+    drug_name: str | None = None,
     actor: Actor = Depends(get_current_actor),
     session: Session = Depends(get_session),
 ):
-    """Chat.tsx의 추천 질문 버튼에 쓸 목록 — 환자가 등록한 약이 있으면 그 약 기반으로
-    동적 생성하고(_build_dynamic_questions), 없으면 고정 질문(PRESET_QUESTIONS)으로
-    폴백한다. [2026-07-19 추가] patient_id를 받게 되면서 다른 환자 정보 유추에 악용되지
-    않도록 require_actor_patient_access로 막는다(다른 인가된 엔드포인트와 동일 패턴)."""
+    """Chat.tsx의 추천 질문 버튼에 쓸 목록.
+
+    [2026-07-23 수정] 예전엔 어느 화면에서 들어왔든 항상 "환자가 최근 등록한 약" 기준으로
+    질문을 만들었다 — 그래서 A약 상세에서 들어가도, 우측 하단 플로팅 챗봇으로 들어가도
+    같은(최근) 약 이름이 붙는 문제가 있었다. 이제는 Chat.tsx가 실제로 어느 약 맥락에서
+    열렸는지(location.state.drugName) 그대로 넘겨준 drug_name만 쓴다 — 맥락 없이(플로팅
+    버튼) 들어왔으면 특정 약을 지어내지 않고 고정 질문(PRESET_QUESTIONS)을 보여준다.
+    [2026-07-19 추가] patient_id를 받게 되면서 다른 환자 정보 유추에 악용되지 않도록
+    require_actor_patient_access로 막는다(다른 인가된 엔드포인트와 동일 패턴)."""
     require_actor_patient_access(patient_id, actor, session)
-    questions = _build_dynamic_questions(patient_id, session)
+    questions = _build_dynamic_questions(drug_name) if drug_name else PRESET_QUESTIONS
     return [{"id": q["id"], "text": q["text"]} for q in questions]
 
 

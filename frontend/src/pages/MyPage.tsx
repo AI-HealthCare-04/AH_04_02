@@ -42,6 +42,7 @@ export default function MyPage() {
     : { text: "복약관리 대상자", bg: `${C.success}20`, color: "#4A7A47" };
 
   const patientMenu: MenuItem[] = [
+    { label: "내 정보", icon: "🪪", to: "/mypage/info" },
     { label: "복약 일정", icon: "💊", to: "/schedule" },
     { label: "알림 설정", icon: "🔔", to: "/notification" },
     { label: "등록내역", icon: "📋", to: "/records" },
@@ -63,13 +64,22 @@ export default function MyPage() {
     navigate("/login");
   };
 
+  const logout = () => {
+    if (!window.confirm("로그아웃할까요?")) return;
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("patient_id");
+    localStorage.removeItem("caregiver_id");
+    localStorage.removeItem("user_name");
+    navigate("/");
+  };
+
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
       <NavBar isLoggedIn userName={displayName} />
       <main className="max-w-xl mx-auto px-6 sm:px-8 py-10">
         <h1 className="text-[26px] font-black mb-7" style={{ color: C.dark }}>마이페이지</h1>
 
-        <div className="rounded-2xl p-6 mb-6" style={{ background: C.white, boxShadow: "0 2px 20px rgba(30,26,23,0.07)" }}>
+        <div className="rounded-2xl p-6 mb-6" style={{ background: C.surface, boxShadow: "0 2px 20px rgba(30,26,23,0.07)" }}>
           <div className="flex items-center gap-4 mb-1">
             <div
               className="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-xl font-black shrink-0"
@@ -94,7 +104,7 @@ export default function MyPage() {
           )}
         </div>
 
-        <div className="rounded-2xl overflow-hidden mb-8" style={{ background: C.white, boxShadow: "0 2px 20px rgba(30,26,23,0.07)" }}>
+        <div className="rounded-2xl overflow-hidden mb-8" style={{ background: C.surface, boxShadow: "0 2px 20px rgba(30,26,23,0.07)" }}>
           {menu.map(({ label, icon, to }) => (
             <button
               key={label}
@@ -119,6 +129,13 @@ export default function MyPage() {
           style={{ borderColor: "rgba(30,26,23,0.15)", color: C.dark }}
         >
           다른 사용자로 전환
+        </button>
+        <button
+          onClick={logout}
+          className="w-full py-3 mt-2 font-bold text-[14px] transition-opacity hover:opacity-70"
+          style={{ color: C.muted }}
+        >
+          로그아웃
         </button>
       </main>
     </div>

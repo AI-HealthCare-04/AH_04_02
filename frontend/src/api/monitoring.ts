@@ -21,6 +21,7 @@ export interface Patient {
   phone: string | null;
   email: string | null;
   birth_date: string | null;
+  gender: "male" | "female" | null;
   push_enabled: boolean;
   sms_enabled: boolean;
   email_opt_in: boolean;
@@ -31,6 +32,10 @@ export interface Patient {
   lunch_regular: boolean | null;
   dinner_time: string | null;
   dinner_regular: boolean | null;
+  // [2026-07-22 추가] 환자 관리 테이블(PatientManagement.tsx) 전용 — GET /caregivers/{id}/patients만
+  // 채워 보내고, 다른 곳(회원가입 응답 등)에서는 항상 기본값(null/"none")으로 온다.
+  diagnoses: string | null;
+  medication_status: "active" | "paused" | "none";
 }
 
 export interface Caregiver {
@@ -127,6 +132,53 @@ export async function createCaregiver(payload: {
   return data;
 }
 
+/** [2026-07-22 추가] "내 정보"(MyInfo.tsx) — 회원가입 때 받은 보호자/기관 정보 수정 */
+export async function updateCaregiver(
+  caregiverId: number,
+  payload: {
+    name?: string;
+    phone?: string;
+    email?: string;
+    birth_date?: string;
+    push_enabled?: boolean;
+    sms_enabled?: boolean;
+    email_opt_in?: boolean;
+    org_name?: string;
+    org_type?: string;
+    business_reg_no?: string;
+    manager_name?: string;
+    manager_phone?: string;
+  }
+) {
+  const { data } = await monitoringClient.patch<Caregiver>(
+    `/monitoring/caregivers/${caregiverId}`,
+    payload
+  );
+  return data;
+}
+
+/** [2026-07-23 추가] 회원가입(SignUp.tsx) — 이메일/전화번호 입력 필드에서 포커스를 잃을 때
+ * 중복 여부를 미리 알려주기 위한 조회 전용 호출(계정을 만들지 않음). */
+export async function checkPatientDuplicate(params: { email?: string; phone?: string }) {
+  const { data } = await monitoringClient.get<{ email_taken: boolean; phone_taken: boolean }>(
+    "/monitoring/patients/check-duplicate",
+    { params }
+  );
+  return data;
+}
+
+export async function checkCaregiverDuplicate(params: {
+  relation_type: "guardian" | "organization";
+  email?: string;
+  phone?: string;
+}) {
+  const { data } = await monitoringClient.get<{ email_taken: boolean; phone_taken: boolean }>(
+    "/monitoring/caregivers/check-duplicate",
+    { params }
+  );
+  return data;
+}
+
 /**
  * [7/8 추가] 반대 방향 — 이 환자를 케어하는 보호자 전체 목록 (Connect.tsx '연결된 사람' 표)
  */
@@ -168,6 +220,7 @@ export async function createPatient(payload: {
   phone?: string;
   email?: string;
   birth_date?: string;
+  gender?: "male" | "female";
   password?: string;
   push_enabled?: boolean;
   sms_enabled?: boolean;
@@ -179,7 +232,17 @@ export async function createPatient(payload: {
 
 export async function updatePatient(
   patientId: number,
-  payload: { name?: string; note?: string; phone?: string; email?: string; birth_date?: string }
+  payload: {
+    name?: string;
+    note?: string;
+    phone?: string;
+    email?: string;
+    birth_date?: string;
+    gender?: "male" | "female";
+    push_enabled?: boolean;
+    sms_enabled?: boolean;
+    email_opt_in?: boolean;
+  }
 ) {
   const { data } = await monitoringClient.patch<Patient>(
     `/monitoring/patients/${patientId}`,

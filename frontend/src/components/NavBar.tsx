@@ -10,11 +10,13 @@ interface NavBarProps {
   variant?: "light" | "dark";
 }
 
+type NavItem = { label: string; to: string; children?: { label: string; to: string }[] };
+
 // [2026-07-20] 별도 "더 보기" 화살표 하나에 전부 몰아두던 방식 대신, 상단 메뉴 각각에
 // 마우스를 올리면 그 메뉴 바로 아래로 관련 하위 항목이 드롭다운되도록 변경 — 알림류는
 // 오늘의 복약 아래, 기록류는 등록내역 아래로 그룹 분리. 복약 가이드는 하위 항목에서
 // 상단 메뉴로 승격, 처방 약 등록은 맨 왼쪽으로 이동.
-const PATIENT_NAV_ITEMS: { label: string; to: string; children?: { label: string; to: string }[] }[] = [
+const PATIENT_NAV_ITEMS: NavItem[] = [
   { label: "처방 약 등록", to: "/upload" },
   {
     label: "오늘의 복약",
@@ -28,11 +30,19 @@ const PATIENT_NAV_ITEMS: { label: string; to: string; children?: { label: string
   {
     label: "등록내역",
     to: "/records",
-    children: [{ label: "복약기록", to: "/monitoring" }],
+    children: [
+      { label: "복약기록", to: "/monitoring" },
+      // [2026-07-21 추가] 보호자 초대/연결 화면(Connect.tsx) — 지금까진 대시보드
+      // 배너에서만 들어갈 수 있었음. 이미 만든 페이지를 내비바에서도 바로 접근 가능하게.
+      { label: "보호자 등록", to: "/connect" },
+      // [2026-07-21 추가] 식사시간 설정(MealTimeCheck.tsx) — 지금까진 회원가입 직후에만
+      // 들어올 수 있었음. 복용시간(식전/식후) 계산 기준이라 나중에도 고칠 수 있어야 한다.
+      { label: "식사시간 등록", to: "/meal-check" },
+    ],
   },
 ];
 
-const CAREGIVER_NAV_ITEMS: { label: string; to: string; children?: { label: string; to: string }[] }[] = [
+const CAREGIVER_NAV_ITEMS: NavItem[] = [
   { label: "환자 관리", to: "/patients" },
   { label: "연결관리", to: "/connect" },
   { label: "설정", to: "/settings" },
@@ -121,6 +131,12 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, [searchFocused]);
 
+  // 현재 경로가 이 메뉴(또는 그 하위 항목) 소속인지 — 정확히 같거나 그 경로로 시작하면
+  // (예: /records/3/review도 "등록내역" 소속) 활성 메뉴로 보고 주황색으로 강조한다.
+  const isActivePath = (to: string) => location.pathname === to || location.pathname.startsWith(`${to}/`);
+  const isActiveItem = (item: NavItem) =>
+    isActivePath(item.to) || (item.children?.some((c) => isActivePath(c.to)) ?? false);
+
   const goToRecordsSearch = (q: string) => {
     if (!q) return;
     navigate(`/records?search=${encodeURIComponent(q)}`);
@@ -158,8 +174,11 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
                 >
                   <Link
                     to={item.to}
-                    className="text-[15px] font-medium whitespace-nowrap transition-opacity hover:opacity-60"
-                    style={{ color: textColor }}
+                    className="text-[15px] whitespace-nowrap transition-opacity hover:opacity-60"
+                    style={{
+                      color: isActiveItem(item) ? C.terracotta : textColor,
+                      fontWeight: isActiveItem(item) ? 700 : 500,
+                    }}
                   >
                     {item.label}
                   </Link>
@@ -372,8 +391,11 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
               <div key={item.to} className="border-b last:border-0" style={{ borderColor: "rgba(30,26,23,0.08)" }}>
                 <Link
                   to={item.to}
-                  className="block text-[15px] font-medium whitespace-nowrap transition-opacity hover:opacity-60 py-3"
-                  style={{ color: C.dark }}
+                  className="block text-[15px] whitespace-nowrap transition-opacity hover:opacity-60 py-3"
+                  style={{
+                    color: isActiveItem(item) ? C.terracotta : C.dark,
+                    fontWeight: isActiveItem(item) ? 700 : 500,
+                  }}
                   onClick={() => setIsOpen(false)}
                 >
                   {item.label}

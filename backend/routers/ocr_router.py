@@ -35,6 +35,7 @@ from models import MedicalRecord, OcrResult
 from services.drug_matcher import MATCH_THRESHOLD, match_drug
 from services.drug_reference import get_drug_info
 from services.ocr_interface import get_ocr_provider  # noqa: E402
+from services.parsing_rules import extract_prescription_date
 
 # [2026-07-20 추가, 담당: 김영혜] /drug-info(DrugDetail.tsx)에 사용상의 주의사항·부작용·
 # 상호작용·보관법을 채워주기 위해 rag/ 패키지의 e약은요·DUR 클라이언트를 재사용한다.
@@ -363,6 +364,7 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
             os.unlink(tmp_path)
 
     record.raw_text = ocr_result.raw_text
+    record.prescription_date = extract_prescription_date(ocr_result.raw_text) or None
     record.status = "review_required" if ocr_result.review_required else "completed"
     session.add(record)
 

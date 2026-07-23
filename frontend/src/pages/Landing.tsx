@@ -151,10 +151,12 @@ export default function Landing() {
           <p className="text-[15px] md:text-[17px] mb-8 md:mb-9 leading-[1.6] break-keep" style={{ color: "#C9BCAE" }}>
             진료 기록을 기반으로 한 맞춤형 복약 안내와 생활 습관 개선 가이드로 건강한 일상을 함께합니다.
           </p>
-          <div className="flex gap-3">
-            <button className="px-7 py-4 md:px-9 text-[15px] md:text-[16px] font-bold rounded-full text-white" style={{ background: "#C16A45" }} onClick={() => navigate("/register")}>무료로 시작하기</button>
-            <button className="px-7 py-4 md:px-9 text-[15px] md:text-[16px] font-bold rounded-full text-white bg-transparent" style={{ border: "1.5px solid #6B5B4C" }} onClick={() => navigate("/login")}>로그인</button>
-          </div>
+          {!loggedIn && (
+            <div className="flex gap-3">
+              <button className="px-7 py-4 md:px-9 text-[15px] md:text-[16px] font-bold rounded-full text-white" style={{ background: "#C16A45" }} onClick={() => navigate("/register")}>무료로 시작하기</button>
+              <button className="px-7 py-4 md:px-9 text-[15px] md:text-[16px] font-bold rounded-full text-white bg-transparent" style={{ border: "1.5px solid #6B5B4C" }} onClick={() => navigate("/login")}>로그인</button>
+            </div>
+          )}
         </div>
         <p className="text-center text-[13px] pb-6" style={{ color: "#8A7A6A" }}>스크롤하여 더 알아보기</p>
       </div>

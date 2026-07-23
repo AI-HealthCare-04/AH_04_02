@@ -10,6 +10,9 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      // skipWaiting/clientsClaim 없으면 새 배포분이 서비스워커 "waiting" 상태로 멈춰서
+      // 탭을 전부 닫기 전까진 캐시된 옛날 빌드가 계속 보인다 — 새로고침만으로 최신 반영되게 함.
+      workbox: { skipWaiting: true, clientsClaim: true },
       manifest: {
         name: '건강동행',
         short_name: '건강동행',

@@ -59,7 +59,7 @@ export default function Chat() {
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    getChatQuestions(patientId).then(setQuestions).catch(() => setQuestions([]));
+    getChatQuestions(patientId, context?.drugName).then(setQuestions).catch(() => setQuestions([]));
     getNotificationSettings(patientId)
       .then((s) => setChatbotName(s.chatbot_name || DEFAULT_CHATBOT_NAME))
       .catch(() => setChatbotName(DEFAULT_CHATBOT_NAME));
@@ -147,7 +147,7 @@ export default function Chat() {
           <p className="text-[14px]" style={{ color: C.muted }}>복약 안내 결과에 대해 궁금한 점을 물어보세요</p>
         </div>
 
-        <div className="rounded-3xl mb-4 flex flex-col overflow-hidden flex-1 min-h-0" style={{ background: C.white, boxShadow: "0 2px 20px rgba(30,26,23,0.07)" }}>
+        <div className="rounded-3xl mb-4 flex flex-col overflow-hidden flex-1 min-h-0" style={{ background: C.surface, boxShadow: "0 2px 20px rgba(30,26,23,0.07)" }}>
           <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto space-y-5 p-5">
             {messages.map((m, i) => {
               // 스트리밍 첫 토큰이 오기 전(빈 bot placeholder)에는 빈 말풍선 대신 아래

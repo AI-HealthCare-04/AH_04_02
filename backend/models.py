@@ -56,6 +56,10 @@ class Patient(SQLModel, table=True):
     # 고쳤다 — 항상 security.normalize_email()로 정규화한 값만 여기 저장한다는 전제.
     email: str | None = Field(default=None, unique=True, index=True)
     birth_date: str | None = None  # [7/8 추가] 생년월일 (자유 텍스트, 예: "1945.03.15")
+    # [2026-07-22 추가] 환자 관리 테이블(PatientManagement.tsx, Figma 목업)의 "성별" 컬럼용 —
+    # "male"/"female"만 받는다(가입 화면 select). 민감정보라 name/phone처럼 암호화할지도
+    # 고려했으나, 팀 논의 없이 임의로 결정하지 않고 우선 평문 컬럼으로 추가 — 필요시 재검토.
+    gender: str | None = None
     # [7/8 추가, 7/9 실제 로그인 대상으로 전환] 환자 본인 계정 비밀번호 — Caregiver.hashed_password와 동일 원칙
     hashed_password: str | None = None
     push_enabled: bool = True  # [7/8 추가] 회원가입 알림 수신 설정 (Caregiver와 동일한 3종)
@@ -238,6 +242,11 @@ class MedicalRecord(SQLModel, table=True):
     # [2026-07-16 추가] 등록내역 삭제 기능 — PatientMedication.deleted_at과 동일한 soft-delete
     # 관례. OCR·가이드 등 연결 데이터를 실제로 지우지 않고 목록/조회에서만 감춘다.
     deleted_at: datetime | None = Field(default=None)
+    # [2026-07-21 추가] 등록내역 목록에서 즐겨찾기처럼 위쪽에 고정하는 기능.
+    pinned: bool = False
+    # [2026-07-23 추가] raw_text에서 뽑아낸 조제일자("YYYY-MM-DD") — 재처방인지(같은 약,
+    # 다른 날짜) 판단하는 근거. 날짜를 못 찾으면 None(기존처럼 이름만으로 중복 판정).
+    prescription_date: str | None = Field(default=None)
 
 
 # ── OCR 추출 결과 (약품 1개 = 1행, 담당: 권순현) ──

@@ -154,7 +154,7 @@ export default function MonitoringDashboard() {
         ) : (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-              <div className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
+              <div className="rounded-2xl p-5" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
                 <p className="text-[12px] font-bold uppercase tracking-wider mb-3" style={{ color: C.muted }}>도움 단계</p>
                 {assessment ? (
                   <span
@@ -172,7 +172,7 @@ export default function MonitoringDashboard() {
                   </p>
                 )}
               </div>
-              <div className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
+              <div className="rounded-2xl p-5" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
                 <p className="text-[12px] font-bold uppercase tracking-wider mb-3" style={{ color: C.muted }}>복약 이행률 (최근 7일)</p>
                 <div className="flex items-baseline gap-1 mb-3">
                   <span className="text-[32px] font-black" style={{ color: C.dark }}>{adherence ?? "—"}</span>
@@ -182,7 +182,7 @@ export default function MonitoringDashboard() {
                   {last7.length > 0 ? `${last7.length}건 중 ${takenCount}건 복용` : "기록된 복약 없음"}
                 </p>
               </div>
-              <div className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
+              <div className="rounded-2xl p-5" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
                 <p className="text-[12px] font-bold uppercase tracking-wider mb-3" style={{ color: C.muted }}>이번 주 누락</p>
                 <div className="flex items-baseline gap-1">
                   <span className="text-[32px] font-black" style={{ color: missedCount > 0 ? "#D94F4F" : C.dark }}>{missedCount}</span>
@@ -191,7 +191,7 @@ export default function MonitoringDashboard() {
               </div>
             </div>
 
-            <div className="rounded-2xl overflow-hidden mb-6" style={{ background: C.white, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
+            <div className="rounded-2xl overflow-hidden mb-6" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
               <div className="px-6 py-4 border-b flex items-center justify-between flex-wrap gap-2" style={{ borderColor: "rgba(30,26,23,0.08)" }}>
                 <h2 className="text-[16px] font-black" style={{ color: C.dark }}>등록된 약 전체</h2>
                 <span className="text-[12px]" style={{ color: C.muted }}>약 이름을 클릭하면 상세 정보를 볼 수 있어요</span>
@@ -199,41 +199,65 @@ export default function MonitoringDashboard() {
               {schedules.length === 0 ? (
                 <p className="px-6 py-8 text-center text-[14px]" style={{ color: C.muted }}>등록된 약이 없어요.</p>
               ) : (
-                <table className="w-full">
-                  <thead>
-                    <tr style={{ borderBottom: "1px solid rgba(30,26,23,0.08)" }}>
-                      {["약 이름", "복용 시간", "메모", "사용 여부"].map((h) => (
-                        <th key={h} className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider" style={{ color: C.muted }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
+                <>
+                  {/* 모바일: 좁은 화면에서 표 컬럼이 한 글자씩 줄바꿈되는 걸 피하려고 카드형으로 */}
+                  <div className="sm:hidden">
                     {schedules.map((s, i) => (
-                      <tr
+                      <div
                         key={s.id}
-                        className="cursor-pointer transition-colors hover:bg-black/[0.02]"
+                        className="px-5 py-4 cursor-pointer transition-colors hover:bg-black/[0.02]"
                         style={{ borderBottom: i < schedules.length - 1 ? "1px solid rgba(30,26,23,0.06)" : undefined }}
                         onClick={() => navigate(`/drugs/${s.id}`, { state: { schedule: s } })}
                       >
-                        <td className="px-5 py-3.5 font-bold text-[14px] hover:underline" style={{ color: C.terracotta }}>{s.drug_name}</td>
-                        <td className="px-5 py-3.5 text-[13px]" style={{ color: C.muted }}>{s.time_slot}</td>
-                        <td className="px-5 py-3.5 text-[13px]" style={{ color: C.muted }}>{s.memo || "—"}</td>
-                        <td className="px-5 py-3.5">
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <span className="font-bold text-[15px]" style={{ color: C.terracotta }}>{s.drug_name}</span>
                           <span
-                            className="px-3 py-1 rounded-full text-[12px] font-bold"
+                            className="shrink-0 px-3 py-1 rounded-full text-[12px] font-bold"
                             style={{ background: s.active ? `${C.success}20` : "rgba(30,26,23,0.07)", color: s.active ? "#4A7A47" : C.muted }}
                           >
                             {s.active ? "사용 중" : "중지"}
                           </span>
-                        </td>
-                      </tr>
+                        </div>
+                        <p className="text-[13px]" style={{ color: C.muted }}>{s.time_slot}{s.memo ? ` · ${s.memo}` : ""}</p>
+                      </div>
                     ))}
-                  </tbody>
-                </table>
+                  </div>
+                  <table className="w-full hidden sm:table">
+                    <thead>
+                      <tr style={{ borderBottom: "1px solid rgba(30,26,23,0.08)" }}>
+                        {["약 이름", "복용 시간", "메모", "사용 여부"].map((h) => (
+                          <th key={h} className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider" style={{ color: C.muted }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {schedules.map((s, i) => (
+                        <tr
+                          key={s.id}
+                          className="cursor-pointer transition-colors hover:bg-black/[0.02]"
+                          style={{ borderBottom: i < schedules.length - 1 ? "1px solid rgba(30,26,23,0.06)" : undefined }}
+                          onClick={() => navigate(`/drugs/${s.id}`, { state: { schedule: s } })}
+                        >
+                          <td className="px-5 py-3.5 font-bold text-[14px] hover:underline" style={{ color: C.terracotta }}>{s.drug_name}</td>
+                          <td className="px-5 py-3.5 text-[13px]" style={{ color: C.muted }}>{s.time_slot}</td>
+                          <td className="px-5 py-3.5 text-[13px]" style={{ color: C.muted }}>{s.memo || "—"}</td>
+                          <td className="px-5 py-3.5">
+                            <span
+                              className="px-3 py-1 rounded-full text-[12px] font-bold"
+                              style={{ background: s.active ? `${C.success}20` : "rgba(30,26,23,0.07)", color: s.active ? "#4A7A47" : C.muted }}
+                            >
+                              {s.active ? "사용 중" : "중지"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
               )}
             </div>
 
-            <div className="rounded-2xl p-6 mb-6" style={{ background: C.white, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
+            <div className="rounded-2xl p-6 mb-6" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
               <div className="flex items-center justify-between mb-5">
                 <h2 className="text-[16px] font-black" style={{ color: C.dark }}>이번 달 복약 현황</h2>
                 <div className="flex items-center gap-1">
@@ -295,32 +319,21 @@ export default function MonitoringDashboard() {
               </div>
             </div>
 
-            <div className="rounded-2xl overflow-hidden mb-6" style={{ background: C.white, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
+            <div className="rounded-2xl overflow-hidden mb-6" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
               <div className="px-6 py-4 border-b" style={{ borderColor: "rgba(30,26,23,0.08)" }}>
                 <h2 className="text-[16px] font-black" style={{ color: C.dark }}>최근 복약 기록</h2>
               </div>
               {recentLogs.length === 0 ? (
                 <p className="px-6 py-8 text-center text-[14px]" style={{ color: C.muted }}>기록이 없어요.</p>
               ) : (
-                <table className="w-full">
-                  <thead>
-                    <tr style={{ borderBottom: "1px solid rgba(30,26,23,0.08)" }}>
-                      {["날짜", "약 이름", "복용 시간", "상태"].map((h) => (
-                        <th key={h} className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider" style={{ color: C.muted }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recentLogs.map((r) => (
-                      <tr key={r.id} style={{ borderBottom: "1px solid rgba(30,26,23,0.06)" }}>
-                        <td className="px-5 py-3.5 text-[13px]" style={{ color: C.muted }}>
-                          {new Date(r.checked_at).toLocaleDateString("ko-KR")}
-                        </td>
-                        <td className="px-5 py-3.5 font-semibold text-[14px]" style={{ color: C.dark }}>{r.drug_name}</td>
-                        <td className="px-5 py-3.5 text-[13px]" style={{ color: C.muted }}>{r.time_slot}</td>
-                        <td className="px-5 py-3.5">
+                <>
+                  <div className="sm:hidden">
+                    {recentLogs.map((r, i) => (
+                      <div key={r.id} className="px-5 py-4" style={{ borderBottom: i < recentLogs.length - 1 ? "1px solid rgba(30,26,23,0.06)" : undefined }}>
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <span className="font-semibold text-[14px]" style={{ color: C.dark }}>{r.drug_name}</span>
                           <span
-                            className="px-3 py-1 rounded-full text-[12px] font-bold"
+                            className="shrink-0 px-3 py-1 rounded-full text-[12px] font-bold"
                             style={{
                               background: r.status === "taken" ? `${C.success}20` : "rgba(217,79,79,0.12)",
                               color: r.status === "taken" ? "#4A7A47" : "#D94F4F",
@@ -328,11 +341,45 @@ export default function MonitoringDashboard() {
                           >
                             {r.status === "taken" ? "복용완료" : r.status === "missed" ? "놓침" : "건너뜀"}
                           </span>
-                        </td>
-                      </tr>
+                        </div>
+                        <p className="text-[13px]" style={{ color: C.muted }}>
+                          {new Date(r.checked_at).toLocaleDateString("ko-KR")} · {r.time_slot}
+                        </p>
+                      </div>
                     ))}
-                  </tbody>
-                </table>
+                  </div>
+                  <table className="w-full hidden sm:table">
+                    <thead>
+                      <tr style={{ borderBottom: "1px solid rgba(30,26,23,0.08)" }}>
+                        {["날짜", "약 이름", "복용 시간", "상태"].map((h) => (
+                          <th key={h} className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider" style={{ color: C.muted }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recentLogs.map((r) => (
+                        <tr key={r.id} style={{ borderBottom: "1px solid rgba(30,26,23,0.06)" }}>
+                          <td className="px-5 py-3.5 text-[13px]" style={{ color: C.muted }}>
+                            {new Date(r.checked_at).toLocaleDateString("ko-KR")}
+                          </td>
+                          <td className="px-5 py-3.5 font-semibold text-[14px]" style={{ color: C.dark }}>{r.drug_name}</td>
+                          <td className="px-5 py-3.5 text-[13px]" style={{ color: C.muted }}>{r.time_slot}</td>
+                          <td className="px-5 py-3.5">
+                            <span
+                              className="px-3 py-1 rounded-full text-[12px] font-bold"
+                              style={{
+                                background: r.status === "taken" ? `${C.success}20` : "rgba(217,79,79,0.12)",
+                                color: r.status === "taken" ? "#4A7A47" : "#D94F4F",
+                              }}
+                            >
+                              {r.status === "taken" ? "복용완료" : r.status === "missed" ? "놓침" : "건너뜀"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
               )}
             </div>
           </>

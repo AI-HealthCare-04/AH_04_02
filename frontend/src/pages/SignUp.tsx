@@ -2,7 +2,7 @@ import { Fragment, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Check, Phone } from "lucide-react";
 import NavBar from "../components/NavBar";
-import { createCaregiver, createPatient } from "../api/monitoring";
+import { checkCaregiverDuplicate, checkPatientDuplicate, createCaregiver, createPatient } from "../api/monitoring";
 import { login } from "../api/auth";
 import { C } from "../theme";
 
@@ -49,8 +49,8 @@ const inputCss = "w-full px-4 py-3.5 rounded-xl border text-[15px] outline-none"
 const inputStyle = { borderColor: "rgba(30,26,23,0.12)", color: C.dark, background: C.ivory };
 
 function Field({
-  label, value, onChange, placeholder, type = "text", error,
-}: { label: string; value: string; onChange: (v: string) => void; placeholder: string; type?: string; error?: string }) {
+  label, value, onChange, placeholder, type = "text", error, onBlur,
+}: { label: string; value: string; onChange: (v: string) => void; placeholder: string; type?: string; error?: string; onBlur?: () => void }) {
   return (
     <div>
       <label className="block text-[13px] font-bold mb-1.5" style={{ color: C.dark }}>{label}</label>
@@ -58,6 +58,7 @@ function Field({
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
         placeholder={placeholder}
         className={inputCss}
         style={{ ...inputStyle, borderColor: error ? "#D94F4F" : inputStyle.borderColor }}
@@ -141,10 +142,18 @@ export default function SignUp() {
   const [pRole, setPRole] = useState<PatientRole>("patient");
   const [name, setName] = useState("");
   const [birthDate, setBirthDate] = useState("");
+  // [2026-07-22 추가] 환자 관리 테이블(PatientManagement.tsx)의 "성별" 컬럼용 — 환자 본인
+  // 가입에서만 받는다(보호자/기관 계정엔 해당 없는 필드). 모르면 그냥 비워둔다.
+  const [gender, setGender] = useState<"male" | "female" | "">("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
+  // [2026-07-23 추가] 이메일/전화번호에서 다른 필드로 넘어갈 때(onBlur) 바로 중복 확인 —
+  // 비밀번호 확인과 동일하게 빨간 테두리 + 문구로 보여준다. 값을 고치면 다시 확인 전까지
+  // 초기화(더 이상 유효하지 않은 판정을 계속 보여주지 않기 위함).
+  const [emailTaken, setEmailTaken] = useState(false);
+  const [phoneTaken, setPhoneTaken] = useState(false);
 
   // Step 3 — 정보입력 (단체)
   const [orgName, setOrgName] = useState("");
@@ -153,6 +162,8 @@ export default function SignUp() {
   const [managerName, setManagerName] = useState("");
   const [managerEmail, setManagerEmail] = useState("");
   const [managerPhone, setManagerPhone] = useState("");
+  const [managerEmailTaken, setManagerEmailTaken] = useState(false);
+  const [managerPhoneTaken, setManagerPhoneTaken] = useState(false);
 
   const [notifPrefs, setNotifPrefs] = useState<NotifPrefs>({ push: false, sms: false, email: false });
 
@@ -171,6 +182,13 @@ export default function SignUp() {
     return () => clearTimeout(t);
   }, [codeSent, timer]);
 
+  // [2026-07-23 추가] 환자 본인/보호자 전환은 확인 대상 테이블(patients vs caregivers)이
+  // 바뀌므로, 이전 판정을 그대로 들고 있으면 안 된다 — 다시 확인 전까지 초기화.
+  useEffect(() => {
+    setEmailTaken(false);
+    setPhoneTaken(false);
+  }, [pRole]);
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
@@ -180,16 +198,29 @@ export default function SignUp() {
 
   const step3Valid =
     memberType === "organization"
-      ? Boolean(orgName.trim() && businessRegNo.trim() && managerName.trim() && managerPhone.trim() && passwordValid)
-      : Boolean(name.trim() && phone.trim() && passwordValid);
+      ? Boolean(
+          orgName.trim() && businessRegNo.trim() && managerName.trim() && managerPhone.trim() &&
+          passwordValid && !managerEmailTaken && !managerPhoneTaken
+        )
+      : Boolean(name.trim() && phone.trim() && passwordValid && !emailTaken && !phoneTaken);
 
   const showErr = (invalid: boolean) => step3Attempted && invalid;
   const nameError = showErr(!name.trim()) ? "이름을 입력해주세요" : undefined;
-  const phoneError = showErr(!phone.trim()) ? "전화번호를 입력해주세요" : undefined;
+  const emailError = emailTaken ? "이미 사용중인 이메일이에요." : undefined;
+  const phoneError = phoneTaken
+    ? "이미 사용중인 전화번호예요."
+    : showErr(!phone.trim())
+    ? "전화번호를 입력해주세요"
+    : undefined;
   const orgNameError = showErr(!orgName.trim()) ? "기관명을 입력해주세요" : undefined;
   const businessRegNoError = showErr(!businessRegNo.trim()) ? "사업자등록번호를 입력해주세요" : undefined;
   const managerNameError = showErr(!managerName.trim()) ? "담당자 이름을 입력해주세요" : undefined;
-  const managerPhoneError = showErr(!managerPhone.trim()) ? "담당자 전화번호를 입력해주세요" : undefined;
+  const managerEmailError = managerEmailTaken ? "이미 사용중인 이메일이에요." : undefined;
+  const managerPhoneError = managerPhoneTaken
+    ? "이미 사용중인 전화번호예요."
+    : showErr(!managerPhone.trim())
+    ? "담당자 전화번호를 입력해주세요"
+    : undefined;
   const passwordError = showErr(password.length < 8) ? "비밀번호는 8자 이상이어야 해요" : undefined;
   const passwordConfirmError =
     passwordConfirm.length > 0 && password !== passwordConfirm
@@ -198,6 +229,51 @@ export default function SignUp() {
       ? "비밀번호를 다시 입력해주세요"
       : undefined;
   const pushError = showErr(!notifPrefs.push);
+
+  // [2026-07-23 추가] 이메일/전화번호 입력 필드에서 포커스를 잃으면 바로 중복 확인 —
+  // 실패(네트워크 오류 등)는 조용히 무시한다. 최종 제출 시 서버가 다시 한번 막아준다.
+  const checkEmailDuplicate = async () => {
+    if (!email.trim()) return;
+    try {
+      const result =
+        pRole === "patient"
+          ? await checkPatientDuplicate({ email: email.trim() })
+          : await checkCaregiverDuplicate({ relation_type: "guardian", email: email.trim() });
+      setEmailTaken(result.email_taken);
+    } catch {
+      // ignore
+    }
+  };
+  const checkPhoneDuplicate = async () => {
+    if (!phone.trim()) return;
+    try {
+      const result =
+        pRole === "patient"
+          ? await checkPatientDuplicate({ phone: phone.trim() })
+          : await checkCaregiverDuplicate({ relation_type: "guardian", phone: phone.trim() });
+      setPhoneTaken(result.phone_taken);
+    } catch {
+      // ignore
+    }
+  };
+  const checkManagerEmailDuplicate = async () => {
+    if (!managerEmail.trim()) return;
+    try {
+      const result = await checkCaregiverDuplicate({ relation_type: "organization", email: managerEmail.trim() });
+      setManagerEmailTaken(result.email_taken);
+    } catch {
+      // ignore
+    }
+  };
+  const checkManagerPhoneDuplicate = async () => {
+    if (!managerPhone.trim()) return;
+    try {
+      const result = await checkCaregiverDuplicate({ relation_type: "organization", phone: managerPhone.trim() });
+      setManagerPhoneTaken(result.phone_taken);
+    } catch {
+      // ignore
+    }
+  };
 
   const sendCode = () => {
     setCodeSent(true);
@@ -215,6 +291,7 @@ export default function SignUp() {
           phone: phone.trim(),
           email: email.trim() || undefined,
           birth_date: birthDate.trim() || undefined,
+          gender: gender || undefined,
           password,
           push_enabled: notifPrefs.push,
           sms_enabled: notifPrefs.sms,
@@ -295,7 +372,7 @@ export default function SignUp() {
       <main className="flex-1 flex items-start justify-center px-4 py-10">
         <div className="w-full" style={{ maxWidth: 480 }}>
           {!done && <StepIndicator current={step} />}
-          <div className="rounded-3xl p-8" style={{ background: C.white, boxShadow: "0 8px 40px rgba(30,26,23,0.10)" }}>
+          <div className="rounded-3xl p-8" style={{ background: C.surface, boxShadow: "0 8px 40px rgba(30,26,23,0.10)" }}>
             {done ? (
               <div className="text-center py-6">
                 <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6" style={{ background: `${C.success}22` }}>
@@ -423,15 +500,66 @@ export default function SignUp() {
                       </div>
                       <Field label="사업자등록번호" value={businessRegNo} onChange={setBusinessRegNo} placeholder="000-00-00000" error={businessRegNoError} />
                       <Field label="담당자 이름" value={managerName} onChange={setManagerName} placeholder="홍길동" error={managerNameError} />
-                      <Field label="담당자 이메일" value={managerEmail} onChange={setManagerEmail} placeholder="manager@agency.com" />
-                      <Field label="담당자 전화번호" value={managerPhone} onChange={setManagerPhone} placeholder="010-0000-0000" error={managerPhoneError} />
+                      <Field
+                        label="담당자 이메일"
+                        value={managerEmail}
+                        onChange={(v) => { setManagerEmail(v); setManagerEmailTaken(false); }}
+                        onBlur={checkManagerEmailDuplicate}
+                        placeholder="manager@agency.com"
+                        error={managerEmailError}
+                      />
+                      <Field
+                        label="담당자 전화번호"
+                        value={managerPhone}
+                        onChange={(v) => { setManagerPhone(v); setManagerPhoneTaken(false); }}
+                        onBlur={checkManagerPhoneDuplicate}
+                        placeholder="010-0000-0000"
+                        error={managerPhoneError}
+                      />
                     </>
                   ) : (
                     <>
                       <Field label="이름" value={name} onChange={setName} placeholder="홍길동" error={nameError} />
                       <Field label="생년월일" value={birthDate} onChange={setBirthDate} placeholder="1945.03.15" />
-                      <Field label="이메일" value={email} onChange={setEmail} placeholder="example@email.com" type="email" />
-                      <Field label="전화번호" value={phone} onChange={setPhone} placeholder="010-0000-0000" error={phoneError} />
+                      {pRole === "patient" && (
+                        <div>
+                          <label className="block text-[13px] font-bold mb-1.5" style={{ color: C.dark }}>성별</label>
+                          <div className="flex gap-3">
+                            {(["female", "male"] as const).map((g) => (
+                              <button
+                                key={g}
+                                type="button"
+                                onClick={() => setGender(g)}
+                                className="flex-1 py-3 rounded-xl font-bold text-[14px] transition-all"
+                                style={{
+                                  background: gender === g ? C.terracotta : C.ivory,
+                                  color: gender === g ? C.white : C.dark,
+                                  border: `1.5px solid ${gender === g ? C.terracotta : "rgba(30,26,23,0.12)"}`,
+                                }}
+                              >
+                                {g === "female" ? "여성" : "남성"}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      <Field
+                        label="이메일"
+                        value={email}
+                        onChange={(v) => { setEmail(v); setEmailTaken(false); }}
+                        onBlur={checkEmailDuplicate}
+                        placeholder="example@email.com"
+                        type="email"
+                        error={emailError}
+                      />
+                      <Field
+                        label="전화번호"
+                        value={phone}
+                        onChange={(v) => { setPhone(v); setPhoneTaken(false); }}
+                        onBlur={checkPhoneDuplicate}
+                        placeholder="010-0000-0000"
+                        error={phoneError}
+                      />
                     </>
                   )}
 

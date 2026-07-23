@@ -47,7 +47,7 @@ export default function MedGuideList() {
         {loading ? (
           <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>
         ) : records.length === 0 ? (
-          <div className="rounded-2xl p-10 text-center" style={{ background: C.white, boxShadow: C.shadowCard }}>
+          <div className="rounded-2xl p-10 text-center" style={{ background: C.surface, boxShadow: C.shadowCard }}>
             <p className="text-[14px] mb-4" style={{ color: C.muted }}>아직 완성된 복약 가이드가 없어요.</p>
             <button
               onClick={() => navigate("/upload")}

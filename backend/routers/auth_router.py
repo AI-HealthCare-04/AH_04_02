@@ -130,6 +130,10 @@ class WithdrawRequest(BaseModel):
     password: str  # 확인 절차(REQ-035) — 현재 비밀번호 재입력으로 본인 확인
 
 
+class VerifyPasswordRequest(BaseModel):
+    password: str  # "내 정보" 열람 전 본인 확인(MyInfo.tsx) — 상태 변경 없이 맞는지만 본다
+
+
 class WithdrawCancelRequest(BaseModel):
     identifier: str  # 탈퇴 후에는 로그인이 막히므로(access_token 없음) login()과 같은 방식으로 본인 확인
     password: str
@@ -617,6 +621,19 @@ def confirm_password_reset(payload: PasswordResetConfirmRequest, session: Sessio
     session.commit()
 
     return {"message": "비밀번호가 재설정되었습니다. 새 비밀번호로 로그인해주세요."}
+
+
+@router.post("/verify-password")
+def verify_current_password(
+    payload: VerifyPasswordRequest,
+    actor: Actor = Depends(get_current_actor),
+):
+    """[2026-07-22 추가] "내 정보"(MyInfo.tsx) 열람 전 본인 확인용 — 로그인된 계정의
+    현재 비밀번호가 맞는지만 확인하고 아무 상태도 바꾸지 않는다."""
+    _, account = actor
+    if not account.hashed_password or not verify_password(payload.password, account.hashed_password):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "비밀번호가 올바르지 않습니다.")
+    return {"verified": True}
 
 
 # ── 회원 탈퇴 [2026-07-15 추가, REQ-035] ──
