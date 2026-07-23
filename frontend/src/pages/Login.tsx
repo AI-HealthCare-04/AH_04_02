@@ -127,6 +127,7 @@ export default function Login() {
       const accountRole: "guardian" | "organization" = relation_type === "organization" ? "organization" : "guardian";
 
       localStorage.setItem("caregiver_id", String(caregiver_id));
+      localStorage.removeItem("patient_id");
       setSelectedCaregiver({ id: caregiver_id, name } as Caregiver);
 
       const list = await getCaregiverPatients(caregiver_id);
