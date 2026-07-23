@@ -36,7 +36,11 @@ export default function MyPage() {
     load();
   }, [caregiverId, patientId]);
 
-  const displayName = caregiver ? caregiver.name : patient ? patient.name : "사용자";
+  const caregiverDisplayName =
+    caregiver?.relation_type === "organization" && caregiver.manager_name?.trim()
+      ? caregiver.manager_name.trim()
+      : caregiver?.name;
+  const displayName = caregiverDisplayName ?? (patient ? patient.name : "사용자");
   const roleLabel = caregiver
     ? { text: `보호자 (${relationLabel(caregiver.relation_type)})`, bg: `${C.terracottaLight}20`, color: C.terracotta }
     : { text: "복약관리 대상자", bg: `${C.success}20`, color: "#4A7A47" };

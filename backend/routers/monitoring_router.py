@@ -360,7 +360,11 @@ def create_caregiver(payload: CaregiverCreate, session: Session = Depends(get_se
         email=email,
         hashed_password=hash_password(payload.password) if payload.password else None,
     )
-    caregiver.name = payload.name
+    caregiver.name = (
+        payload.manager_name.strip()
+        if payload.relation_type == "organization" and payload.manager_name and payload.manager_name.strip()
+        else payload.name
+    )
     caregiver.phone = payload.phone
     session.add(caregiver)
     session.commit()
