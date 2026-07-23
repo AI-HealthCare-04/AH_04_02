@@ -109,6 +109,48 @@ class TestAuthFlow:
         )
         assert r2.status_code == 409
 
+    def test_caregiver_email_duplicate_allowed_across_relation_types_blocked_within(
+        self, client: TestClient
+    ):
+        """[2026-07-23 추가] phone_hash와 동일하게 email도 relation_type(역할)끼리만 중복을
+        막는다 — 같은 사람이 보호자(가족)이면서 동시에 기관(요양보호사 등) 소속일 수 있어
+        같은 이메일로 두 역할 계정을 가질 수 있어야 하지만, 같은 역할 안에서는 여전히
+        막혀야 한다."""
+        r1 = client.post(
+            "/monitoring/caregivers",
+            json={
+                "name": "보호자3",
+                "email": "cross-role@test.com",
+                "password": "pw123456",
+                "relation_type": "guardian",
+            },
+        )
+        assert r1.status_code == 200
+
+        # 다른 relation_type(organization)이면 같은 이메일이어도 허용돼야 한다.
+        r2 = client.post(
+            "/monitoring/caregivers",
+            json={
+                "name": "요양원3",
+                "email": "cross-role@test.com",
+                "password": "pw123456",
+                "relation_type": "organization",
+            },
+        )
+        assert r2.status_code == 200
+
+        # 같은 relation_type(guardian)끼리는 여전히 막혀야 한다.
+        r3 = client.post(
+            "/monitoring/caregivers",
+            json={
+                "name": "보호자3-again",
+                "email": "cross-role@test.com",
+                "password": "pw654321",
+                "relation_type": "guardian",
+            },
+        )
+        assert r3.status_code == 409
+
     def test_removed_dead_signup_endpoint_returns_404(self, client: TestClient):
         """[2026-07-14] POST /auth/signup는 monitoring_router.py와 중복되는 죽은 코드라 제거함."""
         r = client.post("/auth/signup", json={"email": "x@test.com", "password": "pw", "name": "x"})

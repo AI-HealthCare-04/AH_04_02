@@ -332,8 +332,17 @@ def create_caregiver(payload: CaregiverCreate, session: Session = Depends(get_se
     # [2026-07-14] Patient와 동일하게 이메일 정규화 + 사전 중복검사(친절한 409) 적용.
     # Caregiver.email은 원래부터 DB 유니크 제약이 있었지만, 정규화 없이 비교하면
     # "Test@x.com"과 "test@x.com"을 다른 값으로 보고 제약을 통과시켜버릴 수 있었다.
+    # [2026-07-23 수정] phone_hash와 동일한 이유로 email도 테이블 전체가 아니라
+    # relation_type끼리만 중복을 막는다(아래 phone_hash 주석 참고).
     email = normalize_email(payload.email) if payload.email else None
-    if email and session.exec(select(Caregiver).where(Caregiver.email == email)).first():
+    if (
+        email
+        and session.exec(
+            select(Caregiver)
+            .where(Caregiver.email == email)
+            .where(Caregiver.relation_type == payload.relation_type)
+        ).first()
+    ):
         raise HTTPException(409, "이미 사용중인 이메일입니다.")
 
     # [2026-07-22 추가] Patient._register_patient와 동일한 이유 — phone_hash 유니크
@@ -382,11 +391,18 @@ def check_caregiver_duplicate(
     session: Session = Depends(get_session),
 ):
     """[2026-07-23 추가] check_patient_duplicate와 동일한 목적 — create_caregiver의 중복
-    판정 규칙(전화번호는 relation_type끼리만 비교)을 그대로 재사용한다."""
+    판정 규칙(이메일·전화번호 모두 relation_type끼리만 비교)을 그대로 재사용한다."""
     email_taken = False
     if email:
         normalized = normalize_email(email)
-        email_taken = session.exec(select(Caregiver).where(Caregiver.email == normalized)).first() is not None
+        email_taken = (
+            session.exec(
+                select(Caregiver)
+                .where(Caregiver.email == normalized)
+                .where(Caregiver.relation_type == relation_type)
+            ).first()
+            is not None
+        )
     phone_taken = False
     if phone:
         phone_taken = (
@@ -437,7 +453,11 @@ def update_caregiver(
     updates = payload.model_dump(exclude_unset=True)
     if "email" in updates and updates["email"]:
         email = normalize_email(updates["email"])
-        existing = session.exec(select(Caregiver).where(Caregiver.email == email)).first()
+        existing = session.exec(
+            select(Caregiver)
+            .where(Caregiver.email == email)
+            .where(Caregiver.relation_type == caregiver.relation_type)
+        ).first()
         if existing and existing.id != caregiver_id:
             raise HTTPException(409, "이미 사용중인 이메일입니다.")
         updates["email"] = email

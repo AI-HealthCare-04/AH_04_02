@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ChevronDown, ChevronRight, Menu, Pill, Search, X } from "lucide-react";
+import { getCurrentCaregiverId } from "../lib/session";
 import { C } from "../theme";
 
 interface NavBarProps {
@@ -71,7 +72,7 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const allMenuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLDivElement>(null);
-  const navItems = localStorage.getItem("caregiver_id") ? CAREGIVER_NAV_ITEMS : PATIENT_NAV_ITEMS;
+  const navItems = getCurrentCaregiverId() ? CAREGIVER_NAV_ITEMS : PATIENT_NAV_ITEMS;
   // [2026-07-20] 통합검색에서 "알림설정", "가이드"처럼 메뉴 이름 일부만 쳐도 해당 메뉴로
   // 바로 이동할 수 있게 — 상단 메뉴+하위 항목을 한 겹으로 펼친 검색 대상 목록.
   const allMenuEntries: { label: string; to: string }[] = navItems.flatMap((item) => [

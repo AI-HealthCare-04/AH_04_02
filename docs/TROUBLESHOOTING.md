@@ -376,3 +376,39 @@ for raw, norm in zip(raw_pool, norm_pool):
 | **원인** | EasyOCR이 시각적으로 유사한 문자를 혼동한다. 의약품 도메인에서는 한글 받침 혼동(“캡슐”→”캡쑬”)이나 숫자·문자 혼동(`0`→`O`)이 처방 용량이나 약품명 오인식으로 직결된다. |
 | **해결** | 2단계 후처리: ① 자주 혼동되는 패턴 사전 치환(`CHAR_CORRECTIONS`) → ② 의약품 도메인 사전과 유사도 비교(`difflib.get_close_matches`) |
 | **현재 상태** | CLOVA OCR 전환으로 후처리 파이프라인 불필요. 참고용으로만 보존. |
+
+---
+
+| 날짜 | 2026.07.23 |
+|---|---|
+| **작성자** | 김영혜 |
+| **이슈** | (1) 지원인력 계정이 마이페이지 "화면·챗봇 설정"에 들어가면 설정 화면 대신 환자 관리 화면으로 튕김 (2) 회원가입 생년월일 입력란에 형식 안내/오류 표시가 전혀 없음 (3) 이메일이 기관/보호자 등 관계(역할) 구분 없이 테이블 전체에서 유니크해서, 같은 사람이 보호자이면서 동시에 요양보호사로도 같은 이메일로 가입할 수 없었음(전화번호는 이미 역할별로 허용됨) (4) 회원가입 휴대폰 본인인증 6자리 코드 입력칸에서 숫자가 칸 밖으로 넘침 |
+| **발생 위치** | `frontend/src/pages/Settings.tsx`, `frontend/src/lib/session.ts`, `frontend/src/pages/SignUp.tsx`, `backend/models.py`, `backend/routers/monitoring_router.py`, `backend/alembic/versions/dd2141948419_...py` |
+| **원인** | (1) `Settings.tsx`가 Dashboard/Schedule 등과 동일하게 `useGuardedPatientId()`를 그대로 써서, 케어하는 환자가 0명이거나 2명 이상인데 아직 하나를 고르지 않은 지원인력은 이 화면에 들어오는 즉시 `/patients`로 강제 이동됐다 — "글자 크기"처럼 환자와 무관한 설정까지 덩달아 막혔다. (2) `SignUp.tsx`의 생년월일 `Field`에는 애초에 힌트/에러를 표시할 로직 자체가 없었다(값은 그냥 자유 텍스트로 저장). (3) `Caregiver.email`이 `unique=True`(DB 유니크)라 relation_type과 무관하게 테이블 전체에서 막혔다 — `phone_hash`는 2026-07-22에 이미 relation_type별로 풀어뒀지만 email은 그대로였다. (4) 인증코드 input이 `flex-1`인데 min-width가 브라우저 기본값(auto)이라, `font-size 26px + letterSpacing 0.5em` 기준 6자리 내용 너비가 타이머 박스와 함께 있는 flex row보다 넓어지면 줄어들지 못하고 넘쳤다. |
+| **해결** | (1) `useGuardedPatientId(options?: { silent?: boolean })`에 `silent` 옵션을 추가해 리다이렉트를 끌 수 있게 하고, `Settings.tsx`는 `{ silent: true }`로 호출 — 환자가 아직 안 정해졌으면 챗봇 이름 카드만 숨기고 글자 크기 설정은 그대로 보여준다. (2) 생년월일 입력란 위에 "현재 이후로도 가입이 가능해요."(대리 가입 등으로 정확한 생년월일을 모를 수 있어 미래 날짜도 허용한다는 안내) 힌트를 추가하고, `isValidBirthDate()`로 연/월/일이 실제 존재하는 날짜인지만 검사해(미래 여부는 검사하지 않음) 형식이 잘못됐을 때 "생년월일이 정확한지 확인해주세요."를 표시하도록 했다. (3) `Caregiver.email`의 DB 유니크 인덱스를 제거하는 마이그레이션을 추가하고(`ix_caregivers_email`을 `unique=False`로 재생성), `create_caregiver`/`check_caregiver_duplicate`/`update_caregiver`의 이메일 중복 검사에 phone_hash와 동일하게 `relation_type` 조건을 추가했다. (4) 인증코드 input에 `min-w-0`을 추가해 실제로 줄어들 수 있게 하고, 폰트 크기(26px→22px)와 자간(0.5em→0.35em)도 여유 있게 줄였다. |
+| **테스트/검증** | `backend/tests/test_auth_signup_login.py`에 "같은 이메일로 relation_type이 다르면 가입 허용, 같으면 409" 회귀 테스트 추가. `uv run pytest tests/test_auth_signup_login.py tests/test_auth_switch_account.py tests/test_care_router_invitations.py tests/test_invitation_accept_caregiver_id_auth.py tests/test_login_lockout_and_password_reset.py tests/test_scheduler.py tests/test_update_email_normalization.py -q` 77개 통과. `npm run build`, `npm run lint` 통과. 복약일정 삭제는 실제 로컬 서버에서 일정 생성→체크인(알림/기록 연결)→삭제→목록 재조회까지 실행해 FK 삭제와 화면 반영(로컬 상태 필터링) 모두 정상 동작을 재확인했다(코드 변경 없음). |
+| **재발 방지** | 여러 화면이 같은 가드 훅(`useGuardedPatientId` 등)을 공유할 때는, 그 화면이 정말로 "환자가 반드시 정해져야만" 보여줄 수 있는 화면인지 먼저 따진다 — 화면 일부만 환자 종속적이면 훅에 silent 옵션을 주거나 화면을 쪼갠다. 관계(역할)별로 중복을 허용해야 하는 필드(phone_hash)가 있다면, 같은 계정에 있는 유사한 필드(email)도 나중에 똑같은 요구가 생길 수 있다는 걸 염두에 두고 한 번에 점검한다. `flex-1` + 큰 `letterSpacing`/폰트 조합의 입력창은 항상 `min-w-0`을 같이 붙여야 실제로 줄어든다. |
+
+---
+
+| 날짜 | 2026.07.23 |
+|---|---|
+| **작성자** | 김영혜 |
+| **이슈** | PR #79 리뷰 코멘트 — `NavBar.tsx`가 `localStorage.getItem("caregiver_id")`를 직접 읽어 나머지 코드베이스가 쓰는 `lib/session.ts`의 `getCurrentCaregiverId()` 관례와 어긋남 |
+| **발생 위치** | `frontend/src/components/NavBar.tsx` |
+| **원인** | NavBar가 지원인력/환자 메뉴를 나누는 로직을 짜면서, 이미 있던 `getCurrentCaregiverId()` 헬퍼를 쓰지 않고 `localStorage.getItem`을 직접 호출했다. |
+| **해결** | `lib/session.ts`의 `getCurrentCaregiverId()`를 import해서 `localStorage.getItem("caregiver_id")` 대신 쓰도록 교체. 동작은 동일(값이 있으면 지원인력 메뉴, 없으면 환자 메뉴). |
+| **테스트/검증** | `npm run build`, `npm run lint` 통과. |
+| **재발 방지** | localStorage의 로그인/역할 관련 키(`caregiver_id`, `patient_id`, `user_name`, `access_token`)는 화면에서 직접 읽지 말고 항상 `lib/session.ts`의 헬퍼를 거친다. |
+
+---
+
+| 날짜 | 2026.07.23 |
+|---|---|
+| **작성자** | 김영혜 |
+| **이슈** | 회원가입 생년월일 입력이 순수 자유 텍스트라, 숫자만 입력하면 "."을 직접 타이핑해야 했음(사용자 요청 — 숫자 4자리 뒤/2자리 뒤에 "."이 자동으로 붙었으면 함) |
+| **발생 위치** | `frontend/src/pages/SignUp.tsx` |
+| **원인** | 생년월일 `Field`의 `onChange`가 입력값을 그대로 `setBirthDate`에 넣기만 해서 자동 서식 로직이 없었다. |
+| **해결** | `formatBirthDateInput()`을 추가해 입력값에서 숫자만 추출한 뒤 4자리(연) 뒤, 6자리(연+월) 뒤에 "."을 붙여 재조립하도록 했다. 8자리(연월일)를 넘는 입력은 잘라낸다. 매 입력마다 숫자만 남기고 다시 조립하는 방식이라 백스페이스로 지울 때도 자연스럽게 재적용된다. |
+| **테스트/검증** | `npm run build`, `npm run lint` 통과. |
+| **핵심 패턴** | 자동 구분자 삽입은 "매번 숫자만 추출 → 자리수 기준으로 구분자를 다시 붙여 조립"하는 방식이 커서 위치를 직접 추적하는 것보다 단순하고 backspace에도 안전하다. 다만 구분자 바로 뒤에서 backspace를 누르면 자리수가 그대로라 아무 변화가 없어 보일 수 있는 건 이 방식의 알려진 한계다. |

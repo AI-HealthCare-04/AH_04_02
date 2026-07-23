@@ -12,6 +12,35 @@ type PatientRole = "patient" | "guardian";
 const ORG_TYPE_OPTIONS = ["요양원", "정부기관", "협회", "보건소", "기타"];
 const STEPS = ["약관동의", "유형선택", "정보입력", "본인인증"];
 
+/** [2026-07-23 추가] 생년월일 형식만 검증한다 — 미래 날짜도 허용해야 해서(대리 가입 등
+ * 정확한 생년월일을 모르는 경우 포함) 오늘 이전인지는 확인하지 않고, "YYYY.MM.DD" 류
+ * 구분자(.,-,/)로 연/월/일이 실제로 존재하는 날짜인지만 본다. 빈 값은 선택 입력이라 통과. */
+function isValidBirthDate(input: string): boolean {
+  const trimmed = input.trim();
+  if (!trimmed) return true;
+  const match = trimmed.match(/^(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})$/);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12) return false;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  return day >= 1 && day <= daysInMonth;
+}
+
+/** [2026-07-23 추가] 생년월일 입력 중 숫자 4자리(연) 뒤, 2자리(월) 뒤에 "."을 자동으로
+ * 붙여준다 — 매번 숫자만 남기고 다시 조립하는 방식이라 백스페이스로 지울 때도 그대로
+ * 재적용된다. */
+function formatBirthDateInput(raw: string): string {
+  const digits = raw.replace(/\D/g, "").slice(0, 8);
+  const year = digits.slice(0, 4);
+  const month = digits.slice(4, 6);
+  const day = digits.slice(6, 8);
+  if (digits.length > 6) return `${year}.${month}.${day}`;
+  if (digits.length > 4) return `${year}.${month}`;
+  return year;
+}
+
 function StepIndicator({ current }: { current: number }) {
   return (
     <div className="flex items-center justify-center mb-8">
@@ -142,6 +171,7 @@ export default function SignUp() {
   const [pRole, setPRole] = useState<PatientRole>("patient");
   const [name, setName] = useState("");
   const [birthDate, setBirthDate] = useState("");
+  const [birthDateTouched, setBirthDateTouched] = useState(false);
   // [2026-07-22 추가] 환자 관리 테이블(PatientManagement.tsx)의 "성별" 컬럼용 — 환자 본인
   // 가입에서만 받는다(보호자/기관 계정엔 해당 없는 필드). 모르면 그냥 비워둔다.
   const [gender, setGender] = useState<"male" | "female" | "">("");
@@ -202,10 +232,14 @@ export default function SignUp() {
           orgName.trim() && businessRegNo.trim() && managerName.trim() && managerPhone.trim() &&
           passwordValid && !managerEmailTaken && !managerPhoneTaken
         )
-      : Boolean(name.trim() && phone.trim() && passwordValid && !emailTaken && !phoneTaken);
+      : Boolean(name.trim() && phone.trim() && passwordValid && !emailTaken && !phoneTaken && isValidBirthDate(birthDate));
 
   const showErr = (invalid: boolean) => step3Attempted && invalid;
   const nameError = showErr(!name.trim()) ? "이름을 입력해주세요" : undefined;
+  const birthDateError =
+    (birthDateTouched || step3Attempted) && birthDate.trim() && !isValidBirthDate(birthDate)
+      ? "생년월일이 정확한지 확인해주세요."
+      : undefined;
   const emailError = emailTaken ? "이미 사용중인 이메일이에요." : undefined;
   const phoneError = phoneTaken
     ? "이미 사용중인 전화번호예요."
@@ -520,7 +554,17 @@ export default function SignUp() {
                   ) : (
                     <>
                       <Field label="이름" value={name} onChange={setName} placeholder="홍길동" error={nameError} />
-                      <Field label="생년월일" value={birthDate} onChange={setBirthDate} placeholder="1945.03.15" />
+                      <div>
+                        <p className="text-[12px] mb-1.5" style={{ color: C.muted }}>현재 이후로도 가입이 가능해요.</p>
+                        <Field
+                          label="생년월일"
+                          value={birthDate}
+                          onChange={(v) => { setBirthDate(formatBirthDateInput(v)); setBirthDateTouched(false); }}
+                          onBlur={() => setBirthDateTouched(true)}
+                          placeholder="1945.03.15"
+                          error={birthDateError}
+                        />
+                      </div>
                       {pRole === "patient" && (
                         <div>
                           <label className="block text-[13px] font-bold mb-1.5" style={{ color: C.dark }}>성별</label>
@@ -631,8 +675,12 @@ export default function SignUp() {
                         value={code}
                         onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
                         placeholder="······"
-                        className="flex-1 text-center text-[26px] font-black px-4 py-4 rounded-xl outline-none"
-                        style={{ background: C.ivory, border: `2px solid ${code.length === 6 ? C.terracotta : "rgba(30,26,23,0.15)"}`, color: C.dark, letterSpacing: "0.5em" }}
+                        // [2026-07-23 수정] flex-1인데 min-width가 기본값(auto)이라, 6자리 +
+                        // letterSpacing 만큼의 내용 너비가 flex row(타이머와 함께)보다 넓어지면
+                        // 줄어들지 못하고 오른쪽 칸(타이머) 쪽으로 넘쳤다 — min-w-0으로 실제
+                        // 줄어들 수 있게 하고, 글자 크기·자간도 여유 있게 살짝 줄였다.
+                        className="flex-1 min-w-0 text-center text-[22px] font-black px-3 py-4 rounded-xl outline-none"
+                        style={{ background: C.ivory, border: `2px solid ${code.length === 6 ? C.terracotta : "rgba(30,26,23,0.15)"}`, color: C.dark, letterSpacing: "0.35em" }}
                       />
                       <div className="shrink-0 font-black tabular-nums text-[17px]" style={{ color: C.terracotta, minWidth: 56, textAlign: "center" }}>
                         {mm}:{ss}

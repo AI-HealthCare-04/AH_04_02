@@ -12,7 +12,10 @@ const FONT_SCALE_OPTIONS: { value: FontScale; label: string }[] = [
 ];
 
 export default function Settings() {
-  const patientId = useGuardedPatientId();
+  // [2026-07-23 수정] 글자 크기는 환자와 무관한 설정이라, 케어하는 환자가 아직 없거나
+  // 여러 명 중 하나를 고르지 않은 지원인력/보호자도 이 화면 자체는 볼 수 있어야 한다 —
+  // silent: true로 강제 이동을 끄고, 챗봇 이름 카드만 환자가 정해졌을 때 보여준다.
+  const patientId = useGuardedPatientId({ silent: true });
   const [settings, setSettings] = useState<NotificationSettings | null>(null);
   const [chatbotName, setChatbotName] = useState("");
   const [fontScale, setFontScale] = useState<FontScale>(() => getFontScale());
@@ -22,7 +25,10 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (patientId == null) return;
+    if (patientId == null) {
+      setLoading(false);
+      return;
+    }
     getNotificationSettings(patientId)
       .then((s) => {
         setSettings(s);
