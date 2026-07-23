@@ -39,6 +39,7 @@ from models import (
     Caregiver,
     CaregiverPatient,
     MedicalRecord,
+    MedicationLog,
     MedicationRecord,
     MedicationSchedule,
     NotificationLog,
@@ -217,6 +218,11 @@ def update_patient(
         if existing and existing.id != patient_id:
             raise HTTPException(409, "이미 사용중인 이메일입니다.")
         updates["email"] = email
+    elif "email" in updates:
+        # [2026-07-23 수정, 팀원 리뷰 반영] 빈 문자열을 그대로 저장하면 email이
+        # unique=True라 다른 계정도 빈 문자열로 지운 경우 unique 제약 충돌이 난다 —
+        # "삭제"는 None으로 정규화해야 안전하다(여러 계정이 동시에 None이어도 무관).
+        updates["email"] = None
     if "phone" in updates and updates["phone"]:
         existing = session.exec(
             select(Patient).where(Patient.phone_hash == hash_phone(updates["phone"]))
@@ -429,6 +435,10 @@ def update_caregiver(
         if existing and existing.id != caregiver_id:
             raise HTTPException(409, "이미 사용중인 이메일입니다.")
         updates["email"] = email
+    elif "email" in updates:
+        # [2026-07-23 수정, 팀원 리뷰 반영] update_patient와 동일한 이유 — email이
+        # unique=True라 빈 문자열을 그대로 저장하면 여러 계정이 지웠을 때 충돌한다.
+        updates["email"] = None
     if "phone" in updates and updates["phone"]:
         existing = session.exec(
             select(Caregiver)
@@ -704,6 +714,14 @@ def delete_schedule(
     ).all()
     for log in logs:
         session.delete(log)
+    # [2026-07-23 수정, 팀원 리뷰 반영] medication_logs → medication_records 이관(849bd15b19a5)
+    # 이후로 새로 쓰이진 않지만 테이블 자체는 남아있고 schedule_id가 여전히 FK라, 이관
+    # 이전부터 있던 오래된 일정을 지우면 여기서 FK 위반이 났다.
+    legacy_logs = session.exec(
+        select(MedicationLog).where(MedicationLog.schedule_id == schedule_id)
+    ).all()
+    for legacy_log in legacy_logs:
+        session.delete(legacy_log)
     session.flush()
     session.delete(schedule)
     session.commit()
