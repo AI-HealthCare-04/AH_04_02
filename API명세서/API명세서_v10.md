@@ -148,7 +148,7 @@ OCR 제공자는 `OCR_PROVIDER` 환경변수로 전환한다(`clova`=기본값, 
 | PATCH | `/records/{record_id}/medications/{medication_id}` | 확인 화면 약물 항목 수정 + 오타 제안(REQ-047) | 경로 둘 다; `{drug_name, dosage?, frequency?, total_days?, diagnosis?, drug_class?}` | `200 {..., matched_drug_name, match_score, needs_review, typo_suggestion}` | O | 완료 |
 | GET | `/records` | 환자별 처방전 이력 목록 | 쿼리 `patient_id`(필수) | `200 [{record_id, status, created_at, diagnosis, drug_names, uploaded_by_name}]` | O | 완료 |
 | GET | `/records/{record_id}` | 단건 재조회 | 경로 `record_id` | `200`(guide 포함 최신 상태) | O | 완료 |
-| DELETE | `/records/{record_id}` | 처방전 소프트 삭제(`deleted_at`) — `record_id`로 연결된 `medication_schedules` 비활성화 + `PatientMedication.prescription_id`로 연결된 내약 soft delete + 해당 내약 기반 schedule 비활성화 | 경로 `record_id` | `200 {deleted, deactivated_schedules, deactivated_medications}` | O | 완료 |
+| DELETE | `/records/{record_id}` | 처방전 소프트 삭제(`deleted_at`) — `record_id`로 연결된 `medication_schedules` 비활성화 + `PatientMedication.prescription_id`로 연결된 내약 soft delete + 해당 내약 기반 schedule 비활성화 | 경로 `record_id` | `200 {message: "삭제됐어요"}` | O | 완료 |
 | GET | `/ocr/drug-info` | 약물상세 화면용 단건 조회 | 쿼리 `drug_name` | `200 {drug_name, matched_name, drug_class, indication, precautions, side_effects, interactions, storage, patient_summary, dur_cautions}` | X(의도됨) | 완료 |
 | GET | `/ocr/ping` | 라우터 연결 확인 | 없음 | `200 {status:"ok", owner:"권순현"}` | X | 완료(디버그용) |
 | POST | `/ocr/test` | OCR 단독 테스트 | 쿼리 `patient_id`; multipart `file` | `200 {record_id, status, medications}` | O | 완료(테스트용) |
