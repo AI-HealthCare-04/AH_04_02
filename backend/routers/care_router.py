@@ -473,6 +473,44 @@ def list_invitations(
     ).all()
 
 
+class SentPatientInvitation(BaseModel):
+    """[2026-07-23 추가] 보호자/기관이 보낸 "환자→계정 없음" 초대(relation_type="patient")는
+    수락 전까지 patient_id가 없어서 InvitationPublic(patient_id 필수)을 그대로 못 쓴다."""
+    id: int
+    invited_phone: str | None = None
+    status: str
+    created_at: datetime
+    expires_at: datetime | None = None
+
+
+@router.get("/caregivers/{caregiver_id}/invitations", response_model=list[SentPatientInvitation])
+def list_sent_patient_invitations(
+    caregiver_id: int,
+    caregiver: Caregiver = Depends(get_current_caregiver),
+    session: Session = Depends(get_session),
+):
+    """연결관리(Connect.tsx) — 보호자/기관이 보낸 환자 초대 중 아직 대기중인 것.
+    수락되면 caregiver_patients 연결이 생겨 환자 목록에 나타나므로 여기선 pending만 보여준다."""
+    if caregiver_id != caregiver.id:
+        raise HTTPException(403, "본인이 보낸 초대만 볼 수 있어요")
+    invitations = session.exec(
+        select(Invitation)
+        .where(Invitation.relation_type == "patient")
+        .where(Invitation.inviter_caregiver_id == caregiver_id)
+        .where(Invitation.status == "pending")
+        .order_by(Invitation.created_at.desc())
+    ).all()
+    result = []
+    for inv in invitations:
+        if inv.is_expired:
+            inv.status = "expired"
+            session.add(inv)
+            continue
+        result.append(inv)
+    session.commit()
+    return result
+
+
 # ══════════════════════════════════════════
 # 3. 돌봄관계 해제 (Trust Relation Dissolution, REQ-004)
 # ══════════════════════════════════════════

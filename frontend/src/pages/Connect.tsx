@@ -11,12 +11,21 @@ import {
   listInvitations,
   listPendingRevocations,
   listReceivedInvitations,
+  listSentPatientInvitations,
   rejectInvitationAsCaregiver,
   type InvitationSummary,
   type PendingRevocation,
   type ReceivedInvitation,
+  type SentPatientInvitation,
 } from "../api/care";
-import { getPatientCaregivers, unlinkCaregiverPatient, type Caregiver } from "../api/monitoring";
+import {
+  getCaregiverPatients,
+  getCaregivers,
+  getPatientCaregivers,
+  unlinkCaregiverPatient,
+  type Caregiver,
+  type Patient,
+} from "../api/monitoring";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { getCurrentCaregiverId, getCurrentPatientId, getCurrentUserName } from "../lib/session";
 
@@ -63,6 +72,30 @@ export default function Connect() {
   // 알아서 필터링해 주므로 프론트는 역할 분기 없이 같은 목록을 그대로 쓴다).
   const [pendingRevocations, setPendingRevocations] = useState<PendingRevocation[]>([]);
   const [actingRevocationId, setActingRevocationId] = useState<number | null>(null);
+  // [2026-07-23 추가] 보호자/기관 쪽에도 "내가 보낸 초대"와 "연결된 환자" 목록을 보여준다 —
+  // 지금까진 이 화면(caregiverId != null 쪽)에 둘 다 없어서, 초대를 보내도 확인할 방법이 없고
+  // 연결 해제도 PatientManagement.tsx에서만 가능했다.
+  const [sentInvitations, setSentInvitations] = useState<SentPatientInvitation[]>([]);
+  const [connectedPatients, setConnectedPatients] = useState<Patient[]>([]);
+  const [myCaregiver, setMyCaregiver] = useState<Caregiver | null>(null);
+  const [deletingSentInvitationId, setDeletingSentInvitationId] = useState<number | null>(null);
+  const [unlinkingPatientId, setUnlinkingPatientId] = useState<number | null>(null);
+
+  const loadCaregiverSideData = async () => {
+    if (caregiverId == null) return;
+    try {
+      const [sent, patients, myProfile] = await Promise.all([
+        listSentPatientInvitations(caregiverId),
+        getCaregiverPatients(caregiverId),
+        getCaregivers(),
+      ]);
+      setSentInvitations(sent);
+      setConnectedPatients(patients);
+      setMyCaregiver(myProfile[0] ?? null);
+    } catch {
+      setError("연결 정보를 불러오지 못했어요.");
+    }
+  };
 
   const loadConnections = async (pid: number) => {
     try {
@@ -99,6 +132,7 @@ export default function Connect() {
     if (caregiverId != null) {
       setLoading(false);
       loadReceivedInvitations();
+      loadCaregiverSideData();
       return;
     }
     if (patientId == null) {
@@ -178,6 +212,45 @@ export default function Connect() {
       setError("초대를 삭제하지 못했어요.");
     } finally {
       setDeletingInvitationId(null);
+    }
+  };
+
+  const handleDeleteSentInvitation = async (invitationId: number) => {
+    if (deletingSentInvitationId !== null) return;
+    if (!window.confirm("대기중인 초대를 삭제할까요? 이미 보낸 초대 링크도 사용할 수 없게 돼요.")) return;
+    setDeletingSentInvitationId(invitationId);
+    setError("");
+    try {
+      await deleteInvitation(invitationId);
+      setSentInvitations((prev) => prev.filter((inv) => inv.id !== invitationId));
+    } catch {
+      setError("초대를 삭제하지 못했어요.");
+    } finally {
+      setDeletingSentInvitationId(null);
+    }
+  };
+
+  // [2026-07-23 추가] 기관 계정은 사유를 남기고 승인을 받아야 하므로 별도 화면으로
+  // 이동시킨다(PatientManagement.tsx의 remove()와 동일한 정책).
+  const handleUnlinkPatient = async (targetPatientId: number) => {
+    if (caregiverId == null) return;
+    if (myCaregiver?.relation_type === "organization") {
+      navigate(`/patients/${targetPatientId}/disconnect`);
+      return;
+    }
+    if (!window.confirm("이 환자와의 연결을 해제할까요? 환자 계정과 기록은 삭제되지 않아요.")) return;
+    setUnlinkingPatientId(targetPatientId);
+    setError("");
+    try {
+      await unlinkCaregiverPatient(caregiverId, targetPatientId);
+      setConnectedPatients((prev) => prev.filter((p) => p.id !== targetPatientId));
+      if (localStorage.getItem("patient_id") === String(targetPatientId)) {
+        localStorage.removeItem("patient_id");
+      }
+    } catch {
+      setError("연결을 해제하지 못했어요.");
+    } finally {
+      setUnlinkingPatientId(null);
     }
   };
 
@@ -281,7 +354,10 @@ export default function Connect() {
           <div className="mb-6">
             <InvitePatientPanel
               caregiverId={caregiverId}
-              onCreated={() => loadReceivedInvitations()}
+              onCreated={() => {
+                loadReceivedInvitations();
+                loadCaregiverSideData();
+              }}
             />
           </div>
         )}
@@ -354,6 +430,62 @@ export default function Connect() {
             </div>
             {inviteUrlError && (
               <p className="text-[12px] mt-2 text-[#D94F4F]">{inviteUrlError}</p>
+            )}
+          </div>
+        )}
+
+        {/* [2026-07-23 추가] 초대중인 내역 — 내가(보호자/기관) 보낸 환자 초대 중 대기중인 것 */}
+        {caregiverId != null && sentInvitations.length > 0 && (
+          <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden mb-6">
+            <div className="px-6 py-4 border-b border-[rgba(30,26,23,0.06)]">
+              <h2 className="text-[15px] font-black text-[#1E1A17]">초대중인 내역 ({sentInvitations.length}건)</h2>
+            </div>
+            {sentInvitations.map((inv) => (
+              <div key={inv.id} className="flex items-center justify-between px-6 py-3.5 border-b border-[#F4F0EA] last:border-0">
+                <span className="text-[14px] text-[#1E1A17]">
+                  환자 초대{inv.invited_phone ? ` · ${inv.invited_phone}` : ""}
+                </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="px-3 py-1 rounded-full text-[12px] font-bold bg-[#F4F0EA] text-[#8A7E75]">대기중</span>
+                  <button
+                    onClick={() => handleDeleteSentInvitation(inv.id)}
+                    disabled={deletingSentInvitationId === inv.id}
+                    aria-label="초대중인 내역 삭제"
+                    className="w-8 h-8 rounded-lg flex items-center justify-center disabled:opacity-50"
+                    style={{ background: "rgba(217,79,79,0.10)" }}
+                  >
+                    <Trash2 className="w-4 h-4 text-[#D94F4F]" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* [2026-07-23 추가] 연결된 환자 리스트 — 이 계정이 케어하는 환자 전체 */}
+        {caregiverId != null && (
+          <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden mb-6">
+            <div className="px-6 py-4 border-b border-[rgba(30,26,23,0.06)]">
+              <h2 className="text-[15px] font-black text-[#1E1A17]">연결된 환자 ({connectedPatients.length}명)</h2>
+            </div>
+            {connectedPatients.length === 0 ? (
+              <div className="py-14 text-center">
+                <User className="w-9 h-9 mx-auto mb-3 text-[#8A7E75] opacity-30" />
+                <p className="text-[14px] text-[#8A7E75]">아직 연결된 환자가 없어요</p>
+              </div>
+            ) : (
+              connectedPatients.map((p) => (
+                <div key={p.id} className="flex items-center justify-between px-6 py-4 border-b border-[#F4F0EA] last:border-0">
+                  <p className="text-[14px] font-bold text-[#1E1A17]">{p.name}</p>
+                  <button
+                    onClick={() => handleUnlinkPatient(p.id)}
+                    disabled={unlinkingPatientId === p.id}
+                    className="px-4 py-2 rounded-full text-[12px] font-bold border border-[#C1653D]/35 text-[#C1653D] disabled:opacity-50"
+                  >
+                    연결 해제
+                  </button>
+                </div>
+              ))
             )}
           </div>
         )}

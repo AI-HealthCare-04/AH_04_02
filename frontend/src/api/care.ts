@@ -99,6 +99,22 @@ export async function listReceivedInvitations(caregiverId: number) {
   return data;
 }
 
+// [2026-07-23 추가] "초대중인 내역" — 내(보호자/기관)가 보낸 환자 초대 중 아직 대기중인 것.
+export interface SentPatientInvitation {
+  id: number;
+  invited_phone: string | null;
+  status: string;
+  created_at: string;
+  expires_at: string | null;
+}
+
+export async function listSentPatientInvitations(caregiverId: number) {
+  const { data } = await monitoringClient.get<SentPatientInvitation[]>(
+    `/caregivers/${caregiverId}/invitations`
+  );
+  return data;
+}
+
 export async function acceptInvitationAsCaregiver(invitationId: number) {
   const { data } = await monitoringClient.post(`/invitations/${invitationId}/accept-as-caregiver`);
   return data;

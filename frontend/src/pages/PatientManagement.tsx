@@ -45,7 +45,6 @@ export default function PatientManagement() {
   const [maxAge, setMaxAge] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   // [2026-07-23 추가] 기관(organization) 계정인지 확인 — 기관이 연결을 끊을 땐 사유 입력과
   // 상대 승인이 필요하다(REQ-004 확장).
   const [myCaregiver, setMyCaregiver] = useState<Caregiver | null>(null);
@@ -99,30 +98,25 @@ export default function PatientManagement() {
   const remove = async (id: number) => {
     if (!caregiverId) return;
     setError("");
-    setNotice("");
 
-    let reason: string | undefined;
+    // [2026-07-23 수정] window.prompt()는 브라우저 네이티브 팝업이라 한글(IME) 입력이
+    // 제대로 안 되는 문제가 있었다 — 사유 입력은 전용 화면(DisconnectPatient.tsx)에서
+    // 일반 React 입력창으로 받는다. 기관은 사유 없이 일방적으로 연결을 끊을 수 없다 —
+    // 환자가 스스로 관리하지 못하는 상황에서 기관이 손을 떼는 걸 막기 위해, 사유를
+    // 남기고 환자·다른 보호자의 승인을 받아야 실제로 끊긴다(2주 안에 응답 없으면 자동 확정).
     if (myCaregiver?.relation_type === "organization") {
-      // [2026-07-23 추가] 기관은 사유 없이 일방적으로 연결을 끊을 수 없다 — 환자가
-      // 스스로 관리하지 못하는 상황에서 기관이 손을 떼는 걸 막기 위해, 사유를 남기고
-      // 환자·다른 보호자의 승인을 받아야 실제로 끊긴다(2주 안에 응답 없으면 자동 확정).
-      const input = window.prompt(
-        "이 환자와의 연결을 끊는 사유를 입력해 주세요. 환자 또는 다른 보호자가 승인해야 실제로 연결이 끊겨요."
-      );
-      if (!input || !input.trim()) return;
-      reason = input.trim();
-    } else if (!window.confirm("이 환자와의 연결을 해제할까요? 환자 계정과 기록은 삭제되지 않아요.")) {
+      navigate(`/patients/${id}/disconnect`);
+      return;
+    }
+    if (!window.confirm("이 환자와의 연결을 해제할까요? 환자 계정과 기록은 삭제되지 않아요.")) {
       return;
     }
 
     try {
-      const result = await unlinkCaregiverPatient(caregiverId, id, reason);
+      await unlinkCaregiverPatient(caregiverId, id);
       await load();
       if (localStorage.getItem("patient_id") === String(id)) {
         localStorage.removeItem("patient_id");
-      }
-      if (result.status === "revocation_pending") {
-        setNotice("연결 해제 요청을 보냈어요. 승인되거나 2주가 지나면 실제로 끊겨요.");
       }
     } catch {
       setError("연결을 해제하지 못했어요.");
@@ -195,7 +189,6 @@ export default function PatientManagement() {
         </div>
 
         {error && <p className="text-[13px] mb-4" style={{ color: "#D94F4F" }}>{error}</p>}
-        {notice && <p className="text-[13px] mb-4" style={{ color: C.successText }}>{notice}</p>}
 
         <div className="rounded-2xl overflow-hidden overflow-x-auto" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
           {loading ? (

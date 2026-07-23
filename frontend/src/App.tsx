@@ -26,6 +26,7 @@ import MyPage from "./pages/MyPage";
 import MyInfo from "./pages/MyInfo";
 import Settings from "./pages/Settings";
 import PatientManagement from "./pages/PatientManagement";
+import DisconnectPatient from "./pages/DisconnectPatient";
 import MonitoringDashboard from "./pages/MonitoringDashboard";
 import MonitoringDayLogs from "./pages/MonitoringDayLogs";
 import DrugDetail from "./pages/DrugDetail";
@@ -73,6 +74,7 @@ function App() {
           <Route path="/mypage/info" element={<MyInfo />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/patients" element={<PatientManagement />} />
+          <Route path="/patients/:patientId/disconnect" element={<DisconnectPatient />} />
           <Route path="/monitoring" element={<MonitoringDashboard />} />
           <Route path="/monitoring/logs/:date" element={<MonitoringDayLogs />} />
           <Route path="/drugs/:scheduleId" element={<DrugDetail />} />

@@ -10,6 +10,7 @@ from unittest.mock import patch
 import models
 import pytest
 from core.security import hash_token
+from fastapi import HTTPException
 from pydantic import ValidationError
 from routers.care_router import (
     InvitationAccept,
@@ -18,6 +19,7 @@ from routers.care_router import (
     accept_invitation_as_caregiver,
     create_invitation,
     delete_pending_invitation,
+    list_sent_patient_invitations,
 )
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -376,3 +378,64 @@ def test_accept_invitation_rolls_back_caregiver_when_failure_happens_after_creat
             select(models.Invitation).where(models.Invitation.token_hash == hash_token(RAW_TOKEN))
         ).first()
         assert refreshed.status == "pending"  # 커밋 전 상태로 롤백됨
+
+
+# ── GET /caregivers/{id}/invitations — "초대중인 내역" (2026-07-23 추가) ──────────
+
+def test_list_sent_patient_invitations_returns_only_pending():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        caregiver = _make_caregiver(session)
+        pending = _make_pending_patient_invitation(session, caregiver)
+
+        result = list_sent_patient_invitations(caregiver.id, caregiver, session)
+
+        assert len(result) == 1
+        assert result[0].id == pending.id
+        assert result[0].status == "pending"
+
+
+def test_list_sent_patient_invitations_excludes_accepted():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        caregiver = _make_caregiver(session)
+        accepted = _make_pending_patient_invitation(session, caregiver)
+        accepted.status = "accepted"
+        session.add(accepted)
+        session.commit()
+
+        result = list_sent_patient_invitations(caregiver.id, caregiver, session)
+
+        assert result == []
+
+
+def test_list_sent_patient_invitations_forbidden_for_other_caregiver():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        owner = _make_caregiver(session, "주인")
+        outsider = _make_caregiver(session, "무관자")
+        _make_pending_patient_invitation(session, owner)
+
+        with pytest.raises(HTTPException) as exc:
+            list_sent_patient_invitations(owner.id, outsider, session)
+        assert exc.value.status_code == 403
+
+
+def test_list_sent_patient_invitations_marks_expired_and_excludes():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        caregiver = _make_caregiver(session)
+        expired = _make_pending_patient_invitation(session, caregiver)
+        expired.expires_at = datetime.now() - timedelta(days=1)
+        session.add(expired)
+        session.commit()
+
+        result = list_sent_patient_invitations(caregiver.id, caregiver, session)
+
+        assert result == []
+        session.refresh(expired)
+        assert expired.status == "expired"
