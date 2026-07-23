@@ -2,7 +2,6 @@ import { Fragment, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import NavBar from "../components/NavBar";
-import { getCurrentUserName } from "../lib/session";
 import { C } from "../theme";
 
 type StageType = "집중교육" | "전화지원" | "자립단계";
@@ -81,7 +80,7 @@ export default function CareEducation() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn userName="김보호" />
       <main className="max-w-4xl mx-auto px-6 sm:px-8 py-10">
         <button
           onClick={() => navigate("/patients")}

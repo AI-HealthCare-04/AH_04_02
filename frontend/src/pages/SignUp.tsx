@@ -325,9 +325,7 @@ export default function SignUp() {
         localStorage.setItem("user_name", loggedInName);
       } else {
         await createCaregiver({
-          // 기관 계정도 화면 상단에는 기관명이 아니라 실제 로그인/담당자 이름이 보여야 한다.
-          // 기관명은 org_name에 별도 보관한다.
-          name: managerName.trim(),
+          name: orgName.trim(),
           relation_type: "organization",
           phone: managerPhone.trim(),
           email: managerEmail.trim() || undefined,

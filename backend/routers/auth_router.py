@@ -139,23 +139,6 @@ class WithdrawCancelRequest(BaseModel):
     password: str
 
 
-def _display_name_for_login(role: str, subject: Caregiver | Patient) -> str:
-    """로그인 응답/상단 표시용 이름.
-
-    기관 계정은 `name`에 과거 기관명이 저장된 데이터가 있어도, 화면에는 실제 담당자명을
-    보여줘야 한다. org_name은 기관 식별용으로만 둔다.
-    """
-    if (
-        role == "caregiver"
-        and isinstance(subject, Caregiver)
-        and subject.relation_type == "organization"
-        and subject.manager_name
-        and subject.manager_name.strip()
-    ):
-        return subject.manager_name.strip()
-    return subject.name
-
-
 def _find_by_identifiers(session: Session, model, identifier: str) -> list:
     """identifier가 이메일 형식이면 email로, 아니면 전화번호로 보고 phone_hash로 조회 —
     일치하는 계정을 전부 반환한다.
@@ -221,7 +204,7 @@ def login(payload: LoginRequest, response: Response, session: Session = Depends(
                 response,
                 caregiver.id,
                 "caregiver",
-                _display_name_for_login("caregiver", caregiver),
+                caregiver.name,
                 session,
                 relation_type=caregiver.relation_type,
                 remember_device=payload.remember_device,
@@ -464,14 +447,7 @@ def refresh_token(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Refresh token이 없습니다.")
     subject_id, role, subject = _rotate_refresh_token_or_401(token, session)
     relation_type = subject.relation_type if role == "caregiver" else None
-    return _issue_login_response(
-        response,
-        subject_id,
-        role,
-        _display_name_for_login(role, subject),
-        session,
-        relation_type=relation_type,
-    )
+    return _issue_login_response(response, subject_id, role, subject.name, session, relation_type=relation_type)
 
 
 def _rotate_refresh_token_or_401(token: str, session: Session) -> tuple[int, str, Caregiver | Patient]:
@@ -539,13 +515,7 @@ def switch_account(
 
     relation_type = subject.relation_type if role == "caregiver" else None
     return _issue_login_response(
-        response,
-        subject_id,
-        role,
-        _display_name_for_login(role, subject),
-        session,
-        relation_type=relation_type,
-        remember_device=True,
+        response, subject_id, role, subject.name, session, relation_type=relation_type, remember_device=True
     )
 
 

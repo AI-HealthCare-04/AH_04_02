@@ -10,13 +10,11 @@ interface NavBarProps {
   variant?: "light" | "dark";
 }
 
-type NavItem = { label: string; to: string; children?: { label: string; to: string }[] };
-
 // [2026-07-20] 별도 "더 보기" 화살표 하나에 전부 몰아두던 방식 대신, 상단 메뉴 각각에
 // 마우스를 올리면 그 메뉴 바로 아래로 관련 하위 항목이 드롭다운되도록 변경 — 알림류는
 // 오늘의 복약 아래, 기록류는 등록내역 아래로 그룹 분리. 복약 가이드는 하위 항목에서
 // 상단 메뉴로 승격, 처방 약 등록은 맨 왼쪽으로 이동.
-const PATIENT_NAV_ITEMS: NavItem[] = [
+const NAV_ITEMS: { label: string; to: string; children?: { label: string; to: string }[] }[] = [
   { label: "처방 약 등록", to: "/upload" },
   {
     label: "오늘의 복약",
@@ -42,11 +40,12 @@ const PATIENT_NAV_ITEMS: NavItem[] = [
   },
 ];
 
-const CAREGIVER_NAV_ITEMS: NavItem[] = [
-  { label: "환자 관리", to: "/patients" },
-  { label: "연결관리", to: "/connect" },
-  { label: "설정", to: "/settings" },
-];
+// [2026-07-20] 통합검색에서 "알림설정", "가이드"처럼 메뉴 이름 일부만 쳐도 해당 메뉴로
+// 바로 이동할 수 있게 — 상단 메뉴+하위 항목을 한 겹으로 펼친 검색 대상 목록.
+const ALL_MENU_ENTRIES: { label: string; to: string }[] = NAV_ITEMS.flatMap((item) => [
+  { label: item.label, to: item.to },
+  ...(item.children ?? []),
+]);
 
 /**
  * [7/8 업그레이드] 기존엔 로고만 있고 메뉴 링크는 실제로 동작하지 않았음.
@@ -71,15 +70,8 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const allMenuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLDivElement>(null);
-  const navItems = localStorage.getItem("caregiver_id") ? CAREGIVER_NAV_ITEMS : PATIENT_NAV_ITEMS;
-  // [2026-07-20] 통합검색에서 "알림설정", "가이드"처럼 메뉴 이름 일부만 쳐도 해당 메뉴로
-  // 바로 이동할 수 있게 — 상단 메뉴+하위 항목을 한 겹으로 펼친 검색 대상 목록.
-  const allMenuEntries: { label: string; to: string }[] = navItems.flatMap((item) => [
-    { label: item.label, to: item.to },
-    ...(item.children ?? []),
-  ]);
   const trimmedQuery = searchQuery.trim();
-  const menuMatches = trimmedQuery ? allMenuEntries.filter((e) => e.label.includes(trimmedQuery)) : [];
+  const menuMatches = trimmedQuery ? ALL_MENU_ENTRIES.filter((e) => e.label.includes(trimmedQuery)) : [];
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -134,7 +126,7 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
   // 현재 경로가 이 메뉴(또는 그 하위 항목) 소속인지 — 정확히 같거나 그 경로로 시작하면
   // (예: /records/3/review도 "등록내역" 소속) 활성 메뉴로 보고 주황색으로 강조한다.
   const isActivePath = (to: string) => location.pathname === to || location.pathname.startsWith(`${to}/`);
-  const isActiveItem = (item: NavItem) =>
+  const isActiveItem = (item: (typeof NAV_ITEMS)[number]) =>
     isActivePath(item.to) || (item.children?.some((c) => isActivePath(c.to)) ?? false);
 
   const goToRecordsSearch = (q: string) => {
@@ -165,7 +157,7 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
 
           {isLoggedIn && (
             <nav className="hidden lg:flex items-center justify-center gap-6 min-w-0">
-              {navItems.map((item) => (
+              {NAV_ITEMS.map((item) => (
                 <div
                   key={item.to}
                   className="relative"
@@ -229,7 +221,7 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
                       className="rounded-2xl p-6 flex gap-10"
                       style={{ background: C.white, border: "1px solid rgba(30,26,23,0.10)", boxShadow: C.shadowDropdown }}
                     >
-                      {navItems.map((item) => (
+                      {NAV_ITEMS.map((item) => (
                         <div key={item.to} className="flex flex-col gap-2 min-w-[110px]">
                           <Link
                             to={item.to}
@@ -387,7 +379,7 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
             className="fixed top-16 left-0 right-0 z-40 lg:hidden border-b backdrop-blur-sm px-6 py-2 flex flex-col max-h-[calc(100vh-4rem)] overflow-y-auto"
             style={{ background: "rgba(255,255,255,0.97)", borderColor: "rgba(30,26,23,0.10)" }}
           >
-            {navItems.map((item) => (
+            {NAV_ITEMS.map((item) => (
               <div key={item.to} className="border-b last:border-0" style={{ borderColor: "rgba(30,26,23,0.08)" }}>
                 <Link
                   to={item.to}

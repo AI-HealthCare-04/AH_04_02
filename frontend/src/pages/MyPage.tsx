@@ -36,31 +36,25 @@ export default function MyPage() {
     load();
   }, [caregiverId, patientId]);
 
-  const caregiverDisplayName =
-    caregiver?.relation_type === "organization" && caregiver.manager_name?.trim()
-      ? caregiver.manager_name.trim()
-      : caregiver?.name;
-  const displayName = caregiverDisplayName ?? (patient ? patient.name : "사용자");
+  const displayName = caregiver ? caregiver.name : patient ? patient.name : "사용자";
   const roleLabel = caregiver
     ? { text: `보호자 (${relationLabel(caregiver.relation_type)})`, bg: `${C.terracottaLight}20`, color: C.terracotta }
     : { text: "복약관리 대상자", bg: `${C.success}20`, color: "#4A7A47" };
 
-  const patientMenu: MenuItem[] = [
+  const menu: MenuItem[] = [
     { label: "내 정보", icon: "🪪", to: "/mypage/info" },
     { label: "복약 일정", icon: "💊", to: "/schedule" },
     { label: "알림 설정", icon: "🔔", to: "/notification" },
     { label: "등록내역", icon: "📋", to: "/records" },
-    { label: "모니터링 대시보드", icon: "📊", to: "/monitoring" },
     { label: "연결관리", icon: "👥", to: "/connect" },
     { label: "화면·챗봇 설정", icon: "⚙️", to: "/settings" },
+    ...(caregiverId
+      ? [
+          { label: "모니터링 대시보드", icon: "📊", to: "/monitoring" },
+          { label: "환자 관리", icon: "🏥", to: "/patients" },
+        ]
+      : []),
   ];
-  const caregiverMenu: MenuItem[] = [
-    { label: "내 정보", icon: "🪪", to: "/mypage/info" },
-    { label: "환자 관리", icon: "🏥", to: "/patients" },
-    { label: "연결관리", icon: "👥", to: "/connect" },
-    { label: "화면·챗봇 설정", icon: "⚙️", to: "/settings" },
-  ];
-  const menu = caregiverId ? caregiverMenu : patientMenu;
 
   const switchUser = () => {
     if (!window.confirm("다른 사용자로 전환할까요? 지금 화면에서 로그아웃돼요.")) return;
@@ -150,7 +144,6 @@ export default function MyPage() {
 function relationLabel(relationType: string) {
   const map: Record<string, string> = {
     guardian: "보호자",
-    organization: "지원인력",
     caregiver: "돌봄제공자",
     life_support_worker: "생활지원사",
     social_worker: "사회복지사",

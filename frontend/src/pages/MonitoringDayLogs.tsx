@@ -4,7 +4,7 @@ import { ChevronLeft, Clock, FileText, Heart } from "lucide-react";
 import NavBar from "../components/NavBar";
 import { getLogs, type MedicationLogEntry } from "../api/monitoring";
 import { listRecords, type RecordSummary } from "../api/records";
-import { getCurrentPatientId, getCurrentUserName } from "../lib/session";
+import { getCurrentPatientId } from "../lib/session";
 import { C } from "../theme";
 
 function dateKey(iso: string) {
@@ -44,7 +44,7 @@ export default function MonitoringDayLogs() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn userName="김보호" />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <button
           onClick={() => navigate("/monitoring")}
