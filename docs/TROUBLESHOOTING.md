@@ -400,3 +400,15 @@ for raw, norm in zip(raw_pool, norm_pool):
 | **해결** | `lib/session.ts`의 `getCurrentCaregiverId()`를 import해서 `localStorage.getItem("caregiver_id")` 대신 쓰도록 교체. 동작은 동일(값이 있으면 지원인력 메뉴, 없으면 환자 메뉴). |
 | **테스트/검증** | `npm run build`, `npm run lint` 통과. |
 | **재발 방지** | localStorage의 로그인/역할 관련 키(`caregiver_id`, `patient_id`, `user_name`, `access_token`)는 화면에서 직접 읽지 말고 항상 `lib/session.ts`의 헬퍼를 거친다. |
+
+---
+
+| 날짜 | 2026.07.23 |
+|---|---|
+| **작성자** | 김영혜 |
+| **이슈** | 회원가입 생년월일 입력이 순수 자유 텍스트라, 숫자만 입력하면 "."을 직접 타이핑해야 했음(사용자 요청 — 숫자 4자리 뒤/2자리 뒤에 "."이 자동으로 붙었으면 함) |
+| **발생 위치** | `frontend/src/pages/SignUp.tsx` |
+| **원인** | 생년월일 `Field`의 `onChange`가 입력값을 그대로 `setBirthDate`에 넣기만 해서 자동 서식 로직이 없었다. |
+| **해결** | `formatBirthDateInput()`을 추가해 입력값에서 숫자만 추출한 뒤 4자리(연) 뒤, 6자리(연+월) 뒤에 "."을 붙여 재조립하도록 했다. 8자리(연월일)를 넘는 입력은 잘라낸다. 매 입력마다 숫자만 남기고 다시 조립하는 방식이라 백스페이스로 지울 때도 자연스럽게 재적용된다. |
+| **테스트/검증** | `npm run build`, `npm run lint` 통과. |
+| **핵심 패턴** | 자동 구분자 삽입은 "매번 숫자만 추출 → 자리수 기준으로 구분자를 다시 붙여 조립"하는 방식이 커서 위치를 직접 추적하는 것보다 단순하고 backspace에도 안전하다. 다만 구분자 바로 뒤에서 backspace를 누르면 자리수가 그대로라 아무 변화가 없어 보일 수 있는 건 이 방식의 알려진 한계다. |

@@ -28,6 +28,19 @@ function isValidBirthDate(input: string): boolean {
   return day >= 1 && day <= daysInMonth;
 }
 
+/** [2026-07-23 추가] 생년월일 입력 중 숫자 4자리(연) 뒤, 2자리(월) 뒤에 "."을 자동으로
+ * 붙여준다 — 매번 숫자만 남기고 다시 조립하는 방식이라 백스페이스로 지울 때도 그대로
+ * 재적용된다. */
+function formatBirthDateInput(raw: string): string {
+  const digits = raw.replace(/\D/g, "").slice(0, 8);
+  const year = digits.slice(0, 4);
+  const month = digits.slice(4, 6);
+  const day = digits.slice(6, 8);
+  if (digits.length > 6) return `${year}.${month}.${day}`;
+  if (digits.length > 4) return `${year}.${month}`;
+  return year;
+}
+
 function StepIndicator({ current }: { current: number }) {
   return (
     <div className="flex items-center justify-center mb-8">
@@ -546,7 +559,7 @@ export default function SignUp() {
                         <Field
                           label="생년월일"
                           value={birthDate}
-                          onChange={(v) => { setBirthDate(v); setBirthDateTouched(false); }}
+                          onChange={(v) => { setBirthDate(formatBirthDateInput(v)); setBirthDateTouched(false); }}
                           onBlur={() => setBirthDateTouched(true)}
                           placeholder="1945.03.15"
                           error={birthDateError}
