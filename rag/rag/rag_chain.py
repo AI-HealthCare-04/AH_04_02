@@ -24,6 +24,7 @@ from rag.schemas import (
     DurWarning,
     GuideResponse,
     HiraDrugMasterEntry,
+    LifestyleCategoryGuide,
     LifestyleGuideResult,
     LifestyleSourceRef,
     MedicationInput,
@@ -64,13 +65,19 @@ LIFESTYLE_SYSTEM_PROMPT = """\
 당신은 고령 만성질환 환자와 보호자를 위한 "진단명 기준" 생활습관 안내를 작성하는 보조자입니다.
 [참고자료]는 특정 진단명(질환)에 대한 생활습관 지침(질병관리청·학회 진료지침 기반)입니다.
 이 안내는 특정 의약품이 아니라 진단명 자체를 기준으로 작성해야 합니다 — 약 이름은 절대 언급하지 마세요.
-아래 [참고자료]에 없는 내용은 절대로 지어내지 마세요 (hallucination 금지).
-모든 문장은 [참고자료]의 번호를 근거로 작성하고, 사용한 번호를 source_refs에 정수 배열로 포함하세요.
+아래 [참고자료]에 없는 내용은 절대로 지어내지 마세요 (hallucination 금지). 근거가 없는 카테고리는
+억지로 채우지 말고 recommended/avoid를 빈 배열로 두세요.
+각 항목은 [참고자료]에 실제로 있는 내용만 짧은 문장 하나로 쓰세요. 항목마다 근거로 쓴 [참고자료]
+번호를 모아 source_refs에 정수 배열로 포함하세요.
 쉬운 말로, 고령자도 이해할 수 있도록 짧은 문장으로 작성하세요.
+diet(식사)/exercise(운동)/other(그 외 — 금연·금주·스트레스 관리·정기 검진 등) 세 카테고리 각각에
+recommended(권장 사항)와 avoid(피해야 할 사항) 목록을 채우세요.
 반드시 아래 JSON 형식으로만 답하세요. 다른 텍스트를 추가하지 마세요.
 
 {
-  "lifestyle_guide": "이 진단명과 관련된 생활습관 개선 가이드 (식이·운동·주의사항 등, 약물 이름 언급 금지)",
+  "diet": {"recommended": ["..."], "avoid": ["..."]},
+  "exercise": {"recommended": ["..."], "avoid": ["..."]},
+  "other": {"recommended": ["..."], "avoid": ["..."]},
   "source_refs": [1, 2]
 }
 """
@@ -407,8 +414,12 @@ def _fallback_precautions_from_context(context_items: list[dict], limit: int = 3
     return results
 
 
-def _fallback_lifestyle_guide_from_context(context_items: list[dict], limit: int = 3) -> str:
-    """생활습관 근거가 있는데 LLM이 lifestyle_guide를 비워 보내면 검색 문구로 보강한다."""
+def _fallback_lifestyle_guide_from_context(context_items: list[dict], limit: int = 3) -> list[str]:
+    """생활습관 근거가 있는데 LLM이 diet/exercise/other를 전부 비워 보내면 검색 문구로 보강한다.
+
+    [2026-07-23 수정] 카테고리 구분 없이 한 단락(str)이던 걸 목록(list[str])으로 바꿨다 —
+    호출부가 이 결과를 other.recommended에 그대로 담는다(어느 카테고리인지 LLM도 못 정한
+    상황이라 "그 외"로 분류)."""
     lines: list[str] = []
     seen: set[str] = set()
     for item in context_items:
@@ -421,7 +432,7 @@ def _fallback_lifestyle_guide_from_context(context_items: list[dict], limit: int
         lines.append(text)
         if len(lines) >= limit:
             break
-    return "\n".join(lines)
+    return lines
 
 
 def _llm_generate_once(
@@ -534,6 +545,35 @@ def generate_guide(
     )
 
 
+def _str_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(v).strip() for v in value if str(v).strip()]
+
+
+def _parse_lifestyle_category(raw: object) -> LifestyleCategoryGuide:
+    """LLM이 준 diet/exercise/other 중 하나를 안전하게 LifestyleCategoryGuide로 변환한다.
+    형식이 어긋나면(dict가 아니거나 리스트가 아닌 값 등) 지어내지 않고 빈 카테고리로 둔다."""
+    if not isinstance(raw, dict):
+        return LifestyleCategoryGuide()
+    return LifestyleCategoryGuide(recommended=_str_list(raw.get("recommended")), avoid=_str_list(raw.get("avoid")))
+
+
+def _lifestyle_category_is_empty(category: LifestyleCategoryGuide) -> bool:
+    return not category.recommended and not category.avoid
+
+
+def _flatten_lifestyle_candidate(candidate: dict) -> str:
+    """self-consistency 비교용 — diet/exercise/other의 모든 항목을 한 문자열로 펼친다."""
+    parts: list[str] = []
+    for key in ("diet", "exercise", "other"):
+        raw_cat = candidate.get(key)
+        if isinstance(raw_cat, dict):
+            parts.extend(_str_list(raw_cat.get("recommended")))
+            parts.extend(_str_list(raw_cat.get("avoid")))
+    return "\n".join(parts)
+
+
 def generate_lifestyle_guide_for_diagnosis(diagnosis: str | None) -> LifestyleGuideResult:
     """진단명 기준으로 생활습관 안내를 생성한다 — 의약품과 무관하며, 이 함수는 drug_name을
     받지 않는다(구조적으로 "의약품별"이 아니라 "진단명별" 생성임을 강제).
@@ -547,7 +587,9 @@ def generate_lifestyle_guide_for_diagnosis(diagnosis: str | None) -> LifestyleGu
     if not diagnosis:
         return LifestyleGuideResult(
             diagnosis="",
-            guide="진단명 정보가 부족해 자세한 생활습관 안내를 드리기 어려워요. 처방전에 진단명을 등록하면 더 정확한 안내를 받을 수 있어요.",
+            other=LifestyleCategoryGuide(
+                recommended=["진단명 정보가 부족해 자세한 생활습관 안내를 드리기 어려워요. 처방전에 진단명을 등록하면 더 정확한 안내를 받을 수 있어요."]
+            ),
             source_refs=[],
             review_required=True,
             review_reason="진단명 미상 — 안전한 일반 안내로 대체",
@@ -561,7 +603,9 @@ def generate_lifestyle_guide_for_diagnosis(diagnosis: str | None) -> LifestyleGu
     if not context_items:
         return LifestyleGuideResult(
             diagnosis=diagnosis,
-            guide=f"'{diagnosis}'에 대한 생활습관 안내 자료를 아직 찾지 못했어요. 담당 의료진과 상담해 주세요.",
+            other=LifestyleCategoryGuide(
+                recommended=[f"'{diagnosis}'에 대한 생활습관 안내 자료를 아직 찾지 못했어요. 담당 의료진과 상담해 주세요."]
+            ),
             source_refs=[],
             review_required=True,
             review_reason=f"'{diagnosis}'에 대한 생활지침 검색 결과 없음",
@@ -571,7 +615,7 @@ def generate_lifestyle_guide_for_diagnosis(diagnosis: str | None) -> LifestyleGu
     if not settings.OPENAI_API_KEY:
         return LifestyleGuideResult(
             diagnosis=diagnosis,
-            guide="\n".join(item["text"] for item in context_items),
+            other=LifestyleCategoryGuide(recommended=[item["text"] for item in context_items]),
             source_refs=[item["source_ref"] for item in context_items],
             review_required=True,
             review_reason="OPENAI_API_KEY 미설정 (dry-run 모드: 검색 결과만 반환)",
@@ -602,7 +646,7 @@ def generate_lifestyle_guide_for_diagnosis(diagnosis: str | None) -> LifestyleGu
         )
         for _ in range(settings.SELF_CONSISTENCY_SAMPLES)
     ]
-    candidate_texts = [c.get("lifestyle_guide") or "" for c in raw_candidates]
+    candidate_texts = [_flatten_lifestyle_candidate(c) for c in raw_candidates]
     best_idx, avg_similarity = pick_consistent_answer(candidate_texts)
     best = raw_candidates[best_idx]
 
@@ -623,21 +667,29 @@ def generate_lifestyle_guide_for_diagnosis(diagnosis: str | None) -> LifestyleGu
         )
         flags.append("low_self_consistency")
 
-    guide_text = str(best.get("lifestyle_guide") or "").strip()
-    if not guide_text:
-        guide_text = _fallback_lifestyle_guide_from_context(used_items or context_items)
-        if guide_text:
-            reasons.append("LLM이 생활습관 안내 본문을 비워 검색 근거 문구로 보강했습니다.")
+    diet = _parse_lifestyle_category(best.get("diet"))
+    exercise = _parse_lifestyle_category(best.get("exercise"))
+    other = _parse_lifestyle_category(best.get("other"))
+
+    if _lifestyle_category_is_empty(diet) and _lifestyle_category_is_empty(exercise) and _lifestyle_category_is_empty(other):
+        fallback_lines = _fallback_lifestyle_guide_from_context(used_items or context_items)
+        if fallback_lines:
+            other = LifestyleCategoryGuide(recommended=fallback_lines)
+            reasons.append("LLM이 생활습관 안내 항목을 비워 검색 근거 문구로 보강했습니다.")
             flags.append("empty_lifestyle_fallback")
 
-    if not guide_text:
-        guide_text = f"'{diagnosis}'에 대한 생활습관 안내를 생성하지 못했어요. 담당 의료진과 상담해 주세요."
-        reasons.append("생활습관 안내 본문이 비어 있습니다.")
+    if _lifestyle_category_is_empty(diet) and _lifestyle_category_is_empty(exercise) and _lifestyle_category_is_empty(other):
+        other = LifestyleCategoryGuide(
+            recommended=[f"'{diagnosis}'에 대한 생활습관 안내를 생성하지 못했어요. 담당 의료진과 상담해 주세요."]
+        )
+        reasons.append("생활습관 안내 항목이 비어 있습니다.")
         flags.append("empty_lifestyle_guide")
 
     return LifestyleGuideResult(
         diagnosis=diagnosis,
-        guide=guide_text,
+        diet=diet,
+        exercise=exercise,
+        other=other,
         source_refs=source_refs,
         review_required=bool(reasons),
         review_reason=" ".join(reasons) if reasons else None,

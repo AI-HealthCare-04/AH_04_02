@@ -33,22 +33,28 @@ export interface GuideDrug {
   review_flags?: string[];
 }
 
+/** [2026-07-23 추가] 생활습관 안내 한 카테고리(식사/운동/그 외)의 권장·비권장 항목 목록. */
+export interface LifestyleCategory {
+  recommended: string[];
+  avoid: string[];
+}
+
 /** [2026-07-21 회의 반영] 진단명 기준 생활습관 안내 1건 — 여러 약이 같은 진단명을 공유해도
- * 한 번만 생성된다(생활습관 안내는 의약품별이 아니라 진단명별이어야 한다는 결정 반영). */
+ * 한 번만 생성된다(생활습관 안내는 의약품별이 아니라 진단명별이어야 한다는 결정 반영).
+ * [2026-07-23 수정] 자유 텍스트 한 단락(guide: str) 대신 식사(diet)/운동(exercise)/
+ * 그 외(other) × 권장(recommended)/비권장(avoid)으로 구조화됐다. */
 export interface LifestyleGuideEntry {
   diagnosis: string; // 진단명 미상이면 빈 문자열(안전한 일반 안내로 대체된 상태)
-  guide: string;
+  diet: LifestyleCategory;
+  exercise: LifestyleCategory;
+  other: LifestyleCategory;
   review_required?: boolean;
   review_reason?: string;
 }
 
 export interface LifestyleGuide {
   diagnosis: string; // 대표 진단명(헤드라인 표시용) — guides[0].diagnosis와 대체로 동일
-  // stub 모양
-  diet?: { avoid: string[]; drug_specific: string[] };
-  exercise?: { type: string; duration: string; intensity: string };
-  // 실제 파이프라인 모양 — 진단명별 생활습관 안내 목록(약 개수가 아니라 고유 진단명 개수만큼)
-  guides?: LifestyleGuideEntry[];
+  guides: LifestyleGuideEntry[]; // 진단명별 생활습관 안내 목록(약 개수가 아니라 고유 진단명 개수만큼)
 }
 
 export interface SourceRef {
@@ -125,27 +131,96 @@ export interface RecordResult {
   duplicate_drug_names: string[];
 }
 
+function emptyLifestyleCategory(): LifestyleCategory {
+  return { recommended: [], avoid: [] };
+}
+
+function isLifestyleCategoryEmpty(category: LifestyleCategory): boolean {
+  return category.recommended.length === 0 && category.avoid.length === 0;
+}
+
+function normalizeLifestyleCategory(raw: unknown): LifestyleCategory {
+  if (!raw || typeof raw !== "object") return emptyLifestyleCategory();
+  const obj = raw as Record<string, unknown>;
+  const toStrings = (value: unknown): string[] =>
+    Array.isArray(value) ? value.map((v) => String(v).trim()).filter(Boolean) : [];
+  return { recommended: toStrings(obj.recommended), avoid: toStrings(obj.avoid) };
+}
+
+/** [2026-07-23 수정] "guides"는 이제 항목당 diet/exercise/other × recommended/avoid로
+ * 구조화됐다. 이 변경 전에 이미 저장된 처방전 기록(guides[].guide 자유 텍스트, 더 옛
+ * 문자열 배열, 가장 옛 최상위 diet/exercise 고정 JSON)도 죽지 않고 같은 모양으로
+ * 맞춰 반환한다 — backend/routers/chat_router.py의 _summarize_lifestyle_guide와 동일한
+ * 하위호환 원칙. */
 function normalizeLifestyleGuide(guide: LifestyleGuide): LifestyleGuide {
   const rawGuides = guide.guides as unknown;
-  if (!Array.isArray(rawGuides)) return guide;
+  if (!Array.isArray(rawGuides)) {
+    const legacy = guide as unknown as {
+      diet?: { avoid?: string[] };
+      exercise?: { type?: string; duration?: string; intensity?: string };
+    };
+    if (!legacy.diet && !legacy.exercise) return { ...guide, guides: [] };
+    const exercise = emptyLifestyleCategory();
+    const exerciseText = [legacy.exercise?.type, legacy.exercise?.duration, legacy.exercise?.intensity]
+      .filter(Boolean)
+      .join(" · ");
+    if (exerciseText) exercise.recommended.push(exerciseText);
+    return {
+      ...guide,
+      guides: [
+        {
+          diagnosis: guide.diagnosis || "",
+          diet: { recommended: [], avoid: legacy.diet?.avoid ?? [] },
+          exercise,
+          other: emptyLifestyleCategory(),
+        },
+      ],
+    };
+  }
 
   const guides = rawGuides
     .map((entry): LifestyleGuideEntry | null => {
       if (typeof entry === "string") {
         const text = entry.trim();
-        return text ? { diagnosis: guide.diagnosis || "", guide: text } : null;
+        if (!text) return null;
+        return {
+          diagnosis: guide.diagnosis || "",
+          diet: emptyLifestyleCategory(),
+          exercise: emptyLifestyleCategory(),
+          other: { recommended: [text], avoid: [] },
+        };
       }
       if (!entry || typeof entry !== "object") return null;
+      const rawEntry = entry as Record<string, unknown>;
+      const diagnosis = String(rawEntry.diagnosis ?? guide.diagnosis ?? "").trim();
 
-      const rawEntry = entry as Partial<LifestyleGuideEntry>;
-      const text = String(rawEntry.guide ?? "").trim();
-      if (!text) return null;
+      // v1.1 이하 — 항목당 자유 텍스트 한 단락(guide: string)이던 옛 모양.
+      if (typeof rawEntry.guide === "string") {
+        const text = rawEntry.guide.trim();
+        if (!text) return null;
+        return {
+          diagnosis,
+          diet: emptyLifestyleCategory(),
+          exercise: emptyLifestyleCategory(),
+          other: { recommended: [text], avoid: [] },
+          review_required: rawEntry.review_required as boolean | undefined,
+          review_reason: rawEntry.review_reason as string | undefined,
+        };
+      }
 
+      const diet = normalizeLifestyleCategory(rawEntry.diet);
+      const exercise = normalizeLifestyleCategory(rawEntry.exercise);
+      const other = normalizeLifestyleCategory(rawEntry.other);
+      if (isLifestyleCategoryEmpty(diet) && isLifestyleCategoryEmpty(exercise) && isLifestyleCategoryEmpty(other)) {
+        return null;
+      }
       return {
-        diagnosis: String(rawEntry.diagnosis ?? guide.diagnosis ?? "").trim(),
-        guide: text,
-        review_required: rawEntry.review_required,
-        review_reason: rawEntry.review_reason,
+        diagnosis,
+        diet,
+        exercise,
+        other,
+        review_required: rawEntry.review_required as boolean | undefined,
+        review_reason: rawEntry.review_reason as string | undefined,
       };
     })
     .filter((entry): entry is LifestyleGuideEntry => entry !== null);
