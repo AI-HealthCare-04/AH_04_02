@@ -117,7 +117,10 @@ class Caregiver(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     name_encrypted: str = Field(default="")  # [7/9] Patient.name_encrypted와 동일한 원칙 — .name 프로퍼티 참고
-    email: str | None = Field(default=None, unique=True, index=True)  # 회원가입 화면의 "아이디" 입력이 여기 저장됨
+    # [2026-07-23 수정] 같은 사람이 보호자(가족)이면서 동시에 기관(요양보호사 등) 소속일
+    # 수 있어(phone_hash와 동일한 이유), 테이블 전체 유니크 대신 relation_type끼리만
+    # 중복을 막는다 — 실제 검사는 monitoring_router.py 애플리케이션 레벨에서 한다.
+    email: str | None = Field(default=None, index=True)  # 회원가입 화면의 "아이디" 입력이 여기 저장됨
     hashed_password: str | None = None
     # 직접 가입(routers/monitoring_router.py CaregiverCreate)은 guardian/organization만
     # 허용하고, 보호자 초대(routers/care_router.py InvitationCreate)는 Connect.tsx UI에 맞춰

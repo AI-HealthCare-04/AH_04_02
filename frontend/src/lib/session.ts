@@ -187,8 +187,14 @@ export function applyFontScale(scale: FontScale): void {
  *   고른 적 없음) → /patients(환자 선택)로 보내 반드시 먼저 고르게 한다.
  * 반환값이 null이면 아직 검증 중(보호자 케이스)이거나 리다이렉트된 것 — 화면은
  * 데이터를 가져오기 전에 이 값이 채워질 때까지 기다려야 한다.
+ *
+ * [2026-07-23 추가] `silent: true`를 주면 환자를 특정할 수 없어도(케어하는 환자가 0명이거나
+ * 아직 고르지 않은 2명 이상) `/patients`로 강제 이동시키지 않고 그냥 null을 반환한다.
+ * Settings.tsx처럼 화면 일부만 환자 단위 데이터(챗봇 이름)이고 나머지(글자 크기)는
+ * 환자와 무관해서, 환자가 아직 안 정해졌다고 화면 전체를 떠나보내면 안 되는 경우에 쓴다.
  */
-export function useGuardedPatientId(): number | null {
+export function useGuardedPatientId(options?: { silent?: boolean }): number | null {
+  const silent = options?.silent ?? false;
   const navigate = useNavigate();
   const caregiverId = getCurrentCaregiverId();
   const [patientId, setPatientId] = useState<number | null>(caregiverId ? null : getCurrentPatientId());
@@ -200,7 +206,7 @@ export function useGuardedPatientId(): number | null {
       .then((patients) => {
         if (cancelled) return;
         if (patients.length === 0) {
-          navigate("/patients", { replace: true });
+          if (!silent) navigate("/patients", { replace: true });
           return;
         }
         // [주의] getCurrentPatientId()는 값이 없으면 1로 폴백하는데, 그 1이 우연히
@@ -213,16 +219,18 @@ export function useGuardedPatientId(): number | null {
         } else if (patients.length === 1) {
           localStorage.setItem("patient_id", String(patients[0].id));
           setPatientId(patients[0].id);
-        } else {
+        } else if (!silent) {
           navigate("/patients", { replace: true });
         }
       })
-      .catch(() => navigate("/patients", { replace: true }));
+      .catch(() => {
+        if (!silent) navigate("/patients", { replace: true });
+      });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [caregiverId]);
+  }, [caregiverId, silent]);
 
   return patientId;
 }
