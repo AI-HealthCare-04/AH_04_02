@@ -114,8 +114,8 @@ def get_current_patient_optional(
         return None
     try:
         subject_id, role = decode_token(credential.credentials, expected_type="access")
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="유효하지 않거나 만료된 토큰입니다.")
+    except jwt.PyJWTError as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="유효하지 않거나 만료된 토큰입니다.") from e
     if role != "patient":
         return None
 
