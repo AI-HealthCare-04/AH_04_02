@@ -16,6 +16,7 @@ import Dashboard from "./pages/Dashboard";
 import InviteAccept from "./pages/InviteAccept";
 import Schedule from "./pages/Schedule";
 import Notification from "./pages/Notification";
+import Notifications from "./pages/Notifications";
 import Records from "./pages/Records";
 import PrescriptionDetail from "./pages/PrescriptionDetail";
 import PrescriptionReview from "./pages/PrescriptionReview";
@@ -61,6 +62,7 @@ function App() {
           <Route path="/invite/:token" element={<InviteAccept />} />
           <Route path="/schedule" element={<Schedule />} />
           <Route path="/notification" element={<Notification />} />
+          <Route path="/notifications" element={<Notifications />} />
           <Route path="/records" element={<Records />} />
           <Route path="/guides" element={<MedGuideList />} />
           <Route path="/records/:recordId" element={<PrescriptionDetail />} />

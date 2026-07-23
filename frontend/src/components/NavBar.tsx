@@ -25,6 +25,7 @@ const PATIENT_NAV_ITEMS: NavItem[] = [
     children: [
       { label: "복약 알림", to: "/schedule" },
       { label: "알림 설정", to: "/notification" },
+      { label: "알림함", to: "/notifications" },
     ],
   },
   { label: "복약 가이드", to: "/guides" },
@@ -45,6 +46,7 @@ const PATIENT_NAV_ITEMS: NavItem[] = [
 
 const CAREGIVER_NAV_ITEMS: NavItem[] = [
   { label: "환자 관리", to: "/patients" },
+  { label: "알림함", to: "/notifications" },
   { label: "연결관리", to: "/connect" },
   { label: "설정", to: "/settings" },
 ];

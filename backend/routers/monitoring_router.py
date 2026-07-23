@@ -999,6 +999,57 @@ def list_logs(
     return entries
 
 
+class NotificationLogEntry(BaseModel):
+    """[2026-07-23 추가] 알림함 — 복약 알림/놓침 감지가 이미 NotificationLog에 쌓이고
+    있는데, 이걸 웹에서 모아 볼 화면이 없었다(푸시만 전제한 설계). 웹만 켜둔 환자·보호자도
+    지난 알림을 확인할 수 있게 그대로 노출한다."""
+    id: int
+    schedule_id: int
+    drug_name: str
+    time_slot: str
+    due_date: str
+    kind: Literal["reminder", "missed"]
+    status: Literal["pending", "sent", "suppressed", "failed"]
+    fired_at: datetime
+
+
+@router.get("/patients/{patient_id}/notifications", response_model=list[NotificationLogEntry])
+def list_notifications(
+    patient_id: int,
+    days: int = 30,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    require_actor_patient_access(patient_id, actor, session)
+    since = datetime.now() - timedelta(days=days)
+    logs = session.exec(
+        select(NotificationLog)
+        .where(NotificationLog.patient_id == patient_id)
+        .where(NotificationLog.fired_at >= since)
+        .order_by(NotificationLog.fired_at.desc())
+    ).all()
+    if not logs:
+        return []
+
+    schedule_ids = {log.schedule_id for log in logs}
+    schedules = {
+        s.id: s for s in session.exec(select(MedicationSchedule).where(MedicationSchedule.id.in_(schedule_ids)))
+    }
+    return [
+        NotificationLogEntry(
+            id=log.id,
+            schedule_id=log.schedule_id,
+            drug_name=schedules[log.schedule_id].drug_name if log.schedule_id in schedules else "삭제된 일정",
+            time_slot=log.time_slot,
+            due_date=log.due_date,
+            kind=log.kind,
+            status=log.status,
+            fired_at=log.fired_at,
+        )
+        for log in logs
+    ]
+
+
 # ── Dashboard.tsx가 그대로 쓸 수 있는 오늘자 통합 조회 [7/6: patient_id 필수로 변경] ──
 @router.get("/today")
 def get_today(

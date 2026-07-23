@@ -49,6 +49,7 @@ export default function MyPage() {
     { label: "내 정보", icon: "🪪", to: "/mypage/info" },
     { label: "복약 일정", icon: "💊", to: "/schedule" },
     { label: "알림 설정", icon: "🔔", to: "/notification" },
+    { label: "알림함", icon: "📥", to: "/notifications" },
     { label: "등록내역", icon: "📋", to: "/records" },
     { label: "모니터링 대시보드", icon: "📊", to: "/monitoring" },
     { label: "연결관리", icon: "👥", to: "/connect" },
@@ -57,6 +58,7 @@ export default function MyPage() {
   const caregiverMenu: MenuItem[] = [
     { label: "내 정보", icon: "🪪", to: "/mypage/info" },
     { label: "환자 관리", icon: "🏥", to: "/patients" },
+    { label: "알림함", icon: "📥", to: "/notifications" },
     { label: "연결관리", icon: "👥", to: "/connect" },
     { label: "화면·챗봇 설정", icon: "⚙️", to: "/settings" },
   ];

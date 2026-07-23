@@ -374,3 +374,23 @@ export async function getLogs(patientId: number, days = 30) {
   });
   return data;
 }
+
+// [2026-07-23 추가] 알림함(웹 인박스) — NotificationLog 원본을 그대로 노출한다.
+export interface NotificationLogEntry {
+  id: number;
+  schedule_id: number;
+  drug_name: string;
+  time_slot: string;
+  due_date: string;
+  kind: "reminder" | "missed";
+  status: "pending" | "sent" | "suppressed" | "failed";
+  fired_at: string;
+}
+
+export async function getNotifications(patientId: number, days = 30) {
+  const { data } = await monitoringClient.get<NotificationLogEntry[]>(
+    `/monitoring/patients/${patientId}/notifications`,
+    { params: { days } }
+  );
+  return data;
+}
