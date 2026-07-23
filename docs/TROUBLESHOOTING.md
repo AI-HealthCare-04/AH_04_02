@@ -258,3 +258,121 @@ retrieve-dur-lookup
 | **원인** | 등록내역 삭제 API는 `MedicalRecord.deleted_at`과 `MedicationSchedule.record_id` 기반 일정 비활성화만 처리했다. 따라서 처방전에서 파생된 `PatientMedication.prescription_id` 데이터와 그 내약 기반 일정이 있으면 다른 화면에 계속 남아 “삭제가 안 됐다”고 보일 수 있었다. 프론트도 삭제 성공 후 로컬 배열만 필터링하고 서버 목록을 다시 확인하지 않았다. 연결관리의 대기중 초대는 목록 조회만 있고 보낸 초대를 취소하는 API/버튼이 없었다. 또한 보호자 `환자 관리`의 X 버튼은 보호자-환자 연결 해제가 아니라 환자 계정 자체 삭제 API(`/monitoring/patients/{patient_id}`)를 호출하고 있어, 환자에게 처방/일정/기록이 있으면 삭제가 실패할 수 있었다. |
 | **해결** | 등록내역 삭제 시 `PatientMedication.prescription_id == record_id`인 내약을 soft-delete하고, 해당 내약에 연결된 일정도 비활성화하도록 보강했다. 프론트 `Records.tsx`는 삭제 후 `listRecords()`를 다시 호출해 서버 기준 목록으로 갱신한다. 연결관리에는 `DELETE /care/invitations/{invitation_id}`를 추가해 pending 초대를 `cancelled`로 바꾸고, `Connect.tsx`의 대기중 초대 목록에 삭제 버튼을 추가했다. 보호자 `PatientManagement.tsx`의 X 버튼은 환자 계정 삭제 대신 기존 `unlinkCaregiverPatient(caregiverId, patientId)`를 호출해 현재 보호자와의 연결만 해제하도록 바꿨다. |
 | **재발 방지** | 사용자가 “삭제”라고 인식하는 범위가 화면 카드 1개인지, 그 카드에서 파생된 내약/일정까지인지, 또는 관계 해제인지 확인해야 한다. soft-delete를 쓰는 데이터는 삭제 후 프론트 로컬 상태만 바꾸지 말고 서버 재조회로 실제 영속 상태를 확인한다. |
+
+---
+
+| 날짜 | 2026.07.23 |
+|---|---|
+| **작성자** | 김영혜 |
+| **이슈** | 복약일정에서 복용시간대 삭제가 실제 DB 삭제로 이어지지 않고, 보호자/지원인력 화면의 사용자명·메뉴 구조가 환자 중심 흐름과 맞지 않음 |
+| **발생 위치** | `backend/routers/monitoring_router.py`, `backend/routers/auth_router.py`, `frontend/src/pages/Schedule.tsx`, `frontend/src/pages/Login.tsx`, `frontend/src/pages/MyPage.tsx`, `frontend/src/pages/PatientManagement.tsx`, `frontend/src/components/NavBar.tsx`, `frontend/src/pages/SignUp.tsx`, `frontend/src/pages/MonitoringDashboard.tsx`, `frontend/src/pages/MonitoringDayLogs.tsx`, `frontend/src/pages/DrugDetail.tsx`, `frontend/src/pages/CareEducation.tsx` |
+| **원인** | `DELETE /monitoring/schedules/{schedule_id}`가 `MedicationRecord`만 정리하고 `NotificationLog`, 레거시 `MedicationLog` 참조는 정리하지 않아 알림/체크 기록이 붙은 일정은 FK 제약으로 삭제가 실패할 수 있었다. 일부 보호자 화면은 `NavBar userName="김보호"`를 하드코딩해 실제 로그인 이름과 다르게 보였다. 기관/지원인력 가입은 `Caregiver.name`에 기관명을 저장해 `test.worker@team.local`처럼 담당자명(`테스트요양보호사`)이 있는 계정도 화면 이름이 기관명(`행복요양원`)으로 보일 수 있었다. 또한 보호자/지원인력도 복약일정·알림설정·등록내역 메뉴를 직접 볼 수 있어, 환자관리 → 환자 리스트 → 환자별 하위 메뉴로 들어가는 흐름이 약했다. |
+| **해결** | 일정 삭제 시 `MedicationRecord`, `MedicationLog`, `NotificationLog`를 먼저 삭제하고 flush한 뒤 `MedicationSchedule`을 삭제하도록 변경했다. 기관/지원인력 가입 시 화면 표시 이름은 담당자 이름(`managerName`)으로 저장하고 기관명은 `org_name`에만 저장하도록 분리했다. 백엔드 `create_caregiver()`도 기관 계정이면 `manager_name`을 표시 이름으로 저장하도록 방어 로직을 추가했다. 로그인/토큰 갱신/계정 전환 응답과 마이페이지는 기존 DB 데이터 대응을 위해 기관 계정의 `manager_name`을 우선 표시한다. 로그인 성공 시 보호자/지원인력은 기존 `patient_id`를 지우고 환자관리 화면으로 이동하도록 변경했다. 마이페이지와 상단 네비게이션은 역할별 메뉴를 분리해 보호자/지원인력은 `환자 관리`, `연결관리`, `설정` 중심으로 보이게 했다. 환자관리 목록에는 환자별 `복약일정`, `알림설정`, `등록내역`, `모니터링` 버튼을 추가해 선택한 환자의 하위 기능으로 이동하게 했다. `김보호` 하드코딩 화면은 `getCurrentUserName()`을 사용하도록 수정했다. |
+| **테스트/검증** | `backend/tests/test_monitoring_missed_merge.py`에 체크 기록, 레거시 로그, 알림 로그가 붙은 일정도 삭제되는 회귀 테스트를 추가했다. `npm run build` 통과. `uv run pytest backend/tests/test_auth_switch_account.py backend/tests/test_update_email_normalization.py -q` 결과 9개 통과. |
+| **확인 결과** | 원격 DB 단건 조회 결과 `test.worker@team.local`은 `name=행복요양원`, `relation_type=organization`, `org_name=행복요양원`, `manager_name=테스트요양보호사`로 저장돼 있었다. 따라서 화면 이름이 기관명으로 나온 원인은 기존 데이터의 표시 이름 컬럼이 기관명으로 저장된 것이 맞다. 신규 가입 데이터는 담당자명으로 저장되며, 기존 테스트 계정은 로그인 응답/마이페이지에서 `manager_name`을 우선 표시해 화면상 보정한다. |
+| **재발 방지** | 역할별 화면을 수정할 때는 상단 네비게이션, 마이페이지, 로그인 후 이동 경로, 환자 선택 후 하위 화면 진입 경로를 한 세트로 본다. 하드코딩 표시명은 테스트 계정에서는 빨리 눈에 띄지만 실제 사용자 경험을 깨므로 `localStorage.user_name` 또는 인증 API 응답 기반으로 통일한다. |
+
+---
+
+| 날짜 | 2026.07.23 |
+|---|---|
+| **작성자** | 김영혜 |
+| **이슈** | 마이페이지 역할별 메뉴 분리 후 요양보호사/보호자 계정에서 "내 정보" 진입 경로가 사라졌고, 환자 관리 화면에 연결관리와 중복되는 "환자 연결"/"받은 초대" UI가 남아있었음 |
+| **발생 위치** | `frontend/src/pages/MyPage.tsx`, `frontend/src/pages/PatientManagement.tsx` |
+| **원인** | 마이페이지 메뉴를 `patientMenu`/`caregiverMenu`로 분리하는 과정(`d5025ca`)에서 "내 정보" 항목을 `caregiverMenu`에는 옮기지 않고 누락했다. `PatientManagement.tsx`에는 온보딩용으로 만들어둔 "환자 연결" 버튼과 "받은 초대" 카드가 그대로 남아있었는데, 같은 기능이 `Connect.tsx`(연결관리)에도 이미 있어 두 화면에서 중복 노출되고 있었다. |
+| **해결** | `caregiverMenu` 맨 앞에 `{ label: "내 정보", to: "/mypage/info" }`를 복구했다. `PatientManagement.tsx`에서 "환자 연결" 버튼, `InvitePatientPanel`, "받은 초대" 카드와 관련 상태·핸들러·미사용 import를 전부 제거해 `연결관리` 화면과의 중복을 없앴다. |
+| **테스트/검증** | `npm run build`, `npm run lint` 통과. |
+| **재발 방지** | 역할별로 메뉴를 나눌 때는 기존 메뉴에 있던 항목이 새 메뉴 배열 전부에 빠짐없이 옮겨졌는지 diff로 확인한다. 같은 기능(초대 발송/수락)을 여러 화면에 중복 배치하지 말고 한 화면(연결관리)에만 두고 나머지 화면은 그 화면으로 안내한다. |
+
+---
+
+| 날짜 | 2026.07.01 |
+|---|---|
+| **작성자** | 권순현 |
+| **이슈** | PyCharm 이름 변경 다이얼로그에 슬래시(`/`) 포함 브랜치명 입력 시 “올바른 식별자가 아닙니다” 오류 |
+| **발생 위치** | PyCharm IDE Rename 다이얼로그 |
+| **원인** | `feature/ocr-day1-setup_soonhyun`은 Git 브랜치명이지 파일시스템 경로가 아니다. PyCharm의 Rename 다이얼로그는 파일·디렉터리 이름을 변경하는 UI이기 때문에, 슬래시(`/`)가 포함된 이름을 유효하지 않은 식별자로 판단한다. |
+| **해결** | 브랜치 생성과 push는 파일 탐색기가 아니라 터미널 Git 명령어로 처리한다. |
+| **핵심 패턴** | PyCharm의 Rename 다이얼로그는 파일명용이다. Git 브랜치는 반드시 터미널에서 `git checkout -b <name>` + `git push -u origin <name>`으로 생성한다. |
+
+```bash
+git checkout -b feature/ocr-day1-setup_soonhyun
+git push -u origin feature/ocr-day1-setup_soonhyun
+```
+
+---
+
+| 날짜 | 2026.07.15 |
+|---|---|
+| **작성자** | 권순현 |
+| **이슈** | `backend/.env`의 `DATABASE_URL`을 수정하고 `docker compose restart`를 실행했는데, 로그에 여전히 이전 값(`APP_ENV=local`, SQLite)이 출력됨 |
+| **발생 위치** | `docker-compose.yml` backend 서비스 |
+| **원인** | `docker-compose.yml`의 `backend` 서비스에 `env_file`이나 `environment` 지시자가 없었다. 코드가 `load_dotenv()`로 `.env`를 직접 읽는 방식에만 의존하고 있어서 Compose 레벨에서는 이 파일의 존재를 알지 못했다. `docker compose restart`는 기존 컨테이너 프로세스를 그대로 재시작할 뿐이라, `.env` 파일을 수정해도 컨테이너 시작 시점에 이미 로드된 값이 유지된다. |
+| **해결** | `docker compose down` → `docker compose up -d` 로 컨테이너를 완전히 재생성한다. |
+| **검증** | `docker compose logs backend --tail=30 \| grep “\[db\]”` 로 `APP_ENV=development`로 변경됐는지 확인 |
+| **핵심 패턴** | 환경변수 변경 시 `restart`만으로는 반영되지 않는다. `down` → `up` 습관화 필요. 근본 해결은 `docker-compose.yml`에 `env_file: - backend/.env` 추가. |
+
+---
+
+| 날짜 | 2026.07.20 |
+|---|---|
+| **작성자** | 권순현 |
+| **이슈** | OCR이 “메트포르민정500mg”을 정확히 읽어도 `drug_matcher`가 `(“메트포르민정250mg”, score=1.0)`을 반환함 |
+| **발생 위치** | `backend/services/drug_matcher.py` — `match_drug()` |
+| **원인** | `_normalize()` 로직이 용량 표기를 제거하고 성분명만 남긴다. 서로 다른 용량의 약품(250mg / 500mg / 1000mg)이 모두 같은 정규화 키로 축약되는데, `dict[str, str]`로 관리하다 보니 먼저 등록된 값이 나중 값을 덮어써 나머지 후보가 소실됐다. score가 1.0으로 반환되어 “정확히 일치”로 오판되는 점이 더 위험하다. |
+| **영향 범위** | 24개 목업 테스트에서는 충돌 8그룹이 전부 외용제라 미발생. HIRA 약가마스터(30만 건) 적용 시 실제 발생 가능. |
+| **해결** | `dict[str, str]` → `dict[str, list[str]]`로 변경해 모든 후보를 보존하도록 수정(PR #57). 신규 테스트 15건 추가. |
+| **핵심 패턴** | 정규화 키가 충돌할 수 있는 사전은 `dict[str, str]` 대신 `dict[str, list[str]]`로 설계해 덮어쓰기를 방지한다. |
+
+```python
+# ❌ 문제가 된 코드 — 나중에 등록된 용량이 덮어써짐
+norm_to_raw: dict[str, str] = {}
+for raw, norm in zip(raw_pool, norm_pool):
+    if norm in close_norm and norm not in norm_to_raw:
+        norm_to_raw[norm] = raw
+
+# ✅ 수정 — 모든 후보 보존
+norm_to_raws: dict[str, list[str]] = {}
+for raw, norm in zip(raw_pool, norm_pool):
+    if norm in close_norm:
+        norm_to_raws.setdefault(norm, []).append(raw)
+```
+
+---
+
+## 과거 EasyOCR 실험 기록 (참고용, 현재 미사용 — 현재는 CLOVA OCR 사용)
+
+> 아래 항목은 초기 프로토타입 단계에서 EasyOCR을 직접 사용하던 시기의 기록이다. 현재 OCR 처리는 `backend/routers/ocr_router.py`의 CLOVA OCR 인터페이스(`ocr_interface.py`)로 전환됐으며, EasyOCR 의존성은 제거됐다.
+
+---
+
+| 날짜 | (EasyOCR 실험 초기) |
+|---|---|
+| **작성자** | 권순현 |
+| **이슈** | 한글이 포함된 처방전 이미지를 OCR에 넣었을 때 한글 부분이 전부 빈 결과로 반환됨 |
+| **발생 위치** | EasyOCR `Reader` 초기화 |
+| **원인** | EasyOCR은 Reader 초기화 시 선언한 언어 코드에 해당하는 모델만 로드한다. `[“en”]`만 선언하면 한국어 모델 자체를 불러오지 않는다. |
+| **해결** | `reader = easyocr.Reader([“en”, “ko”])` |
+| **현재 상태** | CLOVA OCR 전환으로 EasyOCR 미사용. 참고용으로만 보존. |
+
+---
+
+| 날짜 | (EasyOCR 실험 초기) |
+|---|---|
+| **작성자** | 권순현 |
+| **이슈** | 한글이 포함된 샘플 이미지를 PIL로 생성했을 때 한글 부분이 깨지거나 빈 박스로 출력됨 |
+| **발생 위치** | PIL(Pillow) 이미지 생성 코드 |
+| **원인** | PIL의 기본 폰트(`ImageFont.load_default()`)는 ASCII 문자만 지원한다. 한글 렌더링에는 시스템에 설치된 한글 폰트 파일 경로를 직접 지정해야 한다. |
+| **해결** | `font = ImageFont.truetype(“/System/Library/Fonts/AppleSDGothicNeo.ttc”, size=24)` (macOS 기준) |
+| **현재 상태** | EasyOCR 테스트용 이미지 생성 코드였으므로 현재 미사용. |
+
+---
+
+| 날짜 | (EasyOCR 실험 초기) |
+|---|---|
+| **작성자** | 권순현 |
+| **이슈** | “캡슐500mg” → “캡쑬50Omg” 처럼 약품명과 용량이 동시에 오인식됨 |
+| **발생 위치** | EasyOCR raw 결과 후처리 |
+| **원인** | EasyOCR이 시각적으로 유사한 문자를 혼동한다. 의약품 도메인에서는 한글 받침 혼동(“캡슐”→”캡쑬”)이나 숫자·문자 혼동(`0`→`O`)이 처방 용량이나 약품명 오인식으로 직결된다. |
+| **해결** | 2단계 후처리: ① 자주 혼동되는 패턴 사전 치환(`CHAR_CORRECTIONS`) → ② 의약품 도메인 사전과 유사도 비교(`difflib.get_close_matches`) |
+| **현재 상태** | CLOVA OCR 전환으로 후처리 파이프라인 불필요. 참고용으로만 보존. |

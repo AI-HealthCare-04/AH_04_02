@@ -18,12 +18,13 @@ from main import app
 from models import (
     Caregiver,
     CaregiverPatient,
+    MedicationLog,
     MedicationRecord,
     MedicationSchedule,
     NotificationLog,
     Patient,
 )
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 from sqlmodel.pool import StaticPool
 
 
@@ -357,3 +358,34 @@ class TestNonCheckInStatusesFilteredOut:
         entries = r.json()
         assert len(entries) == 1
         assert entries[0]["status"] == "taken"
+
+
+class TestScheduleDelete:
+    def test_delete_schedule_removes_dependent_logs_first(self, client: TestClient, session: Session):
+        """복약 체크/알림 기록이 붙은 일정도 사용자가 삭제하면 실제로 삭제되어야 한다."""
+        pt = _make_patient(session)
+        sched = MedicationSchedule(patient_id=pt.id, drug_name="약M", time_slot="08:00")
+        session.add(sched)
+        session.commit()
+        session.refresh(sched)
+        session.add(MedicationRecord(schedule_id=sched.id, status="taken", taken_at=datetime.now()))
+        session.add(MedicationLog(schedule_id=sched.id, status="taken"))
+        session.add(
+            NotificationLog(
+                schedule_id=sched.id,
+                patient_id=pt.id,
+                due_date=date.today().isoformat(),
+                time_slot="08:00",
+                kind="reminder",
+                status="sent",
+            )
+        )
+        session.commit()
+
+        r = client.delete(f"/monitoring/schedules/{sched.id}", headers=_headers(pt.id))
+
+        assert r.status_code == 200
+        assert session.get(MedicationSchedule, sched.id) is None
+        assert session.exec(select(MedicationRecord)).all() == []
+        assert session.exec(select(MedicationLog)).all() == []
+        assert session.exec(select(NotificationLog)).all() == []

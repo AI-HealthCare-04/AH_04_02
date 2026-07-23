@@ -10,7 +10,7 @@ import {
   type Schedule,
 } from "../api/monitoring";
 import { getLatestAssessment, type AssessmentResult } from "../api/care";
-import { getCurrentCaregiverId, getCurrentPatientId } from "../lib/session";
+import { getCurrentCaregiverId, getCurrentPatientId, getCurrentUserName } from "../lib/session";
 import { C } from "../theme";
 
 const CARE_LEVEL_LABEL: Record<AssessmentResult["care_level"], string> = {
@@ -121,7 +121,7 @@ export default function MonitoringDashboard() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName="김보호" />
+      <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-4xl mx-auto px-6 sm:px-8 py-10">
         <h1 className="text-[24px] font-black mb-6" style={{ color: C.dark }}>모니터링 대시보드</h1>
 
