@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import NavBar from "../components/NavBar";
 import {
+  getPatientCaregivers,
   getTodayMedications,
   checkIntake,
   clearIntake,
@@ -34,6 +35,17 @@ export default function Dashboard() {
       .finally(() => setLoading(false));
     listRecords(patientId)
       .then((list) => setRecentRecords(list.filter((r) => r.status === "completed").slice(0, 2)))
+      .catch(() => {});
+  }, [patientId]);
+
+  // [2026-07-22 추가] 이미 연결된 보호자가 있으면 "보호자를 연결해보세요" 배너 자체가
+  // 더 이상 의미 없다 — X로 닫는 것과 별개로, 연결 여부를 실제로 확인해서 있으면 숨긴다.
+  useEffect(() => {
+    if (patientId == null || getCurrentCaregiverId()) return;
+    getPatientCaregivers(patientId)
+      .then((list) => {
+        if (list.length > 0) setShowBanner(false);
+      })
       .catch(() => {});
   }, [patientId]);
 
@@ -126,7 +138,7 @@ export default function Dashboard() {
               <p className="text-[13px] font-bold mb-2.5" style={{ color: C.terracotta }}>{time}</p>
               <div className="flex flex-col gap-4">
                 {group.map((med) => (
-            <div key={med.id} className="rounded-2xl px-5 sm:px-6 py-5 border" style={{ background: C.white, borderColor: "rgba(30,26,23,0.12)" }}>
+            <div key={med.id} className="rounded-2xl px-5 sm:px-6 py-5 border" style={{ background: C.surface, borderColor: "rgba(30,26,23,0.12)" }}>
               <div className="flex justify-between mb-4">
                 <div>
                   <p className="text-[17px] font-bold mb-1" style={{ color: C.dark }}>{med.name}</p>
@@ -196,7 +208,7 @@ export default function Dashboard() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
             {recentRecords.map((r) => (
-              <div key={r.record_id} className="rounded-2xl p-5 border" style={{ background: C.white, borderColor: "rgba(30,26,23,0.12)" }}>
+              <div key={r.record_id} className="rounded-2xl p-5 border" style={{ background: C.surface, borderColor: "rgba(30,26,23,0.12)" }}>
                 <div className="text-xl mb-3">📄</div>
                 <p className="text-sm font-bold mb-5 min-h-10" style={{ color: C.dark }}>{r.diagnosis || "복약 가이드"}</p>
                 <div className="flex justify-between items-center">

@@ -120,6 +120,9 @@ export interface RecordResult {
     lifestyle_guide: LifestyleGuide;
     source_refs: SourceRef[];
   } | null;
+  // [2026-07-23 추가] confirm 시점에 이미 활성 일정이 있던 약이 있으면 그 이름들 —
+  // "오늘의 복약"에 중복 등록하지 않고 건너뛴 약. 없으면 빈 배열.
+  duplicate_drug_names: string[];
 }
 
 function normalizeLifestyleGuide(guide: LifestyleGuide): LifestyleGuide {
@@ -169,6 +172,8 @@ export interface RecordSummary {
   diagnosis: string;
   drug_names: string[];
   uploaded_by_name: string | null;
+  // [2026-07-21 추가] 즐겨찾기처럼 목록 위쪽에 고정 — 목록은 이 값 기준으로 이미 정렬되어 온다
+  pinned: boolean;
 }
 
 /**
@@ -233,6 +238,11 @@ export async function listRecords(patientId: number, signal?: AbortSignal) {
 /** [2026-07-16 추가] 등록내역 삭제 (soft-delete) — 목록/상세 조회에서 이후 제외됨 */
 export async function deleteRecord(recordId: number) {
   await monitoringClient.delete(`/records/${recordId}`);
+}
+
+/** [2026-07-21 추가] 등록내역 즐겨찾기처럼 위쪽에 고정/해제 */
+export async function pinRecord(recordId: number, pinned: boolean) {
+  await monitoringClient.patch(`/records/${recordId}/pin`, { pinned });
 }
 
 /** 처방전확인 화면 — review_required 항목 수정 후 확정 제출용 */

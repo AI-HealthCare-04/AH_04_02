@@ -39,6 +39,7 @@ from models import (
     Caregiver,
     CaregiverPatient,
     MedicalRecord,
+    MedicationLog,
     MedicationRecord,
     MedicationSchedule,
     NotificationLog,
@@ -60,6 +61,9 @@ class PatientCreate(BaseModel):
     phone: str | None = None  # [7/8 추가] 회원가입(SignUp.tsx)
     email: str | None = None  # [7/8 추가] 회원가입 "아이디"
     birth_date: str | None = None  # [7/8 추가]
+    # [2026-07-22 추가] 환자 관리 테이블(Figma 목업)의 "성별" 컬럼용 — 가입 화면 select가
+    # "male"/"female" 둘 중 하나만 보낸다(모르면 그냥 비워둠 — 지어내지 않음).
+    gender: Literal["male", "female"] | None = None
     password: str | None = None  # [7/8 추가] 평문으로 받아서 저장 전에 반드시 해시 처리
     push_enabled: bool = True
     sms_enabled: bool = False
@@ -72,6 +76,11 @@ class PatientUpdate(BaseModel):
     phone: str | None = None
     email: str | None = None
     birth_date: str | None = None
+    gender: Literal["male", "female"] | None = None
+    # [2026-07-22 추가] "내 정보"(MyInfo.tsx)에서 회원가입 때 받은 알림 수신 설정도 같이 수정
+    push_enabled: bool | None = None
+    sms_enabled: bool | None = None
+    email_opt_in: bool | None = None
 
 
 class PatientPublic(BaseModel):
@@ -82,6 +91,7 @@ class PatientPublic(BaseModel):
     phone: str | None = None
     email: str | None = None
     birth_date: str | None = None
+    gender: str | None = None
     push_enabled: bool = True
     sms_enabled: bool = False
     email_opt_in: bool = False
@@ -92,6 +102,11 @@ class PatientPublic(BaseModel):
     lunch_regular: bool | None = None
     dinner_time: str | None = None
     dinner_regular: bool | None = None
+    # [2026-07-22 추가] 환자 관리 테이블(PatientManagement.tsx)의 "진단명"/"상태" 컬럼용 —
+    # 다른 엔드포인트에서는 계산 안 하고 기본값(None/"none")으로 둔다. 계산 비용이 있는
+    # 값이라 실제로 표로 보여줄 GET /caregivers/{id}/patients에서만 채운다.
+    diagnoses: str | None = None
+    medication_status: Literal["active", "paused", "none"] = "none"
 
 
 class MealTimesUpdate(BaseModel):
@@ -144,6 +159,27 @@ def create_patient(payload: PatientCreate, session: Session = Depends(get_sessio
     return _register_patient(payload, session)
 
 
+@router.get("/patients/check-duplicate")
+def check_patient_duplicate(
+    email: str | None = None,
+    phone: str | None = None,
+    session: Session = Depends(get_session),
+):
+    """[2026-07-23 추가] 회원가입(SignUp.tsx)에서 이메일/전화번호를 입력하고 다른 필드로
+    넘어갈 때(onBlur) 바로 중복 여부를 알려주기 위한 조회용 엔드포인트 — 계정을 만들지
+    않고 _register_patient와 동일한 중복 판정 규칙만 재사용한다."""
+    email_taken = False
+    if email:
+        normalized = normalize_email(email)
+        email_taken = session.exec(select(Patient).where(Patient.email == normalized)).first() is not None
+    phone_taken = False
+    if phone:
+        phone_taken = session.exec(
+            select(Patient).where(Patient.phone_hash == hash_phone(phone))
+        ).first() is not None
+    return {"email_taken": email_taken, "phone_taken": phone_taken}
+
+
 @router.get("/patients", response_model=list[PatientPublic])
 def list_patients(actor: Actor = Depends(get_current_actor), session: Session = Depends(get_session)):
     """[7/13] MyPage.tsx가 "본인"을 찾는 데만 쓴다 — 전체 목록이 아니라 토큰의 본인
@@ -164,14 +200,37 @@ def list_patients(actor: Actor = Depends(get_current_actor), session: Session = 
 def update_patient(
     patient_id: int,
     payload: PatientUpdate,
-    caregiver: Caregiver = Depends(get_current_caregiver),
+    actor: Actor = Depends(get_current_actor),
     session: Session = Depends(get_session),
 ):
-    require_patient_access(patient_id, caregiver, session)
+    """[2026-07-22 수정] 보호자뿐 아니라 환자 본인도 "내 정보"(MyInfo.tsx)에서 자기
+    정보를 고칠 수 있어야 해서 actor 기반 인가로 바꿨다(보호자면 연결된 환자인지,
+    환자 본인이면 자기 자신인지 확인 — require_actor_patient_access)."""
+    require_actor_patient_access(patient_id, actor, session)
     patient = session.get(Patient, patient_id)
     if not patient:
         raise HTTPException(404, "해당 환자를 찾을 수 없어요")
-    for key, value in payload.model_dump(exclude_unset=True).items():
+
+    updates = payload.model_dump(exclude_unset=True)
+    if "email" in updates and updates["email"]:
+        email = normalize_email(updates["email"])
+        existing = session.exec(select(Patient).where(Patient.email == email)).first()
+        if existing and existing.id != patient_id:
+            raise HTTPException(409, "이미 사용중인 이메일입니다.")
+        updates["email"] = email
+    elif "email" in updates:
+        # [2026-07-23 수정, 팀원 리뷰 반영] 빈 문자열을 그대로 저장하면 email이
+        # unique=True라 다른 계정도 빈 문자열로 지운 경우 unique 제약 충돌이 난다 —
+        # "삭제"는 None으로 정규화해야 안전하다(여러 계정이 동시에 None이어도 무관).
+        updates["email"] = None
+    if "phone" in updates and updates["phone"]:
+        existing = session.exec(
+            select(Patient).where(Patient.phone_hash == hash_phone(updates["phone"]))
+        ).first()
+        if existing and existing.id != patient_id:
+            raise HTTPException(409, "이미 사용중인 전화번호입니다.")
+
+    for key, value in updates.items():
         setattr(patient, key, value)
     session.add(patient)
     session.commit()
@@ -309,10 +368,118 @@ def create_caregiver(payload: CaregiverCreate, session: Session = Depends(get_se
     return caregiver
 
 
+@router.get("/caregivers/check-duplicate")
+def check_caregiver_duplicate(
+    relation_type: Literal["guardian", "organization"],
+    email: str | None = None,
+    phone: str | None = None,
+    session: Session = Depends(get_session),
+):
+    """[2026-07-23 추가] check_patient_duplicate와 동일한 목적 — create_caregiver의 중복
+    판정 규칙(전화번호는 relation_type끼리만 비교)을 그대로 재사용한다."""
+    email_taken = False
+    if email:
+        normalized = normalize_email(email)
+        email_taken = session.exec(select(Caregiver).where(Caregiver.email == normalized)).first() is not None
+    phone_taken = False
+    if phone:
+        phone_taken = (
+            session.exec(
+                select(Caregiver)
+                .where(Caregiver.phone_hash == hash_phone(phone))
+                .where(Caregiver.relation_type == relation_type)
+            ).first()
+            is not None
+        )
+    return {"email_taken": email_taken, "phone_taken": phone_taken}
+
+
 @router.get("/caregivers", response_model=list[CaregiverPublic])
 def list_caregivers(caregiver: Caregiver = Depends(get_current_caregiver)):
     """[7/10] 전체 보호자 목록이 아니라 로그인한 본인만 반환 (MyPage.tsx가 본인 조회용으로만 씀, issue #21)."""
     return [caregiver]
+
+
+class CaregiverUpdate(BaseModel):
+    """[2026-07-22 추가] "내 정보"(MyInfo.tsx)에서 회원가입 때 받은 정보를 수정 —
+    relation_type/password는 여기서 안 바꾼다(전자는 계정 성격 자체를 바꾸는 별개 작업,
+    후자는 이미 있는 비밀번호 재설정 흐름을 쓴다)."""
+    name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    birth_date: str | None = None
+    push_enabled: bool | None = None
+    sms_enabled: bool | None = None
+    email_opt_in: bool | None = None
+    org_name: str | None = None
+    org_type: str | None = None
+    business_reg_no: str | None = None
+    manager_name: str | None = None
+    manager_phone: str | None = None
+
+
+@router.patch("/caregivers/{caregiver_id}", response_model=CaregiverPublic)
+def update_caregiver(
+    caregiver_id: int,
+    payload: CaregiverUpdate,
+    caregiver: Caregiver = Depends(get_current_caregiver),
+    session: Session = Depends(get_session),
+):
+    if caregiver.id != caregiver_id:
+        raise HTTPException(403, "본인 정보만 수정할 수 있어요.")
+
+    updates = payload.model_dump(exclude_unset=True)
+    if "email" in updates and updates["email"]:
+        email = normalize_email(updates["email"])
+        existing = session.exec(select(Caregiver).where(Caregiver.email == email)).first()
+        if existing and existing.id != caregiver_id:
+            raise HTTPException(409, "이미 사용중인 이메일입니다.")
+        updates["email"] = email
+    elif "email" in updates:
+        # [2026-07-23 수정, 팀원 리뷰 반영] update_patient와 동일한 이유 — email이
+        # unique=True라 빈 문자열을 그대로 저장하면 여러 계정이 지웠을 때 충돌한다.
+        updates["email"] = None
+    if "phone" in updates and updates["phone"]:
+        existing = session.exec(
+            select(Caregiver)
+            .where(Caregiver.phone_hash == hash_phone(updates["phone"]))
+            .where(Caregiver.relation_type == caregiver.relation_type)
+        ).first()
+        if existing and existing.id != caregiver_id:
+            raise HTTPException(409, "이미 사용중인 전화번호입니다.")
+
+    for key, value in updates.items():
+        setattr(caregiver, key, value)
+    session.add(caregiver)
+    session.commit()
+    session.refresh(caregiver)
+    return caregiver
+
+
+def _patient_diagnoses(session: Session, patient_id: int) -> str | None:
+    """환자 관리 테이블 "진단명" 컬럼용 — diagnosis는 MedicalRecord(처방전 1건)가 아니라
+    OcrResult(약 1개당 1행)에 있다 — 등록내역(soft-delete 제외)에 딸린 결과들의 진단명을
+    중복 없이 등장 순서대로 모아 "·"로 이어붙인다. 실제로 값이 있는 것만."""
+    rows = session.exec(
+        select(OcrResult.diagnosis)
+        .join(MedicalRecord, OcrResult.record_id == MedicalRecord.id)
+        .where(MedicalRecord.patient_id == patient_id)
+        .where(MedicalRecord.deleted_at.is_(None))
+        .where(OcrResult.diagnosis != "")
+    ).all()
+    distinct = list(dict.fromkeys(rows))
+    return "·".join(distinct) if distinct else None
+
+
+def _patient_medication_status(session: Session, patient_id: int) -> Literal["active", "paused", "none"]:
+    """환자 관리 테이블 "상태" 컬럼용 — 활성 복약 일정이 하나라도 있으면 복약중, 일정
+    자체는 있는데 전부 비활성이면 중단, 아예 없으면 none(표에서 "-"로 표시)."""
+    schedules = session.exec(
+        select(MedicationSchedule.active).where(MedicationSchedule.patient_id == patient_id)
+    ).all()
+    if not schedules:
+        return "none"
+    return "active" if any(schedules) else "paused"
 
 
 @router.get("/caregivers/{caregiver_id}/patients", response_model=list[PatientPublic])
@@ -321,7 +488,10 @@ def list_patients_of_caregiver(
     caregiver: Caregiver = Depends(get_current_caregiver),
     session: Session = Depends(get_session),
 ):
-    """핵심 기능: 이 보호자가 케어하는 환자 전체 목록 (여러 명 가능)"""
+    """핵심 기능: 이 보호자가 케어하는 환자 전체 목록 (여러 명 가능)
+
+    [2026-07-22 수정] 환자 관리 테이블(Figma 목업)이 진단명·복약상태도 보여줘야 해서,
+    ORM 객체를 그대로 반환하는 대신 PatientPublic으로 변환한 뒤 계산한 값을 채워 넣는다."""
     if caregiver_id != caregiver.id:
         raise HTTPException(403, "다른 보호자의 환자 목록은 볼 수 없어요")
 
@@ -331,7 +501,19 @@ def list_patients_of_caregiver(
     patient_ids = [link.patient_id for link in links]
     if not patient_ids:
         return []
-    return session.exec(select(Patient).where(Patient.id.in_(patient_ids))).all()
+    patients = session.exec(select(Patient).where(Patient.id.in_(patient_ids))).all()
+    result = []
+    for patient in patients:
+        public = PatientPublic.model_validate(patient, from_attributes=True)
+        result.append(
+            public.model_copy(
+                update={
+                    "diagnoses": _patient_diagnoses(session, patient.id),
+                    "medication_status": _patient_medication_status(session, patient.id),
+                }
+            )
+        )
+    return result
 
 
 @router.get("/patients/{patient_id}/caregivers", response_model=list[CaregiverPublic])
@@ -523,6 +705,24 @@ def delete_schedule(
     ).all()
     for record in records:
         session.delete(record)
+    # [2026-07-22 수정] notification_logs.schedule_id가 이 스케줄을 참조하고 있으면(알림이
+    # 한 번이라도 발송/판정된 적 있으면) FK 제약 위반으로 500이 났다 — 기록도 함께 지운다.
+    # MedicationSchedule<->NotificationLog 사이엔 ORM relationship이 없어 SQLAlchemy가
+    # 삭제 순서를 FK 기준으로 자동 정렬해주지 않는다 — flush로 먼저 실행되게 강제한다.
+    logs = session.exec(
+        select(NotificationLog).where(NotificationLog.schedule_id == schedule_id)
+    ).all()
+    for log in logs:
+        session.delete(log)
+    # [2026-07-23 수정, 팀원 리뷰 반영] medication_logs → medication_records 이관(849bd15b19a5)
+    # 이후로 새로 쓰이진 않지만 테이블 자체는 남아있고 schedule_id가 여전히 FK라, 이관
+    # 이전부터 있던 오래된 일정을 지우면 여기서 FK 위반이 났다.
+    legacy_logs = session.exec(
+        select(MedicationLog).where(MedicationLog.schedule_id == schedule_id)
+    ).all()
+    for legacy_log in legacy_logs:
+        session.delete(legacy_log)
+    session.flush()
     session.delete(schedule)
     session.commit()
     return {"deleted": schedule_id}

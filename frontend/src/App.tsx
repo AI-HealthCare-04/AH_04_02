@@ -22,6 +22,7 @@ import PrescriptionReview from "./pages/PrescriptionReview";
 import MedGuide from "./pages/MedGuide";
 import MedGuideList from "./pages/MedGuideList";
 import MyPage from "./pages/MyPage";
+import MyInfo from "./pages/MyInfo";
 import Settings from "./pages/Settings";
 import PatientManagement from "./pages/PatientManagement";
 import CareEducation from "./pages/CareEducation";
@@ -68,6 +69,7 @@ function App() {
           <Route path="/records/:recordId/guide" element={<MedGuide />} />
           <Route path="/records/:recordId/drugs/:medId" element={<DrugInfo />} />
           <Route path="/mypage" element={<MyPage />} />
+          <Route path="/mypage/info" element={<MyInfo />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/patients" element={<PatientManagement />} />
           <Route path="/care-education" element={<CareEducation />} />

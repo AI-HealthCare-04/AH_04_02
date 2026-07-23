@@ -164,7 +164,8 @@ def create_invitation(
     """초대 생성.
 
     - relation_type="patient": 보호자/지원인력 → 아직 계정이 없는 환자 초대
-    - 그 외 relation_type: 환자 → 보호자/지원인력 초대
+    - 그 외 relation_type: 환자 → 보호자/지원인력 초대(환자 본인 또는 그 환자에 접근 권한이
+      있는 보호자도 만들 수 있다 — require_actor_patient_access가 둘 다 허용).
     """
     if payload.relation_type == "patient":
         if payload.inviter_caregiver_id is None:

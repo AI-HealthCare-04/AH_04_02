@@ -6,9 +6,11 @@ export interface ChatQuestion {
   text: string;
 }
 
-export async function getChatQuestions(patientId: number) {
+/** [2026-07-23 추가] drugName을 넘기면 그 약 기준 추천 질문, 안 넘기면(플로팅 챗봇
+ * 버튼처럼 약 맥락 없이 들어온 경우) 고정 질문으로 응답한다 — Chat.tsx 참고. */
+export async function getChatQuestions(patientId: number, drugName?: string) {
   const { data } = await monitoringClient.get<ChatQuestion[]>("/chat/questions", {
-    params: { patient_id: patientId },
+    params: { patient_id: patientId, drug_name: drugName || undefined },
   });
   return data;
 }

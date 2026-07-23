@@ -19,6 +19,12 @@ export default function Processing() {
 
   const [current, setCurrent] = useState(0);
   const visualRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // [2026-07-22 추가] React StrictMode(main.tsx)는 개발 모드에서 마운트 이펙트를 일부러
+  // 두 번 실행한다 — 여기 가드가 없으면 그때마다 POST /records가 두 번 나가서 같은
+  // 처방전이 등록내역에 중복으로 쌓였다(실제 공유 DB에서 확인된 원인). 컴포넌트가 같은
+  // 인스턴스로 두 번째 이펙트를 도는 것뿐이라 ref 값은 그대로 살아있으므로, 이미 한 번
+  // 시작했으면 두 번째 실행은 건너뛴다.
+  const startedRef = useRef(false);
 
   const runUpload = async () => {
     if (!file || !patientId) {
@@ -48,6 +54,8 @@ export default function Processing() {
   };
 
   useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
     runUpload();
     return () => {
       if (visualRef.current) clearInterval(visualRef.current);
@@ -73,14 +81,25 @@ export default function Processing() {
               const active = i === current;
               return (
                 <div key={step.id} className="flex items-start gap-3 sm:gap-4 px-3.5 py-3.5 sm:px-4 rounded-xl" style={{ background: C.ivory }}>
-                  <div
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-[13px] font-bold shrink-0"
-                    style={{
-                      background: done ? C.success : active ? C.terracotta : C.bubbleBg,
-                      color: done || active ? C.white : C.muted,
-                    }}
-                  >
-                    {done ? "✓" : step.id}
+                  <div className="relative w-8 h-8 shrink-0">
+                    <div
+                      className="absolute inset-0 rounded-full flex items-center justify-center text-[13px] font-bold"
+                      style={{
+                        background: done ? C.success : C.bubbleBg,
+                        color: done ? C.white : active ? C.terracotta : C.muted,
+                      }}
+                    >
+                      {done ? "✓" : step.id}
+                    </div>
+                    {/* [2026-07-22 추가] 마지막 단계(맞춤 가이드 생성)는 실제 LLM 호출이라 화면상
+                        가짜 진행바가 멈춰 보여도 실제로는 계속 처리 중이다 — 진행 중인 단계에
+                        도는 링을 씌워 "멈춘 게 아니라 로딩 중"임을 보여준다. */}
+                    {active && (
+                      <div
+                        className="absolute inset-0 rounded-full animate-spin"
+                        style={{ border: "2.5px solid transparent", borderTopColor: C.terracotta, borderRightColor: `${C.terracotta}35` }}
+                      />
+                    )}
                   </div>
                   <div className="flex-1">
                     <p className="text-[14px] sm:text-[15px] font-semibold mb-0.5" style={{ color: active ? C.dark : C.muted }}>{step.label}</p>

@@ -85,7 +85,8 @@ export default function Login() {
     localStorage.setItem("caregiver_id", String(caregiverId));
     localStorage.setItem("patient_id", String(patient.id));
     persistLoginChoice({ identifier: identifier.trim(), name, role, patientId: patient.id, caregiverId });
-    navigate("/dashboard");
+    // 보호자/기관 계정의 홈은 특정 환자의 "오늘의 복약"이 아니라 환자 목록 관리 화면.
+    navigate("/patients");
   };
 
   const handleLogin = async () => {
@@ -160,9 +161,8 @@ export default function Login() {
   const handleSwitchAccount = async (account: RecentAccount) => {
     try {
       await switchToRecentAccount(account);
-      // [2026-07-22 수정] 케어하는 환자가 없던 보호자 계정은 patientId가 없다 — 그대로
-      // /dashboard로 보내면 엉뚱한 환자로 진입하니, 환자 등록 화면으로 보낸다.
-      navigate(account.patientId ? "/dashboard" : "/patients");
+      // 환자 본인 계정만 "오늘의 복약"(/dashboard)이 홈이고, 보호자/기관은 환자관리(/patients)가 홈.
+      navigate(account.role === "patient" ? "/dashboard" : "/patients");
     } catch {
       // [2026-07-22 추가] refresh_token까지 만료·무효화됐으면(오래 방치했거나 이미 다른
       // 곳에서 갱신에 써버려 로테이션된 경우) 더 이상 이 계정으로 조용히 전환할 수 없다 —

@@ -65,7 +65,7 @@ export default function InvitePatientPanel({
   };
 
   return (
-    <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl p-6">
+    <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl p-6">
       <h2 className="text-[16px] font-black text-[#1E1A17] mb-1">환자 연결하기</h2>
       <p className="text-[13px] text-[#8A7E75] mb-4">
         환자에게 초대 링크를 보내면, 환자가 직접 계정을 만들어 연결돼요.
@@ -99,7 +99,7 @@ export default function InvitePatientPanel({
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               placeholder="환자 전화번호 (010-0000-0000)"
-              className="w-full pl-11 pr-4 py-3.5 rounded-xl border border-[rgba(30,26,23,0.12)] bg-[#FAF6F1] text-[15px] outline-none"
+              className="w-full pl-11 pr-4 py-3.5 rounded-xl border border-[rgba(30,26,23,0.12)] bg-[#F2E8D8] text-[15px] outline-none"
             />
           </div>
           {!inviteUrl ? (
@@ -112,7 +112,7 @@ export default function InvitePatientPanel({
             </button>
           ) : (
             <>
-              <div className="rounded-xl px-4 py-3 bg-[#FAF6F1] border border-[rgba(30,26,23,0.08)]">
+              <div className="rounded-xl px-4 py-3 bg-[#F2E8D8] border border-[rgba(30,26,23,0.08)]">
                 <p className="text-[12px] font-bold text-[#8A7E75] mb-1">생성된 초대 링크</p>
                 <p className="text-[13px] break-all text-[#1E1A17]">{inviteUrl}</p>
               </div>
@@ -141,7 +141,7 @@ export default function InvitePatientPanel({
               {sending ? "생성 중..." : "초대 링크 만들기"}
             </button>
           ) : (
-            <div className="flex items-center gap-2 px-4 py-3.5 rounded-xl bg-[#FAF6F1] border border-[rgba(30,26,23,0.10)]">
+            <div className="flex items-center gap-2 px-4 py-3.5 rounded-xl bg-[#F2E8D8] border border-[rgba(30,26,23,0.10)]">
               <span className="flex-1 text-[13px] font-mono truncate text-[#1E1A17]">{inviteUrl}</span>
               <button
                 onClick={copyUrl}
@@ -171,7 +171,7 @@ export default function InvitePatientPanel({
               <p className="text-[13px] text-center text-[#8A7E75]">
                 환자가 이 QR을 스캔하면 초대 링크로 이동해요.
               </p>
-              <div className="p-4 rounded-2xl bg-white border-2 border-[rgba(30,26,23,0.08)]">
+              <div className="p-4 rounded-2xl bg-[#F9F4EB] border-2 border-[rgba(30,26,23,0.08)]">
                 <QRCodeSVG value={inviteUrl} size={160} />
               </div>
               <p className="text-[12px] font-mono break-all text-center text-[#1E1A17]">{inviteUrl}</p>

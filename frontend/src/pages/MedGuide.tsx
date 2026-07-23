@@ -40,7 +40,7 @@ export default function MedGuide() {
     return (
       <div className="min-h-screen" style={{ background: C.ivory }}>
         <NavBar isLoggedIn userName={getCurrentUserName()} />
-        <div className="rounded-2xl p-10 m-8 text-center" style={{ background: C.white }}>
+        <div className="rounded-2xl p-10 m-8 text-center" style={{ background: C.surface }}>
           <p className="text-[14px]" style={{ color: "#D94F4F" }}>{error || "가이드를 찾을 수 없어요."}</p>
         </div>
       </div>
@@ -119,7 +119,7 @@ export default function MedGuide() {
                   {content}
                 </button>
               ) : (
-                <div key={i} className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
+                <div key={i} className="rounded-2xl p-5" style={{ background: C.surface, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
                   {content}
                 </div>
               );
@@ -141,7 +141,7 @@ export default function MedGuide() {
           return (
             <div className="space-y-4">
               {drugsWithCaution.length > 0 && (
-                <div className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
+                <div className="rounded-2xl p-5" style={{ background: C.surface, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
                   <p className="text-[15px] font-black mb-3" style={{ color: C.dark }}>💊 약물별 주의사항</p>
                   <ul className="space-y-2.5">
                     {drugsWithCaution.map(({ d, cautionText }, i) => (
@@ -171,7 +171,7 @@ export default function MedGuide() {
                 </div>
               )}
               {hasDietWarning && (
-                <div className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
+                <div className="rounded-2xl p-5" style={{ background: C.surface, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
                   <p className="text-[15px] font-black mb-3" style={{ color: C.dark }}>🥗 생활 속 주의사항</p>
                   <ul className="space-y-2.5">
                     {dietAvoid.map((food, i) => (
@@ -201,7 +201,7 @@ export default function MedGuide() {
             {guide.lifestyle_guide.guides?.length ? (
               // [2026-07-21 회의 반영] 실제 파이프라인 모양 — 진단명별 생활습관 안내(약별이 아님)
               guide.lifestyle_guide.guides.map((entry, i) => (
-                <div key={i} className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
+                <div key={i} className="rounded-2xl p-5" style={{ background: C.surface, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
                   <p className="text-[15px] font-black mb-3" style={{ color: C.dark }}>🌿 {entry.diagnosis || "생활습관 안내"}</p>
                   <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>{entry.guide}</p>
                 </div>
@@ -209,7 +209,7 @@ export default function MedGuide() {
             ) : (
               // stub 모양 — 구조화된 diet/exercise
               <>
-                <div className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
+                <div className="rounded-2xl p-5" style={{ background: C.surface, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
                   <p className="text-[15px] font-black mb-3" style={{ color: C.dark }}>🥗 식이</p>
                   <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>
                     피해야 할 음식: {guide.lifestyle_guide.diet?.avoid.join(", ") || "없음"}
@@ -220,7 +220,7 @@ export default function MedGuide() {
                     </p>
                   )}
                 </div>
-                <div className="rounded-2xl p-5" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
+                <div className="rounded-2xl p-5" style={{ background: C.surface, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
                   <p className="text-[15px] font-black mb-3" style={{ color: C.dark }}>🏃 운동</p>
                   <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>
                     {guide.lifestyle_guide.exercise?.type} · {guide.lifestyle_guide.exercise?.duration} ·{" "}

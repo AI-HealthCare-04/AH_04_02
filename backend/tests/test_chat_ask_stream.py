@@ -161,7 +161,9 @@ class TestAskStreamFallback:
         session.commit()
         headers = {"Authorization": f"Bearer {create_access_token(pt.id, 'patient')}"}
 
-        listed = client.get("/chat/questions", params={"patient_id": pt.id}, headers=headers)
+        listed = client.get(
+            "/chat/questions", params={"patient_id": pt.id, "drug_name": "암로디핀정5밀리그램"}, headers=headers
+        )
         dyn_id = listed.json()[0]["id"]
 
         r = client.post("/chat/ask/stream", json={"patient_id": pt.id, "question_id": dyn_id}, headers=headers)
@@ -322,7 +324,9 @@ class TestAskStreamLlmGating:
         )
         session.commit()
         headers = {"Authorization": f"Bearer {create_access_token(pt.id, 'patient')}"}
-        dyn_id = client.get("/chat/questions", params={"patient_id": pt.id}, headers=headers).json()[0]["id"]
+        dyn_id = client.get(
+            "/chat/questions", params={"patient_id": pt.id, "drug_name": "암로디핀정5밀리그램"}, headers=headers
+        ).json()[0]["id"]
 
         r = client.post("/chat/ask/stream", json={"patient_id": pt.id, "question_id": dyn_id}, headers=headers)
         assert r.status_code == 200

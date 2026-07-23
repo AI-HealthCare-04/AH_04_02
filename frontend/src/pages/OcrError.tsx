@@ -48,7 +48,7 @@ export default function OcrError() {
           {reason ?? "사진이 흐리거나 잘린 경우 인식이 어려울 수 있어요."}
           <br />아래 방법으로 다시 시도해보세요.
         </p>
-        <div className="rounded-2xl p-5 mb-8 text-left" style={{ background: C.white, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
+        <div className="rounded-2xl p-5 mb-8 text-left" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
           <p className="text-[12px] font-black mb-3 uppercase tracking-widest" style={{ color: C.muted }}>실패 가능 원인</p>
           {REASONS.map((r) => (
             <div key={r} className="flex items-start gap-2.5 mb-2.5 last:mb-0">

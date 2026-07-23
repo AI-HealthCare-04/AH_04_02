@@ -189,7 +189,7 @@ export default function Connect() {
   };
 
   return (
-    <div className="min-h-screen bg-[#FAF6F1]">
+    <div className="min-h-screen bg-[#F2E8D8]">
       <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <h1 className="text-[26px] font-black text-[#1E1A17] mb-1">연결관리</h1>
@@ -213,7 +213,7 @@ export default function Connect() {
         )}
 
         {caregiverId != null && (
-          <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
+          <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
             <h2 className="text-[16px] font-black text-[#1E1A17] mb-1">받은 초대</h2>
             <p className="text-[13px] text-[#8A7E75] mb-4">
               환자가 전화번호로 보낸 초대는 여기에서 바로 수락하거나 거절할 수 있어요.
@@ -224,7 +224,7 @@ export default function Connect() {
                 {receivedInvitations.map((inv) => (
                   <div
                     key={inv.id}
-                    className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-[#FAF6F1] flex-wrap"
+                    className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-[#F2E8D8] flex-wrap"
                   >
                     <div>
                       <p className="text-[14px] font-bold text-[#1E1A17]">
@@ -256,7 +256,7 @@ export default function Connect() {
                 ))}
               </div>
             ) : (
-              <p className="px-4 py-4 rounded-xl bg-[#FAF6F1] text-[14px] text-[#8A7E75] mb-4">
+              <p className="px-4 py-4 rounded-xl bg-[#F2E8D8] text-[14px] text-[#8A7E75] mb-4">
                 아직 받은 초대가 없어요.
               </p>
             )}
@@ -287,7 +287,7 @@ export default function Connect() {
         {/* 보호자·지원인력 초대하기 (환자 로그인일 때만) */}
         {caregiverId == null && patientId != null && (
           <>
-            <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
+            <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
               <h2 className="text-[16px] font-black text-[#1E1A17] mb-1">받은 초대 수락하기</h2>
               <p className="text-[13px] text-[#8A7E75] mb-4">
                 보호자나 지원인력에게 받은 초대 링크 또는 코드를 입력하세요.
@@ -314,7 +314,7 @@ export default function Connect() {
               )}
             </div>
 
-            <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
+            <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
               <h2 className="text-[16px] font-black text-[#1E1A17] mb-1">보호자·지원인력 초대하기</h2>
               <p className="text-[13px] text-[#8A7E75] mb-4">
                 함께 복약을 확인할 사람에게 초대 링크를 보내세요.
@@ -328,7 +328,7 @@ export default function Connect() {
                     className={`py-2.5 rounded-xl text-[13px] font-bold border transition-all ${
                       relationType === type
                         ? "border-[#C1653D] bg-[#C1653D]/10 text-[#C1653D]"
-                        : "border-[rgba(30,26,23,0.12)] bg-[#FAF6F1] text-[#8A7E75]"
+                        : "border-[rgba(30,26,23,0.12)] bg-[#F2E8D8] text-[#8A7E75]"
                     }`}
                   >
                     {RELATION_LABEL[type]}
@@ -340,7 +340,7 @@ export default function Connect() {
                 value={invitedPhone}
                 onChange={(event) => setInvitedPhone(event.target.value)}
                 placeholder="초대받을 사람 전화번호 (선택)"
-                className="w-full px-4 py-3.5 rounded-xl border border-[rgba(30,26,23,0.12)] bg-[#FAF6F1] text-[15px] outline-none mb-3"
+                className="w-full px-4 py-3.5 rounded-xl border border-[rgba(30,26,23,0.12)] bg-[#F2E8D8] text-[15px] outline-none mb-3"
               />
 
               <button
@@ -352,7 +352,7 @@ export default function Connect() {
               </button>
 
               {inviteUrl && (
-                <div className="flex items-center gap-2 px-4 py-3.5 mt-4 rounded-xl bg-[#FAF6F1] border border-[rgba(30,26,23,0.10)]">
+                <div className="flex items-center gap-2 px-4 py-3.5 mt-4 rounded-xl bg-[#F2E8D8] border border-[rgba(30,26,23,0.10)]">
                   <span className="flex-1 text-[13px] font-mono truncate text-[#1E1A17]">{inviteUrl}</span>
                   <button
                     onClick={handleCopyInviteUrl}
@@ -370,7 +370,7 @@ export default function Connect() {
 
         {/* 대기중인 초대 */}
         {caregiverId == null && invitations.length > 0 && (
-          <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden mb-6">
+          <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden mb-6">
             <div className="px-6 py-4 border-b border-[rgba(30,26,23,0.06)]">
               <h2 className="text-[15px] font-black text-[#1E1A17]">대기중인 초대 ({invitations.length}건)</h2>
             </div>
@@ -399,7 +399,7 @@ export default function Connect() {
 
         {/* 연결된 사람 */}
         {caregiverId == null && (
-          <div className="bg-white border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden">
+          <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden">
             <div className="px-6 py-4 border-b border-[rgba(30,26,23,0.06)]">
               <h2 className="text-[15px] font-black text-[#1E1A17]">연결된 사람 ({caregivers.length}명)</h2>
             </div>

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { AlertCircle, Check } from "lucide-react";
+import { AlertCircle, Check, Plus, X } from "lucide-react";
 import NavBar from "../components/NavBar";
 import {
   addMedicationItem,
@@ -24,6 +24,20 @@ const DOSE_TIMING_GUESS: Record<string, string[]> = {
   "1일 2회": ["아침 식후", "저녁 식후"],
   "1일 3회": ["아침 식후", "점심 식후", "저녁 식후"],
 };
+
+// [2026-07-21 추가] "몇 시간마다 반복" — 시작 시각부터 간격만큼 더해가며 하루(24시간)를
+// 채울 만큼만 생성한다(자정 넘어가면 다음날로 넘기지 않고 그 시각에서 멈춤 — 다음날 몫은
+// 이 처방전의 하루 일정과 무관하므로 배제).
+function expandInterval(startTime: string, intervalHours: number): string[] {
+  const [h, m] = startTime.split(":").map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m) || !intervalHours || intervalHours <= 0) return [];
+  const startMinutes = h * 60 + m;
+  const times: string[] = [];
+  for (let minutes = startMinutes; minutes < 24 * 60; minutes += intervalHours * 60) {
+    times.push(`${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`);
+  }
+  return times;
+}
 
 const FIELDS: { key: keyof OcrMedication; label: string }[] = [
   { key: "drug_name", label: "약품명" },
@@ -83,8 +97,11 @@ export default function PrescriptionReview() {
   const { recordId } = useParams<{ recordId: string }>();
   const [record, setRecord] = useState<RecordResult | null>(null);
   const [edited, setEdited] = useState<Record<number, OcrMedication>>({});
-  // [2026-07-21 추가] 항목별 복용시간(공복/아침 식후 등) 다중 선택 — 순서가 곧 하루 중 순서
+  // [2026-07-21 추가] 항목별 복용시간(공복/아침 식후 등) 다중 선택 — 순서가 곧 하루 중 순서.
+  // 같은 항목을 여러 번 고를 수 있어서(중복 허용) Set이 아니라 배열 그대로 유지.
   const [doseTimings, setDoseTimings] = useState<Record<number, string[]>>({});
+  const [customTimeDraft, setCustomTimeDraft] = useState<Record<number, string>>({});
+  const [intervalDraft, setIntervalDraft] = useState<Record<number, { start: string; hours: string }>>({});
   const [confirmed, setConfirmed] = useState<Set<number>>(new Set());
   // 약품명이 실제 존재하는 약인지(e약은요/HIRA 매칭) — key: 항목 id, undefined면 아직 조회 전
   const [drugNameOk, setDrugNameOk] = useState<Record<number, boolean>>({});
@@ -149,15 +166,44 @@ export default function PrescriptionReview() {
     setEdited((prev) => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
   };
 
-  // 이미 골랐으면 빼고, 아니면 맨 뒤에 추가 — 선택 순서가 그대로 하루 중 시간 순서가 됨
-  const toggleDoseTiming = (id: number, timing: string) => {
-    setDoseTimings((prev) => {
-      const current = prev[id] ?? [];
-      const next = current.includes(timing)
-        ? current.filter((t) => t !== timing)
-        : [...current, timing];
-      return { ...prev, [id]: next };
-    });
+  // 필드(약품명/투약량/투약횟수)는 문제없는데 복용시간만 만지작거리다 끝난 경우에도
+  // "확인 완료"로 넘어갈 수 있게 — handleBlur 안에서만 확인하던 걸 공용 함수로 뺐다.
+  // (복용시간 자체는 필수 항목이 아니라 computeIssues에 영향 없음 — 그래서 여기선
+  // edited[id] 값만 다시 검사하면 된다, doseTimings 최신값은 필요 없음)
+  const maybeConfirm = (id: number) => {
+    const m = edited[id];
+    if (m && computeIssues(m, drugNameOk[id], nameOverride[id]).length === 0) {
+      setConfirmed((prev) => new Set([...prev, id]));
+    }
+  };
+
+  // [2026-07-21 변경] 같은 시간대를 여러 번 고를 수 있어야 해서(중복 허용) 토글이 아니라
+  // 클릭할 때마다 추가 — 제거는 아래 목록에서 항목별 × 버튼으로.
+  const addDoseTiming = (id: number, timing: string) => {
+    setDoseTimings((prev) => ({ ...prev, [id]: [...(prev[id] ?? []), timing] }));
+    maybeConfirm(id);
+  };
+
+  const removeDoseTimingAt = (id: number, index: number) => {
+    setDoseTimings((prev) => ({ ...prev, [id]: (prev[id] ?? []).filter((_, i) => i !== index) }));
+  };
+
+  const addCustomTime = (id: number) => {
+    const time = customTimeDraft[id];
+    if (!time) return;
+    setDoseTimings((prev) => ({ ...prev, [id]: [...(prev[id] ?? []), time] }));
+    setCustomTimeDraft((prev) => ({ ...prev, [id]: "" }));
+    maybeConfirm(id);
+  };
+
+  const addInterval = (id: number) => {
+    const draft = intervalDraft[id];
+    const hours = Number(draft?.hours);
+    if (!draft?.start || !hours || hours <= 0) return;
+    const times = expandInterval(draft.start, hours);
+    if (times.length === 0) return;
+    setDoseTimings((prev) => ({ ...prev, [id]: [...(prev[id] ?? []), ...times] }));
+    maybeConfirm(id);
   };
 
   const fieldIssues = (item: OcrMedication): FieldIssue[] =>
@@ -199,8 +245,7 @@ export default function PrescriptionReview() {
     const container = itemContainerRefs.current[id];
     if (relatedTarget instanceof Node && container?.contains(relatedTarget)) return;
 
-    const current = edited[id];
-    if (computeIssues(current, nameOk, overridden).length === 0) {
+    if (computeIssues(edited[id], nameOk, overridden).length === 0) {
       setConfirmed((prev) => new Set([...prev, id]));
     }
   };
@@ -295,7 +340,16 @@ export default function PrescriptionReview() {
       const updated = await confirmMedications(record.record_id, corrections);
       done = true;
       setProgress(100);
-      setTimeout(() => navigate(`/records/${updated.record_id}`), 500);
+      // [2026-07-23 추가] 이미 활성 일정이 있던 약은 건너뛰고 등록됐다 — 다음 화면에
+      // "이미 등록된 처방이에요" 배너로 보여주기 위해 넘겨준다(이 정보는 DB에 저장되지
+      // 않는 confirm 응답 한정값이라, 재조회로는 알 수 없어 state로만 전달 가능).
+      setTimeout(
+        () =>
+          navigate(`/records/${updated.record_id}`, {
+            state: { duplicateDrugNames: updated.duplicate_drug_names },
+          }),
+        500
+      );
     } catch {
       done = true;
       setGenerating(false);
@@ -407,7 +461,7 @@ export default function PrescriptionReview() {
         ) : !record ? (
           <p className="text-center py-16 text-[14px]" style={{ color: "#D94F4F" }}>{error || "기록을 찾을 수 없어요."}</p>
         ) : record.status !== "review_required" ? (
-          <div className="rounded-2xl p-10 text-center" style={{ background: C.white }}>
+          <div className="rounded-2xl p-10 text-center" style={{ background: C.surface }}>
             <p className="text-[14px]" style={{ color: C.muted }}>이미 확인이 끝난 처방전이에요.</p>
             <button
               onClick={() => navigate(`/records/${record.record_id}`)}
@@ -601,7 +655,9 @@ export default function PrescriptionReview() {
                       {/* [2026-07-21 추가] 처방확인 화면에서 복용시간을 바로 설정 — 나중에
                           Schedule.tsx에서 또 손대지 않아도 되고, 대시보드/알림에서 시간대별로
                           묶어 보여줄 수 있게 됨. 필수 항목이 아니라(issues에 안 들어감) 몰라도
-                          그냥 넘어갈 수 있다 — 모르는 걸 지어내지 않는다는 기존 원칙 유지. */}
+                          그냥 넘어갈 수 있다 — 모르는 걸 지어내지 않는다는 기존 원칙 유지.
+                          [2026-07-21 수정] 같은 시간대 중복 선택 허용 + 직접 시간 입력/반복
+                          추가 — 토글(Set) 대신 배열에 계속 추가하고 목록에서 개별 삭제. */}
                       <div className="px-6 pb-6">
                         <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5" style={{ color: C.muted }}>
                           복용시간 (선택)
@@ -611,26 +667,98 @@ export default function PrescriptionReview() {
                             {(doseTimings[item.id] ?? []).length > 0 ? doseTimings[item.id].join(" · ") : "설정 안 함"}
                           </p>
                         ) : (
-                          <div className="flex flex-wrap gap-2">
-                            {DOSE_TIMINGS.map((timing) => {
-                              const active = (doseTimings[item.id] ?? []).includes(timing);
-                              return (
+                          <>
+                            <div className="flex flex-wrap gap-2 mb-3">
+                              {DOSE_TIMINGS.map((timing) => (
                                 <button
                                   key={timing}
                                   type="button"
-                                  onClick={() => toggleDoseTiming(item.id, timing)}
-                                  className="px-3.5 py-2 rounded-full text-[13px] font-bold transition-all"
-                                  style={{
-                                    background: active ? C.terracotta : C.ivory,
-                                    color: active ? C.white : C.muted,
-                                    border: `1.5px solid ${active ? C.terracotta : "rgba(30,26,23,0.12)"}`,
-                                  }}
+                                  onClick={() => addDoseTiming(item.id, timing)}
+                                  className="flex items-center gap-1 px-3.5 py-2 rounded-full text-[13px] font-bold transition-all hover:opacity-70"
+                                  style={{ background: C.ivory, color: C.dark, border: "1.5px solid rgba(30,26,23,0.12)" }}
                                 >
-                                  {timing}
+                                  <Plus className="w-3 h-3" /> {timing}
                                 </button>
-                              );
-                            })}
-                          </div>
+                              ))}
+                            </div>
+
+                            {(doseTimings[item.id] ?? []).length > 0 && (
+                              <div className="flex flex-wrap gap-2 mb-3">
+                                {(doseTimings[item.id] ?? []).map((timing, i) => (
+                                  <span
+                                    key={`${timing}-${i}`}
+                                    className="flex items-center gap-1.5 pl-3 pr-1.5 py-1.5 rounded-full text-[13px] font-bold"
+                                    style={{ background: C.terracotta, color: C.white }}
+                                  >
+                                    {timing}
+                                    <button
+                                      type="button"
+                                      onClick={() => removeDoseTimingAt(item.id, i)}
+                                      className="w-4 h-4 rounded-full flex items-center justify-center hover:opacity-70"
+                                      style={{ background: "rgba(255,255,255,0.25)" }}
+                                      aria-label={`${timing} 삭제`}
+                                    >
+                                      <X className="w-2.5 h-2.5" />
+                                    </button>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+
+                            <div className="flex flex-wrap items-center gap-2 mb-2">
+                              <span className="text-[12px] font-bold" style={{ color: C.muted }}>직접 시간 설정</span>
+                              <input
+                                type="time"
+                                value={customTimeDraft[item.id] ?? ""}
+                                onChange={(e) => setCustomTimeDraft((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                                className="px-3 py-1.5 rounded-lg border text-[13px] outline-none"
+                                style={{ borderColor: "rgba(30,26,23,0.15)" }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => addCustomTime(item.id)}
+                                className="px-3 py-1.5 rounded-full text-[12px] font-bold"
+                                style={{ background: "rgba(30,26,23,0.06)", color: C.dark }}
+                              >
+                                추가
+                              </button>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-[12px] font-bold" style={{ color: C.muted }}>몇 시간마다 반복</span>
+                              <input
+                                type="time"
+                                value={intervalDraft[item.id]?.start ?? "08:00"}
+                                onChange={(e) =>
+                                  setIntervalDraft((prev) => ({ ...prev, [item.id]: { hours: prev[item.id]?.hours ?? "", start: e.target.value } }))
+                                }
+                                className="px-3 py-1.5 rounded-lg border text-[13px] outline-none"
+                                style={{ borderColor: "rgba(30,26,23,0.15)" }}
+                              />
+                              <span className="text-[12px]" style={{ color: C.muted }}>부터</span>
+                              <input
+                                type="number"
+                                min={1}
+                                max={24}
+                                placeholder="시간"
+                                value={intervalDraft[item.id]?.hours ?? ""}
+                                onChange={(e) =>
+                                  setIntervalDraft((prev) => ({ ...prev, [item.id]: { start: prev[item.id]?.start ?? "08:00", hours: e.target.value } }))
+                                }
+                                className="w-16 px-3 py-1.5 rounded-lg border text-[13px] outline-none"
+                                style={{ borderColor: "rgba(30,26,23,0.15)" }}
+                              />
+                              <span className="text-[12px]" style={{ color: C.muted }}>시간마다</span>
+                              <button
+                                type="button"
+                                onClick={() => addInterval(item.id)}
+                                className="px-3 py-1.5 rounded-full text-[12px] font-bold"
+                                style={{ background: "rgba(30,26,23,0.06)", color: C.dark }}
+                              >
+                                추가
+                              </button>
+                            </div>
+                          </>
                         )}
                       </div>
                       </div>
@@ -714,7 +842,7 @@ export default function PrescriptionReview() {
           style={{ background: "rgba(30,26,23,0.55)" }}
           onClick={() => setShowFinalModal(false)}
         >
-          <div className="rounded-3xl p-8 w-full max-w-md" style={{ background: C.white }} onClick={(e) => e.stopPropagation()}>
+          <div className="rounded-3xl p-8 w-full max-w-md" style={{ background: C.surface }} onClick={(e) => e.stopPropagation()}>
             <div
               className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-5 text-[28px]"
               style={{ background: `${C.success}15` }}

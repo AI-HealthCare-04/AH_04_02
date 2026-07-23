@@ -8,8 +8,11 @@
 export const C = {
   terracotta: "#C1653D",
   terracottaLight: "#E08A5B",
-  ivory: "#FAF6F1",
+  ivory: "#F2E8D8",
   white: "#FFFFFF",
+  // [2026-07-22 추가] 카드/패널 배경 전용 — 순백 대신 페이지 배경(ivory)과 톤온톤이
+  // 되도록 살짝 톤을 낮췄다. 버튼 텍스트·아이콘 등 진짜 "흰색"이 필요한 곳은 계속 white를 쓴다.
+  surface: "#F9F4EB",
   dark: "#1E1A17",
   muted: "#6E6259", // [2026-07-20] #8A7E75는 흰/아이보리 배경 대비 3.95:1로 WCAG AA(4.5:1) 미달 — 같은 웜브라운 톤에서 명도만 낮춤(5.9:1)
   bubbleBg: "#F4F0EA",
