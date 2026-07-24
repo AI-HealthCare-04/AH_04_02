@@ -225,6 +225,12 @@ export default function SignUp() {
 
   const passwordValid = password.length >= 8 && password === passwordConfirm;
   const verifyPhone = memberType === "organization" ? managerPhone : phone;
+  // [2026-07-24 추가] 중복 확인은 onBlur에서 즉시 결과가 나오므로, "다음" 버튼을 처음
+  // 눌러보기 전(step3Attempted=false)에도 이미 알고 있는 중복 상태라면 바로 흐리게
+  // 보여줘야 한다 — 안 그러면 중복 문구가 떠 있는데도 버튼만 멀쩡해 보여서 눌러도 되는
+  // 것처럼 오해하게 된다.
+  const duplicateBlocked =
+    memberType === "organization" ? managerEmailTaken || managerPhoneTaken : emailTaken || phoneTaken;
 
   const step3Valid =
     memberType === "organization"
@@ -641,7 +647,10 @@ export default function SignUp() {
                     else setStep3Attempted(true);
                   }}
                   className="w-full py-4 rounded-full text-white font-black text-[16px] mt-6 transition-opacity"
-                  style={{ background: C.terracotta, opacity: step3Attempted && (!step3Valid || !notifPrefs.push) ? 0.6 : 1 }}
+                  style={{
+                    background: C.terracotta,
+                    opacity: duplicateBlocked || (step3Attempted && (!step3Valid || !notifPrefs.push)) ? 0.6 : 1,
+                  }}
                 >
                   다음 (본인인증)
                 </button>

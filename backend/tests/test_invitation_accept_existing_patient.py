@@ -78,6 +78,14 @@ def test_existing_patient_accepts_without_creating_a_new_account(client: TestCli
     ).json()
     assert any(c["id"] == caregiver_id for c in linked)
 
+    # [2026-07-24 추가] 초대를 보낸 보호자 쪽에도 "연결됐다" 알림이 남아야 한다.
+    notices = client.get(
+        "/trust/relations/notices", headers={"Authorization": f"Bearer {caregiver_token}"}
+    ).json()
+    assert len(notices) == 1
+    assert notices[0]["event"] == "linked"
+    assert notices[0]["patient_id"] == patient_id
+
 
 def test_cannot_accept_with_someone_elses_patient_id(client: TestClient, session: Session):
     caregiver_id, caregiver_token = _signup_and_login_caregiver(client, "org2@test.com")

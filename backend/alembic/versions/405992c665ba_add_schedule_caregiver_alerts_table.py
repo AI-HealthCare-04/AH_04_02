@@ -14,7 +14,7 @@ import sqlmodel  # [2026-07-14] SQLModel 커스텀 컬럼 타입(AutoString 등)
 
 # revision identifiers, used by Alembic.
 revision: str = '405992c665ba'
-down_revision: Union[str, Sequence[str], None] = 'bee05b2591cb'
+down_revision: Union[str, Sequence[str], None] = 'a313929ff868'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

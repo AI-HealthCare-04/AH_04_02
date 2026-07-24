@@ -30,6 +30,7 @@ from core.dependencies import (
     get_current_patient_optional,
     require_actor_patient_access,
 )
+from core.relation_notices import create_relation_notice
 from core.security import hash_phone, hash_token, normalize_phone
 from fastapi import APIRouter, Depends, HTTPException
 from models import (
@@ -38,7 +39,7 @@ from models import (
     Invitation,
     NotificationSetting,
     Patient,
-    RevocationNotice,
+    RelationNotice,
 )
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -151,7 +152,9 @@ def create_invitation(
     session.add(invitation)
     session.commit()
     session.refresh(invitation)
-    return {"token": token, "invite_url": f"/invite/{token}"}
+    # [2026-07-24 추가] id를 반환해야 프론트가 "재발급"(기존 초대 취소 + 새로 생성) 시
+    # 기존 초대를 특정해서 delete_pending_invitation을 호출할 수 있다.
+    return {"id": invitation.id, "token": token, "invite_url": f"/invite/{token}"}
 
 
 @router.get("/invitations/{token}")
@@ -220,6 +223,7 @@ def accept_invitation(
                 raise HTTPException(403, "본인 계정으로 로그인한 상태에서만 기존 계정으로 수락할 수 있어요.")
             if invitation.inviter_caregiver_id:
                 _reactivate_or_create_link(session, invitation.inviter_caregiver_id, patient_actor.id)
+                _notify_caregiver_linked(session, invitation.inviter_caregiver_id, patient_actor)
             invitation.patient_id = patient_actor.id
             invitation.status = "accepted"
             invitation.accepted_at = datetime.now()
@@ -246,6 +250,7 @@ def accept_invitation(
                     caregiver_id=invitation.inviter_caregiver_id, patient_id=new_patient.id
                 )
             )
+            _notify_caregiver_linked(session, invitation.inviter_caregiver_id, new_patient)
         invitation.status = "accepted"
         invitation.accepted_at = datetime.now()
         session.add(invitation)
@@ -312,11 +317,40 @@ def _link_caregiver_to_invitation(session: Session, invitation: Invitation, care
         expected = RELATION_TYPE_LABELS.get(invitation.relation_type, invitation.relation_type)
         raise HTTPException(403, f"이 초대는 {expected}로 가입한 계정만 수락할 수 있어요.")
     _reactivate_or_create_link(session, caregiver.id, invitation.patient_id)
+    patient = session.get(Patient, invitation.patient_id)
+    if patient:
+        create_relation_notice(
+            session,
+            recipient_role="patient",
+            recipient_id=patient.id,
+            patient_id=patient.id,
+            patient_name=patient.name,
+            counterpart_name=caregiver.name,
+            event="linked",
+        )
 
     invitation.status = "accepted"
     invitation.accepted_at = datetime.now()
     session.add(invitation)
     session.commit()
+
+
+def _notify_caregiver_linked(session: Session, caregiver_id: int, patient: Patient) -> None:
+    """[2026-07-24 추가] 보호자→환자 초대(relation_type="patient")를 환자가 수락하면,
+    초대를 보낸 보호자 쪽에 알려준다 — _link_caregiver_to_invitation의 반대 방향(환자가
+    수락자)이라 별도 헬퍼로 뺐다."""
+    caregiver = session.get(Caregiver, caregiver_id)
+    if not caregiver:
+        return
+    create_relation_notice(
+        session,
+        recipient_role="caregiver",
+        recipient_id=caregiver.id,
+        patient_id=patient.id,
+        patient_name=patient.name,
+        counterpart_name=patient.name,
+        event="linked",
+    )
 
 
 @router.post("/invitations/{token}/reject")
@@ -681,13 +715,13 @@ def approve_revocation(
     # [2026-07-23 추가] 승인/거부 시 link의 requested_by 관련 필드가 지워지거나(거부) 요청자가
     # 접근권을 잃을 수 있어(승인) — 결과 알림을 남기려면 지워지기 전에 스냅샷을 떠야 한다.
     patient = session.get(Patient, link.patient_id)
-    notice = RevocationNotice(
+    notice = RelationNotice(
         recipient_role=link.requested_by_role or "caregiver",
         recipient_id=link.revocation_requested_by,
         patient_id=link.patient_id,
         patient_name=patient.name if patient else "알 수 없음",
         counterpart_name=subject.name,
-        approved=payload.approve,
+        event="revocation_approved" if payload.approve else "revocation_rejected",
         reason=link.revocation_reason,
     )
 
@@ -727,43 +761,44 @@ def approve_revocation(
     )
 
 
-# [2026-07-23 추가] 해제 요청자가 자기 요청의 승인/거부 결과를 확인하는 알림함.
-# 대상 환자에 대한 접근권을 승인 시점에 잃을 수 있어(revoked) require_actor_patient_access로
-# 게이팅하지 않고, recipient_id/recipient_role == 현재 로그인한 본인인지로만 확인한다.
-class RevocationNoticePublic(BaseModel):
+# [2026-07-23 추가, 2026-07-24 확장] 환자-보호자 관계 알림함 — 연결/해제/해제 승인·거부
+# 결과를 상대에게 보여준다. 해제 승인 시점에 그 환자에 대한 접근권을 잃을 수 있어(revoked)
+# require_actor_patient_access로 게이팅하지 않고, recipient_id/recipient_role == 현재
+# 로그인한 본인인지로만 확인한다.
+class RelationNoticePublic(BaseModel):
     id: int
     patient_id: int
     patient_name: str
     counterpart_name: str
-    approved: bool
+    event: Literal["linked", "unlinked", "revocation_approved", "revocation_rejected"]
     reason: str | None = None
     created_at: datetime
     read_at: datetime | None = None
 
 
-@router.get("/trust/relations/notices", response_model=list[RevocationNoticePublic])
-def list_revocation_notices(
+@router.get("/trust/relations/notices", response_model=list[RelationNoticePublic])
+def list_relation_notices(
     actor: Actor = Depends(get_current_actor),
     session: Session = Depends(get_session),
 ):
     role, subject = actor
     notices = session.exec(
-        select(RevocationNotice)
-        .where(RevocationNotice.recipient_role == role)
-        .where(RevocationNotice.recipient_id == subject.id)
-        .order_by(RevocationNotice.created_at.desc())
+        select(RelationNotice)
+        .where(RelationNotice.recipient_role == role)
+        .where(RelationNotice.recipient_id == subject.id)
+        .order_by(RelationNotice.created_at.desc())
     ).all()
     return notices
 
 
-@router.post("/trust/relations/notices/{notice_id}/read", response_model=RevocationNoticePublic)
-def mark_revocation_notice_read(
+@router.post("/trust/relations/notices/{notice_id}/read", response_model=RelationNoticePublic)
+def mark_relation_notice_read(
     notice_id: int,
     actor: Actor = Depends(get_current_actor),
     session: Session = Depends(get_session),
 ):
     role, subject = actor
-    notice = session.get(RevocationNotice, notice_id)
+    notice = session.get(RelationNotice, notice_id)
     if not notice or notice.recipient_role != role or notice.recipient_id != subject.id:
         raise HTTPException(404, "존재하지 않는 알림이에요")
     if notice.read_at is None:

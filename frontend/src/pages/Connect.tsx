@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { User, AlertCircle, Trash2 } from "lucide-react";
+import { User, AlertCircle, RotateCw, Trash2 } from "lucide-react";
 import NavBar from "../components/NavBar";
 import InvitePatientPanel from "../components/InvitePatientPanel";
 import {
@@ -11,14 +11,14 @@ import {
   listInvitations,
   listPendingRevocations,
   listReceivedInvitations,
-  listRevocationNotices,
+  listRelationNotices,
   listSentPatientInvitations,
-  markRevocationNoticeRead,
+  markRelationNoticeRead,
   rejectInvitationAsCaregiver,
   type InvitationSummary,
   type PendingRevocation,
   type ReceivedInvitation,
-  type RevocationNotice,
+  type RelationNotice,
   type SentPatientInvitation,
 } from "../api/care";
 import {
@@ -50,6 +50,28 @@ function formatCaregiverRelation(c: Caregiver): string {
   return RELATION_LABEL[c.relation_type as RelationType] ?? c.relation_type;
 }
 
+// [2026-07-24 추가] event별로 다른 문구를 만든다 — patient_name과 counterpart_name이 같으면
+// (환자 본인이 처리한 경우) 굳이 이름을 두 번 반복하지 않는다.
+function describeRelationNotice(notice: RelationNotice): string {
+  const same = notice.counterpart_name === notice.patient_name;
+  switch (notice.event) {
+    case "linked":
+      return `${notice.counterpart_name}님과 연결됐어요`;
+    case "unlinked":
+      return `${notice.counterpart_name}님과의 연결이 해제됐어요`;
+    case "revocation_approved":
+      return same
+        ? `${notice.patient_name}님과의 연결 해제 요청이 승인됐어요`
+        : `${notice.patient_name}님과의 연결 해제 요청이 승인됐어요 (${notice.counterpart_name}님이 처리)`;
+    case "revocation_rejected":
+      return same
+        ? `${notice.patient_name}님과의 연결 해제 요청이 거부됐어요`
+        : `${notice.patient_name}님과의 연결 해제 요청이 거부됐어요 (${notice.counterpart_name}님이 처리)`;
+    default:
+      return `${notice.patient_name}님과의 연결에 변경이 있었어요`;
+  }
+}
+
 function extractInviteToken(input: string): string | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
@@ -72,6 +94,7 @@ export default function Connect() {
   const [error, setError] = useState("");
   const [relationType, setRelationType] = useState<RelationType>("guardian");
   const [invitedPhone, setInvitedPhone] = useState("");
+  const [inviteId, setInviteId] = useState<number | null>(null);
   const [inviteUrl, setInviteUrl] = useState("");
   const [creatingInvite, setCreatingInvite] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -84,9 +107,10 @@ export default function Connect() {
   // 알아서 필터링해 주므로 프론트는 역할 분기 없이 같은 목록을 그대로 쓴다).
   const [pendingRevocations, setPendingRevocations] = useState<PendingRevocation[]>([]);
   const [actingRevocationId, setActingRevocationId] = useState<number | null>(null);
-  // [2026-07-23 추가] "해제 요청 처리 결과" — 내가 요청한 해제를 상대가 승인/거부하면
-  // 여기에 뜬다. 승인 시 그 환자에 대한 접근권을 잃을 수 있어 별도 알림함으로 확인한다.
-  const [revocationNotices, setRevocationNotices] = useState<RevocationNotice[]>([]);
+  // [2026-07-23 추가, 2026-07-24 확장] "관계 알림" — 연결(초대 수락)/해제(즉시 해제, 해제
+  // 요청 승인·거부 결과) 등 상대에게 생긴 일을 여기서 확인한다. 승인 시 그 환자에 대한
+  // 접근권을 잃을 수 있어 별도 알림함으로 확인한다.
+  const [relationNotices, setRelationNotices] = useState<RelationNotice[]>([]);
   const [dismissingNoticeId, setDismissingNoticeId] = useState<number | null>(null);
   // [2026-07-23 추가] 보호자/기관 쪽에도 "내가 보낸 초대"와 "연결된 환자" 목록을 보여준다 —
   // 지금까진 이 화면(caregiverId != null 쪽)에 둘 다 없어서, 초대를 보내도 확인할 방법이 없고
@@ -143,9 +167,9 @@ export default function Connect() {
       .catch(() => {});
   };
 
-  const loadRevocationNotices = () => {
-    listRevocationNotices()
-      .then((notices) => setRevocationNotices(notices.filter((n) => n.read_at == null)))
+  const loadRelationNotices = () => {
+    listRelationNotices()
+      .then((notices) => setRelationNotices(notices.filter((n) => n.read_at == null)))
       .catch(() => {});
   };
 
@@ -153,8 +177,8 @@ export default function Connect() {
     if (dismissingNoticeId !== null) return;
     setDismissingNoticeId(noticeId);
     try {
-      await markRevocationNoticeRead(noticeId);
-      setRevocationNotices((prev) => prev.filter((n) => n.id !== noticeId));
+      await markRelationNoticeRead(noticeId);
+      setRelationNotices((prev) => prev.filter((n) => n.id !== noticeId));
     } catch {
       setError("알림을 확인 처리하지 못했어요.");
     } finally {
@@ -164,7 +188,7 @@ export default function Connect() {
 
   useEffect(() => {
     loadPendingRevocations();
-    loadRevocationNotices();
+    loadRelationNotices();
     if (caregiverId != null) {
       setLoading(false);
       loadReceivedInvitations();
@@ -215,10 +239,40 @@ export default function Connect() {
         relation_type: relationType,
         invited_phone: invitedPhone.trim() || undefined,
       });
+      setInviteId(created.id);
       setInviteUrl(window.location.origin + created.invite_url);
       await loadConnections(patientId);
     } catch {
       setError("초대를 만들지 못했어요.");
+    } finally {
+      setCreatingInvite(false);
+    }
+  };
+
+  // [2026-07-24 추가] 기존 초대 링크를 무효화하고 새 코드를 발급한다.
+  const handleRegenerateInvite = async () => {
+    if (patientId == null || creatingInvite) return;
+    setCreatingInvite(true);
+    setError("");
+    try {
+      if (inviteId != null) {
+        await deleteInvitation(inviteId);
+        // [2026-07-24 추가] delete 성공 후 create가 실패하면 inviteId가 이미 cancelled된
+        // 옛 초대를 계속 가리켜서 다음 재발급 시도가 409로 영원히 막힌다 — 즉시 비운다.
+        setInviteId(null);
+        setInviteUrl("");
+      }
+      const created = await createInvitation({
+        patient_id: patientId,
+        relation_type: relationType,
+        invited_phone: invitedPhone.trim() || undefined,
+      });
+      setInviteId(created.id);
+      setInviteUrl(window.location.origin + created.invite_url);
+      setCopied(false);
+      await loadConnections(patientId);
+    } catch {
+      setError("초대를 다시 만들지 못했어요.");
     } finally {
       setCreatingInvite(false);
     }
@@ -341,17 +395,17 @@ export default function Connect() {
           </div>
         )}
 
-        {/* [2026-07-23 추가] 해제 요청 처리 결과 — 내가 요청한 해제를 상대가 승인/거부하면 여기 뜬다. */}
-        {revocationNotices.length > 0 && (
+        {/* [2026-07-23 추가, 2026-07-24 확장] 관계 알림 — 연결/해제/해제 요청 처리 결과를
+            역할(환자/보호자/기관) 무관하게 상대에게 보여준다. */}
+        {relationNotices.length > 0 && (
           <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
-            <h2 className="text-[16px] font-black text-[#1E1A17] mb-1">해제 요청 처리 결과</h2>
+            <h2 className="text-[16px] font-black text-[#1E1A17] mb-1">알림</h2>
             <div className="space-y-3 mt-3">
-              {revocationNotices.map((notice) => (
+              {relationNotices.map((notice) => (
                 <div key={notice.id} className="px-4 py-3.5 rounded-xl bg-[#F2E8D8] flex items-start justify-between gap-3">
                   <div>
                     <p className="text-[14px] font-bold text-[#1E1A17]">
-                      {notice.patient_name}님과의 연결 해제 요청이 {notice.approved ? "승인" : "거부"}됐어요
-                      {notice.counterpart_name !== notice.patient_name && ` (${notice.counterpart_name}님이 처리)`}
+                      {describeRelationNotice(notice)}
                     </p>
                     <p className="text-[12px] text-[#8A7E75] mt-1">
                       {new Date(notice.created_at).toLocaleDateString("ko-KR")}
@@ -625,6 +679,14 @@ export default function Connect() {
               {inviteUrl && (
                 <div className="flex items-center gap-2 px-4 py-3.5 mt-4 rounded-xl bg-[#F2E8D8] border border-[rgba(30,26,23,0.10)]">
                   <span className="flex-1 text-[13px] font-mono truncate text-[#1E1A17]">{inviteUrl}</span>
+                  <button
+                    onClick={handleRegenerateInvite}
+                    disabled={creatingInvite}
+                    aria-label="초대 링크 재발급"
+                    className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center bg-[#C1653D]/15 text-[#C1653D] disabled:opacity-50"
+                  >
+                    <RotateCw className="w-4 h-4" />
+                  </button>
                   <button
                     onClick={handleCopyInviteUrl}
                     className={`shrink-0 px-4 py-2 rounded-full text-[13px] font-bold ${
