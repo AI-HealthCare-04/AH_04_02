@@ -2,6 +2,16 @@ import { monitoringClient } from "./monitoringClient";
 
 // ── 타입 정의 (records_router.py 응답 형태 그대로) ──
 
+// [2026-07-25 추가] 보호자·기관이 "수정이 필요해요"로 지목한 칸 — PrescriptionReview.tsx의
+// correction 모드가 이 목록으로 잠금(field_flags에 없는 칸)/빨간테두리(corrected=false)/
+// 초록 완료(corrected=true)를 그린다.
+export interface FieldFlag {
+  id: number;
+  field_name: string;
+  reason: string;
+  corrected: boolean;
+}
+
 export interface OcrMedication {
   id: number;
   drug_name: string;
@@ -13,6 +23,7 @@ export interface OcrMedication {
   drug_class: string;
   confidence: number;
   review_required: boolean;
+  field_flags: FieldFlag[];
 }
 
 /**
@@ -115,12 +126,18 @@ export function formatUniqueSourceRefs(refs: SourceRef[]): { text: string; url?:
   return result;
 }
 
+// [2026-07-25 추가] 보호자·기관 검토 상태 — "none": 연결된 보호자·기관 없음(검토 대상 아님)
+// "pending": 검토 대기 / "needs_correction": 보호자·기관이 수정 요청, 환자 응답 대기
+// "reviewed": 보호자·기관 최종 확인 완료
+export type CaregiverReviewStatus = "none" | "pending" | "needs_correction" | "reviewed";
+
 export interface RecordResult {
   record_id: number;
   status: "processing" | "review_required" | "completed" | "failed";
   failure_reason: string | null;
   created_at: string;
   uploaded_by_name: string | null;
+  caregiver_review_status: CaregiverReviewStatus;
   medications: OcrMedication[];
   guide: {
     medication_guide: { drugs: GuideDrug[] };
@@ -250,6 +267,7 @@ export interface RecordSummary {
   uploaded_by_name: string | null;
   // [2026-07-21 추가] 즐겨찾기처럼 목록 위쪽에 고정 — 목록은 이 값 기준으로 이미 정렬되어 온다
   pinned: boolean;
+  caregiver_review_status: CaregiverReviewStatus;
 }
 
 /**
@@ -348,6 +366,56 @@ export async function confirmMedications(recordId: number, medications: Medicati
     { timeout: 120000 }
   );
   return normalizeRecordResult(data);
+}
+
+// [2026-07-25 추가] 보호자·기관 검토 흐름 — MedGuide.tsx(검토했어요/수정이 필요해요),
+// PrescriptionReview.tsx(correction 모드)에서 쓴다.
+
+export interface FieldFlagRequest {
+  ocr_result_id: number;
+  field_name: string;
+  reason: string;
+}
+
+/** 보호자·기관이 "수정이 필요해요"로 지목한 칸들을 저장하고 환자에게 알린다. */
+export async function requestCorrection(recordId: number, flags: FieldFlagRequest[]) {
+  const { data } = await monitoringClient.post<RecordResult>(`/records/${recordId}/request-correction`, { flags });
+  return normalizeRecordResult(data);
+}
+
+/** 보호자·기관의 최종 "검토했어요". */
+export async function markReviewed(recordId: number) {
+  const { data } = await monitoringClient.post<RecordResult>(`/records/${recordId}/mark-reviewed`);
+  return normalizeRecordResult(data);
+}
+
+/** 환자가 지목된 칸 하나를 고친다 — 활성 플래그가 없는 칸은 서버가 거부한다. */
+export async function correctMedicationField(recordId: number, medicationId: number, fieldName: string, value: string) {
+  const { data } = await monitoringClient.patch<RecordResult>(
+    `/records/${recordId}/medications/${medicationId}/correct`,
+    { field_name: fieldName, value }
+  );
+  return normalizeRecordResult(data);
+}
+
+export interface RecordCorrectionNotice {
+  id: number;
+  record_id: number;
+  patient_id: number;
+  patient_name: string;
+  event: "correction_requested" | "correction_completed";
+  created_at: string;
+  read_at: string | null;
+}
+
+/** 읽지 않은 처방전 검토 알림 — 환자는 "수정 요청"을, 보호자·기관은 "수정 완료"를 받는다. */
+export async function listCorrectionNotices() {
+  const { data } = await monitoringClient.get<RecordCorrectionNotice[]>("/records/notices");
+  return data;
+}
+
+export async function markCorrectionNoticeRead(noticeId: number) {
+  await monitoringClient.post(`/records/notices/${noticeId}/read`);
 }
 
 /** DUR 노인주의/연령금기/임부금기 — "약 하나" 자체의 속성(다른 약과 무관하게 표시됨) */

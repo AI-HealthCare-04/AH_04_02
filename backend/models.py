@@ -220,6 +220,23 @@ class RelationNotice(SQLModel, table=True):
     read_at: datetime | None = None
 
 
+# [2026-07-25 추가] 처방전 검토 알림 — RelationNotice와 같은 recipient_role/recipient_id
+# 패턴이지만 "관계" 이벤트가 아니라 "처방전 하나"에 딸린 이벤트라 별도 테이블로 분리했다
+# (patient_name/counterpart_name 같은 관계 전용 필드가 안 맞음).
+# event: "correction_requested"(보호자·기관 → 환자, 수정 요청) |
+#        "correction_completed"(환자 → 보호자·기관, 수정 완료 알림)
+class RecordCorrectionNotice(SQLModel, table=True):
+    __tablename__ = "record_correction_notices"
+
+    id: int | None = Field(default=None, primary_key=True)
+    recipient_role: str  # "patient" | "caregiver"
+    recipient_id: int
+    record_id: int = Field(foreign_key="medical_records.id")
+    event: str
+    created_at: datetime = Field(default_factory=datetime.now)
+    read_at: datetime | None = None
+
+
 # [2026-07-24 추가] Web Push 구독 정보 — 브라우저의 PushManager.subscribe()가 반환하는
 # endpoint/keys를 그대로 저장한다. NotificationSetting처럼 patient_id로 묶지 않고
 # RelationNotice와 동일하게 "이 알림을 받을 계정"(recipient_role/recipient_id) 기준으로
@@ -301,6 +318,12 @@ class MedicalRecord(SQLModel, table=True):
     # [2026-07-23 추가] raw_text에서 뽑아낸 조제일자("YYYY-MM-DD") — 재처방인지(같은 약,
     # 다른 날짜) 판단하는 근거. 날짜를 못 찾으면 None(기존처럼 이름만으로 중복 판정).
     prescription_date: str | None = Field(default=None)
+    # [2026-07-25 추가] 보호자·기관 검토 상태 — OCR 신뢰도(review_required)와 무관하게,
+    # 환자가 등록한 모든 처방전을 연결된 보호자/기관이 한 번은 확인하게 하기 위함.
+    # "none": 연결된 보호자·기관이 없어 검토 대상 아님 / "pending": 검토 대기
+    # "needs_correction": 보호자·기관이 특정 칸에 수정을 요청함(환자 응답 대기)
+    # "reviewed": 보호자·기관이 최종 확인 완료
+    caregiver_review_status: str = "none"
 
 
 # ── OCR 추출 결과 (약품 1개 = 1행, 담당: 권순현) ──
@@ -338,6 +361,22 @@ class OcrResult(SQLModel, table=True):
         if self.matched_drug_name and not self.needs_review:
             return self.matched_drug_name
         return self.drug_name
+
+
+# [2026-07-25 추가] 보호자·기관이 "수정이 필요해요"를 누르면서 지목한 칸 하나 — OcrResult의
+# 필드 이름(drug_name/dosage/dose_amount/frequency/total_days/diagnosis/drug_class) 중
+# 하나 + 사유. 환자가 그 칸을 고치면 corrected=True로 바뀐다(값 자체는 OcrResult에 그대로
+# 저장 — 이 테이블은 "무엇을, 왜 고쳐야 하는지"와 "고쳤는지"만 추적한다).
+class MedicationFieldFlag(SQLModel, table=True):
+    __tablename__ = "medication_field_flags"
+
+    id: int | None = Field(default=None, primary_key=True)
+    ocr_result_id: int = Field(foreign_key="ocr_results.id")
+    field_name: str
+    reason: str
+    corrected: bool = False
+    created_at: datetime = Field(default_factory=datetime.now)
+    corrected_at: datetime | None = None
 
 
 # ── RAG 가이드 결과 (담당: 김영혜) ──

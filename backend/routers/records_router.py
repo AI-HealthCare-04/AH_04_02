@@ -23,12 +23,15 @@ from core.dependencies import Actor, get_current_actor, require_actor_patient_ac
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from models import (
     Caregiver,
+    CaregiverPatient,
     GuideResult,
     MedicalRecord,
+    MedicationFieldFlag,
     MedicationSchedule,
     OcrResult,
     Patient,
     PatientMedication,
+    RecordCorrectionNotice,
 )
 from pydantic import BaseModel
 from services.drug_matcher import MATCH_THRESHOLD, match_drug
@@ -156,6 +159,17 @@ def _create_schedules_from_ocr(
     return duplicate_drug_names
 
 
+# [2026-07-25 추가] 처방전이 완료(guide 생성)될 때 보호자 검토 대상인지 정한다 — 연결된
+# 보호자·기관이 하나도 없으면 검토할 사람이 없으니 대상에서 뺀다("none").
+def _initial_caregiver_review_status(patient_id: int, session: Session) -> str:
+    has_caregiver = session.exec(
+        select(CaregiverPatient)
+        .where(CaregiverPatient.patient_id == patient_id)
+        .where(CaregiverPatient.status != "revoked")
+    ).first()
+    return "pending" if has_caregiver else "none"
+
+
 def _build_record_response(
     record: MedicalRecord,
     session: Session,
@@ -168,12 +182,23 @@ def _build_record_response(
         if record.uploaded_by_caregiver_id
         else None
     )
+    # [2026-07-25 추가] 보호자·기관이 수정 요청한 칸 — item.id별로 묶어서 내려준다.
+    # PrescriptionReview.tsx가 correction 모드일 때 이 목록으로 잠금/빨간테두리를 그린다.
+    flags_by_item: dict[int, list[MedicationFieldFlag]] = {}
+    if ocr_items:
+        item_ids = [item.id for item in ocr_items]
+        flags = session.exec(
+            select(MedicationFieldFlag).where(MedicationFieldFlag.ocr_result_id.in_(item_ids))
+        ).all()
+        for flag in flags:
+            flags_by_item.setdefault(flag.ocr_result_id, []).append(flag)
     return {
         "record_id": record.id,
         "status": record.status,
         "failure_reason": record.failure_reason,
         "created_at": record.created_at.isoformat(),
         "uploaded_by_name": uploader.name if uploader else None,
+        "caregiver_review_status": record.caregiver_review_status,
         "medications": [
             {
                 "id": item.id,  # [7/8 추가] 처방전확인 화면에서 항목별 수정 시 식별용
@@ -189,6 +214,15 @@ def _build_record_response(
                 "drug_class": item.drug_class,
                 "confidence": item.confidence,
                 "review_required": item.review_required,
+                "field_flags": [
+                    {
+                        "id": flag.id,
+                        "field_name": flag.field_name,
+                        "reason": flag.reason,
+                        "corrected": flag.corrected,
+                    }
+                    for flag in flags_by_item.get(item.id, [])
+                ],
             }
             for item in ocr_items
         ],
@@ -466,6 +500,7 @@ def list_records(
                 "drug_names": [item.drug_name for item in ocr_items],
                 "uploaded_by_name": uploader.name if uploader else None,
                 "pinned": r.pinned,
+                "caregiver_review_status": r.caregiver_review_status,
             }
         )
     return summaries
@@ -632,6 +667,7 @@ async def confirm_medications(
     def _mark_completed() -> None:
         record.status = "completed"
         record.failure_reason = None
+        record.caregiver_review_status = _initial_caregiver_review_status(record.patient_id, session)
         session.add(record)
         session.commit()
         session.refresh(record)
@@ -648,6 +684,254 @@ async def confirm_medications(
     duplicate_drug_names = await asyncio.to_thread(_register_schedules)
 
     return await asyncio.to_thread(_build_record_response, record, session, guide, duplicate_drug_names)
+
+
+# [2026-07-25 추가] get_record()가 재조회할 때 쓰던 "이 record_id의 최신 GuideResult
+# 찾기" 로직을 검토 흐름 엔드포인트들도 그대로 써야 해서(응답에 guide를 계속 포함시켜야
+# 화면이 안 깨짐) 공용 함수로 뺐다.
+def _latest_guide(record: MedicalRecord, session: Session) -> GuideResult | None:
+    return session.exec(
+        select(GuideResult)
+        .where(GuideResult.record_id == record.id)
+        .order_by(GuideResult.id.desc())  # ty: ignore[unresolved-attribute]
+    ).first()
+
+
+# [2026-07-25 추가] 처방전확인 화면(PrescriptionReview.tsx)의 7개 칸과 동일한 목록 —
+# 보호자가 지목할 수 있는 칸을 여기로 제한해서 임의의 필드가 들어오는 걸 막는다.
+_CORRECTABLE_FIELDS = {
+    "drug_name", "dosage", "dose_amount", "frequency", "total_days", "diagnosis", "drug_class",
+}
+
+
+class FieldFlagRequest(BaseModel):
+    ocr_result_id: int
+    field_name: str
+    reason: str
+
+
+class RequestCorrectionPayload(BaseModel):
+    flags: list[FieldFlagRequest]
+
+
+@router.post("/{record_id}/request-correction")
+async def request_correction(
+    record_id: int,
+    payload: RequestCorrectionPayload,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """보호자·기관이 "수정이 필요해요"를 눌러 지목한 칸들을 저장하고 환자에게 알린다."""
+    role, _subject = actor
+    if role != "caregiver":
+        raise HTTPException(403, "보호자·기관만 수정을 요청할 수 있어요")
+    if not payload.flags:
+        raise HTTPException(422, "수정이 필요한 칸을 1개 이상 골라주세요")
+
+    def _apply() -> MedicalRecord:
+        rec = session.get(MedicalRecord, record_id)
+        if not rec:
+            raise HTTPException(404, "해당 기록을 찾을 수 없어요")
+        require_actor_patient_access(rec.patient_id, actor, session)
+        if rec.status != "completed":
+            raise HTTPException(409, "복약 가이드가 생성된 처방전만 검토할 수 있어요")
+
+        item_ids = {item.id for item in session.exec(
+            select(OcrResult).where(OcrResult.record_id == record_id)
+        ).all()}
+        for flag in payload.flags:
+            if flag.ocr_result_id not in item_ids:
+                raise HTTPException(404, "해당 약물 항목을 찾을 수 없어요")
+            if flag.field_name not in _CORRECTABLE_FIELDS:
+                raise HTTPException(422, f"수정 요청할 수 없는 항목이에요: {flag.field_name}")
+            if not flag.reason.strip():
+                raise HTTPException(422, "수정이 필요한 이유를 적어주세요")
+            session.add(
+                MedicationFieldFlag(
+                    ocr_result_id=flag.ocr_result_id,
+                    field_name=flag.field_name,
+                    reason=flag.reason.strip(),
+                )
+            )
+
+        rec.caregiver_review_status = "needs_correction"
+        session.add(rec)
+        session.add(
+            RecordCorrectionNotice(
+                recipient_role="patient",
+                recipient_id=rec.patient_id,
+                record_id=rec.id,
+                event="correction_requested",
+            )
+        )
+        session.commit()
+        session.refresh(rec)
+        return rec
+
+    record = await asyncio.to_thread(_apply)
+    return await asyncio.to_thread(_build_record_response, record, session, _latest_guide(record, session))
+
+
+@router.post("/{record_id}/mark-reviewed")
+async def mark_reviewed(
+    record_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """보호자·기관이 처방전 내용을 최종 확인했다는 표시."""
+    role, _subject = actor
+    if role != "caregiver":
+        raise HTTPException(403, "보호자·기관만 검토를 완료할 수 있어요")
+
+    def _apply() -> MedicalRecord:
+        rec = session.get(MedicalRecord, record_id)
+        if not rec:
+            raise HTTPException(404, "해당 기록을 찾을 수 없어요")
+        require_actor_patient_access(rec.patient_id, actor, session)
+        rec.caregiver_review_status = "reviewed"
+        session.add(rec)
+        session.commit()
+        session.refresh(rec)
+        return rec
+
+    record = await asyncio.to_thread(_apply)
+    return await asyncio.to_thread(_build_record_response, record, session, _latest_guide(record, session))
+
+
+class FieldCorrectionPayload(BaseModel):
+    field_name: str
+    value: str
+
+
+@router.patch("/{record_id}/medications/{medication_id}/correct")
+async def correct_medication_field(
+    record_id: int,
+    medication_id: int,
+    payload: FieldCorrectionPayload,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """환자가 보호자·기관이 지목한 칸 하나를 수정한다 — 활성 플래그가 있는 칸만 허용한다
+    (프론트 잠금은 UI일 뿐이라, 서버에서도 실제로 지목된 칸인지 확인해야 함)."""
+    if payload.field_name not in _CORRECTABLE_FIELDS:
+        raise HTTPException(422, f"수정할 수 없는 항목이에요: {payload.field_name}")
+
+    def _apply() -> MedicalRecord:
+        rec = session.get(MedicalRecord, record_id)
+        if not rec:
+            raise HTTPException(404, "해당 기록을 찾을 수 없어요")
+        require_actor_patient_access(rec.patient_id, actor, session)
+
+        item = session.get(OcrResult, medication_id)
+        if not item or item.record_id != record_id:
+            raise HTTPException(404, "해당 약물 항목을 찾을 수 없어요")
+
+        flag = session.exec(
+            select(MedicationFieldFlag)
+            .where(MedicationFieldFlag.ocr_result_id == medication_id)
+            .where(MedicationFieldFlag.field_name == payload.field_name)
+            .where(MedicationFieldFlag.corrected == False)  # noqa: E712
+        ).first()
+        if not flag:
+            raise HTTPException(409, "보호자·기관이 수정을 요청한 칸이 아니에요")
+
+        setattr(item, payload.field_name, payload.value.strip())
+        flag.corrected = True
+        flag.corrected_at = datetime.now()
+        session.add(item)
+        session.add(flag)
+        session.commit()
+
+        # 이 처방전에 남아있는 미수정 플래그가 하나도 없으면 보호자·기관에게 알린다.
+        item_ids = {i.id for i in session.exec(select(OcrResult).where(OcrResult.record_id == record_id)).all()}
+        remaining = session.exec(
+            select(MedicationFieldFlag)
+            .where(MedicationFieldFlag.ocr_result_id.in_(item_ids))
+            .where(MedicationFieldFlag.corrected == False)  # noqa: E712
+        ).first()
+        if not remaining:
+            caregiver_ids = session.exec(
+                select(CaregiverPatient.caregiver_id)
+                .where(CaregiverPatient.patient_id == rec.patient_id)
+                .where(CaregiverPatient.status != "revoked")
+            ).all()
+            for caregiver_id in caregiver_ids:
+                session.add(
+                    RecordCorrectionNotice(
+                        recipient_role="caregiver",
+                        recipient_id=caregiver_id,
+                        record_id=rec.id,
+                        event="correction_completed",
+                    )
+                )
+            session.commit()
+
+        session.refresh(rec)
+        return rec
+
+    record = await asyncio.to_thread(_apply)
+    return await asyncio.to_thread(_build_record_response, record, session, _latest_guide(record, session))
+
+
+class RecordCorrectionNoticePublic(BaseModel):
+    id: int
+    record_id: int
+    patient_id: int
+    patient_name: str
+    event: str
+    created_at: datetime
+    read_at: datetime | None = None
+
+
+@router.get("/notices", response_model=list[RecordCorrectionNoticePublic])
+def list_correction_notices(
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """읽지 않은 처방전 검토 알림 — 환자는 "수정 요청"을, 보호자·기관은 "수정 완료"를 받는다.
+    Dashboard.tsx/MonitoringDashboard.tsx가 배너로 보여주고 record_id로 바로 이동시킨다."""
+    role, subject = actor
+    notices = session.exec(
+        select(RecordCorrectionNotice)
+        .where(RecordCorrectionNotice.recipient_role == role)
+        .where(RecordCorrectionNotice.recipient_id == subject.id)
+        .where(RecordCorrectionNotice.read_at == None)  # noqa: E711
+        .order_by(RecordCorrectionNotice.created_at.desc())
+    ).all()
+    result = []
+    for notice in notices:
+        record = session.get(MedicalRecord, notice.record_id)
+        if not record:
+            continue
+        patient = session.get(Patient, record.patient_id)
+        result.append(
+            RecordCorrectionNoticePublic(
+                id=notice.id,
+                record_id=notice.record_id,
+                patient_id=record.patient_id,
+                patient_name=patient.name if patient else "",
+                event=notice.event,
+                created_at=notice.created_at,
+                read_at=notice.read_at,
+            )
+        )
+    return result
+
+
+@router.post("/notices/{notice_id}/read")
+def mark_correction_notice_read(
+    notice_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    role, subject = actor
+    notice = session.get(RecordCorrectionNotice, notice_id)
+    if not notice or notice.recipient_role != role or notice.recipient_id != subject.id:
+        raise HTTPException(404, "해당 알림을 찾을 수 없어요")
+    notice.read_at = datetime.now()
+    session.add(notice)
+    session.commit()
+    return {"status": "read"}
 
 
 @router.get("/{record_id}")

@@ -15,6 +15,13 @@ const STATUS_LABEL: Record<RecordSummary["status"], { text: string; bg: string; 
   failed: { text: "실패", bg: "rgba(217,79,79,0.12)", color: "#D94F4F" },
 };
 
+// [2026-07-25 추가] 보호자·기관 검토 상태 — "none"(연결된 보호자·기관 없음)은 뱃지 자체를 안 보여준다.
+const REVIEW_STATUS_LABEL: Record<string, { text: string; bg: string; color: string }> = {
+  pending: { text: "보호자 검토 대기", bg: `${C.terracotta}15`, color: C.terracotta },
+  needs_correction: { text: "내가 수정할 칸 있어요", bg: "#F5E6C8", color: "#8A6D1F" },
+  reviewed: { text: "보호자 검토 완료", bg: `${C.success}20`, color: "#4A7A47" },
+};
+
 export default function Records() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -294,10 +301,31 @@ export default function Records() {
                   <p className="text-[13px] mb-4" style={{ color: C.muted }}>
                     {r.drug_names.length > 0 ? r.drug_names.join(", ") : "인식된 약품 없음"}
                   </p>
-                  <div className="border-t pt-3 flex items-center justify-between" style={{ borderColor: "rgba(30,26,23,0.08)" }}>
-                    <span className="px-3 py-1 rounded-full text-[12px] font-bold" style={{ background: s.bg, color: s.color }}>
-                      {s.text}
-                    </span>
+                  <div className="border-t pt-3 flex items-center justify-between flex-wrap gap-2" style={{ borderColor: "rgba(30,26,23,0.08)" }}>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="px-3 py-1 rounded-full text-[12px] font-bold" style={{ background: s.bg, color: s.color }}>
+                        {s.text}
+                      </span>
+                      {r.caregiver_review_status !== "none" && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(
+                              r.caregiver_review_status === "needs_correction"
+                                ? `/records/${r.record_id}/review?mode=correction`
+                                : `/records/${r.record_id}`
+                            );
+                          }}
+                          className="px-3 py-1 rounded-full text-[12px] font-bold"
+                          style={{
+                            background: REVIEW_STATUS_LABEL[r.caregiver_review_status].bg,
+                            color: REVIEW_STATUS_LABEL[r.caregiver_review_status].color,
+                          }}
+                        >
+                          {REVIEW_STATUS_LABEL[r.caregiver_review_status].text}
+                        </button>
+                      )}
+                    </div>
                     <span className="flex items-center gap-1 text-[13px] font-bold" style={{ color: C.terracotta }}>
                       자세히 보기 <ChevronRight className="w-3.5 h-3.5" />
                     </span>

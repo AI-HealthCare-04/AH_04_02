@@ -13,6 +13,13 @@ function dateKey(iso: string) {
   return iso.slice(0, 10);
 }
 
+// [2026-07-25 추가] 보호자·기관 시점의 검토 상태 뱃지 — "none"(대상 아님)은 안 보여준다.
+const REVIEW_STATUS_LABEL: Record<string, { text: string; bg: string; color: string }> = {
+  pending: { text: "검토해 주세요", bg: `${C.terracotta}15`, color: C.terracotta },
+  needs_correction: { text: "환자 수정 대기 중", bg: "#F5E6C8", color: "#8A6D1F" },
+  reviewed: { text: "검토 완료", bg: `${C.success}20`, color: "#4A7A47" },
+};
+
 // ponytail: 특정 날짜 하나만 콕 집어 조회하는 백엔드 엔드포인트가 따로 없어서,
 // 넉넉한 기간(1년치) 로그를 받아 프론트에서 그 날짜만 걸러냅니다 — 데이터량이
 // 작아서(가정용 복약 기록) 실용적인 선택. 나중에 기록이 많아지면 GET /monitoring/logs에
@@ -173,7 +180,7 @@ export default function MonitoringDayLogs() {
                         <FileText className="w-5 h-5" style={{ color: C.terracotta }} />
                       </div>
                     </div>
-                    <div className="px-6 pb-5">
+                    <div className="px-6 pb-5 flex items-center gap-2 flex-wrap">
                       <button
                         onClick={() => navigate(`/records/${r.record_id}`)}
                         className="px-4 py-2 rounded-full text-[13px] font-bold"
@@ -181,6 +188,18 @@ export default function MonitoringDayLogs() {
                       >
                         자세히 보기 ›
                       </button>
+                      {r.caregiver_review_status !== "none" && (
+                        <button
+                          onClick={() => navigate(`/records/${r.record_id}/guide`)}
+                          className="px-4 py-2 rounded-full text-[13px] font-bold"
+                          style={{
+                            background: REVIEW_STATUS_LABEL[r.caregiver_review_status].bg,
+                            color: REVIEW_STATUS_LABEL[r.caregiver_review_status].color,
+                          }}
+                        >
+                          {REVIEW_STATUS_LABEL[r.caregiver_review_status].text}
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))
