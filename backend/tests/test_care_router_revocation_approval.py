@@ -342,7 +342,7 @@ def test_approve_creates_notice_for_requester(client: TestClient, session: Sessi
     assert notices.status_code == 200
     body = notices.json()
     assert len(body) == 1
-    assert body[0]["approved"] is True
+    assert body[0]["event"] == "revocation_approved"
     assert body[0]["patient_name"] == "환자"
     assert body[0]["counterpart_name"] == "승인자"
     assert body[0]["read_at"] is None
@@ -362,7 +362,7 @@ def test_reject_creates_notice_for_requester(client: TestClient, session: Sessio
     assert notices.status_code == 200
     body = notices.json()
     assert len(body) == 1
-    assert body[0]["approved"] is False
+    assert body[0]["event"] == "revocation_rejected"
 
 
 def test_notice_not_visible_to_unrelated_caregiver(client: TestClient, session: Session):

@@ -93,6 +93,52 @@ def test_patient_initiated_unlink_is_immediate(client: TestClient, session: Sess
     assert r.json()["status"] == "revoked"
 
 
+# ── 즉시 해제 시 상대방 알림 (2026-07-24 추가) ────────────────
+
+def test_caregiver_initiated_unlink_notifies_patient(client: TestClient, session: Session):
+    cg, pt = _caregiver(session, "보호자닉네임", relation_type="guardian"), _patient(session)
+    _link(session, cg, pt)
+
+    r = client.delete(_unlink_url(cg.id, pt.id), headers=_headers(cg.id, "caregiver"))
+    assert r.status_code == 200
+
+    notices = client.get("/trust/relations/notices", headers=_headers(pt.id, "patient"))
+    assert notices.status_code == 200
+    body = notices.json()
+    assert len(body) == 1
+    assert body[0]["event"] == "unlinked"
+    assert body[0]["counterpart_name"] == "보호자닉네임"
+
+
+def test_patient_initiated_unlink_notifies_caregiver(client: TestClient, session: Session):
+    cg, pt = _caregiver(session, relation_type="guardian"), _patient(session)
+    _link(session, cg, pt)
+
+    r = client.delete(_unlink_url(cg.id, pt.id), headers=_headers(pt.id, "patient"))
+    assert r.status_code == 200
+
+    notices = client.get("/trust/relations/notices", headers=_headers(cg.id, "caregiver"))
+    assert notices.status_code == 200
+    body = notices.json()
+    assert len(body) == 1
+    assert body[0]["event"] == "unlinked"
+    assert body[0]["counterpart_name"] == "환자"
+
+
+def test_organization_pending_unlink_does_not_notify_yet(client: TestClient, session: Session):
+    """기관은 사유+승인이 필요한 대기 상태로만 넘어가므로, 이 시점엔 아직 unlinked
+    알림이 없다 — 승인/거부 결과 알림(revocation_approved/rejected)은 approve_revocation에서."""
+    cg, pt = _caregiver(session, relation_type="organization"), _patient(session)
+    _link(session, cg, pt)
+
+    r = client.delete(_unlink_url(cg.id, pt.id) + "?reason=정당한사유", headers=_headers(cg.id, "caregiver"))
+    assert r.status_code == 200
+    assert r.json()["status"] == "revocation_pending"
+
+    notices = client.get("/trust/relations/notices", headers=_headers(pt.id, "patient"))
+    assert notices.json() == []
+
+
 # ── 기관 = 사유 필수 + 승인 대기 ──────────────────────────────
 
 def test_organization_unlink_without_reason_rejected(client: TestClient, session: Session):

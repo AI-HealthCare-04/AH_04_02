@@ -3,6 +3,7 @@ import { monitoringClient } from "./monitoringClient";
 // ── 1. 보호자 초대 (Invitation) ──
 
 export interface InvitationCreated {
+  id: number;
   token: string;
   invite_url: string;
 }
@@ -156,26 +157,29 @@ export async function approveRevocation(trustId: number, approve: boolean) {
   return data;
 }
 
-// [2026-07-23 추가] 해제 요청자용 — 내가 요청한 해제가 승인/거부됐을 때 결과를 확인하는 알림함.
-// 승인되면 그 환자에 대한 접근권을 잃을 수 있어 patient_name/counterpart_name을 스냅샷으로 받는다.
-export interface RevocationNotice {
+// [2026-07-23 추가, 2026-07-24 확장] 환자-보호자 관계 알림함 — 연결(초대 수락)/해제(즉시
+// 해제·해제 요청 승인/거부 결과) 모두 상대에게 알려준다. 승인되면 그 환자에 대한 접근권을
+// 잃거나 거부 시 요청 정보가 지워질 수 있어 patient_name/counterpart_name을 스냅샷으로 받는다.
+export type RelationNoticeEvent = "linked" | "unlinked" | "revocation_approved" | "revocation_rejected";
+
+export interface RelationNotice {
   id: number;
   patient_id: number;
   patient_name: string;
   counterpart_name: string;
-  approved: boolean;
+  event: RelationNoticeEvent;
   reason: string | null;
   created_at: string;
   read_at: string | null;
 }
 
-export async function listRevocationNotices() {
-  const { data } = await monitoringClient.get<RevocationNotice[]>("/trust/relations/notices");
+export async function listRelationNotices() {
+  const { data } = await monitoringClient.get<RelationNotice[]>("/trust/relations/notices");
   return data;
 }
 
-export async function markRevocationNoticeRead(noticeId: number) {
-  const { data } = await monitoringClient.post<RevocationNotice>(
+export async function markRelationNoticeRead(noticeId: number) {
+  const { data } = await monitoringClient.post<RelationNotice>(
     `/trust/relations/notices/${noticeId}/read`
   );
   return data;

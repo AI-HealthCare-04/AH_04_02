@@ -197,22 +197,25 @@ class CaregiverPatient(SQLModel, table=True):
     revocation_requested_at: datetime | None = Field(default=None)
 
 
-# [2026-07-23 추가] 해제 요청 승인/거부 결과를 요청자에게 알려주는 용도.
-# CaregiverPatient 링크 자체는 승인 시 revoked(요청자가 그 환자에 대한 접근권을 잃을 수 있음),
-# 거부 시 revocation_requested_by 등이 지워지므로 결과를 별도로 스냅샷 남겨야 요청자가
-# 나중에도 "승인/거부됐다"를 확인할 수 있다. patient_name/counterpart_name은 승인 후 접근권
-# 상실·개인정보 변경에 영향받지 않도록 그 시점 값을 복사해서 저장한다.
-class RevocationNotice(SQLModel, table=True):
+# [2026-07-23 추가, 2026-07-24 확장] 환자-보호자 관계에 생긴 일(연결/해제/해제 요청 처리 결과)을
+# 상대에게 알려주는 용도. CaregiverPatient 링크 자체는 해제 승인 시 revoked(요청자가 그 환자에
+# 대한 접근권을 잃을 수 있음), 거부 시 revocation_requested_by 등이 지워지므로 결과를 별도로
+# 스냅샷 남겨야 나중에도 확인할 수 있다. patient_name/counterpart_name은 접근권 상실·개인정보
+# 변경에 영향받지 않도록 그 시점 값을 복사해서 저장한다.
+# [2026-07-24 추가] 처음엔 "해제 요청 승인/거부 결과"만 다뤘지만(RevocationNotice, approved: bool),
+# 연결이 새로 생기거나(초대 수락) 기관 승인 절차 없이 즉시 해제될 때도 상대에게 알림이 필요해져서
+# event 필드로 일반화했다 — "linked" | "unlinked" | "revocation_approved" | "revocation_rejected".
+class RelationNotice(SQLModel, table=True):
     __tablename__ = "revocation_notices"
 
     id: int | None = Field(default=None, primary_key=True)
-    recipient_role: str  # "caregiver" | "patient" — 원래 해제를 요청한 쪽
+    recipient_role: str  # "caregiver" | "patient"
     recipient_id: int
     patient_id: int
     patient_name: str
-    counterpart_name: str  # 승인/거부를 처리한 사람 이름
-    approved: bool
-    reason: str | None = None
+    counterpart_name: str  # 상대(연결/해제/승인·거부를 한 사람)의 이름
+    event: str  # "linked" | "unlinked" | "revocation_approved" | "revocation_rejected"
+    reason: str | None = None  # revocation 계열에서만 채워짐(기관이 남긴 해제 사유)
     created_at: datetime = Field(default_factory=datetime.now)
     read_at: datetime | None = None
 

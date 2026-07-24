@@ -34,6 +34,7 @@ from core.dependencies import (
     require_actor_patient_access,
     require_patient_access,
 )
+from core.relation_notices import create_relation_notice
 from core.security import hash_phone, normalize_email
 from fastapi import APIRouter, Depends, HTTPException
 from models import (
@@ -693,6 +694,35 @@ def unlink_caregiver_from_patient(
     link.status = "revoked"
     link.revoked_at = datetime.now()
     session.add(link)
+
+    # [2026-07-24 추가] 즉시 해제(기관의 승인 절차를 거치지 않는 경우)는 지금까지 상대에게
+    # 알릴 방법이 없었다 — 해제한 쪽이 아니라 "상대방"(연결을 끊은 사람이 아닌 쪽)에게 남긴다.
+    if role == "caregiver":
+        patient = session.get(Patient, patient_id)
+        if patient:
+            create_relation_notice(
+                session,
+                recipient_role="patient",
+                recipient_id=patient.id,
+                patient_id=patient.id,
+                patient_name=patient.name,
+                counterpart_name=subject.name,
+                event="unlinked",
+            )
+    else:
+        caregiver = session.get(Caregiver, caregiver_id)
+        patient = session.get(Patient, patient_id)
+        if caregiver and patient:
+            create_relation_notice(
+                session,
+                recipient_role="caregiver",
+                recipient_id=caregiver.id,
+                patient_id=patient_id,
+                patient_name=patient.name,
+                counterpart_name=subject.name,
+                event="unlinked",
+            )
+
     session.commit()
     return {"unlinked": True, "status": "revoked"}
 
