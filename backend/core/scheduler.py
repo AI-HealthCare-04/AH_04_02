@@ -15,7 +15,10 @@ NotificationLog의 (schedule_id, due_date, time_slot, kind) UniqueConstraint다 
 
 알려진 한계(팀 공유 필요, 코멘트에도 명시):
 - 서버 로컬 시간대만 가정한다(Patient/MedicationSchedule의 timezone 필드는 아직 안 씀).
-- 배달 채널은 core/email.py(mock/smtp)뿐이다 — 프론트에 Web Push/FCM 인프라가 없다.
+- [2026-07-24 수정] 배달 채널은 core/email.py(mock/smtp) + core/push.py(Web Push)다.
+  단, push는 백엔드/DB만 준비된 상태 — 프론트에 서비스워커 구독 흐름이 아직 없어
+  PushSubscription이 항상 0건이라 core/push.py가 조용히 no-op한다(HTTPS 배포 이후
+  프론트 작업 붙이면 이 경로가 그대로 살아남).
 - 여러 서버가 동시에 이 루프를 돌리는 멀티워커 배포는 가정하지 않는다(각자 로컬에서
   스케줄러를 꺼둘 수 있게 SCHEDULER_ENABLED로 게이트만 해둠 — 실제 운영 배포시 재검토 필요).
 """
@@ -40,6 +43,7 @@ from sqlmodel import Session, func, select
 
 from core.database import engine
 from core.email import send_email
+from core.push import send_push_to_recipient
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +151,25 @@ def _recipients(session: Session, patient: Patient, schedule: MedicationSchedule
     return recipients
 
 
+def _push_targets(session: Session, patient: Patient, schedule: MedicationSchedule) -> list[tuple[str, int | None]]:
+    """(recipient_role, recipient_id) 목록 — _recipients()와 동일하게 "최초 연결만
+    주 보호자로 취급"하는 단순화를 쓴다. email_opt_in은 이메일 전용 동의라 여기선
+    보지 않는다 — push는 구독이 실제로 있는지만으로 판단하고, 구독이 없으면
+    core/push.py가 알아서 아무것도 안 보낸다."""
+    targets: list[tuple[str, int | None]] = [("patient", patient.id)]
+    if not schedule.caregiver_alert:
+        return targets
+    links = session.exec(
+        select(CaregiverPatient)
+        .where(CaregiverPatient.patient_id == patient.id)
+        .where(CaregiverPatient.status != "revoked")
+        .order_by(CaregiverPatient.id)
+    ).all()
+    if links:
+        targets.append(("caregiver", links[0].caregiver_id))
+    return targets
+
+
 def _same_slot_drug_names(session: Session, schedule: MedicationSchedule) -> list[str]:
     """같은 환자·같은 시간대(time_slot)에 걸린 다른 활성 일정들의 약품명 — 알림 한 통에서
     "이 시간에 뭘 먹어야 하는지" 전부 보여주기 위함(REQ 아님, 사용자 요청: 시간별 그룹핑).
@@ -188,6 +211,24 @@ def _deliver(session: Session, schedule: MedicationSchedule, patient: Patient, k
     for label, email in recipients:
         send_email(to=email, subject=subject, body=body)
         channels.append(label)
+
+    # [2026-07-24 추가] Web Push — all_push_enabled(기본 True)가 꺼져 있으면 스킵한다.
+    # medication_reminder_enabled(위에서 이미 체크)와 별개로 push 채널만 따로 끌 수
+    # 있는 토글. 캐어기버 본인의 push 선호도를 patient별 설정으로 같이 묶는 건 단순화다
+    # (환자 단위 NotificationSetting을 그대로 재사용) — 실제 요구가 생기면 분리 필요.
+    if setting is None or setting.all_push_enabled:
+        for role, recipient_id in _push_targets(session, patient, schedule):
+            if recipient_id is None:
+                continue
+            attempted = send_push_to_recipient(
+                session, role, recipient_id, title=subject, body=body, url="/schedule"
+            )
+            # [2026-07-24] 구독이 없거나 VAPID 키가 없으면 아무 일도 안 했다는 뜻이라
+            # channels에 남기지 않는다 — "발송했다"는 로그가 실제로 아무것도 안 보낸
+            # 경우까지 포함하면 나중에 발송 이력을 신뢰할 수 없게 된다.
+            if attempted:
+                channels.append(f"push:{role}:{recipient_id}")
+
     return "sent", channels
 
 

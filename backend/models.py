@@ -220,6 +220,28 @@ class RelationNotice(SQLModel, table=True):
     read_at: datetime | None = None
 
 
+# [2026-07-24 추가] Web Push 구독 정보 — 브라우저의 PushManager.subscribe()가 반환하는
+# endpoint/keys를 그대로 저장한다. NotificationSetting처럼 patient_id로 묶지 않고
+# RelationNotice와 동일하게 "이 알림을 받을 계정"(recipient_role/recipient_id) 기준으로
+# 저장한다 — 보호자 한 명이 환자 여러 명을 볼 때, 어떤 환자의 알림이든 보호자 본인 기기
+# 하나로 받아야 하기 때문이다. 한 사람이 여러 기기(폰+PC)를 쓸 수 있어 계정당 여러 행이
+# 가능하고, endpoint(기기·브라우저별로 고유)로 구분한다.
+class PushSubscription(SQLModel, table=True):
+    __tablename__ = "push_subscriptions"
+    __table_args__ = (UniqueConstraint("recipient_role", "recipient_id", "endpoint", name="uq_push_subscription"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    recipient_role: str  # "patient" | "caregiver"
+    recipient_id: int
+    # [2026-07-24 수정] MySQL은 TEXT/BLOB 컬럼을 UNIQUE 제약에 그대로 못 쓴다("key length"
+    # 지정 필요) — 실제 Web Push endpoint(FCM/Mozilla 등)는 항상 몇백 자 안쪽이라 Text 대신
+    # 길이 제한 있는 VARCHAR(512)로 충분하다.
+    endpoint: str = Field(max_length=512)
+    p256dh: str
+    auth: str
+    created_at: datetime = Field(default_factory=datetime.now)
+
+
 # ── 비밀번호 재설정 임시코드 [2026-07-15 추가, REQ-039] ──
 # Patient/Caregiver 둘 다 로그인 대상이라 subject_type으로 구분한다(다형 참조) — FK를
 # 어느 한쪽 테이블로 고정할 수 없어 애플리케이션 레벨에서만 유효성을 검증한다.

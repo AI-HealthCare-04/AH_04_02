@@ -393,6 +393,68 @@ class TestDeliveryOrderingAvoidsDuplicateSend:
         mock_deliver.assert_not_called()
 
 
+class TestPushIntegration:
+    """[2026-07-24 추가] _deliver()가 이메일과 나란히 core.push.send_push_to_recipient를
+    호출하는지 검증한다. 실제 pywebpush 호출은 test_push.py에서 이미 다루므로 여기선
+    "언제(누구에게) 호출하느냐"만 확인한다."""
+
+    def test_sends_push_to_patient_and_primary_caregiver_by_default(self, session: Session):
+        pt = _make_patient(session)
+        cg = _make_caregiver_linked(session, pt, "보호자")
+        _make_schedule(session, pt, "08:00")
+        now = datetime(2026, 7, 19, 8, 5)
+
+        with patch("core.scheduler.send_push_to_recipient") as mock_push:
+            scheduler._fire_due_reminders(session, now)
+
+        called_targets = {(c.args[1], c.args[2]) for c in mock_push.call_args_list}
+        assert called_targets == {("patient", pt.id), ("caregiver", cg.id)}
+
+    def test_skips_push_when_all_push_enabled_is_false_but_still_emails(self, session: Session):
+        pt = _make_patient(session)
+        session.add(NotificationSetting(patient_id=pt.id, all_push_enabled=False))
+        session.commit()
+        _make_schedule(session, pt, "08:00")
+        now = datetime(2026, 7, 19, 8, 5)
+
+        with patch("core.scheduler.send_push_to_recipient") as mock_push:
+            scheduler._fire_due_reminders(session, now)
+
+        mock_push.assert_not_called()
+        logs = session.exec(select(NotificationLog)).all()
+        assert logs[0].status == "sent"
+        assert "email:patient" in json.loads(logs[0].channels)
+
+    def test_skips_push_when_medication_reminder_disabled(self, session: Session):
+        """medication_reminder_enabled=False면 이메일도 push도 전부 스킵돼야 한다."""
+        pt = _make_patient(session)
+        session.add(NotificationSetting(patient_id=pt.id, medication_reminder_enabled=False))
+        session.commit()
+        _make_schedule(session, pt, "08:00")
+        now = datetime(2026, 7, 19, 8, 5)
+
+        with patch("core.scheduler.send_push_to_recipient") as mock_push:
+            scheduler._fire_due_reminders(session, now)
+
+        mock_push.assert_not_called()
+
+    def test_push_respects_caregiver_alert_false(self, session: Session):
+        pt = _make_patient(session)
+        _make_caregiver_linked(session, pt, "보호자")
+        _make_schedule(session, pt, "08:00")
+        sched = session.exec(select(MedicationSchedule)).one()
+        sched.caregiver_alert = False
+        session.add(sched)
+        session.commit()
+        now = datetime(2026, 7, 19, 8, 5)
+
+        with patch("core.scheduler.send_push_to_recipient") as mock_push:
+            scheduler._fire_due_reminders(session, now)
+
+        called_targets = {(c.args[1], c.args[2]) for c in mock_push.call_args_list}
+        assert called_targets == {("patient", pt.id)}
+
+
 class TestSchedulerEnabledGate:
     def test_defaults_false_in_test_env(self, monkeypatch):
         monkeypatch.delenv("SCHEDULER_ENABLED", raising=False)

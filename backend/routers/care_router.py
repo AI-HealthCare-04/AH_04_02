@@ -30,6 +30,7 @@ from core.dependencies import (
     get_current_patient_optional,
     require_actor_patient_access,
 )
+from core.push import vapid_public_key
 from core.relation_notices import create_relation_notice
 from core.security import hash_phone, hash_token, normalize_phone
 from fastapi import APIRouter, Depends, HTTPException
@@ -39,6 +40,7 @@ from models import (
     Invitation,
     NotificationSetting,
     Patient,
+    PushSubscription,
     RelationNotice,
 )
 from pydantic import BaseModel
@@ -892,3 +894,74 @@ def update_notification_settings(
     session.commit()
     session.refresh(setting)
     return setting
+
+
+# ══════════════════════════════════════════
+# 5. Web Push 구독 (PushSubscription) [2026-07-24 추가]
+# ══════════════════════════════════════════
+# 프론트에 서비스워커 구독 흐름이 아직 없어(HTTPS 배포 이후 붙일 예정) 지금은 이 세
+# 엔드포인트를 실제로 호출하는 화면이 없다 — 백엔드/DB만 미리 준비해 둔다.
+class PushSubscriptionCreate(BaseModel):
+    endpoint: str
+    p256dh: str
+    auth: str
+
+
+@router.get("/push/vapid-public-key")
+def get_vapid_public_key():
+    """프론트가 pushManager.subscribe()의 applicationServerKey로 쓸 공개키. 로그인 여부와
+    무관한 공개 설정값이라 인증을 요구하지 않는다. None이면 서버에 VAPID 키가 아직
+    설정 안 된 것 — 프론트는 구독 자체를 시도하지 말아야 한다."""
+    return {"public_key": vapid_public_key()}
+
+
+@router.post("/push-subscriptions")
+def create_push_subscription(
+    payload: PushSubscriptionCreate,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    role, subject = actor
+    existing = session.exec(
+        select(PushSubscription)
+        .where(PushSubscription.recipient_role == role)
+        .where(PushSubscription.recipient_id == subject.id)
+        .where(PushSubscription.endpoint == payload.endpoint)
+    ).first()
+    if existing:
+        existing.p256dh = payload.p256dh
+        existing.auth = payload.auth
+        session.add(existing)
+        session.commit()
+        return {"status": "updated"}
+
+    session.add(
+        PushSubscription(
+            recipient_role=role,
+            recipient_id=subject.id,
+            endpoint=payload.endpoint,
+            p256dh=payload.p256dh,
+            auth=payload.auth,
+        )
+    )
+    session.commit()
+    return {"status": "created"}
+
+
+@router.delete("/push-subscriptions")
+def delete_push_subscription(
+    endpoint: str,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    role, subject = actor
+    sub = session.exec(
+        select(PushSubscription)
+        .where(PushSubscription.recipient_role == role)
+        .where(PushSubscription.recipient_id == subject.id)
+        .where(PushSubscription.endpoint == endpoint)
+    ).first()
+    if sub:
+        session.delete(sub)
+        session.commit()
+    return {"status": "deleted"}
