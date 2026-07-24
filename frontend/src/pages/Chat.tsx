@@ -184,15 +184,21 @@ export default function Chat() {
                     >
                       {m.text}
                     </div>
-                    {m.source && (
-                      <p className="text-[11px] mt-1.5 px-1" style={{ color: C.muted }}>{formatAnswerSource(m.source)}</p>
-                    )}
-                    {/* [2026-07-20 추가] formatAnswerSource는 "어떻게 답했는지"(방법) 라벨일 뿐이라
-                        실제 참고 문서를 보여주지 못했다 — 실제 검색된 문서 title/출처를 따로 표시. */}
-                    {m.sourceRefs && m.sourceRefs.length > 0 && (
-                      <p className="text-[11px] mt-0.5 px-1" style={{ color: C.muted }}>
+                    {/* [2026-07-20 추가, 2026-07-24 수정] formatAnswerSource는 "어떻게 답했는지"
+                        (llm/preset/fallback 같은 생성 방법) 라벨일 뿐, 실제로 어떤 자료를
+                        참고했는지는 보여주지 못한다 — 그런데도 항상 먼저 보여서 사용자가 이걸
+                        "출처"로 오인했다("AI 실시간 답변 (gpt-4o-mini)"만 보이고 정작 근거가
+                        된 질병관리청 자료·DUR 조회 결과는 안 보임). 실제 검색된 자료
+                        (source_refs)가 있으면 그걸 우선 보여주고, 방법 라벨은 정말 아무 근거
+                        없이 답한 경우(사전 등록 답변/폴백 등)에만 보조로 보여준다. */}
+                    {m.sourceRefs && m.sourceRefs.length > 0 ? (
+                      <p className="text-[11px] mt-1.5 px-1" style={{ color: C.muted }}>
                         참고 자료: {formatUniqueSourceRefs(m.sourceRefs).map((ref) => ref.text).join(", ")}
                       </p>
+                    ) : (
+                      m.source && (
+                        <p className="text-[11px] mt-1.5 px-1" style={{ color: C.muted }}>{formatAnswerSource(m.source)}</p>
+                      )
                     )}
                   </div>
                 </div>
