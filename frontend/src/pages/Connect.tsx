@@ -248,6 +248,10 @@ export default function Connect() {
     try {
       if (inviteId != null) {
         await deleteInvitation(inviteId);
+        // [2026-07-24 추가] delete 성공 후 create가 실패하면 inviteId가 이미 cancelled된
+        // 옛 초대를 계속 가리켜서 다음 재발급 시도가 409로 영원히 막힌다 — 즉시 비운다.
+        setInviteId(null);
+        setInviteUrl("");
       }
       const created = await createInvitation({
         patient_id: patientId,

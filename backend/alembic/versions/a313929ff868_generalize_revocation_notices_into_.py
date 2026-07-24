@@ -33,7 +33,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Downgrade schema."""
+    """approved 컬럼은 revocation_approved/rejected만 표현할 수 있다 — linked/unlinked
+    행은 전부 approved=0(= "거부됨")으로 뭉개진다. dev DB가 비어있는 지금은 무해하지만,
+    나중에 실제 linked/unlinked 데이터가 있는 채로 downgrade하면 손실이 있다는 점 기록."""
     op.add_column('revocation_notices', sa.Column('approved', mysql.TINYINT(display_width=1), autoincrement=False, nullable=True))
     op.execute("UPDATE revocation_notices SET approved = (event = 'revocation_approved')")
     with op.batch_alter_table('revocation_notices', schema=None) as batch_op:

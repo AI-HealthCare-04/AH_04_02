@@ -64,6 +64,12 @@ export default function InvitePatientPanel({
     try {
       if (inviteId != null) {
         await deleteInvitation(inviteId);
+        // [2026-07-24 추가] delete는 성공했는데 바로 아래 create가 실패하면, inviteId가
+        // 이미 cancelled된 옛 초대를 계속 가리켜서 다음 재발급 시도가 "이미 cancelled
+        // 처리된 초대예요"(409)로 영원히 막힌다 — delete 성공 즉시 비워서 깨끗한 상태로
+        // 만든다.
+        setInviteId(null);
+        setInviteUrl("");
       }
       const created = await createInvitation({
         relation_type: "patient",
