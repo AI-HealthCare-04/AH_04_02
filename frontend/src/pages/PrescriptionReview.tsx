@@ -49,7 +49,10 @@ const FIELDS: { key: keyof OcrMedication; label: string }[] = [
 ];
 
 // 용량엔 반드시 숫자+단위가 같이 있어야 함 (예: "500mg") — "500"처럼 단위 빠진 OCR 오류를 잡아냄
-const DOSAGE_RE = /(\d+\/\d+|\d+\.?\d*)\s*(mg|g|ml|mcg|iu|정|캡슐|포|밀리그램|그램)/i;
+// [PR #90 리뷰 반영 — pecs0310] parsing_rules.py의 DOSE_QTY_UNITS(정|캡슐|캅셀|포|병|환)와
+// 맞춰 캅셀(대체 표기)/병/환을 추가 — 이 세 단위가 빠져 있어서 해당 단위로 처방된 항목은
+// isDosageValid()가 계속 실패로 잡고, allOk가 false가 돼 "확인 완료" 제출 자체가 막혀 있었다.
+const DOSAGE_RE = /(\d+\/\d+|\d+\.?\d*)\s*(mg|g|ml|mcg|iu|정|캡슐|캅셀|포|병|환|밀리그램|그램)/i;
 function isDosageValid(dosage: string) {
   return DOSAGE_RE.test(dosage.trim());
 }
