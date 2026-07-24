@@ -270,16 +270,36 @@ class GuideResponse(BaseModel):
     )
 
 
+class LifestyleCategoryGuide(BaseModel):
+    """생활습관 안내 한 카테고리(식사/운동/그 외)의 권장·비권장 항목 목록.
+
+    [2026-07-23 추가] 예전엔 카테고리 구분 없이 자유 텍스트 한 단락(guide: str)이었는데,
+    화면에서 "식사/운동/그 외"와 "권장/비권장"을 나눠 보여줘야 해서 구조화했다.
+    """
+
+    recommended: list[str] = Field(default_factory=list, description="권장하는 항목 목록 — 근거 없으면 빈 배열")
+    avoid: list[str] = Field(default_factory=list, description="피해야 할/권장하지 않는 항목 목록 — 근거 없으면 빈 배열")
+
+
 class LifestyleGuideResult(BaseModel):
     """진단명(diagnosis) 기준 생활습관 안내 — 의약품과 무관하게 진단명 하나당 1회만 생성된다.
 
     [2026-07-21 회의 반영] 여러 의약품이 같은 진단명을 공유해도 이 결과는 한 번만
     만들어진다(generate_guides_from_medications가 진단명 집합 기준으로 중복 제거).
     diagnosis가 비어 있으면 안전한 일반 안내 문구로 폴백한다(hallucination 방지).
+
+    [2026-07-23 수정] 자유 텍스트 한 단락(guide: str) 대신 식사(diet)/운동(exercise)/
+    그 외(other) 세 카테고리 × 권장(recommended)/비권장(avoid)으로 구조화했다 — MedGuide.tsx
+    "생활습관" 탭이 이 구조 그대로 보여준다.
     """
 
     diagnosis: str = Field(description="이 안내가 대상으로 하는 진단명 — 진단명이 없으면 빈 문자열")
-    guide: str = Field(description="진단명 기준 생활습관 개선 가이드(식이/운동/주의사항 등). 약물 이름은 언급하지 않는다")
+    diet: LifestyleCategoryGuide = Field(default_factory=LifestyleCategoryGuide, description="식사 관련 권장/비권장")
+    exercise: LifestyleCategoryGuide = Field(default_factory=LifestyleCategoryGuide, description="운동 관련 권장/비권장")
+    other: LifestyleCategoryGuide = Field(
+        default_factory=LifestyleCategoryGuide,
+        description="식사·운동 외 생활습관 권장/비권장(금연·금주·스트레스 관리·정기 검진 등)",
+    )
     source_refs: list[LifestyleSourceRef] = Field(default_factory=list)
     review_required: bool = False
     review_reason: str | None = None

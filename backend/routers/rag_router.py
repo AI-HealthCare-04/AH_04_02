@@ -47,7 +47,10 @@ router = APIRouter(prefix="/rag", tags=["RAG"])
 # [2026-07-22] v1.1 — 복약가이드 주의사항/생활습관 빈 응답 fallback 보강.
 # 기존 v1.0 캐시에 빈 precautions/guides가 저장돼 있으면 최신 생성 로직을 타지 않아
 # 화면에 계속 "없음"처럼 보일 수 있으므로 기본 데이터 버전을 올려 자연스럽게 무효화한다.
-GUIDE_DATA_VERSION = os.environ.get("GUIDE_DATA_VERSION", "v1.1")
+# [2026-07-23] v1.2 — lifestyle_guide.guides[].guide(자유 텍스트)를 diet/exercise/other ×
+# recommended/avoid 구조로 바꿨다. v1.1 이하 캐시는 옛 모양(guide: str)이라 새 프론트가
+# 못 읽으므로 버전을 올려 무효화한다.
+GUIDE_DATA_VERSION = os.environ.get("GUIDE_DATA_VERSION", "v1.2")
 GUIDE_CACHE_TTL_DAYS = int(os.environ.get("GUIDE_CACHE_TTL_DAYS", "7"))
 
 
@@ -141,10 +144,20 @@ def _fake_guide_payload(ocr_items: Sequence[OcrResult]) -> tuple[dict, dict, lis
             for item in ocr_items
         ]
     }
+    # [2026-07-23 수정] 실제 파이프라인과 같은 모양(guides[].diet/exercise/other × recommended/
+    # avoid)으로 맞춰서, 프론트가 stub/real 두 가지 모양을 따로 방어할 필요가 없게 했다.
     lifestyle_guide = {
         "diagnosis": ocr_items[0].diagnosis,
-        "diet": {"avoid": ["짠 음식"], "drug_specific": []},
-        "exercise": {"type": "가벼운 걷기", "duration": "30분", "intensity": "낮음"},
+        "guides": [
+            {
+                "diagnosis": ocr_items[0].diagnosis,
+                "diet": {"recommended": ["싱겁게 먹기"], "avoid": ["짠 음식"]},
+                "exercise": {"recommended": ["가벼운 걷기 30분"], "avoid": []},
+                "other": {"recommended": ["금연"], "avoid": ["과도한 음주"]},
+                "review_required": False,
+                "review_reason": None,
+            }
+        ],
     }
     source_refs = [{"title": "테스트 출처", "url": "https://example.com"}]
     return medication_guide, lifestyle_guide, source_refs
@@ -187,16 +200,19 @@ def _generate_via_rag(ocr_items: Sequence[OcrResult]) -> tuple[dict, dict, list]
             for g in guides
         ]
     }
-    # [2026-07-21 회의 반영] "guides"는 이제 문자열 배열이 아니라 진단명별 {diagnosis, guide}
-    # 객체 배열이다 — 여러 약이 같은 진단명을 공유해도 그 진단명의 안내는 한 번만 들어있다.
-    # 최상위 "diagnosis"는 프론트가 헤드라인으로 쓰는 대표 진단명(첫 번째 실제 진단명, 전부
-    # 미상이면 빈 문자열)이다.
+    # [2026-07-21 회의 반영] "guides"는 진단명별 객체 배열이다 — 여러 약이 같은 진단명을
+    # 공유해도 그 진단명의 안내는 한 번만 들어있다. 최상위 "diagnosis"는 프론트가 헤드라인으로
+    # 쓰는 대표 진단명(첫 번째 실제 진단명, 전부 미상이면 빈 문자열)이다.
+    # [2026-07-23 수정] 자유 텍스트 한 단락(guide)이던 걸 diet/exercise/other × recommended/
+    # avoid로 구조화했다 — MedGuide.tsx "생활습관" 탭이 이 모양 그대로 렌더링한다.
     lifestyle_guide = {
         "diagnosis": next((lr.diagnosis for lr in lifestyle_results if lr.diagnosis), ""),
         "guides": [
             {
                 "diagnosis": lr.diagnosis,
-                "guide": lr.guide,
+                "diet": lr.diet.model_dump(),
+                "exercise": lr.exercise.model_dump(),
+                "other": lr.other.model_dump(),
                 "review_required": lr.review_required,
                 "review_reason": lr.review_reason,
             }

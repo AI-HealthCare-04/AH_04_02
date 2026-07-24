@@ -20,6 +20,7 @@ from rag.schemas import (
     DurTabooInfo,
     GuideResponse,
     HiraDrugMasterEntry,
+    LifestyleCategoryGuide,
     LifestyleGuideResult,
     SourceRef,
 )
@@ -456,15 +457,22 @@ def test_generate_lifestyle_guide_for_diagnosis_dry_run_uses_context_text():
     assert result.diagnosis == "고혈압"
     assert len(result.source_refs) == 1
     assert result.source_refs[0].guideline_id == "htn-diet-1"
-    assert "소금" in result.guide
+    assert "소금" in " ".join(result.other.recommended)
     assert "dry_run" in result.review_flags
 
 
 def test_generate_lifestyle_guide_falls_back_to_context_when_llm_returns_empty_text():
-    """LLM이 lifestyle_guide를 빈 문자열로 보내도 검색된 생활지침 문구를 화면에 표시한다."""
+    """LLM이 diet/exercise/other를 전부 비워 보내도 검색된 생활지침 문구를 화면에 표시한다."""
 
     class FakeResponse:
-        content = json.dumps({"lifestyle_guide": "", "source_refs": [1]})
+        content = json.dumps(
+            {
+                "diet": {"recommended": [], "avoid": []},
+                "exercise": {"recommended": [], "avoid": []},
+                "other": {"recommended": [], "avoid": []},
+                "source_refs": [1],
+            }
+        )
 
     class FakeChat:
         def invoke(self, _messages):
@@ -479,7 +487,7 @@ def test_generate_lifestyle_guide_falls_back_to_context_when_llm_returns_empty_t
     ):
         result = generate_lifestyle_guide_for_diagnosis("고혈압")
 
-    assert "관절염은 관절에 염증이 생기는 질환입니다." in result.guide
+    assert "관절염은 관절에 염증이 생기는 질환입니다." in " ".join(result.other.recommended)
     assert result.source_refs[0].source == "질병관리청 국가건강정보포털"
     assert "empty_lifestyle_fallback" in result.review_flags
 
@@ -504,7 +512,7 @@ def test_generate_lifestyle_guide_for_diagnosis_falls_back_safely_without_diagno
     assert result.diagnosis == ""
     assert result.review_required is True
     assert "no_diagnosis" in result.review_flags
-    assert "진단명" in result.guide
+    assert "진단명" in " ".join(result.other.recommended)
 
 
 def test_generate_lifestyle_guide_for_diagnosis_falls_back_safely_when_no_context_found():
@@ -747,7 +755,8 @@ def test_generate_guides_from_medications_generates_lifestyle_once_per_unique_di
             drug_name=medication["drug_name"]
         )
         mock_generate_lifestyle.side_effect = lambda diagnosis: LifestyleGuideResult(
-            diagnosis=diagnosis or "", guide=f"{diagnosis} 생활습관 안내"
+            diagnosis=diagnosis or "",
+            other=LifestyleCategoryGuide(recommended=[f"{diagnosis} 생활습관 안내"]),
         )
         guides, lifestyle_guides = generate_guides_from_medications(medications)
 

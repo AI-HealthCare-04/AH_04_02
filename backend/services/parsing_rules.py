@@ -85,6 +85,22 @@ DRUG_NAME_RE = re.compile(
 # [2026-07-19] "50/1000mg"(복합제, 예: 글리메피리드/메트포르민)처럼 슬래시로 묶인 두 성분
 # 용량도 하나로 인식 — 뒷 숫자에 붙은 단위 하나만 mg/g/ml/%로 보고, 앞 숫자는 그대로 살린다.
 DOSAGE_RE       = re.compile(r"(\d+(?:\.\d+)?(?:\s*/\s*\d+(?:\.\d+)?)?)\s*(mg|g|ml|%)", re.IGNORECASE)
+
+# [2026-07-23 추가] "1회 복용량"(환자가 한 번에 몇 개/단위를 먹는지 — 예: "1정", "0.5정",
+# "2캡슐")은 DOSAGE_RE가 잡는 mg/g/ml/%(주성분 함량, 약품명에 붙어 나옴)와 다른 정보다.
+# 실제 처방전엔 보통 (1) "1회 1정"처럼 텍스트로 풀어 쓰거나, (2) "1T"/"1C" 같은 약식
+# 표기로 나오거나, (3) 공식 표 포맷에서 단위 없이 "1.00"처럼 숫자만 있는 컬럼으로 나온다.
+DOSE_QTY_UNITS = "정|캡슐|캅셀|포|병|환"
+DOSE_QTY_UNIT_RE   = re.compile(rf"(\d+(?:\.\d+)?)\s*({DOSE_QTY_UNITS})")
+DOSE_QTY_ABBREV_RE = re.compile(r"(?<![A-Za-z])(\d+(?:\.\d+)?)\s*(T|C)\b")  # 1T(정)/1C(캡슐) 약식 표기
+# 약품명(DRUG_NAME_RE group 1)이 실제로 끝나는 제형 — (3) 케이스에서 단위 없는 숫자 컬럼에
+# 이 제형을 붙여 "1.00" + "정" → "1정"을 완성한다.
+DRUG_FORM_RE = re.compile(rf"({DOSE_QTY_UNITS}|주|산|시럽|액|크림|연고|로션|겔|패취)$")
+# 단위 없는 순수 숫자 컬럼용 — 날짜/시각(-,:,.) 및 mg류/일/회/분/시/초 단위에 이미 붙은
+# 숫자는 제외한다(그런 숫자는 함량·횟수·일수지 복용량이 아니다).
+_BARE_QTY_RE = re.compile(
+    r"(?<![./\d:-])(\d+(?:\.\d+)?)(?!\s*(?:mg|g|ml|%|일|회|분|시|초)|[./\d:-])"
+)
 KOR_FREQ_RE     = re.compile(r"(?:1\s*일|하루)\s*(\d+)\s*(?:회|번)")  # 1 일 3 회 같은 비표준 공백 허용
 BARE_FREQ_RE    = re.compile(r"(?<!\d)(\d+)\s*회(?!\s*[가-힣\)])")
 ABBREV_FREQ_RE  = re.compile(r"\b(qd|od|bid|tid|qid|prn|hs|ac|pc)\b", re.IGNORECASE)
@@ -128,6 +144,31 @@ def extract_dosage(text: str) -> str:
         return ""
     # "50 / 1000mg"처럼 슬래시 앞뒤에 공백이 있어도 "50/1000mg"로 통일해서 저장한다.
     return f"{m.group(1).replace(' ', '')}{m.group(2)}"
+
+
+def extract_dose_quantity(text: str, form: str = "") -> str:
+    """1회 복용량 — "1정", "0.5정", "2캡슐"처럼 환자가 한 번에 먹는 개수/단위.
+
+    1) "1회 1정"/"1정"처럼 텍스트에 단위가 그대로 있으면 그걸 쓴다.
+    2) "1T"/"1C" 같은 약식 표기(T=정, C=캡슐)를 본다.
+    3) 그래도 없으면 단위 없이 숫자만 있는 컬럼(예: "1.00")을 찾아, 약품명의 제형(form,
+       예: "정"/"캡슐")을 붙여 완성한다 — form이 없으면 조합할 수 없어 빈 문자열을 반환한다.
+    """
+    m = DOSE_QTY_UNIT_RE.search(text)
+    if m:
+        return f"{m.group(1)}{m.group(2)}"
+    m = DOSE_QTY_ABBREV_RE.search(text)
+    if m:
+        unit = "정" if m.group(2).upper() == "T" else "캡슐"
+        return f"{m.group(1)}{unit}"
+    if form:
+        m = _BARE_QTY_RE.search(text)
+        if m:
+            qty = m.group(1)
+            if "." in qty and float(qty) == int(float(qty)):
+                qty = str(int(float(qty)))  # "1.00" → "1" (소수부가 전부 0이면 정수로)
+            return f"{qty}{form}"
+    return ""
 
 
 def _dm_dosage(dm: "re.Match") -> str:
@@ -302,7 +343,6 @@ def _parse_official_format(text: str) -> list:
         dm = DRUG_NAME_RE.search(seg)
         if not dm:
             continue
-        dosage = _dm_dosage(dm) or extract_dosage(seg)
         # [2026-07-18] 약품명에 제형(정/캡슐 등)과 용량을 그대로 남긴다 — "암로디핀"이
         # 아니라 "암로디핀정 5mg"까지가 그 약을 특정하는 실제 이름이라, e약은요·HIRA
         # 매칭에도 이쪽이 더 정확하다.
@@ -310,6 +350,12 @@ def _parse_official_format(text: str) -> list:
 
         post_raw = seg[dm.end():]
         post = post_raw.split("■")[0]
+        # [2026-07-23 수정] dosage는 이제 "1회 복용량"(예: "1정") — 약품명의 제형을
+        # 이 약의 단위로 보고, post(약품명 뒤 텍스트, 여기 "1회 투약량" 컬럼 값이 있다)에서
+        # 수량을 찾는다. mg 등 성분 함량(_dm_dosage/extract_dosage)은 더 이상 dosage로
+        # 쓰지 않는다 — 그건 이미 drug_name에 그대로 남아있다.
+        form_m = DRUG_FORM_RE.search(dm.group(1))
+        dosage = extract_dose_quantity(post, form_m.group(1) if form_m else "")
         # 날짜(2026-07-09)·시각(10:00) 앞뒤 숫자를 col_nums에서 제외하기 위해
         # 기존 패턴에 '-' ':' 추가
         col_nums = re.findall(
@@ -361,10 +407,11 @@ def _parse_abbrev_format(text: str) -> list:
         if not dm:
             continue
         drug_name = dm.group(1) + (f" {_dm_dosage(dm)}" if dm.group(2) else "")
+        form_m = DRUG_FORM_RE.search(dm.group(1))
         results.append({
             "drug_name":  drug_name,
             "drug_code":  "",
-            "dosage":     _dm_dosage(dm) or extract_dosage(item),
+            "dosage":     extract_dose_quantity(item[dm.end():], form_m.group(1) if form_m else ""),
             "frequency":  extract_frequency(item),
             "total_days": extract_days(item),
             "drug_class": lookup_drug_class(drug_name),
@@ -380,10 +427,11 @@ def _parse_list_format(text: str) -> list:
         if not dm:
             continue
         drug_name = dm.group(1) + (f" {_dm_dosage(dm)}" if dm.group(2) else "")
+        form_m = DRUG_FORM_RE.search(dm.group(1))
         results.append({
             "drug_name":  drug_name,
             "drug_code":  "",
-            "dosage":     _dm_dosage(dm) or extract_dosage(item),
+            "dosage":     extract_dose_quantity(item[dm.end():], form_m.group(1) if form_m else ""),
             "frequency":  extract_frequency(item),
             "total_days": extract_days(item),
             "drug_class": lookup_drug_class(drug_name),
@@ -444,13 +492,24 @@ def _parse_table_format(text: str) -> list:
         tail = tail[:diag_m.start()]
     day_nums = re.findall(r"(?<![.\d])(\d+)(?![.\d]|mg|g|ml|일|분)", tail)
 
+    # [2026-07-23 추가] "1회 복용량"(예: "1정", "1T") — 단위가 붙은 수량 표기만 위치 순으로
+    # 모아 약품 순서에 매핑한다. 단위 없는 숫자 컬럼(공식 포맷의 "1.00" 같은)은 이 포맷에서는
+    # 어느 약의 것인지 위치 정보가 약해 신뢰도가 낮으므로 시도하지 않는다.
+    qty_entries: list[tuple[int, str]] = []
+    for m in DOSE_QTY_UNIT_RE.finditer(text):
+        qty_entries.append((m.start(), f"{m.group(1)}{m.group(2)}"))
+    for m in DOSE_QTY_ABBREV_RE.finditer(text):
+        qty_entries.append((m.start(), f"{m.group(1)}{'정' if m.group(2).upper() == 'T' else '캡슐'}"))
+    qty_entries.sort()
+    dose_quantities = [qty for _, qty in qty_entries]
+
     results = []
     for i, dm in enumerate(drug_matches):
         drug_name = dm.group(1) + (f" {_dm_dosage(dm)}" if dm.group(2) else "")
         results.append({
             "drug_name":  drug_name,
             "drug_code":  "",
-            "dosage":     _dm_dosage(dm),
+            "dosage":     dose_quantities[i] if i < len(dose_quantities) else "",
             "frequency":  frequencies[i] if i < len(frequencies) else "",
             "total_days": f"{day_nums[i]}일" if i < len(day_nums) else "",
             "drug_class": lookup_drug_class(drug_name),

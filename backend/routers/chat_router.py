@@ -313,13 +313,25 @@ def _summarize_source_refs(source_refs_json: str) -> list[str]:
     return lines
 
 
-def _summarize_lifestyle_guide(lifestyle_guide_json: str) -> list[str]:
-    """마찬가지로 스텁(diet/exercise 구조) vs 실제 파이프라인(guides 리스트) 두 모양 다 처리.
+def _summarize_lifestyle_category(category: object, label: str) -> str:
+    if not isinstance(category, dict):
+        return ""
+    parts = []
+    if category.get("recommended"):
+        parts.append(f"{label} 권장: " + ", ".join(category["recommended"]))
+    if category.get("avoid"):
+        parts.append(f"{label} 비권장: " + ", ".join(category["avoid"]))
+    return " / ".join(parts)
 
-    [2026-07-21 회의 반영] 실제 파이프라인의 "guides"는 이제 문자열 배열이 아니라 진단명별
-    {diagnosis, guide} 객체 배열이다(의약품별이 아니라 진단명 기준으로 생성이 바뀌었기 때문) —
-    각 항목의 guide 텍스트만 뽑아 합친다. 옛 문자열 배열 항목이 섞여 들어와도(구 캐시 등)
-    죽지 않도록 문자열 원소는 그대로 쓴다.
+
+def _summarize_lifestyle_guide(lifestyle_guide_json: str) -> list[str]:
+    """진단명별 생활습관 안내(guides[])를 챗봇 컨텍스트용 요약으로 만든다.
+
+    [2026-07-23 수정] "guides"는 이제 항목당 자유 텍스트(guide: str) 하나가 아니라
+    diet(식사)/exercise(운동)/other(그 외) × recommended(권장)/avoid(비권장)로 구조화됐다.
+    이 변경 전에 이미 GuideResult에 저장된 옛 모양(guide: str, 또는 그보다 더 옛날의
+    문자열 배열·최상위 diet/exercise)이 있는 처방전 기록도 있으므로, 그 모양들도 죽지 않고
+    그대로 요약하도록 계속 방어한다.
     """
     try:
         lifestyle_guide = json.loads(lifestyle_guide_json)
@@ -328,11 +340,27 @@ def _summarize_lifestyle_guide(lifestyle_guide_json: str) -> list[str]:
 
     guides = lifestyle_guide.get("guides")
     if guides:
-        texts = [g.get("guide", "") if isinstance(g, dict) else str(g) for g in guides]
-        texts = [t for t in texts if t]
-        if texts:
-            return ["[생활습관 안내] " + " ".join(texts)]
+        lines: list[str] = []
+        for g in guides:
+            if not isinstance(g, dict):
+                if g:
+                    lines.append(f"[생활습관 안내] {g}")  # 아주 옛 캐시(문자열 배열)
+                continue
+            if "guide" in g:
+                if g["guide"]:
+                    lines.append(f"[생활습관 안내] {g['guide']}")  # v1.1 이하 자유 텍스트
+                continue
+            texts = [
+                text
+                for key, label in (("diet", "식사"), ("exercise", "운동"), ("other", "그 외"))
+                if (text := _summarize_lifestyle_category(g.get(key), label))
+            ]
+            if texts:
+                lines.append(f"[생활습관 안내:{g.get('diagnosis') or ''}] " + " / ".join(texts))
+        if lines:
+            return lines
 
+    # 최상위 diet/exercise 고정 JSON(stub 초기 모양) 방어.
     lines = []
     diet = lifestyle_guide.get("diet") or {}
     exercise = lifestyle_guide.get("exercise") or {}

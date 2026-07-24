@@ -412,3 +412,15 @@ for raw, norm in zip(raw_pool, norm_pool):
 | **해결** | `formatBirthDateInput()`을 추가해 입력값에서 숫자만 추출한 뒤 4자리(연) 뒤, 6자리(연+월) 뒤에 "."을 붙여 재조립하도록 했다. 8자리(연월일)를 넘는 입력은 잘라낸다. 매 입력마다 숫자만 남기고 다시 조립하는 방식이라 백스페이스로 지울 때도 자연스럽게 재적용된다. |
 | **테스트/검증** | `npm run build`, `npm run lint` 통과. |
 | **핵심 패턴** | 자동 구분자 삽입은 "매번 숫자만 추출 → 자리수 기준으로 구분자를 다시 붙여 조립"하는 방식이 커서 위치를 직접 추적하는 것보다 단순하고 backspace에도 안전하다. 다만 구분자 바로 뒤에서 backspace를 누르면 자리수가 그대로라 아무 변화가 없어 보일 수 있는 건 이 방식의 알려진 한계다. |
+
+---
+
+| 날짜 | 2026.07.23 |
+|---|---|
+| **작성자** | 김영혜 |
+| **이슈** | (1) 처방전 등록 시 "1회 투약량"이 실제로는 성분 함량(mg)이라 "환자가 한 번에 정/캡슐 몇 개를 먹는지"(1회 복용량)를 알 수 없었음 (2) 처방전 확인 화면에서 복용시간대를 하나만 골라도 그 즉시 "확인 완료"로 카드가 접혀, "1일 3회"처럼 여러 시간대를 골라야 하는 경우 나머지를 고르기 전에 잠겨버림 (3) 복약 가이드의 "주의사항" 탭이 복약 지도 탭(약물별 부작용)과 내용이 겹치고, "생활습관" 탭은 진단명당 자유 텍스트 한 단락이라 식사/운동/그 외, 권장/비권장 구분이 안 됨 |
+| **발생 위치** | `backend/services/parsing_rules.py`, `backend/services/ocr_interface.py`, `backend/models.py`, `frontend/src/pages/PrescriptionReview.tsx`, `rag/rag/schemas.py`, `rag/rag/rag_chain.py`, `backend/routers/rag_router.py`, `backend/routers/chat_router.py`, `frontend/src/api/records.ts`, `frontend/src/pages/MedGuide.tsx`, `frontend/src/pages/Result.tsx` |
+| **원인** | (1) `dosage` 필드는 `DOSAGE_RE`/`_dm_dosage`로 약품명에 붙은 mg/g/ml/% 성분 함량만 추출했고, 실제 처방전에 있는 "1회 복용량"(정/캡슐 개수, 예: "1.00", "1정", "1T")은 어디서도 추출하지 않았다 — 공식 포맷의 수량 컬럼은 소수점 때문에 기존 `col_nums` 정규식에서 오히려 제외되고 있었다. (2) `PrescriptionReview.tsx`의 `addDoseTiming`/`addCustomTime`/`addInterval`이 시간대를 추가할 때마다 `maybeConfirm(id)`를 호출해, `computeIssues`가 복용시간을 검사하지 않는데도(필수 항목이 아님) 첫 클릭 즉시 카드가 완료 처리로 접혔다. (3) `LifestyleGuideResult.guide`가 진단명당 자유 텍스트 한 단락이라 애초에 카테고리·권장/비권장 구분이 스키마에 없었고, "주의사항" 탭은 복약 지도 탭에서 약을 눌러 들어가는 DrugDetail.tsx와 같은 내용(약물별 부작용)을 중복 표시하고 있었다. |
+| **해결** | (1) `extract_dose_quantity()`를 추가해 "1회 1정"/"1T"(약식) 같은 명시적 단위 표기를 우선 인식하고, 단위 없이 숫자만 있는 컬럼(예: "1.00")은 약품명의 제형(정/캡슐 등)을 붙여 완성하도록 했다. `official`/`abbrev`/`list`/`table` 네 포맷 파서 전부에 적용하고, 프론트 라벨/검증 메시지를 "1회 복용량"으로 바꿨다. (2) 시간대 추가 함수들에서 `maybeConfirm` 호출을 제거하고, "복용시간 확인 완료" 버튼을 새로 만들어 사용자가 다 고른 뒤 직접 눌러야 확정되게 했다. (3) "주의사항" 탭을 삭제하고(약물별 부작용은 복약 지도 → DrugDetail.tsx에서 계속 볼 수 있음), `LifestyleGuideResult`를 `diet`/`exercise`/`other` × `recommended`/`avoid`로 구조화했다(LLM 프롬프트·Pydantic 스키마·`rag_router.py`의 stub/실제 페이로드·`chat_router.py`의 챗봇 컨텍스트 요약·프론트 타입/렌더링까지 전부 반영). 챗봇 컨텍스트와 프론트 정규화 로직은 이번 변경 이전에 이미 저장된 옛 모양(자유 텍스트 `guide`, 더 옛 문자열 배열, 가장 옛 최상위 `diet`/`exercise` 고정 JSON)도 죽지 않고 요약하도록 하위호환을 유지했다. `GUIDE_DATA_VERSION`을 v1.2로 올려 옛 캐시를 자연스럽게 무효화했다. |
+| **테스트/검증** | `backend/tests/test_parsing_rules_dose_quantity.py` 신규(공식/약봉투/약식 포맷 각각 실제 mock 텍스트로 검증). `rag/tests/test_rag_chain.py`·`backend/tests/test_chat_router_context.py` 관련 테스트를 새 구조에 맞게 수정. 백엔드 전체 335개, RAG 전체 76개 통과. `npm run build`/`npm run lint` 통과. `uv run ruff check`로 수정 파일 전부 확인(무관한 기존 파일의 E402는 베이스라인). |
+| **핵심 패턴** | "필수 아닌 항목"이라도 그 항목을 채우는 액션(시간대 추가 등)이 다른 상태(확인 완료)를 자동으로 건드리면 안 된다 — 액션과 확정은 분리하고 명시적 완료 버튼을 둔다. LLM 응답 스키마를 자유 텍스트에서 구조화된 형태로 바꿀 때는 프롬프트·Pydantic 스키마·저장/직렬화 계층·소비하는 화면(여러 개일 수 있음)·캐시 버전을 한 세트로 보고, 이미 저장된 옛 모양 데이터에 대한 하위호환 폴백을 반드시 남긴다. |

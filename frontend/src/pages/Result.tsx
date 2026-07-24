@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import NavBar from "../components/NavBar";
-import { formatUniqueSourceRefs, type RecordResult } from "../api/records";
+import { formatUniqueSourceRefs, type LifestyleCategory, type RecordResult } from "../api/records";
 import { C } from "../theme";
 import { getCurrentUserName } from "../lib/session";
 
@@ -17,6 +17,15 @@ const guideTextCls = "text-[13px] leading-relaxed";
 const chatBtnCls = "w-full p-4 text-[15px] font-semibold rounded-xl cursor-pointer";
 
 const pageStyle = { background: C.ivory, fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" };
+
+/** [2026-07-23 추가] 생활습관 카테고리(식사/운동/그 외)의 권장·비권장을 요약 한 줄씩으로 압축 —
+ * 이 화면은 업로드 직후 요약 카드라 MedGuide.tsx처럼 목록 전체를 펼치지 않는다. */
+function lifestyleCategorySummary(label: string, category: LifestyleCategory): string {
+  const parts: string[] = [];
+  if (category.recommended.length > 0) parts.push(`${label} 권장: ${category.recommended.join(", ")}`);
+  if (category.avoid.length > 0) parts.push(`${label} 비권장: ${category.avoid.join(", ")}`);
+  return parts.join(" · ");
+}
 
 export default function Result() {
   const navigate = useNavigate();
@@ -143,36 +152,24 @@ export default function Result() {
 
             <div className={cardCls} style={cardStyle}>
               <h2 className={cardTitleCls} style={{ color: C.dark }}>🌿 생활습관 개선 가이드</h2>
-              {guide.lifestyle_guide.guides?.length ? (
-                // [2026-07-21 회의 반영] 실제 파이프라인 모양 — 진단명별 생활습관 안내(약별이 아님)
-                guide.lifestyle_guide.guides.map((entry, i) => (
-                  <div key={i} className={guideItemCls} style={{ borderColor: C.bubbleBg }}>
-                    <p className={guideLabelCls} style={{ color: C.dark }}>🌿 {entry.diagnosis || "생활습관 안내"}</p>
-                    <p className={guideTextCls} style={{ color: C.dark }}>{entry.guide}</p>
-                  </div>
-                ))
+              {guide.lifestyle_guide.guides.length > 0 ? (
+                guide.lifestyle_guide.guides.map((entry, i) => {
+                  const summary = [
+                    lifestyleCategorySummary("식사", entry.diet),
+                    lifestyleCategorySummary("운동", entry.exercise),
+                    lifestyleCategorySummary("그 외", entry.other),
+                  ]
+                    .filter(Boolean)
+                    .join(" · ");
+                  return (
+                    <div key={i} className={guideItemCls} style={{ borderColor: C.bubbleBg }}>
+                      <p className={guideLabelCls} style={{ color: C.dark }}>🌿 {entry.diagnosis || "생활습관 안내"}</p>
+                      <p className={guideTextCls} style={{ color: C.dark }}>{summary || "안내할 내용이 없어요."}</p>
+                    </div>
+                  );
+                })
               ) : (
-                // stub 모양 — 구조화된 diet/exercise
-                <>
-                  <div className={guideItemCls} style={{ borderColor: C.bubbleBg }}>
-                    <p className={guideLabelCls} style={{ color: C.dark }}>🥗 식이</p>
-                    <p className={guideTextCls} style={{ color: C.dark }}>
-                      피해야 할 음식: {guide.lifestyle_guide.diet?.avoid.join(", ") || "없음"}
-                    </p>
-                    {!!guide.lifestyle_guide.diet?.drug_specific.length && (
-                      <p className={guideTextCls} style={{ color: C.dark }}>
-                        {guide.lifestyle_guide.diet.drug_specific.join(" ")}
-                      </p>
-                    )}
-                  </div>
-                  <div className={guideItemCls} style={{ borderColor: C.bubbleBg }}>
-                    <p className={guideLabelCls} style={{ color: C.dark }}>🏃 운동</p>
-                    <p className={guideTextCls} style={{ color: C.dark }}>
-                      {guide.lifestyle_guide.exercise?.type} · {guide.lifestyle_guide.exercise?.duration} ·{" "}
-                      {guide.lifestyle_guide.exercise?.intensity}
-                    </p>
-                  </div>
-                </>
+                <p className={guideTextCls} style={{ color: C.muted }}>생활습관 안내가 아직 없어요.</p>
               )}
               {guide.source_refs.length > 0 && (
                 <div className="mt-3 pt-2.5 border-t" style={{ borderColor: C.bubbleBg }}>
