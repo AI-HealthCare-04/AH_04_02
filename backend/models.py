@@ -358,6 +358,23 @@ class MedicationSchedule(SQLModel, table=True):
     record_id: int | None = Field(default=None, foreign_key="medical_records.id", index=True)
 
 
+# [2026-07-24 추가] 이 일정의 알림을 받을 보호자를 일정별로 명시적으로 골라둔다 —
+# 예전엔 caregiver_alert=True면 "환자와 연결된 caregiver 중 가장 먼저 연결된 1명"에게만
+# 갔다(core/scheduler.py._recipients 참고, 실제 주/부 보호자 구분이 없어 생긴 임의의
+# 단순화였음) — 2번째·3번째로 연결된 보호자·지원인력에게는 애초에 안 갔고, 화면 라벨
+# "보호자에게도 알림"도 실제로 누가 받는지 보여주지 못했다. 이 테이블에 행이 있으면
+# 그 caregiver_id들에게만, 행이 하나도 없으면(과거 데이터·아직 이 화면을 안 거친 일정)
+# 이 환자와 연결된 caregiver 전원에게 보낸다(안전한 방향의 기본값 — 아무도 못 받는
+# 것보다 전원이 받는 게 낫다는 판단). schedule.caregiver_alert가 False면 이 테이블과
+# 무관하게 아무에게도 안 감(기존 kill switch 그대로 유지).
+class ScheduleCaregiverAlert(SQLModel, table=True):
+    __tablename__ = "schedule_caregiver_alerts"
+
+    id: int | None = Field(default=None, primary_key=True)
+    schedule_id: int = Field(foreign_key="medication_schedules.id", index=True)
+    caregiver_id: int = Field(foreign_key="caregivers.id", index=True)
+
+
 # ── 복약 기록 (담당: 박소정) ──
 class MedicationLog(SQLModel, table=True):
     __tablename__ = "medication_logs"

@@ -291,6 +291,12 @@ export async function createSchedule(payload: {
   dose_timing?: string | null;
   caregiver_alert?: boolean;
   memo?: string;
+  // [2026-07-24 추가] 이 일정 알림을 받을 caregiver id 목록 — 안 보내거나 빈 배열([])이면
+  // 백엔드가 연결된 caregiver 전원에게 보낸다(비었다는 것만으로는 "아직 안 골랐다"와
+  // "일부러 0명"을 구분할 수 없어서). "정말 아무에게도 안 보낸다"를 표현하려면
+  // caregiver_alert도 false로 같이 보내야 한다 — Schedule.tsx는 체크박스를 모두 해제하면
+  // 실제로 그렇게 두 값을 함께 보낸다.
+  alert_caregiver_ids?: number[];
 }) {
   const { data } = await monitoringClient.post("/monitoring/schedules", payload);
   return data;
@@ -309,6 +315,10 @@ export interface Schedule {
   memo: string | null;
   active: boolean;
   created_at: string;
+  // [2026-07-24 추가] 이 일정의 알림을 실제로 받는 caregiver id 목록 — 명시적으로 고른
+  // 적 없으면 서버가 연결된 caregiver 전원을 그대로 채워서 돌려준다(실제 발송 대상과
+  // 항상 일치, core/schedule_alerts.py.effective_alert_caregiver_ids 참고).
+  alert_caregiver_ids: number[];
 }
 
 export async function getSchedules(patientId: number, activeOnly = false) {
@@ -327,6 +337,7 @@ export async function updateSchedule(
     caregiver_alert?: boolean;
     memo?: string;
     active?: boolean;
+    alert_caregiver_ids?: number[];
   }
 ) {
   const { data } = await monitoringClient.patch<Schedule>(

@@ -7,9 +7,11 @@ import {
   createSchedule,
   deleteSchedule,
   getKnownDrugs,
+  getPatientCaregivers,
   getPatients,
   getSchedules,
   updateSchedule,
+  type Caregiver,
   type Schedule,
 } from "../api/monitoring";
 import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
@@ -31,7 +33,15 @@ interface DrugGroup {
   ids: number[];
   entries: { id: number; time: string; doseTiming: string | null }[];
   active: boolean;
-  caregiverAlert: boolean;
+  // [2026-07-24 수정] 단순 on/off 대신 실제로 알림을 받는 caregiver id 목록 — "보호자에게도
+  // 알림"이 실제로는 첫 연결자 1명에게만 갔던 문제(REQ 없음, 팀 요청)를 고쳐서 이름으로
+  // 직접 여러 명을 고를 수 있게 한다.
+  alertCaregiverIds: number[];
+}
+
+/** id → 이름 표시용 — 연결이 이미 끊긴 caregiver_id가 옛 일정에 남아있을 수 있어 폴백 문구를 둔다. */
+function caregiverName(caregivers: Caregiver[], id: number): string {
+  return caregivers.find((c) => c.id === id)?.name ?? "연결 해제된 보호자";
 }
 
 /** axios 에러에서 백엔드가 내려준 실제 사유(detail)를 뽑아 표시 — "저장이 안 돼요"로만 뭉개지 않기 위함 */
@@ -75,7 +85,10 @@ export default function SchedulePage() {
   const [entries, setEntries] = useState<TimeEntry[]>([
     { key: nextKey(), time: "08:00", doseTiming: DOSE_TIMINGS[1] },
   ]);
-  const [caregiverAlert, setCaregiverAlert] = useState(true);
+  // [2026-07-24 추가] 연결된 보호자 목록 + 이번 일정에서 체크한 id들. 기본값(새 일정 추가
+  // 시)은 연결된 전원 체크 — 아무도 놓치지 않는 쪽을 기본으로 하고, 필요하면 사용자가 해제한다.
+  const [caregivers, setCaregivers] = useState<Caregiver[]>([]);
+  const [alertCaregiverIds, setAlertCaregiverIds] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
   const [modalError, setModalError] = useState("");
 
@@ -87,13 +100,15 @@ export default function SchedulePage() {
 
   const load = async (pid: number) => {
     try {
-      const [scheduleData, drugData, patients] = await Promise.all([
+      const [scheduleData, drugData, patients, caregiverData] = await Promise.all([
         getSchedules(pid),
         getKnownDrugs(pid),
         getPatients(),
+        getPatientCaregivers(pid),
       ]);
       setSchedules(scheduleData);
       setKnownDrugs(drugData);
+      setCaregivers(caregiverData);
       // [7/8 추가] 저장이 조용히 404로 실패하는 원인 방지 — patient_id가 이제 존재하지 않는
       // (예: app.db를 지운 뒤 옛 로그인 정보가 남아있는) 경우를 목록 조회 시점에 미리 알려줌
       setPatientValid(patients.some((p) => p.id === pid));
@@ -122,11 +137,13 @@ export default function SchedulePage() {
     for (const s of schedules) {
       const g =
         map.get(s.drug_name) ??
-        ({ drugName: s.drug_name, ids: [], entries: [], active: false, caregiverAlert: false } as DrugGroup);
+        ({ drugName: s.drug_name, ids: [], entries: [], active: false, alertCaregiverIds: [] } as DrugGroup);
       g.ids.push(s.id);
       g.entries.push({ id: s.id, time: s.time_slot, doseTiming: s.dose_timing });
       if (s.active) g.active = true;
-      if (s.caregiver_alert) g.caregiverAlert = true;
+      // 같은 약의 시간대별 일정은 항상 같은 caregiver 집합으로 만들어지지만(save() 참고),
+      // 혹시 어긋나도 빠뜨리지 않도록 합집합으로 모은다.
+      g.alertCaregiverIds = Array.from(new Set([...g.alertCaregiverIds, ...s.alert_caregiver_ids]));
       map.set(s.drug_name, g);
     }
     for (const g of map.values()) g.entries.sort((a, b) => a.time.localeCompare(b.time));
@@ -138,7 +155,8 @@ export default function SchedulePage() {
     setDrugMode(knownDrugs.length > 0 ? "select" : "custom");
     setDrugName(knownDrugs[0] ?? "");
     setEntries([{ key: nextKey(), time: "08:00", doseTiming: DOSE_TIMINGS[1] }]);
-    setCaregiverAlert(true);
+    // 기본값 = 연결된 보호자 전원 체크 — 아무도 놓치지 않는 쪽을 기본으로 둔다.
+    setAlertCaregiverIds(caregivers.map((c) => c.id));
     setModalError("");
     setModalOpen(true);
   };
@@ -148,9 +166,15 @@ export default function SchedulePage() {
     setDrugMode(knownDrugs.includes(group.drugName) ? "select" : "custom");
     setDrugName(group.drugName);
     setEntries(group.entries.map((e) => ({ key: nextKey(), time: e.time, doseTiming: e.doseTiming ?? DOSE_TIMINGS[1] })));
-    setCaregiverAlert(group.caregiverAlert);
+    setAlertCaregiverIds(group.alertCaregiverIds);
     setModalError("");
     setModalOpen(true);
+  };
+
+  const toggleAlertCaregiver = (caregiverId: number) => {
+    setAlertCaregiverIds((prev) =>
+      prev.includes(caregiverId) ? prev.filter((id) => id !== caregiverId) : [...prev, caregiverId]
+    );
   };
 
   const addTimeEntry = () => {
@@ -170,19 +194,6 @@ export default function SchedulePage() {
     setSchedules((prev) => prev.map((s) => (group.ids.includes(s.id) ? { ...s, active: next } : s)));
     try {
       await Promise.all(group.ids.map((id) => updateSchedule(id, { active: next })));
-    } catch (e) {
-      setError(describeError(e, "변경하지 못했어요."));
-      if (patientId != null) await load(patientId);
-    }
-  };
-
-  const toggleGroupAlert = async (group: DrugGroup) => {
-    const next = !group.caregiverAlert;
-    setSchedules((prev) =>
-      prev.map((s) => (group.ids.includes(s.id) ? { ...s, caregiver_alert: next } : s))
-    );
-    try {
-      await Promise.all(group.ids.map((id) => updateSchedule(id, { caregiver_alert: next })));
     } catch (e) {
       setError(describeError(e, "변경하지 못했어요."));
       if (patientId != null) await load(patientId);
@@ -261,7 +272,8 @@ export default function SchedulePage() {
             drug_name: name,
             time_slot: e.time,
             dose_timing: e.doseTiming,
-            caregiver_alert: caregiverAlert,
+            caregiver_alert: alertCaregiverIds.length > 0,
+            alert_caregiver_ids: alertCaregiverIds,
           })
         )
       );
@@ -385,9 +397,22 @@ export default function SchedulePage() {
                 </div>
                 {!selectMode && (
                   <div className="flex items-center gap-5 shrink-0">
-                    <div className="text-center">
-                      <p className="text-[11px] text-[#8A7E75] mb-1">보호자 알림</p>
-                      <Toggle on={g.caregiverAlert} onClick={() => toggleGroupAlert(g)} />
+                    <div className="text-center max-w-[140px]">
+                      <p className="text-[11px] text-[#8A7E75] mb-1">알림 받을 사람</p>
+                      <button
+                        type="button"
+                        onClick={() => openEditModal(g)}
+                        className="text-[12px] font-bold text-[#1E1A17] hover:underline truncate block"
+                        title={
+                          g.alertCaregiverIds.length > 0
+                            ? g.alertCaregiverIds.map((id) => caregiverName(caregivers, id)).join(", ")
+                            : "없음"
+                        }
+                      >
+                        {g.alertCaregiverIds.length > 0
+                          ? g.alertCaregiverIds.map((id) => caregiverName(caregivers, id)).join(", ")
+                          : "없음"}
+                      </button>
                     </div>
                     <div className="text-center">
                       <p className="text-[11px] text-[#8A7E75] mb-1">사용 여부</p>
@@ -539,12 +564,32 @@ export default function SchedulePage() {
               + 시간 추가
             </button>
 
-            <div className="flex items-start justify-between gap-3 mb-6 p-4 rounded-xl bg-[#F2E8D8]">
-              <div>
-                <p className="text-[14px] font-bold text-[#1E1A17]">보호자에게도 알림</p>
-                <p className="text-[12px] text-[#8A7E75] mt-0.5">복약 시간에 보호자에게도 알림을 전송합니다</p>
-              </div>
-              <Toggle on={caregiverAlert} onClick={() => setCaregiverAlert((v) => !v)} />
+            {/* [2026-07-24 수정] 예전엔 on/off 토글 하나뿐이라 실제로는 "가장 먼저 연결된
+                보호자 1명"에게만 갔다(REQ 없음, 팀 요청으로 수정) — 이제 연결된 사람 중
+                누구에게 보낼지 이름으로 직접 여러 명 고를 수 있다. */}
+            <div className="mb-6 p-4 rounded-xl bg-[#F2E8D8]">
+              <p className="text-[14px] font-bold text-[#1E1A17] mb-1">알림 받을 사람</p>
+              <p className="text-[12px] text-[#8A7E75] mb-3">복약 시간에 체크한 사람에게도 알림을 보내요.</p>
+              {caregivers.length === 0 ? (
+                <p className="text-[13px] text-[#8A7E75]">아직 연결된 보호자가 없어요.</p>
+              ) : (
+                <div className="space-y-2">
+                  {caregivers.map((c) => (
+                    <label
+                      key={c.id}
+                      className="flex items-center gap-2 text-[14px] text-[#1E1A17] cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={alertCaregiverIds.includes(c.id)}
+                        onChange={() => toggleAlertCaregiver(c.id)}
+                        className="w-4 h-4 accent-current"
+                      />
+                      {c.name}
+                    </label>
+                  ))}
+                </div>
+              )}
             </div>
 
             {modalError && <p className="text-[13px] text-[#D94F4F] mb-4">{modalError}</p>}
