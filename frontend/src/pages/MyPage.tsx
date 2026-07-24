@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ChevronRight } from "lucide-react";
 import NavBar from "../components/NavBar";
 import { getCaregivers, getPatients, type Caregiver, type Patient } from "../api/monitoring";
+import { computeAge, GENDER_LABEL } from "../lib/age";
 import { getCurrentCaregiverId, getCurrentPatientId } from "../lib/session";
 import { C } from "../theme";
 
@@ -44,6 +45,13 @@ export default function MyPage() {
   const roleLabel = caregiver
     ? { text: `보호자 (${relationLabel(caregiver.relation_type)})`, bg: `${C.terracottaLight}20`, color: C.terracotta }
     : { text: "복약관리 대상자", bg: `${C.success}20`, color: "#4A7A47" };
+  // [2026-07-24 추가] 환자 본인 프로필에 성별·나이 표시 — 회원가입 때 받은 생년월일로
+  // 만 나이를 계산한다. 보호자 계정엔 해당 없는 정보라 caregiver가 없을 때만 만든다.
+  const patientAge = patient ? computeAge(patient.birth_date) : null;
+  const patientGenderLabel = patient?.gender ? (GENDER_LABEL[patient.gender] ?? patient.gender) : null;
+  const patientMeta = !caregiver
+    ? [patientGenderLabel, patientAge != null ? `만 ${patientAge}세` : null].filter(Boolean).join(" · ")
+    : "";
 
   const patientMenu: MenuItem[] = [
     { label: "내 정보", icon: "🪪", to: "/mypage/info" },
@@ -96,12 +104,19 @@ export default function MyPage() {
             </div>
             <div>
               <p className="text-[19px] font-black" style={{ color: C.dark }}>{loading ? "..." : displayName}</p>
-              <span
-                className="inline-block px-3 py-1 rounded-full text-[12px] font-bold mt-1"
-                style={{ background: roleLabel.bg, color: roleLabel.color }}
-              >
-                {roleLabel.text}
-              </span>
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                <span
+                  className="inline-block px-3 py-1 rounded-full text-[12px] font-bold"
+                  style={{ background: roleLabel.bg, color: roleLabel.color }}
+                >
+                  {roleLabel.text}
+                </span>
+                {patientMeta && (
+                  <span className="text-[13px] font-semibold" style={{ color: C.muted }}>
+                    {patientMeta}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
           {patient?.note && !caregiver && (
