@@ -117,7 +117,7 @@ export default function MonitoringDashboard() {
           <div className="flex items-center gap-3 mb-7">
             <label className="text-[14px] font-bold" style={{ color: C.muted }}>대상자 선택</label>
             <select
-              value={patientId}
+              value={patientId ?? ""}
               onChange={(e) => {
                 const next = Number(e.target.value);
                 // [7/14] 다른 화면(Dashboard/Schedule/Notification/Connect/Check)도
