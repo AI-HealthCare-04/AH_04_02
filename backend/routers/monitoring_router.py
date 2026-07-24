@@ -35,6 +35,7 @@ from core.dependencies import (
     require_patient_access,
 )
 from core.relation_notices import create_relation_notice
+from core.schedule_alerts import effective_alert_caregiver_ids, linked_caregiver_ids
 from core.security import hash_phone, normalize_email
 from fastapi import APIRouter, Depends, HTTPException
 from models import (
@@ -47,6 +48,7 @@ from models import (
     NotificationLog,
     OcrResult,
     Patient,
+    ScheduleCaregiverAlert,
 )
 from pydantic import BaseModel
 from sqlmodel import Session, func, select
@@ -737,6 +739,13 @@ class ScheduleCreate(BaseModel):
     dose_timing: str | None = None  # [7/8 추가] 공복 / 아침 식후 / 점심 식전 / 점심 식후 / 저녁 식전 / 저녁 식후
     caregiver_alert: bool = True  # [7/8 추가]
     memo: str | None = None
+    # [2026-07-24 추가] 이 일정 알림을 받을 caregiver id 목록 — Schedule.tsx의 "알림 받을
+    # 사람" 체크박스에서 고른 이름들. None(안 보냄)이거나 빈 리스트([])면 "누가 골랐는지
+    # 서버가 확신할 수 없는" 상태라 안전한 쪽(연결된 caregiver 전원)으로 폴백한다
+    # (effective_alert_caregiver_ids 참고) — "명시적으로 아무에게도 안 보낸다"를 표현하려면
+    # caregiver_alert=False를 같이 보내야 한다(Schedule.tsx는 체크박스를 모두 해제하면
+    # caregiver_alert도 함께 False로 보낸다).
+    alert_caregiver_ids: list[int] | None = None
 
 
 class ScheduleUpdate(BaseModel):
@@ -746,25 +755,81 @@ class ScheduleUpdate(BaseModel):
     caregiver_alert: bool | None = None
     memo: str | None = None
     active: bool | None = None
+    alert_caregiver_ids: list[int] | None = None
 
 
 class CheckIn(BaseModel):
     status: str  # "taken" | "skipped" (Dashboard.tsx IntakeStatus와 동일)
 
 
-@router.post("/schedules", response_model=MedicationSchedule)
+class SchedulePublic(BaseModel):
+    """[2026-07-24 추가] MedicationSchedule 그대로 반환하던 걸 이 모델로 바꿔 alert_caregiver_ids
+    (실제로 이 일정의 알림을 받는 caregiver id 목록)를 같이 내려준다 — PatientPublic이
+    diagnoses/medication_status를 계산해서 붙이는 것과 동일한 패턴."""
+
+    id: int
+    patient_id: int
+    drug_name: str
+    time_slot: str
+    dose_timing: str | None = None
+    caregiver_alert: bool
+    memo: str | None = None
+    active: bool
+    created_at: datetime
+    patient_medication_id: int | None = None
+    meal_relation: str | None = None
+    instructions: str | None = None
+    timezone: str | None = None
+    days_of_week: str | None = None
+    record_id: int | None = None
+    alert_caregiver_ids: list[int] = []
+
+
+def _to_schedule_public(schedule: MedicationSchedule, session: Session) -> SchedulePublic:
+    return SchedulePublic(
+        **schedule.model_dump(),
+        alert_caregiver_ids=effective_alert_caregiver_ids(schedule, session),
+    )
+
+
+def _replace_schedule_caregiver_alerts(
+    schedule_id: int, patient_id: int, caregiver_ids: list[int], session: Session
+) -> None:
+    """[2026-07-24 추가] 이 일정의 alert_caregiver_ids를 통째로 교체한다 — 환자와 이미
+    연결이 끊긴(또는 애초에 연결된 적 없는) caregiver_id를 몰래 끼워 넣을 수 없도록,
+    실제로 지금 연결된 caregiver 집합으로만 필터링한다."""
+    linked = set(linked_caregiver_ids(patient_id, session))
+    valid_ids = [cid for cid in dict.fromkeys(caregiver_ids) if cid in linked]
+    existing = session.exec(
+        select(ScheduleCaregiverAlert).where(ScheduleCaregiverAlert.schedule_id == schedule_id)
+    ).all()
+    for row in existing:
+        session.delete(row)
+    for caregiver_id in valid_ids:
+        session.add(ScheduleCaregiverAlert(schedule_id=schedule_id, caregiver_id=caregiver_id))
+
+
+@router.post("/schedules", response_model=SchedulePublic)
 def create_schedule(
     payload: ScheduleCreate, actor: Actor = Depends(get_current_actor), session: Session = Depends(get_session)
 ):
     require_actor_patient_access(payload.patient_id, actor, session)
-    schedule = MedicationSchedule(**payload.model_dump())
+    fields = payload.model_dump(exclude={"alert_caregiver_ids"})
+    schedule = MedicationSchedule(**fields)
     session.add(schedule)
     session.commit()
     session.refresh(schedule)
-    return schedule
+    if payload.alert_caregiver_ids is not None:
+        _replace_schedule_caregiver_alerts(schedule.id, payload.patient_id, payload.alert_caregiver_ids, session)
+        session.commit()
+        # [주의] commit()은 기본적으로 세션의 모든 객체 속성을 만료시킨다 — 이 refresh 없이
+        # model_dump()를 호출하면 SQLAlchemy의 lazy-load를 안 거쳐 빈 값만 보인다(실제로 겪은
+        # 버그, 아래 update_schedule도 동일한 이유로 alert_caregiver_ids 반영 후 refresh한다).
+        session.refresh(schedule)
+    return _to_schedule_public(schedule, session)
 
 
-@router.get("/schedules", response_model=list[MedicationSchedule])
+@router.get("/schedules", response_model=list[SchedulePublic])
 def list_schedules(
     patient_id: int,
     active_only: bool = True,
@@ -775,10 +840,11 @@ def list_schedules(
     query = select(MedicationSchedule).where(MedicationSchedule.patient_id == patient_id)
     if active_only:
         query = query.where(MedicationSchedule.active == True)  # noqa: E712
-    return session.exec(query).all()
+    schedules = session.exec(query).all()
+    return [_to_schedule_public(s, session) for s in schedules]
 
 
-@router.patch("/schedules/{schedule_id}", response_model=MedicationSchedule)
+@router.patch("/schedules/{schedule_id}", response_model=SchedulePublic)
 def update_schedule(
     schedule_id: int,
     payload: ScheduleUpdate,
@@ -789,15 +855,18 @@ def update_schedule(
     if not schedule:
         raise HTTPException(404, "해당 일정을 찾을 수 없어요")
     require_actor_patient_access(schedule.patient_id, actor, session)
-    updates = payload.model_dump(exclude_unset=True)
+    updates = payload.model_dump(exclude_unset=True, exclude={"alert_caregiver_ids"})
     before = {key: getattr(schedule, key, None) for key in updates}
     for key, value in updates.items():
         setattr(schedule, key, value)
     session.add(schedule)
     record_audit_log(session, "medication_schedules", schedule_id, actor, before, updates)
     session.commit()
+    if payload.alert_caregiver_ids is not None:
+        _replace_schedule_caregiver_alerts(schedule.id, schedule.patient_id, payload.alert_caregiver_ids, session)
+        session.commit()
     session.refresh(schedule)
-    return schedule
+    return _to_schedule_public(schedule, session)
 
 
 @router.get("/patients/{patient_id}/known-drugs")
@@ -857,6 +926,14 @@ def delete_schedule(
     ).all()
     for legacy_log in legacy_logs:
         session.delete(legacy_log)
+    # [2026-07-24 수정, 코드 리뷰 반영] schedule_caregiver_alerts.schedule_id도 같은 FK
+    # 참조라 위와 같은 이유로 먼저 지워야 한다 — 새 기본값(명시 선택 없으면 전원)이라
+    # caregiver_alert=True인 일정 대부분이 이 행을 갖게 되어, 방치하면 흔하게 터진다.
+    alert_rows = session.exec(
+        select(ScheduleCaregiverAlert).where(ScheduleCaregiverAlert.schedule_id == schedule_id)
+    ).all()
+    for alert_row in alert_rows:
+        session.delete(alert_row)
     session.flush()
     session.delete(schedule)
     session.commit()
