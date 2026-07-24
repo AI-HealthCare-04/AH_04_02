@@ -239,7 +239,7 @@ export default function PatientManagement() {
                             <ClipboardList className="inline w-3.5 h-3.5 mr-1" /> 등록내역
                           </button>
                           <button
-                            onClick={() => openPatientMenu(p.id, "/monitoring")}
+                            onClick={() => openPatientMenu(p.id, `/monitoring?patient_id=${p.id}`)}
                             className="px-4 py-2 rounded-full text-[13px] font-bold whitespace-nowrap"
                             style={{ background: `${C.terracotta}12`, color: C.terracotta }}
                           >
