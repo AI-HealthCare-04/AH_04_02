@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FileText, ChevronRight } from "lucide-react";
 import NavBar from "../components/NavBar";
+import LoadingDots from "../components/LoadingDots";
 import PatientContextBanner from "../components/PatientContextBanner";
 import { listRecords, type RecordSummary } from "../api/records";
 import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
@@ -48,7 +49,7 @@ export default function MedGuideList() {
         {error && <p className="text-[13px] mb-4" style={{ color: "#D94F4F" }}>{error}</p>}
 
         {loading ? (
-          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>
+          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
         ) : records.length === 0 ? (
           <div className="rounded-2xl p-10 text-center" style={{ background: C.surface, boxShadow: C.shadowCard }}>
             <p className="text-[14px] mb-4" style={{ color: C.muted }}>아직 완성된 복약 가이드가 없어요.</p>

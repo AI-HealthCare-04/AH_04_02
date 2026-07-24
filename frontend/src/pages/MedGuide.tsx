@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import NavBar from "../components/NavBar";
+import LoadingDots from "../components/LoadingDots";
 import { formatUniqueSourceRefs, getRecord, type LifestyleCategory, type RecordResult } from "../api/records";
 import { C } from "../theme";
 import { getCurrentUserName } from "../lib/session";
@@ -65,7 +66,7 @@ export default function MedGuide() {
     return (
       <div className="min-h-screen" style={{ background: C.ivory }}>
         <NavBar isLoggedIn userName={getCurrentUserName()} />
-        <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>
+        <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
       </div>
     );
   }

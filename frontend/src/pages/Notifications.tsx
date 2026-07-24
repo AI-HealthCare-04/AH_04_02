@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Bell, AlertTriangle } from "lucide-react";
 import NavBar from "../components/NavBar";
+import LoadingDots from "../components/LoadingDots";
 import { getNotifications, type NotificationLogEntry } from "../api/monitoring";
 import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
@@ -36,7 +37,7 @@ export default function Notifications() {
         {error && <p className="text-[13px] mb-4" style={{ color: "#D94F4F" }}>{error}</p>}
 
         {loading ? (
-          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>
+          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
         ) : entries.length === 0 ? (
           <div className="rounded-2xl p-10 text-center" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
             <Bell className="w-8 h-8 mx-auto mb-3 opacity-30" style={{ color: C.muted }} />

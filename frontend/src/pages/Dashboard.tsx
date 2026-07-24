@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import NavBar from "../components/NavBar";
+import LoadingDots from "../components/LoadingDots";
 import PatientContextBanner from "../components/PatientContextBanner";
 import {
   getPatientCaregivers,
@@ -128,7 +129,7 @@ export default function Dashboard() {
 
         <h2 className="text-lg font-extrabold mb-4" style={{ color: C.dark }}>오늘의 복약</h2>
 
-        {loading && <p className="text-sm mb-4" style={{ color: C.muted }}>불러오는 중이에요...</p>}
+        {loading && <p className="text-sm mb-4" style={{ color: C.muted }}><LoadingDots /></p>}
         {!loading && error && <p className="text-sm mb-4" style={{ color: C.danger }}>{error}</p>}
         {!loading && !error && meds.length === 0 && (
           <p className="text-sm mb-4" style={{ color: C.muted }}>등록된 복약 일정이 없어요.</p>

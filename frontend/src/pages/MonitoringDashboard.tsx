@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AlertTriangle, CheckCircle2, Users } from "lucide-react";
 import NavBar from "../components/NavBar";
+import LoadingDots from "../components/LoadingDots";
 import {
   getCaregiverPatients,
   getLogs,
@@ -204,7 +205,7 @@ export default function MonitoringDashboard() {
           <h1 className="text-[24px] font-black mb-1" style={{ color: C.dark }}>모니터링 대시보드</h1>
           <p className="text-[14px] mb-7" style={{ color: C.muted }}>연결된 환자들의 오늘 복약 현황을 한눈에 확인하세요.</p>
           {loading ? (
-            <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>
+            <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
           ) : (
             <MonitoringSummary patients={patients} onSelect={selectPatient} />
           )}
@@ -249,7 +250,7 @@ export default function MonitoringDashboard() {
         {error && <p className="text-[13px] mb-4" style={{ color: "#D94F4F" }}>{error}</p>}
 
         {loading ? (
-          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>
+          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
         ) : (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">

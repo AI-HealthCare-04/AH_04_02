@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bell, CalendarClock, ChevronLeft, ClipboardList, LayoutDashboard, Search, X } from "lucide-react";
 import NavBar from "../components/NavBar";
+import LoadingDots from "../components/LoadingDots";
 import { getCaregiverPatients, getCaregivers, unlinkCaregiverPatient, type Caregiver, type Patient } from "../api/monitoring";
 import { computeAge, GENDER_LABEL } from "../lib/age";
 import { getCurrentCaregiverId, getCurrentUserName } from "../lib/session";
@@ -171,7 +172,7 @@ export default function PatientManagement() {
 
         <div className="rounded-2xl overflow-hidden overflow-x-auto" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
           {loading ? (
-            <p className="px-6 py-10 text-center text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>
+            <p className="px-6 py-10 text-center text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
           ) : filtered.length === 0 ? (
             <p className="px-6 py-10 text-center text-[14px]" style={{ color: C.muted }}>
               {patients.length === 0 ? "등록된 환자가 없어요." : "검색 결과가 없어요."}

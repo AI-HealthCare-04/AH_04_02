@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CheckSquare, Plus, Square, X } from "lucide-react";
 import NavBar from "../components/NavBar";
+import LoadingDots from "../components/LoadingDots";
 import PatientContextBanner from "../components/PatientContextBanner";
 import {
   createSchedule,
@@ -355,7 +356,7 @@ export default function SchedulePage() {
 
         <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden">
           {loading ? (
-            <p className="px-6 py-8 text-center text-[14px] text-[#8A7E75]">불러오는 중이에요...</p>
+            <p className="px-6 py-8 text-center text-[14px] text-[#8A7E75]"><LoadingDots /></p>
           ) : groups.length === 0 ? (
             <p className="px-6 py-10 text-center text-[14px] text-[#8A7E75]">등록된 일정이 없어요.</p>
           ) : (
@@ -381,7 +382,20 @@ export default function SchedulePage() {
                     </span>
                   )}
                   <div>
-                    <p className="text-[15px] font-bold text-[#1E1A17]">{g.drugName}</p>
+                    {selectMode ? (
+                      <p className="text-[15px] font-bold text-[#1E1A17]">{g.drugName}</p>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/drugs/${g.entries[0].id}`);
+                        }}
+                        className="text-[15px] font-bold text-[#1E1A17] hover:underline text-left"
+                      >
+                        {g.drugName}
+                      </button>
+                    )}
                     <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                       {g.entries.map((e) => (
                         <span

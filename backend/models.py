@@ -311,7 +311,12 @@ class OcrResult(SQLModel, table=True):
     record_id: int = Field(foreign_key="medical_records.id")
     drug_name: str
     drug_code: str = ""  # [7/6 추가] HIRA 약가마스터 매칭용 코드 (ocr_interface.py의 OCRResult와 동기화)
-    dosage: str = ""       # 미인식이면 빈 문자열 (1회 복용량 — 예: "1정", "2캡슐". mg 등 성분 함량은 drug_name에 있음)
+    dosage: str = ""       # 미인식이면 빈 문자열 (1회 사용량 — 예: "1정", "2캡슐". mg 등 성분 함량은 drug_name에 있음)
+    # [2026-07-25 추가] 1회 투여량 — mg/ml처럼 질량·부피 단위의 실제 투여량. dosage(사용량,
+    # 정/캡슐/패치 등 개수 단위)와 별개 필드. 인식 규칙은 parsing_rules.py의
+    # reconcile_dose_fields() 참고 — 둘 다 인식되면 그대로, 사용량만 없으면 투여량과
+    # 약품명에 포함된 단위당 함량으로 역산, 투여량만 없으면 사용량만 표기(지어내지 않음).
+    dose_amount: str = ""
     frequency: str = ""    # 1일 투여횟수 (예: "1일 3회")
     total_days: str = ""   # [2026-07-18 추가] 총 투약일수 (예: "30일")
     diagnosis: str = ""

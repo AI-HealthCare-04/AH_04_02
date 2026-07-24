@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AlertCircle, Check, Plus, X } from "lucide-react";
 import NavBar from "../components/NavBar";
+import LoadingDots from "../components/LoadingDots";
 import {
   addMedicationItem,
   confirmMedications,
@@ -41,20 +42,29 @@ function expandInterval(startTime: string, intervalHours: number): string[] {
 
 const FIELDS: { key: keyof OcrMedication; label: string }[] = [
   { key: "drug_name", label: "약품명" },
-  { key: "dosage", label: "1회 복용량" },
+  { key: "dosage", label: "1회 사용량" },
+  { key: "dose_amount", label: "1회 투여량" },
   { key: "frequency", label: "1일 투약횟수" },
   { key: "total_days", label: "총 투약일수" },
   { key: "diagnosis", label: "진단명" },
   { key: "drug_class", label: "약효분류" },
 ];
 
-// 용량엔 반드시 숫자+단위가 같이 있어야 함 (예: "500mg") — "500"처럼 단위 빠진 OCR 오류를 잡아냄
-// [PR #90 리뷰 반영 — pecs0310] parsing_rules.py의 DOSE_QTY_UNITS(정|캡슐|캅셀|포|병|환)와
-// 맞춰 캅셀(대체 표기)/병/환을 추가 — 이 세 단위가 빠져 있어서 해당 단위로 처방된 항목은
-// isDosageValid()가 계속 실패로 잡고, allOk가 false가 돼 "확인 완료" 제출 자체가 막혀 있었다.
-const DOSAGE_RE = /(\d+\/\d+|\d+\.?\d*)\s*(mg|g|ml|mcg|iu|정|캡슐|캅셀|포|병|환|밀리그램|그램)/i;
-function isDosageValid(dosage: string) {
-  return DOSAGE_RE.test(dosage.trim());
+// 1회 사용량엔 반드시 숫자+개수단위가 같이 있어야 함 (예: "1정") — "1"처럼 단위 빠진 OCR
+// 오류를 잡아냄. [PR #90 리뷰 반영 — pecs0310] parsing_rules.py의
+// DOSE_QTY_UNITS(정|캡슐|캅셀|포|병|환)와 맞춰 캅셀(대체 표기)/병/환을 추가 — 이 세 단위가
+// 빠져 있어서 해당 단위로 처방된 항목은 isUsageValid()가 계속 실패로 잡고, allOk가
+// false가 돼 "확인 완료" 제출 자체가 막혀 있었다.
+const USAGE_RE = /(\d+\.?\d*)\s*(정|캡슐|캅셀|포|병|환)/i;
+function isUsageValid(dosage: string) {
+  return USAGE_RE.test(dosage.trim());
+}
+
+// [2026-07-25 추가] 1회 투여량 — mg/ml 등 질량·부피 단위. 1회 사용량(개수 단위)과
+// 별개 필드라 단위도 따로 검증한다. "50/1000mg"(복합제) 표기도 허용.
+const AMOUNT_RE = /(\d+\/\d+|\d+\.?\d*)\s*(mg|g|ml|mcg|iu|밀리그램|그램)/i;
+function isAmountValid(amount: string) {
+  return AMOUNT_RE.test(amount.trim());
 }
 
 type FieldIssue = { field: keyof OcrMedication; message: string };
@@ -69,10 +79,14 @@ function computeIssues(m: OcrMedication, drugNameOk: boolean | undefined, nameOv
   } else if (!m.drug_name.trim()) {
     issues.push({ field: "drug_name", message: "약품명이 비어있어요. 입력해주세요." });
   }
-  if (m.dosage.trim() && !isDosageValid(m.dosage)) {
-    issues.push({ field: "dosage", message: "1회 복용량 형식이 잘못됐어요 (예: 1정, 2캡슐처럼 단위를 함께 입력)." });
+  if (m.dosage.trim() && !isUsageValid(m.dosage)) {
+    issues.push({ field: "dosage", message: "1회 사용량 형식이 잘못됐어요 (예: 1정, 2캡슐처럼 단위를 함께 입력)." });
   } else if (!m.dosage.trim()) {
-    issues.push({ field: "dosage", message: "1회 복용량이 비어있어요. 입력해주세요." });
+    issues.push({ field: "dosage", message: "1회 사용량이 비어있어요. 입력해주세요." });
+  }
+  // [2026-07-25 추가] 1회 투여량(mg/ml)은 선택 항목 — 값이 있을 때만 형식을 검사한다.
+  if (m.dose_amount.trim() && !isAmountValid(m.dose_amount)) {
+    issues.push({ field: "dose_amount", message: "1회 투여량 형식이 잘못됐어요 (예: 5mg, 10ml처럼 단위를 함께 입력)." });
   }
   // [2026-07-18] 약효분류는 OCR로 못 잡는 경우가 많아 필수에서 제외 — 비어있어도 확인 완료로
   // 넘어갈 수 있다. 총 투약일수도 같은 이유로 필수가 아니다.
@@ -333,6 +347,7 @@ export default function PrescriptionReview() {
           id: m.id,
           drug_name: e.drug_name.trim(),
           dosage: e.dosage.trim(),
+          dose_amount: e.dose_amount.trim(),
           frequency: e.frequency.trim(),
           total_days: e.total_days.trim(),
           diagnosis: e.diagnosis.trim(),
@@ -460,7 +475,9 @@ export default function PrescriptionReview() {
       <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         {loading ? (
-          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>
+          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>
+            <LoadingDots label="처방전 정보를 불러오는 중이에요" />
+          </p>
         ) : !record ? (
           <p className="text-center py-16 text-[14px]" style={{ color: "#D94F4F" }}>{error || "기록을 찾을 수 없어요."}</p>
         ) : record.status !== "review_required" ? (

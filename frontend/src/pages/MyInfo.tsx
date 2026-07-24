@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Check, Lock } from "lucide-react";
 import NavBar from "../components/NavBar";
+import LoadingDots from "../components/LoadingDots";
 import { verifyPassword } from "../api/auth";
 import {
   getCaregivers,
@@ -255,7 +256,7 @@ export default function MyInfo() {
         <p className="text-[14px] mb-7" style={{ color: C.muted }}>회원가입 때 입력한 정보를 확인하고 수정할 수 있어요.</p>
 
         {loading ? (
-          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>
+          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
         ) : (
           <div className="rounded-2xl p-6" style={{ background: C.surface, boxShadow: "0 2px 20px rgba(30,26,23,0.07)" }}>
             <div className="space-y-4">

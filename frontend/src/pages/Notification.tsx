@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import NavBar from "../components/NavBar";
+import LoadingDots from "../components/LoadingDots";
 import PatientContextBanner from "../components/PatientContextBanner";
 import { getNotificationSettings, updateNotificationSettings, type NotificationSettings } from "../api/care";
 import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
@@ -65,7 +66,7 @@ export default function Notification() {
         <h1 className="text-[26px] font-black text-[#1E1A17] mb-1">알림 설정</h1>
         <p className="text-[14px] text-[#8A7E75] mb-7">받고 싶은 알림을 선택하세요.</p>
 
-        {loading && <p className="text-[14px] text-[#8A7E75]">불러오는 중이에요...</p>}
+        {loading && <p className="text-[14px] text-[#8A7E75]"><LoadingDots /></p>}
         {error && <p className="text-[13px] text-[#D94F4F] mb-4">{error}</p>}
 
         {settings && (

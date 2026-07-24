@@ -16,6 +16,7 @@ import json
 import os
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import requests.exceptions
@@ -57,39 +58,15 @@ def ping():
     return {"status": "ok", "owner": "권순현"}
 
 
-def _fetch_rag_drug_detail(drug_name: str) -> dict:
-    """e약은요(주의사항/부작용/상호작용/보관법)와 DUR(노인주의/연령금기/임부금기)을
-    live API로 보강 조회한다. chat_router.py의 온디맨드 DUR 조회와 동일한 패턴 —
-    특정 PROVIDER 플래그와 무관하게 항상 시도하고, 조회어가 안 걸리거나
-    DATA_GO_KR_SERVICE_KEY 미설정·네트워크 실패 등 어떤 이유로든 실패해도 이 엔드포인트
-    전체가 500이 되지 않도록 각 호출을 개별로 조용히 폴백시킨다.
-
-    병용금기(search_usjnt_taboo)는 "약 하나"가 아니라 "약 A + 약 B" 관계 정보라 이
-    단일 약품 조회와 성격이 달라 여기서는 제외했다(처방전 전체 컨텍스트가 있는
-    chat_router.py의 DUR 보강조회 쪽 몫으로 남겨둠).
-    """
-    precautions: str | None = None
-    side_effects: str | None = None
-    interactions: str | None = None
-    storage: str | None = None
-
-    precaution_parts: list[str] = []
-
-    # [2026-07-20 추가] "노바스크정5mg"처럼 e약은요 등록명과 글자 단위로 다른 이름이 들어와도
-    # 조회가 걸리도록 후보 이름을 순서대로 시도한다(rag_chain.py의 resolve_drug_name_candidates
-    # 재사용 — DUR/RAG 가이드 생성과 동일한 폴백 체인, 중복 구현 금지).
-    try:
-        from rag.rag_chain import resolve_drug_name_candidates
-
-        candidates = resolve_drug_name_candidates(drug_name)
-    except Exception:  # noqa: BLE001 — 후보 생성 실패 시 원문 하나만으로 폴백
-        candidates = [drug_name]
-
+def _fetch_permit_precautions(candidates: list[str]) -> list[str]:
+    """허가정보 상세(search_permit_detail)의 "사용상의 주의사항" 원문 — 후보 이름을
+    순서대로 시도해 처음 걸리는 것만 쓴다."""
     # [2026-07-20] "사용상의 주의사항"이라는 정확한 명칭의 필드는 e약은요(atpn_qesitm,
     # 그냥 "주의사항"으로 라벨링됨)가 아니라 허가정보 상세(search_permit_detail의
     # nb_doc_data)에 있다 — mfds_client.py에 이미 "제품허가정보로 사용상의 주의사항
     # 조회 가능한지 확인 요청"이라는 주석까지 있는, 이 목적으로 만들어진 함수다. 처음에
     # 이걸 빠뜨리고 e약은요 필드만 썼었다 — 공식 허가사항 원문을 우선 소스로 추가한다.
+    precaution_parts: list[str] = []
     try:
         from rag.mfds_client import parse_doc_sections, search_permit_detail
 
@@ -102,7 +79,16 @@ def _fetch_rag_drug_detail(drug_name: str) -> dict:
                 break
     except Exception:  # noqa: BLE001 — 키 미설정/네트워크 실패/미등재 약품명 등 어떤 이유로든 조용히 폴백
         pass
+    return precaution_parts
 
+
+def _fetch_eyakeun_info(candidates: list[str]) -> dict:
+    """e약은요(경고/주의사항/부작용/상호작용/보관법) — 후보 이름을 순서대로 시도해
+    처음 걸리는 것만 쓴다."""
+    precaution_parts: list[str] = []
+    side_effects: str | None = None
+    interactions: str | None = None
+    storage: str | None = None
     try:
         from rag.mfds_client import search_by_name
 
@@ -120,9 +106,17 @@ def _fetch_rag_drug_detail(drug_name: str) -> dict:
                 break
     except Exception:  # noqa: BLE001 — 키 미설정/네트워크 실패/미등재 약품명 등 어떤 이유로든 조용히 폴백
         pass
+    return {
+        "precaution_parts": precaution_parts,
+        "side_effects": side_effects,
+        "interactions": interactions,
+        "storage": storage,
+    }
 
-    precautions = "\n\n".join(precaution_parts) or None
 
+def _fetch_dur_cautions(candidates: list[str]) -> list[dict]:
+    """DUR 노인주의/연령금기/임부금기 — 카테고리별로 후보 이름을 순서대로 시도해
+    처음 걸리는 것만 쓴다."""
     dur_cautions: list[dict] = []
     try:
         from rag.dur_master import search_age_taboo, search_elderly_caution, search_pregnancy_taboo
@@ -139,12 +133,51 @@ def _fetch_rag_drug_detail(drug_name: str) -> dict:
         ]
     except Exception:  # noqa: BLE001
         pass
+    return dur_cautions
+
+
+def _fetch_rag_drug_detail(drug_name: str) -> dict:
+    """e약은요(주의사항/부작용/상호작용/보관법)와 DUR(노인주의/연령금기/임부금기)을
+    live API로 보강 조회한다. chat_router.py의 온디맨드 DUR 조회와 동일한 패턴 —
+    특정 PROVIDER 플래그와 무관하게 항상 시도하고, 조회어가 안 걸리거나
+    DATA_GO_KR_SERVICE_KEY 미설정·네트워크 실패 등 어떤 이유로든 실패해도 이 엔드포인트
+    전체가 500이 되지 않도록 각 호출을 개별로 조용히 폴백시킨다.
+
+    병용금기(search_usjnt_taboo)는 "약 하나"가 아니라 "약 A + 약 B" 관계 정보라 이
+    단일 약품 조회와 성격이 달라 여기서는 제외했다(처방전 전체 컨텍스트가 있는
+    chat_router.py의 DUR 보강조회 쪽 몫으로 남겨둠).
+
+    [2026-07-25 추가] 아래 허가정보/e약은요/DUR 3개 조회는 서로 독립적인데 예전엔
+    순서대로 실행돼서 외부 공공 API 왕복 시간이 그대로 더해지고 있었다("로딩이
+    생각보다 길다" 피드백) — 스레드로 동시에 실행해서 전체 소요 시간을 셋 중 가장
+    느린 것 수준으로 줄인다. 결과 순서(허가정보 → e약은요)는 기존과 동일하게 유지.
+    """
+    # [2026-07-20 추가] "노바스크정5mg"처럼 e약은요 등록명과 글자 단위로 다른 이름이 들어와도
+    # 조회가 걸리도록 후보 이름을 순서대로 시도한다(rag_chain.py의 resolve_drug_name_candidates
+    # 재사용 — DUR/RAG 가이드 생성과 동일한 폴백 체인, 중복 구현 금지).
+    try:
+        from rag.rag_chain import resolve_drug_name_candidates
+
+        candidates = resolve_drug_name_candidates(drug_name)
+    except Exception:  # noqa: BLE001 — 후보 생성 실패 시 원문 하나만으로 폴백
+        candidates = [drug_name]
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        permit_future = executor.submit(_fetch_permit_precautions, candidates)
+        eyakeun_future = executor.submit(_fetch_eyakeun_info, candidates)
+        dur_future = executor.submit(_fetch_dur_cautions, candidates)
+
+        permit_precaution_parts = permit_future.result()
+        eyakeun = eyakeun_future.result()
+        dur_cautions = dur_future.result()
+
+    precautions = "\n\n".join(permit_precaution_parts + eyakeun["precaution_parts"]) or None
 
     return {
         "precautions": precautions,
-        "side_effects": side_effects,
-        "interactions": interactions,
-        "storage": storage,
+        "side_effects": eyakeun["side_effects"],
+        "interactions": eyakeun["interactions"],
+        "storage": eyakeun["storage"],
         "dur_cautions": dur_cautions,
     }
 
@@ -384,6 +417,7 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
                 drug_name=med.drug_name,
                 drug_code=med.drug_code,
                 dosage=med.dosage,
+                dose_amount=med.dose_amount,
                 frequency=med.frequency,
                 diagnosis=med.diagnosis,
                 drug_class=med.drug_class,
@@ -418,6 +452,7 @@ async def test_ocr_upload(
             {
                 "drug_name": m.drug_name,
                 "dosage": m.dosage,
+                "dose_amount": m.dose_amount,
                 "frequency": m.frequency,
                 "diagnosis": m.diagnosis,
                 "drug_class": m.drug_class,

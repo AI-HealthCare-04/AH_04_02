@@ -182,6 +182,7 @@ def _build_record_response(
                 "drug_name": item.display_name,
                 "drug_code": item.drug_code,
                 "dosage": item.dosage,
+                "dose_amount": item.dose_amount,
                 "frequency": item.frequency,
                 "total_days": item.total_days,
                 "diagnosis": item.diagnosis,
@@ -555,6 +556,7 @@ class MedicationCorrection(BaseModel):
     id: int  # OcrResult.id
     drug_name: str
     dosage: str
+    dose_amount: str = ""
     frequency: str
     total_days: str = ""  # [2026-07-18 추가] 총 투약일수
     diagnosis: str
@@ -600,6 +602,7 @@ async def confirm_medications(
                 continue
             item.drug_name = correction.drug_name
             item.dosage = correction.dosage
+            item.dose_amount = correction.dose_amount
             item.frequency = correction.frequency
             item.total_days = correction.total_days
             item.diagnosis = correction.diagnosis

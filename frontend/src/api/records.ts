@@ -5,7 +5,8 @@ import { monitoringClient } from "./monitoringClient";
 export interface OcrMedication {
   id: number;
   drug_name: string;
-  dosage: string;
+  dosage: string; // 1회 사용량 — 예: "1정", "2캡슐" (개수 단위)
+  dose_amount: string; // [2026-07-25 추가] 1회 투여량 — 예: "5mg", "10ml" (질량·부피 단위)
   frequency: string;
   total_days: string;
   diagnosis: string;
@@ -325,6 +326,7 @@ export interface MedicationCorrection {
   id: number;
   drug_name: string;
   dosage: string;
+  dose_amount: string;
   frequency: string;
   total_days: string;
   diagnosis: string;
