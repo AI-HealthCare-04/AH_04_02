@@ -189,6 +189,32 @@ class CaregiverPatient(SQLModel, table=True):
     revocation_requested_by: int | None = Field(default=None)
     # requested_by_role: 요청자가 caregiver인지 patient인지 구분 — 자기승인 가드에 사용
     requested_by_role: str | None = Field(default=None)  # "caregiver" | "patient"
+    # [2026-07-23 추가] 기관이 연결을 끊을 때 반드시 남겨야 하는 사유 — 환자/보호자가 승인
+    # 여부를 판단하는 근거가 된다.
+    revocation_reason: str | None = Field(default=None)
+    # [2026-07-23 추가] 승인 대기 시작 시각 — 2주(14일) 안에 상대가 응답하지 않으면 요청자가
+    # 스스로 확정(자동 승인)할 수 있게 하는 타임아웃 기준점.
+    revocation_requested_at: datetime | None = Field(default=None)
+
+
+# [2026-07-23 추가] 해제 요청 승인/거부 결과를 요청자에게 알려주는 용도.
+# CaregiverPatient 링크 자체는 승인 시 revoked(요청자가 그 환자에 대한 접근권을 잃을 수 있음),
+# 거부 시 revocation_requested_by 등이 지워지므로 결과를 별도로 스냅샷 남겨야 요청자가
+# 나중에도 "승인/거부됐다"를 확인할 수 있다. patient_name/counterpart_name은 승인 후 접근권
+# 상실·개인정보 변경에 영향받지 않도록 그 시점 값을 복사해서 저장한다.
+class RevocationNotice(SQLModel, table=True):
+    __tablename__ = "revocation_notices"
+
+    id: int | None = Field(default=None, primary_key=True)
+    recipient_role: str  # "caregiver" | "patient" — 원래 해제를 요청한 쪽
+    recipient_id: int
+    patient_id: int
+    patient_name: str
+    counterpart_name: str  # 승인/거부를 처리한 사람 이름
+    approved: bool
+    reason: str | None = None
+    created_at: datetime = Field(default_factory=datetime.now)
+    read_at: datetime | None = None
 
 
 # ── 비밀번호 재설정 임시코드 [2026-07-15 추가, REQ-039] ──
@@ -445,22 +471,6 @@ class MedicationRecord(SQLModel, table=True):
 # [7/7 추가] Figma 화면 전체 연결을 위한 신규 테이블
 # ══════════════════════════════════════════════════════════
 
-# ── 자가진단 결과 (담당: 박소정) — Check.tsx/AssessmentPage 저장용 ──
-class CareLevelAssessment(SQLModel, table=True):
-    __tablename__ = "care_level_assessments"
-
-    id: int | None = Field(default=None, primary_key=True)
-    patient_id: int = Field(foreign_key="patients.id")
-    cognitive_level: str = "normal"  # normal / mild / severe
-    mobility_level: str = "normal"
-    vision_level: str = "normal"
-    medication_awareness: bool = True
-    medication_willingness: bool = True
-    care_level: str = "independent"  # independent / guardian_check / third_party_needed
-    reason: str = ""
-    evaluated_at: datetime = Field(default_factory=datetime.now)
-
-
 # ── 보호자 초대 (담당: 박소정) — CaregiverPage/InvitePage 실제 연동용 ──
 # [2026-07-15] 보안 검토 반영: 토큰 원문 대신 해시 저장(token_hash), 만료시각 추가(expires_at),
 # invited_phone도 다른 PII와 동일하게 암호화(.invited_phone 프로퍼티로 투명하게 암복호화).
@@ -552,3 +562,23 @@ class GuideCache(SQLModel, table=True):
     guide_result: str = Field(sa_column=Column(Text, nullable=False))
     created_at: datetime = Field(default_factory=datetime.now)
     expires_at: datetime
+
+
+# ── 변경 이력 (REQ-081) ──
+# 복약 일정·환자 정보를 보호자가 수정할 수 있어서, "어제 8시였던 게 왜 9시로 바뀌었는지"
+# 환자가 확인할 방법이 있어야 한다는 요구로 추가했다(최소 버전 — 조회 화면은 아직 없고
+# 테이블·기록만 남긴다). name/phone처럼 암호화 저장되는 PII는 before/after에 실제 값
+# 대신 "***"만 남긴다 — 이 테이블은 name_encrypted 같은 암호화 보호가 없어서, 그대로
+# 남기면 오히려 새로운 평문 PII 유출 경로가 된다(core/audit.py의 SENSITIVE_FIELDS 참고).
+class AuditLog(SQLModel, table=True):
+    __tablename__ = "audit_logs"
+
+    id: int | None = Field(default=None, primary_key=True)
+    table_name: str = Field(index=True)
+    record_id: int = Field(index=True)
+    actor_id: int
+    actor_role: str  # "caregiver" | "patient"
+    action: str = "update"
+    before: str | None = Field(default=None, sa_column=Column(Text))  # JSON
+    after: str | None = Field(default=None, sa_column=Column(Text))  # JSON
+    created_at: datetime = Field(default_factory=datetime.now)

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import NavBar from "../components/NavBar";
+import PatientContextBanner from "../components/PatientContextBanner";
 import { getNotificationSettings, updateNotificationSettings, type NotificationSettings } from "../api/care";
 import { applyFontScale, getCurrentUserName, getFontScale, type FontScale, useGuardedPatientId } from "../lib/session";
 
@@ -63,6 +64,7 @@ export default function Settings() {
     <div className="min-h-screen bg-[#F2E8D8]">
       <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-xl mx-auto px-6 sm:px-8 py-10">
+        <PatientContextBanner />
         <h1 className="text-[26px] font-black text-[#1E1A17] mb-1">화면·챗봇 설정</h1>
         <p className="text-[14px] text-[#8A7E75] mb-7">챗봇 이름과 글자 크기를 원하는 대로 바꿀 수 있어요.</p>
 

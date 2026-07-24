@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import NavBar from "../components/NavBar";
+import PatientContextBanner from "../components/PatientContextBanner";
 import { askChatFreeformStream, askChatStream, getChatQuestions, type ChatQuestion } from "../api/chat";
 import { getNotificationSettings } from "../api/care";
 import { formatUniqueSourceRefs, type SourceRef } from "../api/records";
-import { getCurrentPatientId, getCurrentUserName } from "../lib/session";
+import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
 
 type Message = { role: "user" | "bot"; text: string; source?: string; sourceRefs?: SourceRef[] };
@@ -46,7 +47,7 @@ function buildGreeting(context: ChatContext | null): string {
 // [7/10] 입력한 문장이 고정 질문과 정확히 같으면 그 질문(캐시된 프리셋 답변 폴백 포함)으로
 // 묻고, 아니면 자유 텍스트 그대로 /chat/ask에 보내 GPT가 환자 컨텍스트 기반으로 답한다.
 export default function Chat() {
-  const patientId = getCurrentPatientId();
+  const patientId = useGuardedPatientId();
   const location = useLocation();
   const context = (location.state as ChatContext | null) ?? null;
   const [questions, setQuestions] = useState<ChatQuestion[]>([]);
@@ -59,12 +60,13 @@ export default function Chat() {
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (patientId == null) return;
     getChatQuestions(patientId, context?.drugName).then(setQuestions).catch(() => setQuestions([]));
     getNotificationSettings(patientId)
       .then((s) => setChatbotName(s.chatbot_name || DEFAULT_CHATBOT_NAME))
       .catch(() => setChatbotName(DEFAULT_CHATBOT_NAME));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [patientId]);
 
   // scrollIntoView는 페이지 전체 스크롤 위치까지 건드릴 수 있어서, 메시지 목록 div의
   // scrollTop만 직접 조작해 채팅창 내부만 스크롤되게 합니다.
@@ -109,7 +111,7 @@ export default function Chat() {
   };
 
   const askPreset = async (q: ChatQuestion) => {
-    if (loading) return;
+    if (loading || patientId == null) return;
     setMessages((prev) => [...prev, { role: "user", text: q.text }, { role: "bot", text: "" }]);
     setLoading(true);
     await askChatStream(patientId, q.id, {
@@ -121,7 +123,7 @@ export default function Chat() {
 
   const handleSend = async () => {
     const text = input.trim();
-    if (!text || loading) return;
+    if (!text || loading || patientId == null) return;
     setInput("");
     const match = questions.find((q) => q.text === text);
     if (match) {
@@ -141,6 +143,9 @@ export default function Chat() {
     <div className="h-screen flex flex-col" style={{ background: C.ivory }}>
       <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl lg:max-w-4xl mx-auto w-full px-4 py-6 flex flex-col flex-1 min-h-0">
+        <div className="shrink-0">
+          <PatientContextBanner />
+        </div>
         <div className="mb-5 shrink-0">
           <p className="text-[13px] font-bold mb-1" style={{ color: C.terracotta }}>AI 복약 상담</p>
           <h1 className="text-[24px] font-black" style={{ color: C.dark }}>{chatbotName}</h1>

@@ -56,10 +56,15 @@ export default function Upload() {
 
   const handleUpload = () => {
     if (!file) return;
+    const patientId = getCurrentPatientId();
+    if (patientId == null) {
+      setError("환자 정보를 확인할 수 없어요. 다시 로그인해 주세요.");
+      return;
+    }
     // 실제 업로드 요청은 Processing.tsx에서 보냄 (동기 방식이라 몇 초 걸릴 수 있어서
     // 애니메이션이 있는 화면으로 넘어간 다음 거기서 기다리는 구조)
     navigate("/processing", {
-      state: { file, patientId: getCurrentPatientId(), caregiverId: getCurrentCaregiverId() ?? undefined },
+      state: { file, patientId, caregiverId: getCurrentCaregiverId() ?? undefined },
     });
   };
 

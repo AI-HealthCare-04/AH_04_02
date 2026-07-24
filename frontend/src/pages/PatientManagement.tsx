@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bell, CalendarClock, ChevronLeft, ClipboardList, LayoutDashboard, Search, X } from "lucide-react";
 import NavBar from "../components/NavBar";
-import { getCaregiverPatients, unlinkCaregiverPatient, type Patient } from "../api/monitoring";
+import { getCaregiverPatients, getCaregivers, unlinkCaregiverPatient, type Caregiver, type Patient } from "../api/monitoring";
 import { getCurrentCaregiverId, getCurrentUserName } from "../lib/session";
 import { C } from "../theme";
 
@@ -45,6 +45,9 @@ export default function PatientManagement() {
   const [maxAge, setMaxAge] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // [2026-07-23 추가] 기관(organization) 계정인지 확인 — 기관이 연결을 끊을 땐 사유 입력과
+  // 상대 승인이 필요하다(REQ-004 확장).
+  const [myCaregiver, setMyCaregiver] = useState<Caregiver | null>(null);
 
   const load = async () => {
     if (!caregiverId) {
@@ -63,6 +66,12 @@ export default function PatientManagement() {
 
   useEffect(() => {
     load();
+    if (caregiverId) {
+      getCaregivers()
+        .then((list) => setMyCaregiver(list[0] ?? null))
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filtered = patients.filter((p) => {
@@ -88,7 +97,21 @@ export default function PatientManagement() {
 
   const remove = async (id: number) => {
     if (!caregiverId) return;
-    if (!window.confirm("이 환자와의 연결을 해제할까요? 환자 계정과 기록은 삭제되지 않아요.")) return;
+    setError("");
+
+    // [2026-07-23 수정] window.prompt()는 브라우저 네이티브 팝업이라 한글(IME) 입력이
+    // 제대로 안 되는 문제가 있었다 — 사유 입력은 전용 화면(DisconnectPatient.tsx)에서
+    // 일반 React 입력창으로 받는다. 기관은 사유 없이 일방적으로 연결을 끊을 수 없다 —
+    // 환자가 스스로 관리하지 못하는 상황에서 기관이 손을 떼는 걸 막기 위해, 사유를
+    // 남기고 환자·다른 보호자의 승인을 받아야 실제로 끊긴다(2주 안에 응답 없으면 자동 확정).
+    if (myCaregiver?.relation_type === "organization") {
+      navigate(`/patients/${id}/disconnect`);
+      return;
+    }
+    if (!window.confirm("이 환자와의 연결을 해제할까요? 환자 계정과 기록은 삭제되지 않아요.")) {
+      return;
+    }
+
     try {
       await unlinkCaregiverPatient(caregiverId, id);
       await load();
@@ -178,7 +201,7 @@ export default function PatientManagement() {
             <table className="w-full text-left" style={{ minWidth: 760 }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid rgba(30,26,23,0.08)" }}>
-                  {["ID", "이름", "나이", "성별", "전화번호", "진단명", "상태", "관리"].map((h) => (
+                  {["ID", "이름", "나이", "성별", "전화번호", "진단명", "상태", "관리", "오늘"].map((h) => (
                     <th
                       key={h}
                       className="px-4 py-3 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap"
@@ -252,6 +275,13 @@ export default function PatientManagement() {
                             <X className="w-4 h-4" />
                           </button>
                         </div>
+                      </td>
+                      <td className="px-4 py-4">
+                        <span
+                          title={p.today_status === "missed" ? "오늘 놓친 약이 있어요" : "오늘 복약 정상"}
+                          className="inline-block w-3 h-3 rounded-full"
+                          style={{ background: p.today_status === "missed" ? "#D94F4F" : C.success }}
+                        />
                       </td>
                     </tr>
                   );

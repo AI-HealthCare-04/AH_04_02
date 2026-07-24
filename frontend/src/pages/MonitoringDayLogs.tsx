@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ChevronLeft, Clock, FileText, Heart } from "lucide-react";
 import NavBar from "../components/NavBar";
+import PatientContextBanner from "../components/PatientContextBanner";
 import { getLogs, type MedicationLogEntry } from "../api/monitoring";
 import { listRecords, type RecordSummary } from "../api/records";
-import { getCurrentPatientId, getCurrentUserName } from "../lib/session";
+import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
 
 function dateKey(iso: string) {
@@ -19,7 +20,8 @@ export default function MonitoringDayLogs() {
   const navigate = useNavigate();
   const { date } = useParams<{ date: string }>();
   const [searchParams] = useSearchParams();
-  const patientId = Number(searchParams.get("patient_id")) || getCurrentPatientId();
+  const guardedPatientId = useGuardedPatientId();
+  const patientId = Number(searchParams.get("patient_id")) || guardedPatientId;
 
   const [logs, setLogs] = useState<MedicationLogEntry[]>([]);
   const [records, setRecords] = useState<RecordSummary[]>([]);
@@ -27,6 +29,7 @@ export default function MonitoringDayLogs() {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (patientId == null) return;
     Promise.all([getLogs(patientId, 366), listRecords(patientId)])
       .then(([l, r]) => {
         setLogs(l);
@@ -46,6 +49,7 @@ export default function MonitoringDayLogs() {
     <div className="min-h-screen" style={{ background: C.ivory }}>
       <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
+        <PatientContextBanner afterSwitchPath="/monitoring" />
         <button
           onClick={() => navigate("/monitoring")}
           className="flex items-center gap-1 text-[13px] font-bold mb-5 hover:opacity-60 transition-opacity"

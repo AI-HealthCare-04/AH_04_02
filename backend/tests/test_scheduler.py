@@ -1,10 +1,12 @@
 """
 core/scheduler.py 테스트 (2026-07-19 신규, 담당: 김영혜)
 
-REQ-026a(정시 알림)/REQ-026c(놓침 감지)/REQ-026d(third_party_needed 공동알림)의
-핵심 로직을 검증한다. 스케줄러는 백그라운드 asyncio 루프라 lifespan을 실제로
-띄우지 않고, _fire_due_reminders/_mark_missed를 명시적 now 인자로 직접 호출해
-"정시가 됐다"를 시뮬레이션한다(실시간 sleep 없이 결정적으로 테스트하기 위함).
+REQ-026a(정시 알림)/REQ-026c(놓침 감지)의 핵심 로직을 검증한다. 스케줄러는 백그라운드
+asyncio 루프라 lifespan을 실제로 띄우지 않고, _fire_due_reminders/_mark_missed를 명시적
+now 인자로 직접 호출해 "정시가 됐다"를 시뮬레이션한다(실시간 sleep 없이 결정적으로 테스트).
+
+[2026-07-23 삭제] REQ-026d(third_party_needed 공동알림)는 자가진단(CareLevelAssessment)
+자체를 제거하면서 함께 정리했다 — 만드는 화면이 없어 실질적으로 한 번도 동작한 적 없었다.
 """
 import json
 from datetime import datetime
@@ -15,7 +17,6 @@ from core import scheduler
 from models import (
     Caregiver,
     CaregiverPatient,
-    CareLevelAssessment,
     MedicationRecord,
     MedicationSchedule,
     NotificationLog,
@@ -211,7 +212,7 @@ class TestMarkMissed:
 
 
 class TestCoNotification:
-    def test_third_party_needed_notifies_all_linked_caregivers(self, session: Session):
+    def test_notifies_only_first_linked_caregiver(self, session: Session):
         pt = _make_patient(session, email=None)  # 환자 본인은 이메일 미동의 — 보호자만 받는지 확인
         cg1 = Caregiver(hashed_password="x", email="cg1@test.com", email_opt_in=True)
         cg1.name = "보호자1"
@@ -224,31 +225,7 @@ class TestCoNotification:
         session.refresh(cg2)
         session.add(CaregiverPatient(caregiver_id=cg1.id, patient_id=pt.id))
         session.add(CaregiverPatient(caregiver_id=cg2.id, patient_id=pt.id))
-        session.add(CareLevelAssessment(patient_id=pt.id, care_level="third_party_needed"))
         session.commit()
-        _make_schedule(session, pt, "08:00")
-
-        scheduler._fire_due_reminders(session, datetime(2026, 7, 19, 8, 5))
-
-        log = session.exec(select(NotificationLog)).first()
-        channels = json.loads(log.channels)
-        assert f"email:caregiver:{cg1.id}" in channels
-        assert f"email:caregiver:{cg2.id}" in channels
-
-    def test_independent_care_level_notifies_only_first_linked_caregiver(self, session: Session):
-        pt = _make_patient(session, email=None)
-        cg1 = Caregiver(hashed_password="x", email="cg1@test.com", email_opt_in=True)
-        cg1.name = "보호자1"
-        cg2 = Caregiver(hashed_password="x", email="cg2@test.com", email_opt_in=True)
-        cg2.name = "보호자2"
-        session.add(cg1)
-        session.add(cg2)
-        session.commit()
-        session.refresh(cg1)
-        session.refresh(cg2)
-        session.add(CaregiverPatient(caregiver_id=cg1.id, patient_id=pt.id))
-        session.add(CaregiverPatient(caregiver_id=cg2.id, patient_id=pt.id))
-        session.commit()  # care_level 기본값 "independent"
         _make_schedule(session, pt, "08:00")
 
         scheduler._fire_due_reminders(session, datetime(2026, 7, 19, 8, 5))
@@ -256,6 +233,32 @@ class TestCoNotification:
         log = session.exec(select(NotificationLog)).first()
         channels = json.loads(log.channels)
         assert channels == [f"email:caregiver:{cg1.id}"]
+
+    def test_revoked_caregiver_excluded_from_recipients(self, session: Session):
+        """[2026-07-23 추가] 연결이 끊긴(revoked) 보호자는 최초 연결이었어도 더 이상 알림을
+        받으면 안 된다 — unlink가 하드 삭제 대신 status="revoked"로 남는 소프트 삭제로
+        바뀌면서, 이 필터가 없으면 끊긴 보호자에게도 계속 이메일이 갔다."""
+        pt = _make_patient(session, email=None)
+        cg1 = Caregiver(hashed_password="x", email="cg1@test.com", email_opt_in=True)
+        cg1.name = "해제된보호자"
+        cg2 = Caregiver(hashed_password="x", email="cg2@test.com", email_opt_in=True)
+        cg2.name = "현재보호자"
+        session.add(cg1)
+        session.add(cg2)
+        session.commit()
+        session.refresh(cg1)
+        session.refresh(cg2)
+        # cg1이 먼저(최초) 연결됐지만 이후 해제됐고, cg2가 나중에 연결된 상태
+        session.add(CaregiverPatient(caregiver_id=cg1.id, patient_id=pt.id, status="revoked"))
+        session.add(CaregiverPatient(caregiver_id=cg2.id, patient_id=pt.id))
+        session.commit()
+        _make_schedule(session, pt, "08:00")
+
+        scheduler._fire_due_reminders(session, datetime(2026, 7, 19, 8, 5))
+
+        log = session.exec(select(NotificationLog)).first()
+        channels = json.loads(log.channels)
+        assert channels == [f"email:caregiver:{cg2.id}"]
 
     def test_schedule_caregiver_alert_false_skips_caregivers_but_not_patient(self, session: Session):
         """monitoring_router.py 스케줄 생성/수정 API에 이미 있는 per-schedule

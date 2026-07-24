@@ -36,6 +36,8 @@ export interface Patient {
   // 채워 보내고, 다른 곳(회원가입 응답 등)에서는 항상 기본값(null/"none")으로 온다.
   diagnoses: string | null;
   medication_status: "active" | "paused" | "none";
+  // [2026-07-23 추가] 환자 관리 테이블 "오늘 상태" 동그라미용 — GET /caregivers/{id}/patients만 채움
+  today_status: "ok" | "missed";
 }
 
 export interface Caregiver {
@@ -192,9 +194,13 @@ export async function getPatientCaregivers(patientId: number) {
 /**
  * [7/8 추가] 보호자-환자 연결 해제 ("연결 해제" 버튼)
  */
-export async function unlinkCaregiverPatient(caregiverId: number, patientId: number) {
+// [2026-07-23 수정] 기관(organization) 계정이 끊을 때는 reason이 필수 — 서버가 즉시 끊는
+// 대신 환자/보호자 승인 대기(status="revocation_pending")로 돌린다. 개인 보호자·환자
+// 본인은 reason 없이 호출하면 기존처럼 즉시 처리된다.
+export async function unlinkCaregiverPatient(caregiverId: number, patientId: number, reason?: string) {
   const { data } = await monitoringClient.delete(
-    `/monitoring/caregivers/${caregiverId}/patients/${patientId}`
+    `/monitoring/caregivers/${caregiverId}/patients/${patientId}`,
+    { params: reason ? { reason } : undefined }
   );
   return data;
 }
@@ -366,5 +372,25 @@ export async function getLogs(patientId: number, days = 30) {
   const { data } = await monitoringClient.get<MedicationLogEntry[]>("/monitoring/logs", {
     params: { patient_id: patientId, days },
   });
+  return data;
+}
+
+// [2026-07-23 추가] 알림함(웹 인박스) — NotificationLog 원본을 그대로 노출한다.
+export interface NotificationLogEntry {
+  id: number;
+  schedule_id: number;
+  drug_name: string;
+  time_slot: string;
+  due_date: string;
+  kind: "reminder" | "missed";
+  status: "pending" | "sent" | "suppressed" | "failed";
+  fired_at: string;
+}
+
+export async function getNotifications(patientId: number, days = 30) {
+  const { data } = await monitoringClient.get<NotificationLogEntry[]>(
+    `/monitoring/patients/${patientId}/notifications`,
+    { params: { days } }
+  );
   return data;
 }

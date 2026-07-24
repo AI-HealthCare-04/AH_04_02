@@ -16,6 +16,7 @@ import Dashboard from "./pages/Dashboard";
 import InviteAccept from "./pages/InviteAccept";
 import Schedule from "./pages/Schedule";
 import Notification from "./pages/Notification";
+import Notifications from "./pages/Notifications";
 import Records from "./pages/Records";
 import PrescriptionDetail from "./pages/PrescriptionDetail";
 import PrescriptionReview from "./pages/PrescriptionReview";
@@ -25,7 +26,7 @@ import MyPage from "./pages/MyPage";
 import MyInfo from "./pages/MyInfo";
 import Settings from "./pages/Settings";
 import PatientManagement from "./pages/PatientManagement";
-import CareEducation from "./pages/CareEducation";
+import DisconnectPatient from "./pages/DisconnectPatient";
 import MonitoringDashboard from "./pages/MonitoringDashboard";
 import MonitoringDayLogs from "./pages/MonitoringDayLogs";
 import DrugDetail from "./pages/DrugDetail";
@@ -62,6 +63,7 @@ function App() {
           <Route path="/invite/:token" element={<InviteAccept />} />
           <Route path="/schedule" element={<Schedule />} />
           <Route path="/notification" element={<Notification />} />
+          <Route path="/notifications" element={<Notifications />} />
           <Route path="/records" element={<Records />} />
           <Route path="/guides" element={<MedGuideList />} />
           <Route path="/records/:recordId" element={<PrescriptionDetail />} />
@@ -72,7 +74,7 @@ function App() {
           <Route path="/mypage/info" element={<MyInfo />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/patients" element={<PatientManagement />} />
-          <Route path="/care-education" element={<CareEducation />} />
+          <Route path="/patients/:patientId/disconnect" element={<DisconnectPatient />} />
           <Route path="/monitoring" element={<MonitoringDashboard />} />
           <Route path="/monitoring/logs/:date" element={<MonitoringDayLogs />} />
           <Route path="/drugs/:scheduleId" element={<DrugDetail />} />

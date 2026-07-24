@@ -10,6 +10,7 @@ from unittest.mock import patch
 import models
 import pytest
 from core.security import hash_token
+from fastapi import HTTPException
 from pydantic import ValidationError
 from routers.care_router import (
     InvitationAccept,
@@ -18,6 +19,7 @@ from routers.care_router import (
     accept_invitation_as_caregiver,
     create_invitation,
     delete_pending_invitation,
+    list_sent_patient_invitations,
 )
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -175,8 +177,10 @@ def test_accept_invitation_preserves_invitation_relation_type():
         assert caregiver.relation_type == "life_support_worker"
 
 
-def _make_caregiver(session: Session, name: str = "김보호", phone: str | None = None) -> models.Caregiver:
-    caregiver = models.Caregiver(relation_type="guardian")
+def _make_caregiver(
+    session: Session, name: str = "김보호", phone: str | None = None, relation_type: str = "guardian"
+) -> models.Caregiver:
+    caregiver = models.Caregiver(relation_type=relation_type)
     caregiver.name = name
     caregiver.phone = phone
     session.add(caregiver)
@@ -206,6 +210,65 @@ def test_accept_matching_invitation_hides_status_from_wrong_caregiver():
             accept_invitation_as_caregiver(invitation.id, owner, session)
 
         assert getattr(exc.value, "status_code", None) == 409
+
+
+# [2026-07-23 추가] 초대의 relation_type과 수락 계정 자신의 relation_type이 다르면 막는다 —
+# "사회복지사"로 온 초대를 "보호자"로 가입한 계정이 그대로 수락해버리던 버그.
+
+def test_accept_as_caregiver_rejects_mismatched_relation_type():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        invitation = _make_pending_invitation(
+            session, relation_type="social_worker", invited_phone="010-1111-2222"
+        )
+        wrong_role_caregiver = _make_caregiver(
+            session, "보호자로가입", phone="010-1111-2222", relation_type="guardian"
+        )
+
+        with pytest.raises(HTTPException) as exc:
+            accept_invitation_as_caregiver(invitation.id, wrong_role_caregiver, session)
+
+        assert exc.value.status_code == 403
+        session.refresh(invitation)
+        assert invitation.status == "pending"
+
+
+def test_accept_as_caregiver_succeeds_with_matching_relation_type():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        invitation = _make_pending_invitation(
+            session, relation_type="social_worker", invited_phone="010-1111-2222"
+        )
+        matching_caregiver = _make_caregiver(
+            session, "사회복지사로가입", phone="010-1111-2222", relation_type="social_worker"
+        )
+
+        result = accept_invitation_as_caregiver(invitation.id, matching_caregiver, session)
+
+        assert result["status"] == "accepted"
+        session.refresh(invitation)
+        assert invitation.status == "accepted"
+
+
+def test_accept_invitation_by_token_rejects_mismatched_relation_type_for_existing_account():
+    """토큰 기반 accept_invitation()도 caregiver_id로 기존 계정을 재사용할 때 같은 검증을 받는다."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        _make_pending_invitation(session, relation_type="life_support_worker")
+        wrong_role_caregiver = _make_caregiver(session, "보호자로가입", relation_type="guardian")
+
+        with pytest.raises(HTTPException) as exc:
+            accept_invitation(
+                RAW_TOKEN,
+                InvitationAccept(caregiver_id=wrong_role_caregiver.id),
+                session,
+                wrong_role_caregiver,
+            )
+
+        assert exc.value.status_code == 403
 
 
 def _make_pending_patient_invitation(
@@ -376,3 +439,64 @@ def test_accept_invitation_rolls_back_caregiver_when_failure_happens_after_creat
             select(models.Invitation).where(models.Invitation.token_hash == hash_token(RAW_TOKEN))
         ).first()
         assert refreshed.status == "pending"  # 커밋 전 상태로 롤백됨
+
+
+# ── GET /caregivers/{id}/invitations — "초대중인 내역" (2026-07-23 추가) ──────────
+
+def test_list_sent_patient_invitations_returns_only_pending():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        caregiver = _make_caregiver(session)
+        pending = _make_pending_patient_invitation(session, caregiver)
+
+        result = list_sent_patient_invitations(caregiver.id, caregiver, session)
+
+        assert len(result) == 1
+        assert result[0].id == pending.id
+        assert result[0].status == "pending"
+
+
+def test_list_sent_patient_invitations_excludes_accepted():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        caregiver = _make_caregiver(session)
+        accepted = _make_pending_patient_invitation(session, caregiver)
+        accepted.status = "accepted"
+        session.add(accepted)
+        session.commit()
+
+        result = list_sent_patient_invitations(caregiver.id, caregiver, session)
+
+        assert result == []
+
+
+def test_list_sent_patient_invitations_forbidden_for_other_caregiver():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        owner = _make_caregiver(session, "주인")
+        outsider = _make_caregiver(session, "무관자")
+        _make_pending_patient_invitation(session, owner)
+
+        with pytest.raises(HTTPException) as exc:
+            list_sent_patient_invitations(owner.id, outsider, session)
+        assert exc.value.status_code == 403
+
+
+def test_list_sent_patient_invitations_marks_expired_and_excludes():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        caregiver = _make_caregiver(session)
+        expired = _make_pending_patient_invitation(session, caregiver)
+        expired.expires_at = datetime.now() - timedelta(days=1)
+        session.add(expired)
+        session.commit()
+
+        result = list_sent_patient_invitations(caregiver.id, caregiver, session)
+
+        assert result == []
+        session.refresh(expired)
+        assert expired.status == "expired"

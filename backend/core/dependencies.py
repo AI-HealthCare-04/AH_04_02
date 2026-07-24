@@ -50,10 +50,14 @@ def get_current_caregiver_optional(
 ) -> Caregiver | None:
     """[2026-07-22 추가, 팀원 리뷰 반영 — HIGH] get_current_caregiver의 "선택적" 버전 —
     Authorization 헤더가 없으면 조용히 None을 반환한다(완전 비인증 흐름을 막지 않기 위함).
-    단, 헤더가 있는데 토큰이 무효/만료됐거나 caregiver 역할이 아니면 여전히 401을 던진다
-    (있는데 잘못된 토큰까지 "로그인 안 한 것"으로 조용히 넘기면 호출부가 잘못된 신뢰를
-    할 수 있다 — care_router.accept_invitation()이 이 값으로 payload.caregiver_id를
-    검증하는 용도로 쓴다)."""
+    토큰이 무효/만료됐으면 여전히 401을 던진다.
+
+    [2026-07-23 수정] role이 "caregiver"가 아닐 때도 이전엔 401을 던졌는데,
+    accept_invitation()이 이제 get_current_patient_optional도 같은 요청에 같이 걸어둔다
+    (수락자가 보호자일지 환자일지 미리 알 수 없어서) — 환자 토큰으로 요청하면 role
+    불일치로 매번 401이 나서 patient_id 검증 로직에 도달하기도 전에 요청이 막혔다. 이제는
+    조용히 None을 반환하고, payload.caregiver_id 검증(아래 accept_invitation)이 actor가
+    None이면 403으로 거부하므로 보안 목적은 동일하게 유지된다."""
     if credential is None:
         return None
     try:
@@ -61,7 +65,7 @@ def get_current_caregiver_optional(
     except jwt.PyJWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="유효하지 않거나 만료된 토큰입니다.")
     if role != "caregiver":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="보호자 계정 토큰이 아닙니다.")
+        return None
 
     caregiver = session.get(Caregiver, subject_id)
     if not caregiver:
@@ -91,13 +95,51 @@ def get_current_patient(
     return patient
 
 
+def get_current_patient_optional(
+    credential: HTTPAuthorizationCredentials | None = Depends(_optional_security),
+    session: Session = Depends(get_session),
+) -> Patient | None:
+    """get_current_caregiver_optional의 환자 버전 — care_router.accept_invitation()이
+    "보호자→환자 초대"를 이미 로그인된 기존 환자 계정으로 바로 수락할 때, payload.patient_id를
+    실제 로그인된 그 계정인지 검증하는 용도로 쓴다.
+
+    [주의] get_current_caregiver_optional과 달리 role이 안 맞으면 401을 던지지 않고 조용히
+    None을 반환한다 — accept_invitation()이 이 함수와 get_current_caregiver_optional을 같은
+    요청에 동시에 걸어두므로(수락자가 보호자일지 환자일지 미리 알 수 없음), 로그인된 보호자
+    토큰으로 요청하면 이 함수 입장에선 "역할이 다른 유효한 토큰"이라 매번 401을 던져
+    caregiver_id 검증 로직까지 도달하기 전에 요청 전체가 막혀버린다. 대신 아래 accept_invitation
+    쪽에서 `patient_id`가 왔는데 patient_actor가 None이면 403으로 거부하므로 보안 목적은
+    동일하게 달성된다."""
+    if credential is None:
+        return None
+    try:
+        subject_id, role = decode_token(credential.credentials, expected_type="access")
+    except jwt.PyJWTError as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="유효하지 않거나 만료된 토큰입니다.") from e
+    if role != "patient":
+        return None
+
+    patient = session.get(Patient, subject_id)
+    if not patient:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증에 실패했습니다.")
+    if patient.deactivated_at is not None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="탈퇴 처리된 계정입니다.")
+    return patient
+
+
 def require_patient_access(patient_id: int, caregiver: Caregiver, session: Session) -> None:
     """[7/10 추가] caregiver가 이 patient_id를 실제로 케어하는지 확인 — issue #21.
-    monitoring_router.py/care_router.py의 모든 patient_id 기반 엔드포인트에서 공용으로 씀."""
+    monitoring_router.py/care_router.py의 모든 patient_id 기반 엔드포인트에서 공용으로 씀.
+
+    [2026-07-23 수정] status != "revoked" 필터 추가 — 연결 해제(unlink)가 하드 삭제 대신
+    상태값(revoked)으로 남는 방식으로 바뀌면서, 이 필터가 없으면 해제된 보호자도 행이 여전히
+    존재한다는 이유로 계속 이 환자에 접근할 수 있었다(권한 우회). revocation_pending은 아직
+    실제로 끊긴 게 아니므로(기관이 사유를 남기고 승인을 기다리는 중) 접근을 계속 허용한다."""
     link = session.exec(
         select(CaregiverPatient)
         .where(CaregiverPatient.caregiver_id == caregiver.id)
         .where(CaregiverPatient.patient_id == patient_id)
+        .where(CaregiverPatient.status != "revoked")
     ).first()
     if not link:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="이 환자에 대한 권한이 없습니다.")

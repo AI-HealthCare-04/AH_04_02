@@ -24,6 +24,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Literal
 
+from core.audit import record_audit_log
 from core.auth import hash_password
 from core.database import get_session
 from core.dependencies import (
@@ -107,6 +108,9 @@ class PatientPublic(BaseModel):
     # 값이라 실제로 표로 보여줄 GET /caregivers/{id}/patients에서만 채운다.
     diagnoses: str | None = None
     medication_status: Literal["active", "paused", "none"] = "none"
+    # [2026-07-23 추가] 환자 관리 테이블 맨 오른쪽 "오늘 상태" 동그라미용 — 다른 계산
+    # 필드와 동일하게 GET /caregivers/{id}/patients에서만 채운다.
+    today_status: Literal["ok", "missed"] = "ok"
 
 
 class MealTimesUpdate(BaseModel):
@@ -188,7 +192,9 @@ def list_patients(actor: Actor = Depends(get_current_actor), session: Session = 
     if role == "patient":
         return [subject]
     links = session.exec(
-        select(CaregiverPatient).where(CaregiverPatient.caregiver_id == subject.id)
+        select(CaregiverPatient)
+        .where(CaregiverPatient.caregiver_id == subject.id)
+        .where(CaregiverPatient.status != "revoked")
     ).all()
     patient_ids = [link.patient_id for link in links]
     if not patient_ids:
@@ -230,9 +236,11 @@ def update_patient(
         if existing and existing.id != patient_id:
             raise HTTPException(409, "이미 사용중인 전화번호입니다.")
 
+    before = {key: getattr(patient, key, None) for key in updates}
     for key, value in updates.items():
         setattr(patient, key, value)
     session.add(patient)
+    record_audit_log(session, "patients", patient_id, actor, before, updates)
     session.commit()
     session.refresh(patient)
     return patient
@@ -506,6 +514,28 @@ def _patient_medication_status(session: Session, patient_id: int) -> Literal["ac
     return "active" if any(schedules) else "paused"
 
 
+def _patient_today_status(session: Session, patient_id: int) -> Literal["ok", "missed"]:
+    """환자 관리 테이블 "오늘 상태" 동그라미용 — 여러 환자를 관리할 때 오늘 누가 약을
+    놓쳤는지 한눈에 보기 위함(list_logs가 캘린더/최근기록에 쓰는 것과 동일한 NotificationLog
+    kind="missed" 병합 방식을 재사용). 오늘 놓친 일정이 하나라도 있으면 missed(빨강),
+    없으면 ok(초록) — 활성 일정이 아예 없는 환자도 ok로 둔다(놓칠 일정 자체가 없으므로)."""
+    active_schedule_ids = session.exec(
+        select(MedicationSchedule.id)
+        .where(MedicationSchedule.patient_id == patient_id)
+        .where(MedicationSchedule.active == True)  # noqa: E712
+    ).all()
+    if not active_schedule_ids:
+        return "ok"
+    today_str = date.today().isoformat()
+    missed = session.exec(
+        select(NotificationLog)
+        .where(NotificationLog.kind == "missed")
+        .where(NotificationLog.due_date == today_str)
+        .where(NotificationLog.schedule_id.in_(active_schedule_ids))
+    ).first()
+    return "missed" if missed else "ok"
+
+
 @router.get("/caregivers/{caregiver_id}/patients", response_model=list[PatientPublic])
 def list_patients_of_caregiver(
     caregiver_id: int,
@@ -520,7 +550,9 @@ def list_patients_of_caregiver(
         raise HTTPException(403, "다른 보호자의 환자 목록은 볼 수 없어요")
 
     links = session.exec(
-        select(CaregiverPatient).where(CaregiverPatient.caregiver_id == caregiver_id)
+        select(CaregiverPatient)
+        .where(CaregiverPatient.caregiver_id == caregiver_id)
+        .where(CaregiverPatient.status != "revoked")
     ).all()
     patient_ids = [link.patient_id for link in links]
     if not patient_ids:
@@ -534,6 +566,7 @@ def list_patients_of_caregiver(
                 update={
                     "diagnoses": _patient_diagnoses(session, patient.id),
                     "medication_status": _patient_medication_status(session, patient.id),
+                    "today_status": _patient_today_status(session, patient.id),
                 }
             )
         )
@@ -548,7 +581,9 @@ def list_caregivers_of_patient(
     require_actor_patient_access(patient_id, actor, session)
 
     links = session.exec(
-        select(CaregiverPatient).where(CaregiverPatient.patient_id == patient_id)
+        select(CaregiverPatient)
+        .where(CaregiverPatient.patient_id == patient_id)
+        .where(CaregiverPatient.status != "revoked")
     ).all()
     caregiver_ids = [link.caregiver_id for link in links]
     if not caregiver_ids:
@@ -583,10 +618,23 @@ def link_caregiver_to_patient(
         .where(CaregiverPatient.patient_id == patient_id)
     ).first()
     if existing:
+        if existing.status == "revoked":
+            # [2026-07-23 추가] 과거에 해제된 연결이면 새 행을 또 만들지 않고 재활성화한다.
+            existing.status = "active"
+            existing.revoked_at = None
+            existing.revocation_requested_by = None
+            existing.requested_by_role = None
+            existing.revocation_reason = None
+            existing.revocation_requested_at = None
+            session.add(existing)
+            session.commit()
+            return {"linked": True, "caregiver_id": caregiver_id, "patient_id": patient_id}
         return {"already_linked": True}
 
     has_any_caregiver = session.exec(
-        select(CaregiverPatient).where(CaregiverPatient.patient_id == patient_id)
+        select(CaregiverPatient)
+        .where(CaregiverPatient.patient_id == patient_id)
+        .where(CaregiverPatient.status != "revoked")
     ).first()
     if has_any_caregiver:
         raise HTTPException(403, "이미 다른 보호자가 연결된 환자예요. 추가 연결은 초대 링크를 통해서만 가능해요.")
@@ -600,10 +648,21 @@ def link_caregiver_to_patient(
 def unlink_caregiver_from_patient(
     caregiver_id: int,
     patient_id: int,
+    reason: str | None = None,
     actor: Actor = Depends(get_current_actor),
     session: Session = Depends(get_session),
 ):
-    """Connect.tsx — 보호자 본인이거나 환자 본인이어야 그 연결을 해제할 수 있다."""
+    """Connect.tsx/PatientManagement.tsx — 보호자 본인이거나 환자 본인이어야 그 연결을 해제할 수 있다.
+
+    [2026-07-23 수정] 기관(organization) 계정이 연결을 끊을 때는 즉시 끊지 않는다 — 환자·보호자가
+    스스로 관리하기 어려운 상황에서 기관이 사유 없이 일방적으로 손을 떼는 걸 막기 위해, 상대(환자
+    또는 다른 보호자)가 승인해야 실제로 끊긴다(POST /trust/relations/{trust_id}/revocation-approval).
+    대신 정당한 사유로 끊으려는 기관이 상대의 무응답에 무기한 묶이지 않도록, 사유 입력을 필수로
+    하고 14일 안에 응답이 없으면 요청자 스스로 확정할 수 있다(approve_revocation의 타임아웃 처리).
+    개인 보호자·환자 본인이 끊을 때는 기존과 동일하게 즉시 처리한다.
+
+    [2026-07-23 수정] 하드 삭제 대신 status를 남기는 소프트 삭제로 바꿨다 — 이 앱의 다른 모델들과
+    같은 소프트 삭제 관례를 따르고, 감사 이력(누가 언제 왜 끊었는지)을 보존한다."""
     role, subject = actor
     if (role == "caregiver" and subject.id != caregiver_id) or (role == "patient" and subject.id != patient_id):
         raise HTTPException(403, "이 연결을 해제할 권한이 없어요")
@@ -611,12 +670,31 @@ def unlink_caregiver_from_patient(
         select(CaregiverPatient)
         .where(CaregiverPatient.caregiver_id == caregiver_id)
         .where(CaregiverPatient.patient_id == patient_id)
+        .where(CaregiverPatient.status != "revoked")
     ).first()
     if not link:
         raise HTTPException(404, "연결된 내역이 없어요")
-    session.delete(link)
+    if link.status == "revocation_pending":
+        raise HTTPException(409, "이미 해제 승인 대기 중인 연결이에요")
+
+    is_institution = role == "caregiver" and getattr(subject, "relation_type", None) == "organization"
+    if is_institution:
+        if not reason or not reason.strip():
+            raise HTTPException(400, "연결을 끊는 사유를 입력해 주세요.")
+        link.status = "revocation_pending"
+        link.revocation_requested_by = subject.id
+        link.requested_by_role = role
+        link.revocation_reason = reason.strip()
+        link.revocation_requested_at = datetime.now()
+        session.add(link)
+        session.commit()
+        return {"unlinked": False, "status": "revocation_pending"}
+
+    link.status = "revoked"
+    link.revoked_at = datetime.now()
+    session.add(link)
     session.commit()
-    return {"unlinked": True}
+    return {"unlinked": True, "status": "revoked"}
 
 
 # ══════════════════════════════════════════
@@ -681,9 +759,12 @@ def update_schedule(
     if not schedule:
         raise HTTPException(404, "해당 일정을 찾을 수 없어요")
     require_actor_patient_access(schedule.patient_id, actor, session)
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+    before = {key: getattr(schedule, key, None) for key in updates}
+    for key, value in updates.items():
         setattr(schedule, key, value)
     session.add(schedule)
+    record_audit_log(session, "medication_schedules", schedule_id, actor, before, updates)
     session.commit()
     session.refresh(schedule)
     return schedule
@@ -916,6 +997,57 @@ def list_logs(
     )
     entries.sort(key=lambda e: e["checked_at"], reverse=True)
     return entries
+
+
+class NotificationLogEntry(BaseModel):
+    """[2026-07-23 추가] 알림함 — 복약 알림/놓침 감지가 이미 NotificationLog에 쌓이고
+    있는데, 이걸 웹에서 모아 볼 화면이 없었다(푸시만 전제한 설계). 웹만 켜둔 환자·보호자도
+    지난 알림을 확인할 수 있게 그대로 노출한다."""
+    id: int
+    schedule_id: int
+    drug_name: str
+    time_slot: str
+    due_date: str
+    kind: Literal["reminder", "missed"]
+    status: Literal["pending", "sent", "suppressed", "failed"]
+    fired_at: datetime
+
+
+@router.get("/patients/{patient_id}/notifications", response_model=list[NotificationLogEntry])
+def list_notifications(
+    patient_id: int,
+    days: int = 30,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    require_actor_patient_access(patient_id, actor, session)
+    since = datetime.now() - timedelta(days=days)
+    logs = session.exec(
+        select(NotificationLog)
+        .where(NotificationLog.patient_id == patient_id)
+        .where(NotificationLog.fired_at >= since)
+        .order_by(NotificationLog.fired_at.desc())
+    ).all()
+    if not logs:
+        return []
+
+    schedule_ids = {log.schedule_id for log in logs}
+    schedules = {
+        s.id: s for s in session.exec(select(MedicationSchedule).where(MedicationSchedule.id.in_(schedule_ids)))
+    }
+    return [
+        NotificationLogEntry(
+            id=log.id,
+            schedule_id=log.schedule_id,
+            drug_name=schedules[log.schedule_id].drug_name if log.schedule_id in schedules else "삭제된 일정",
+            time_slot=log.time_slot,
+            due_date=log.due_date,
+            kind=log.kind,
+            status=log.status,
+            fired_at=log.fired_at,
+        )
+        for log in logs
+    ]
 
 
 # ── Dashboard.tsx가 그대로 쓸 수 있는 오늘자 통합 조회 [7/6: patient_id 필수로 변경] ──

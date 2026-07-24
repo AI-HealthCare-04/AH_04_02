@@ -10,13 +10,15 @@
 7. 환자가 요청 → 같은 환자가 승인 시도 → 403 (CRITICAL 수정, pecs0310 리뷰)
 8. 환자가 요청 → 보호자가 승인 → 200 (정상 경로)
 """
+from datetime import datetime, timedelta
+
 import pytest
 from core.auth import create_access_token
 from core.database import get_session
 from fastapi.testclient import TestClient
 from main import app
-from models import CareLevelAssessment, Caregiver, CaregiverPatient, Patient
-from sqlmodel import Session, SQLModel, create_engine, select
+from models import Caregiver, CaregiverPatient, Patient
+from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
 
 URL = "/trust/relations/{}/revocation-approval"
@@ -73,6 +75,7 @@ def _pending_link(
     *,
     requested_by_role: str = "caregiver",
     requested_by_id: int | None = None,
+    requested_at: datetime | None = None,
 ) -> CaregiverPatient:
     lnk = CaregiverPatient(
         caregiver_id=requester.id,
@@ -80,6 +83,7 @@ def _pending_link(
         status="revocation_pending",
         revocation_requested_by=requested_by_id if requested_by_id is not None else requester.id,
         requested_by_role=requested_by_role,
+        revocation_requested_at=requested_at if requested_at is not None else datetime.now(),
     )
     session.add(lnk)
     session.commit()
@@ -266,3 +270,165 @@ def test_caregiver_approves_patient_request(client: TestClient, session: Session
 
     assert r.status_code == 200
     assert r.json()["status"] == "revoked"
+
+
+# ── 9. 2주 타임아웃 — 요청자 본인 확정 (2026-07-23 추가) ────────────────────
+
+def test_requester_still_blocked_before_timeout(client: TestClient, session: Session):
+    """요청 후 14일이 안 지났으면 요청자 본인은 여전히 승인할 수 없다."""
+    requester = _caregiver(session, "요청기관")
+    pt = _patient(session)
+    pending = _pending_link(session, requester, pt, requested_at=datetime.now() - timedelta(days=13))
+
+    r = client.post(URL.format(pending.id), json={"approve": True}, headers=_headers(requester.id, "caregiver"))
+
+    assert r.status_code == 403
+
+
+def test_requester_can_finalize_after_timeout(client: TestClient, session: Session):
+    """상대가 14일 안에 응답하지 않으면 요청자 본인이 직접 확정(승인)할 수 있다 —
+    정당한 사유로 끊으려는 기관이 무응답에 무기한 묶이지 않도록 하는 타임아웃."""
+    requester = _caregiver(session, "요청기관")
+    pt = _patient(session)
+    pending = _pending_link(session, requester, pt, requested_at=datetime.now() - timedelta(days=15))
+
+    r = client.post(URL.format(pending.id), json={"approve": True}, headers=_headers(requester.id, "caregiver"))
+
+    assert r.status_code == 200
+    assert r.json()["status"] == "revoked"
+
+
+# ── 10. "받은 해제 요청" 목록 (2026-07-23 추가) ──────────────────────────────
+
+def test_patient_sees_pending_revocation_with_reason(client: TestClient, session: Session):
+    requester = _caregiver(session, "요청기관")
+    pt = _patient(session)
+    _pending_link(session, requester, pt)
+
+    r = client.get("/trust/relations/pending", headers=_headers(pt.id, "patient"))
+
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) == 1
+    assert body[0]["caregiver_id"] == requester.id
+    assert body[0]["requested_by_role"] == "caregiver"
+
+
+def test_unrelated_caregiver_does_not_see_pending_revocation(client: TestClient, session: Session):
+    requester = _caregiver(session, "요청기관")
+    outsider = _caregiver(session, "무관자")
+    pt = _patient(session)
+    _pending_link(session, requester, pt)
+
+    r = client.get("/trust/relations/pending", headers=_headers(outsider.id, "caregiver"))
+
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+# ── 11. 해제 요청 처리 결과 알림 (2026-07-23 추가) ──────────────────────────
+
+def test_approve_creates_notice_for_requester(client: TestClient, session: Session):
+    requester = _caregiver(session, "요청기관")
+    approver = _caregiver(session, "승인자")
+    pt = _patient(session)
+    pending = _pending_link(session, requester, pt)
+    _link(session, approver, pt)
+
+    r = client.post(URL.format(pending.id), json={"approve": True}, headers=_headers(approver.id, "caregiver"))
+    assert r.status_code == 200
+
+    notices = client.get("/trust/relations/notices", headers=_headers(requester.id, "caregiver"))
+    assert notices.status_code == 200
+    body = notices.json()
+    assert len(body) == 1
+    assert body[0]["approved"] is True
+    assert body[0]["patient_name"] == "환자"
+    assert body[0]["counterpart_name"] == "승인자"
+    assert body[0]["read_at"] is None
+
+
+def test_reject_creates_notice_for_requester(client: TestClient, session: Session):
+    requester = _caregiver(session, "요청기관")
+    approver = _caregiver(session, "승인자")
+    pt = _patient(session)
+    pending = _pending_link(session, requester, pt)
+    _link(session, approver, pt)
+
+    r = client.post(URL.format(pending.id), json={"approve": False}, headers=_headers(approver.id, "caregiver"))
+    assert r.status_code == 200
+
+    notices = client.get("/trust/relations/notices", headers=_headers(requester.id, "caregiver"))
+    assert notices.status_code == 200
+    body = notices.json()
+    assert len(body) == 1
+    assert body[0]["approved"] is False
+
+
+def test_notice_not_visible_to_unrelated_caregiver(client: TestClient, session: Session):
+    requester = _caregiver(session, "요청기관")
+    approver = _caregiver(session, "승인자")
+    outsider = _caregiver(session, "무관자")
+    pt = _patient(session)
+    pending = _pending_link(session, requester, pt)
+    _link(session, approver, pt)
+
+    client.post(URL.format(pending.id), json={"approve": True}, headers=_headers(approver.id, "caregiver"))
+
+    r = client.get("/trust/relations/notices", headers=_headers(outsider.id, "caregiver"))
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_mark_notice_read(client: TestClient, session: Session):
+    requester = _caregiver(session, "요청기관")
+    approver = _caregiver(session, "승인자")
+    pt = _patient(session)
+    pending = _pending_link(session, requester, pt)
+    _link(session, approver, pt)
+
+    client.post(URL.format(pending.id), json={"approve": True}, headers=_headers(approver.id, "caregiver"))
+    notice_id = client.get(
+        "/trust/relations/notices", headers=_headers(requester.id, "caregiver")
+    ).json()[0]["id"]
+
+    r = client.post(
+        f"/trust/relations/notices/{notice_id}/read", headers=_headers(requester.id, "caregiver")
+    )
+    assert r.status_code == 200
+    assert r.json()["read_at"] is not None
+
+
+def test_mark_notice_read_forbidden_for_other_caregiver(client: TestClient, session: Session):
+    requester = _caregiver(session, "요청기관")
+    approver = _caregiver(session, "승인자")
+    outsider = _caregiver(session, "무관자")
+    pt = _patient(session)
+    pending = _pending_link(session, requester, pt)
+    _link(session, approver, pt)
+
+    client.post(URL.format(pending.id), json={"approve": True}, headers=_headers(approver.id, "caregiver"))
+    notice_id = client.get(
+        "/trust/relations/notices", headers=_headers(requester.id, "caregiver")
+    ).json()[0]["id"]
+
+    r = client.post(
+        f"/trust/relations/notices/{notice_id}/read", headers=_headers(outsider.id, "caregiver")
+    )
+    assert r.status_code == 404
+
+
+def test_patient_requester_receives_notice(client: TestClient, session: Session):
+    """환자가 요청한 해제를 보호자가 승인하면, 환자에게도(role=patient) 알림이 남는다."""
+    caregiver = _caregiver(session, "보호자")
+    pt = _patient(session)
+    pending = _pending_link(session, caregiver, pt, requested_by_role="patient", requested_by_id=pt.id)
+
+    r = client.post(URL.format(pending.id), json={"approve": True}, headers=_headers(caregiver.id, "caregiver"))
+    assert r.status_code == 200
+
+    notices = client.get("/trust/relations/notices", headers=_headers(pt.id, "patient"))
+    assert notices.status_code == 200
+    body = notices.json()
+    assert len(body) == 1
+    assert body[0]["counterpart_name"] == "보호자"

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Heart, Check, X } from "lucide-react";
 import NavBar from "../components/NavBar";
 import { acceptInvitation, getInvitation, rejectInvitation, type InvitationInfo } from "../api/care";
+import { getPatients, type Patient } from "../api/monitoring";
 import { getCurrentCaregiverId, getCurrentUserName, isLoggedIn } from "../lib/session";
 
 const RELATION_LABEL: Record<string, string> = {
@@ -37,9 +38,16 @@ export default function InviteAccept() {
   const [password, setPassword] = useState("");
   const [decided, setDecided] = useState<"accepted" | "rejected" | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // [2026-07-23 추가] 보호자/기관 → 환자 초대인데 초대 받은 사람이 이미 환자 계정으로
+  // 로그인해서 링크를 연 경우 — 새 계정을 또 만들지 않고 이 계정 정보를 그대로 보여준다.
+  const [ownPatient, setOwnPatient] = useState<Patient | null>(null);
 
   // 보호자→환자 초대(REQ-037): 수락자가 실제 환자 계정을 만드는 흐름
   const isPatientInvite = invite?.relation_type === "patient";
+  // 환자 본인 계정으로 이미 로그인한 상태로 이 링크를 열었으면(캐어기버 계정 아님) 새로
+  // 가입할 필요 없이 그 계정을 그대로 연결한다 — Login.tsx는 환자 로그인 시 caregiver_id를
+  // 항상 지우므로, 로그인 상태 + caregiver_id 없음이 곧 "환자 본인 로그인"이다.
+  const useExistingPatient = isPatientInvite && isLoggedIn() && getCurrentCaregiverId() === null;
   // [2026-07-22 추가] "환자→보호자 초대"(Connect.tsx)는 대부분 환자 본인이 직접 보내서
   // inviter_name(보호자 초대자)이 없다 — 그 경우 환자 자신의 이름을 "초대한 사람"으로 보여준다.
   const inviterDisplayName = invite?.inviter_name ?? invite?.patient_name;
@@ -61,6 +69,11 @@ export default function InviteAccept() {
           // [2026-07-22 추가] 이름 입력칸을 로그인된 계정 이름으로 자동 채워둔다 —
           // 다른 이름으로 수락하고 싶으면 그대로 고쳐 쓸 수 있다(자동 채움 + 수정 가능).
           setCaregiverName(getCurrentUserName());
+        } else if (data.relation_type === "patient" && isLoggedIn() && getCurrentCaregiverId() === null) {
+          // getPatients()는 환자 본인 로그인이면 자기 자신 한 명만 돌려준다(list_patients 참고).
+          getPatients()
+            .then((patients) => setOwnPatient(patients[0] ?? null))
+            .catch(() => setError("환자 정보를 불러오지 못했어요."));
         }
       })
       .catch(() => setError("유효하지 않거나 만료된 초대예요."))
@@ -71,6 +84,20 @@ export default function InviteAccept() {
     if (!token) return;
 
     if (isPatientInvite) {
+      if (useExistingPatient) {
+        if (!ownPatient) return;
+        setSubmitting(true);
+        try {
+          await acceptInvitation(token, { patient_id: ownPatient.id });
+          setDecided("accepted");
+        } catch {
+          setError("수락 처리에 실패했어요.");
+        } finally {
+          setSubmitting(false);
+        }
+        return;
+      }
+
       if (!caregiverName.trim()) return;
       setSubmitting(true);
       try {
@@ -161,7 +188,9 @@ export default function InviteAccept() {
             <p className="text-[14px] text-[#8A7E75] mb-6">
               {decided === "accepted"
                 ? isPatientInvite
-                  ? "계정이 만들어졌어요. 이제 복약 관리를 시작할 수 있어요."
+                  ? useExistingPatient
+                    ? `이제 ${inviterDisplayName ?? ""}님과 복약 관리를 함께할 수 있어요.`
+                    : "계정이 만들어졌어요. 이제 복약 관리를 시작할 수 있어요."
                   : `이제 ${invite?.patient_name ?? ""}님의 복약 관리를 함께할 수 있어요.`
                 : "언제든지 다시 초대받을 수 있어요."}
             </p>
@@ -187,10 +216,17 @@ export default function InviteAccept() {
               </p>
               <h1 className="text-[24px] font-black text-[#1E1A17] mb-7 leading-snug">
                 {isPatientInvite ? (
-                  <>
-                    복약 관리를 함께할<br />
-                    계정을 만들어요
-                  </>
+                  useExistingPatient ? (
+                    <>
+                      {inviterDisplayName}님과<br />
+                      복약 관리를 함께해요
+                    </>
+                  ) : (
+                    <>
+                      복약 관리를 함께할<br />
+                      계정을 만들어요
+                    </>
+                  )
                 ) : (
                   <>
                     {inviterDisplayName}님이<br />
@@ -224,34 +260,57 @@ export default function InviteAccept() {
               </div>
 
               {isPatientInvite ? (
-                <>
-                  <input
-                    value={caregiverName}
-                    onChange={(e) => setCaregiverName(e.target.value)}
-                    placeholder="이름을 입력해 주세요"
-                    className="w-full px-4 py-3.5 mb-3 rounded-xl border border-[rgba(30,26,23,0.12)] text-[15px] outline-none"
-                  />
-                  <input
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    type="email"
-                    placeholder="이메일 (로그인 아이디) — 선택"
-                    className="w-full px-4 py-3.5 mb-3 rounded-xl border border-[rgba(30,26,23,0.12)] text-[15px] outline-none"
-                  />
-                  <input
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    type="password"
-                    placeholder="비밀번호 — 선택"
-                    className="w-full px-4 py-3.5 mb-3 rounded-xl border border-[rgba(30,26,23,0.12)] text-[15px] outline-none"
-                  />
-                  <input
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="전화번호 (010-0000-0000) — 선택"
-                    className="w-full px-4 py-3.5 mb-5 rounded-xl border border-[rgba(30,26,23,0.12)] text-[15px] outline-none"
-                  />
-                </>
+                useExistingPatient ? (
+                  <div className="rounded-2xl p-5 mb-5 bg-[#F4F0EA] text-left space-y-2.5">
+                    {!ownPatient ? (
+                      <p className="text-[13px] text-[#8A7E75]">내 계정 정보를 불러오는 중이에요...</p>
+                    ) : (
+                      <>
+                        <div className="flex justify-between text-[13px]">
+                          <span className="text-[#8A7E75]">이름</span>
+                          <span className="font-bold text-[#1E1A17]">{ownPatient.name}</span>
+                        </div>
+                        <div className="flex justify-between text-[13px]">
+                          <span className="text-[#8A7E75]">이메일</span>
+                          <span className="font-bold text-[#1E1A17]">{ownPatient.email ?? "-"}</span>
+                        </div>
+                        <div className="flex justify-between text-[13px]">
+                          <span className="text-[#8A7E75]">전화번호</span>
+                          <span className="font-bold text-[#1E1A17]">{ownPatient.phone ?? "-"}</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <input
+                      value={caregiverName}
+                      onChange={(e) => setCaregiverName(e.target.value)}
+                      placeholder="이름을 입력해 주세요"
+                      className="w-full px-4 py-3.5 mb-3 rounded-xl border border-[rgba(30,26,23,0.12)] text-[15px] outline-none"
+                    />
+                    <input
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      type="email"
+                      placeholder="이메일 (로그인 아이디) — 선택"
+                      className="w-full px-4 py-3.5 mb-3 rounded-xl border border-[rgba(30,26,23,0.12)] text-[15px] outline-none"
+                    />
+                    <input
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      type="password"
+                      placeholder="비밀번호 — 선택"
+                      className="w-full px-4 py-3.5 mb-3 rounded-xl border border-[rgba(30,26,23,0.12)] text-[15px] outline-none"
+                    />
+                    <input
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="전화번호 (010-0000-0000) — 선택"
+                      className="w-full px-4 py-3.5 mb-5 rounded-xl border border-[rgba(30,26,23,0.12)] text-[15px] outline-none"
+                    />
+                  </>
+                )
               ) : (
                 <>
                   <input
@@ -287,7 +346,12 @@ export default function InviteAccept() {
                 </button>
                 <button
                   onClick={handleAccept}
-                  disabled={submitting || !caregiverName.trim() || (invite.phone_verification_required && !phone.trim())}
+                  disabled={
+                    submitting ||
+                    (useExistingPatient
+                      ? !ownPatient
+                      : !caregiverName.trim() || (invite.phone_verification_required && !phone.trim()))
+                  }
                   className="flex-1 py-3.5 rounded-full font-bold text-[15px] text-white bg-[#C1653D] disabled:opacity-50"
                 >
                   수락

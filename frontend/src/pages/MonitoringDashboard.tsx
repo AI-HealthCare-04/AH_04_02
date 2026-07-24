@@ -9,15 +9,8 @@ import {
   type Patient,
   type Schedule,
 } from "../api/monitoring";
-import { getLatestAssessment, type AssessmentResult } from "../api/care";
 import { getCurrentCaregiverId, getCurrentPatientId, getCurrentUserName } from "../lib/session";
 import { C } from "../theme";
-
-const CARE_LEVEL_LABEL: Record<AssessmentResult["care_level"], string> = {
-  independent: "자가관리 가능",
-  guardian_check: "보호자 확인 필요",
-  third_party_needed: "제3자 도움 필요",
-};
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
@@ -30,8 +23,7 @@ export default function MonitoringDashboard() {
   const caregiverId = getCurrentCaregiverId();
 
   const [patients, setPatients] = useState<Patient[]>([]);
-  const [patientId, setPatientId] = useState<number>(getCurrentPatientId());
-  const [assessment, setAssessment] = useState<AssessmentResult | null>(null);
+  const [patientId, setPatientId] = useState<number | null>(getCurrentPatientId());
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [logs, setLogs] = useState<MedicationLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -56,14 +48,10 @@ export default function MonitoringDashboard() {
   }, [caregiverId]);
 
   useEffect(() => {
+    if (patientId == null) return;
     setLoading(true);
-    Promise.all([
-      getLatestAssessment(patientId).catch(() => null),
-      getSchedules(patientId, false),
-      getLogs(patientId, 45),
-    ])
-      .then(([a, s, l]) => {
-        setAssessment(a);
+    Promise.all([getSchedules(patientId, false), getLogs(patientId, 45)])
+      .then(([s, l]) => {
         setSchedules(s);
         setLogs(l);
       })
@@ -129,7 +117,7 @@ export default function MonitoringDashboard() {
           <div className="flex items-center gap-3 mb-7">
             <label className="text-[14px] font-bold" style={{ color: C.muted }}>대상자 선택</label>
             <select
-              value={patientId}
+              value={patientId ?? ""}
               onChange={(e) => {
                 const next = Number(e.target.value);
                 // [7/14] 다른 화면(Dashboard/Schedule/Notification/Connect/Check)도
@@ -153,25 +141,7 @@ export default function MonitoringDashboard() {
           <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>
         ) : (
           <>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-              <div className="rounded-2xl p-5" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
-                <p className="text-[12px] font-bold uppercase tracking-wider mb-3" style={{ color: C.muted }}>도움 단계</p>
-                {assessment ? (
-                  <span
-                    className="inline-block px-4 py-2 rounded-full text-[13px] font-black"
-                    style={{ background: `${C.terracotta}18`, color: C.terracotta, border: `1.5px solid ${C.terracotta}40` }}
-                  >
-                    {CARE_LEVEL_LABEL[assessment.care_level]}
-                  </span>
-                ) : (
-                  <p className="text-[13px]" style={{ color: C.muted }}>자가진단 기록 없음</p>
-                )}
-                {assessment && (
-                  <p className="text-[12px] mt-3" style={{ color: C.muted }}>
-                    최근 평가: {new Date(assessment.evaluated_at).toLocaleDateString("ko-KR")}
-                  </p>
-                )}
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
               <div className="rounded-2xl p-5" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
                 <p className="text-[12px] font-bold uppercase tracking-wider mb-3" style={{ color: C.muted }}>복약 이행률 (최근 7일)</p>
                 <div className="flex items-baseline gap-1 mb-3">

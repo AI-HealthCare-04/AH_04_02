@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import NavBar from "../components/NavBar";
+import PatientContextBanner from "../components/PatientContextBanner";
 import {
   getPatientCaregivers,
   getTodayMedications,
@@ -90,6 +91,7 @@ export default function Dashboard() {
     <div className="min-h-screen" style={{ background: C.ivory, fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" }}>
       <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-[700px] mx-auto px-4 sm:px-5 pt-6 sm:pt-8 pb-12 sm:pb-[60px]">
+        <PatientContextBanner />
         <div className="flex justify-between items-start mb-5">
           <div>
             <p className="text-[13px] mb-1" style={{ color: C.muted }}>오늘</p>
