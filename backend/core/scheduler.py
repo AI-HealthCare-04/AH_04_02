@@ -124,15 +124,24 @@ def _recipients(session: Session, patient: Patient, schedule: MedicationSchedule
     않고 있었다 — 환자가 특정 약 일정에서 이 값을 False로 꺼도 스케줄러가 무시하고 보호자에게
     계속 알림을 보내던 실제 버그. False면 보호자 후보를 아예 안 만든다(환자 본인 몫은 그대로,
     effective_alert_caregiver_ids 내부에서 처리).
-    """
+
+    [2026-07-24 추가] NotificationSetting.care_alert_enabled("돌봄 알림" — 알림 설정 화면)를
+    보호자 몫에만 별도로 적용한다 — 팀 요청: 이 스위치를 끄면 "누구에게 보낼지"(alert_caregiver_ids
+    선택, schedule.caregiver_alert)는 그대로 두고 실제 발송만 막아야 한다(껐다 켜면 다시 같은
+    사람들에게 그대로 가야 하므로). 그래서 selection을 지우거나 바꾸는 대신 여기서 조건부로
+    건너뛴다 — 환자 본인 알림(medication_reminder_enabled, _deliver에서 이미 처리)과는
+    완전히 별개의 스위치다."""
     recipients: list[tuple[str, str]] = []
     if patient.email_opt_in and patient.email:
         recipients.append(("email:patient", patient.email))
 
-    for caregiver_id in effective_alert_caregiver_ids(schedule, session):
-        caregiver = session.get(Caregiver, caregiver_id)
-        if caregiver and caregiver.email_opt_in and caregiver.email:
-            recipients.append((f"email:caregiver:{caregiver.id}", caregiver.email))
+    setting = session.get(NotificationSetting, patient.id)
+    care_alert_enabled = setting.care_alert_enabled if setting else True
+    if care_alert_enabled:
+        for caregiver_id in effective_alert_caregiver_ids(schedule, session):
+            caregiver = session.get(Caregiver, caregiver_id)
+            if caregiver and caregiver.email_opt_in and caregiver.email:
+                recipients.append((f"email:caregiver:{caregiver.id}", caregiver.email))
     return recipients
 
 

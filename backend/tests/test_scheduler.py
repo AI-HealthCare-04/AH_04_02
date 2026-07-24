@@ -344,6 +344,49 @@ class TestCoNotification:
         # caregiver_patients row 삽입 순서상 cg1이 먼저 연결됐으므로 cg1이 채널 목록에서도 먼저 나와야 한다.
         assert channels == [f"email:caregiver:{cg1.id}", f"email:caregiver:{cg2.id}"]
 
+    def test_care_alert_disabled_suppresses_caregivers_but_not_patient(self, session: Session):
+        """[2026-07-24 추가, 팀 요청] 알림 설정의 "돌봄 알림"(NotificationSetting.care_alert_enabled)을
+        끄면 보호자에게 실제로 알림이 안 가야 한다 — 다만 "누구에게 보낼지" 선택
+        (ScheduleCaregiverAlert/schedule.caregiver_alert)은 그대로 둔다(아래 재활성화 테스트가
+        선택이 보존되는지 확인). 환자 본인 알림은 이 스위치와 무관하게 그대로 간다."""
+        pt = _make_patient(session, email="patient@test.com")
+        cg = _make_caregiver_linked(session, pt, "보호자1")
+        session.add(NotificationSetting(patient_id=pt.id, care_alert_enabled=False))
+        session.commit()
+        _make_schedule(session, pt, "08:00")
+
+        scheduler._fire_due_reminders(session, datetime(2026, 7, 19, 8, 5))
+
+        log = session.exec(select(NotificationLog)).first()
+        channels = json.loads(log.channels)
+        assert channels == ["email:patient"]
+        assert f"email:caregiver:{cg.id}" not in channels
+
+    def test_care_alert_re_enabled_restores_same_recipients_without_reselecting(self, session: Session):
+        """"돌봄 알림"을 다시 켜면 alert_caregiver_ids를 다시 고를 필요 없이 그대로
+        복원돼야 한다 — care_alert_enabled는 selection을 건드리지 않는 별개의 스위치이기
+        때문이다. (_recipients를 직접 호출 — _fire_due_reminders를 두 번 부르면 같은
+        due_date/time_slot 조합이라 두 번째 호출이 dedup으로 그냥 건너뛰어져 재현이 안 됨.)"""
+        pt = _make_patient(session, email=None)
+        _make_caregiver_linked(session, pt, "보호자1")
+        cg2 = _make_caregiver_linked(session, pt, "보호자2")
+        setting = NotificationSetting(patient_id=pt.id, care_alert_enabled=False)
+        session.add(setting)
+        session.commit()
+        sched = _make_schedule(session, pt, "08:00")
+        session.add(ScheduleCaregiverAlert(schedule_id=sched.id, caregiver_id=cg2.id))
+        session.commit()
+
+        assert scheduler._recipients(session, pt, sched) == []  # 꺼져 있으니 보호자 몫 없음(환자도 이메일 미동의)
+
+        setting.care_alert_enabled = True
+        session.add(setting)
+        session.commit()
+
+        # cg1이 아니라 cg2 — 아까 골라둔 선택이 그대로 살아있어야 한다(재선택 없이 복원).
+        recipients = scheduler._recipients(session, pt, sched)
+        assert [label for label, _email in recipients] == [f"email:caregiver:{cg2.id}"]
+
 
 class TestDeliveryOrderingAvoidsDuplicateSend:
     """[2026-07-20 round2, 박소정님 리뷰에서 발견] 예전엔 _deliver()(실제 발송)가
