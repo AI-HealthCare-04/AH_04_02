@@ -22,6 +22,7 @@ from models import (
     NotificationLog,
     NotificationSetting,
     Patient,
+    ScheduleCaregiverAlert,
 )
 from sqlmodel import Session, SQLModel, create_engine, select
 from sqlmodel.pool import StaticPool
@@ -212,7 +213,11 @@ class TestMarkMissed:
 
 
 class TestCoNotification:
-    def test_notifies_only_first_linked_caregiver(self, session: Session):
+    def test_notifies_all_linked_caregivers_by_default(self, session: Session):
+        """[2026-07-24 수정] 예전엔 "가장 먼저 연결된 caregiver 1명"에게만 갔다(임의의
+        단순화) — 일정마다 알림 받을 사람을 이름으로 직접 고를 수 있게 되면서(REQ 없음,
+        팀 요청), 명시적으로 고른 적 없는 일정은 연결된 caregiver 전원에게 보내는 걸
+        기본값으로 바꿨다(core/schedule_alerts.py.effective_alert_caregiver_ids)."""
         pt = _make_patient(session, email=None)  # 환자 본인은 이메일 미동의 — 보호자만 받는지 확인
         cg1 = Caregiver(hashed_password="x", email="cg1@test.com", email_opt_in=True)
         cg1.name = "보호자1"
@@ -232,7 +237,33 @@ class TestCoNotification:
 
         log = session.exec(select(NotificationLog)).first()
         channels = json.loads(log.channels)
-        assert channels == [f"email:caregiver:{cg1.id}"]
+        assert channels == [f"email:caregiver:{cg1.id}", f"email:caregiver:{cg2.id}"]
+
+    def test_notifies_only_explicitly_selected_caregivers(self, session: Session):
+        """[2026-07-24 추가] Schedule.tsx에서 특정 caregiver만 체크해뒀으면(ScheduleCaregiverAlert
+        행이 있으면) 연결된 전원이 아니라 고른 사람에게만 간다."""
+        pt = _make_patient(session, email=None)
+        cg1 = Caregiver(hashed_password="x", email="cg1@test.com", email_opt_in=True)
+        cg1.name = "보호자1"
+        cg2 = Caregiver(hashed_password="x", email="cg2@test.com", email_opt_in=True)
+        cg2.name = "보호자2"
+        session.add(cg1)
+        session.add(cg2)
+        session.commit()
+        session.refresh(cg1)
+        session.refresh(cg2)
+        session.add(CaregiverPatient(caregiver_id=cg1.id, patient_id=pt.id))
+        session.add(CaregiverPatient(caregiver_id=cg2.id, patient_id=pt.id))
+        session.commit()
+        sched = _make_schedule(session, pt, "08:00")
+        session.add(ScheduleCaregiverAlert(schedule_id=sched.id, caregiver_id=cg2.id))
+        session.commit()
+
+        scheduler._fire_due_reminders(session, datetime(2026, 7, 19, 8, 5))
+
+        log = session.exec(select(NotificationLog)).first()
+        channels = json.loads(log.channels)
+        assert channels == [f"email:caregiver:{cg2.id}"]
 
     def test_revoked_caregiver_excluded_from_recipients(self, session: Session):
         """[2026-07-23 추가] 연결이 끊긴(revoked) 보호자는 최초 연결이었어도 더 이상 알림을
@@ -279,11 +310,12 @@ class TestCoNotification:
         assert channels == ["email:patient"]
         assert f"email:caregiver:{cg.id}" not in channels
 
-    def test_first_linked_caregiver_is_deterministic_by_id_not_insertion_coincidence(self, session: Session):
+    def test_default_recipient_order_is_deterministic_by_link_id_not_insertion_coincidence(self, session: Session):
         """links 쿼리에 order_by가 없으면 SQLite에서는 우연히 삽입 순서로 보이지만 SQL
-        표준상 보장되지 않는다(팀 실제 운영/개발 DB는 MySQL) — id로 정렬해 "최초 연결"이
-        실제로 결정적인지 확인한다. cg2를 먼저 만들어 id가 더 작게 하고, CaregiverPatient는
-        cg1(나중에 만든, id가 더 큼)을 먼저 연결해 "삽입 순서 우연"과 "id 순서"가 갈리게 한다."""
+        표준상 보장되지 않는다(팀 실제 운영/개발 DB는 MySQL) — caregiver_patients.id로
+        정렬해 전원에게 보낼 때도 순서가 실제로 결정적인지 확인한다. cg2를 먼저 만들어
+        caregivers.id가 더 작게 하고, CaregiverPatient는 cg1(나중에 만든, id가 더 큼)을
+        먼저 연결해 "caregivers.id 순서"와 "caregiver_patients.id(연결) 순서"가 갈리게 한다."""
         pt = _make_patient(session, email=None)
         cg2 = Caregiver(hashed_password="x", email="cg2@test.com", email_opt_in=True)
         cg2.name = "먼저 생성된 보호자"
@@ -299,7 +331,7 @@ class TestCoNotification:
 
         # CaregiverPatient는 cg1을 먼저 연결(insert 순서상 cg1이 "먼저"지만 caregiver_patients.id는
         # 여전히 이 insert 순서를 따름 — 여기서 검증하려는 건 caregivers.id가 아니라
-        # caregiver_patients.id로 "최초 연결"을 판단한다는 점).
+        # caregiver_patients.id(연결된 순서)로 정렬한다는 점).
         session.add(CaregiverPatient(caregiver_id=cg1.id, patient_id=pt.id))
         session.add(CaregiverPatient(caregiver_id=cg2.id, patient_id=pt.id))
         session.commit()
@@ -309,8 +341,51 @@ class TestCoNotification:
 
         log = session.exec(select(NotificationLog)).first()
         channels = json.loads(log.channels)
-        # caregiver_patients row 삽입 순서상 cg1이 먼저 연결됐으므로 cg1이 "최초 연결"이어야 한다.
-        assert channels == [f"email:caregiver:{cg1.id}"]
+        # caregiver_patients row 삽입 순서상 cg1이 먼저 연결됐으므로 cg1이 채널 목록에서도 먼저 나와야 한다.
+        assert channels == [f"email:caregiver:{cg1.id}", f"email:caregiver:{cg2.id}"]
+
+    def test_care_alert_disabled_suppresses_caregivers_but_not_patient(self, session: Session):
+        """[2026-07-24 추가, 팀 요청] 알림 설정의 "돌봄 알림"(NotificationSetting.care_alert_enabled)을
+        끄면 보호자에게 실제로 알림이 안 가야 한다 — 다만 "누구에게 보낼지" 선택
+        (ScheduleCaregiverAlert/schedule.caregiver_alert)은 그대로 둔다(아래 재활성화 테스트가
+        선택이 보존되는지 확인). 환자 본인 알림은 이 스위치와 무관하게 그대로 간다."""
+        pt = _make_patient(session, email="patient@test.com")
+        cg = _make_caregiver_linked(session, pt, "보호자1")
+        session.add(NotificationSetting(patient_id=pt.id, care_alert_enabled=False))
+        session.commit()
+        _make_schedule(session, pt, "08:00")
+
+        scheduler._fire_due_reminders(session, datetime(2026, 7, 19, 8, 5))
+
+        log = session.exec(select(NotificationLog)).first()
+        channels = json.loads(log.channels)
+        assert channels == ["email:patient"]
+        assert f"email:caregiver:{cg.id}" not in channels
+
+    def test_care_alert_re_enabled_restores_same_recipients_without_reselecting(self, session: Session):
+        """"돌봄 알림"을 다시 켜면 alert_caregiver_ids를 다시 고를 필요 없이 그대로
+        복원돼야 한다 — care_alert_enabled는 selection을 건드리지 않는 별개의 스위치이기
+        때문이다. (_recipients를 직접 호출 — _fire_due_reminders를 두 번 부르면 같은
+        due_date/time_slot 조합이라 두 번째 호출이 dedup으로 그냥 건너뛰어져 재현이 안 됨.)"""
+        pt = _make_patient(session, email=None)
+        _make_caregiver_linked(session, pt, "보호자1")
+        cg2 = _make_caregiver_linked(session, pt, "보호자2")
+        setting = NotificationSetting(patient_id=pt.id, care_alert_enabled=False)
+        session.add(setting)
+        session.commit()
+        sched = _make_schedule(session, pt, "08:00")
+        session.add(ScheduleCaregiverAlert(schedule_id=sched.id, caregiver_id=cg2.id))
+        session.commit()
+
+        assert scheduler._recipients(session, pt, sched) == []  # 꺼져 있으니 보호자 몫 없음(환자도 이메일 미동의)
+
+        setting.care_alert_enabled = True
+        session.add(setting)
+        session.commit()
+
+        # cg1이 아니라 cg2 — 아까 골라둔 선택이 그대로 살아있어야 한다(재선택 없이 복원).
+        recipients = scheduler._recipients(session, pt, sched)
+        assert [label for label, _email in recipients] == [f"email:caregiver:{cg2.id}"]
 
 
 class TestDeliveryOrderingAvoidsDuplicateSend:
