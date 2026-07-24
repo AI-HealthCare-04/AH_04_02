@@ -251,6 +251,13 @@ def test_accept_as_caregiver_succeeds_with_matching_relation_type():
         session.refresh(invitation)
         assert invitation.status == "accepted"
 
+        # [2026-07-24 추가] 초대를 보낸 환자 쪽에 "연결됐다" 알림이 남아야 한다.
+        notices = session.exec(select(models.RelationNotice)).all()
+        assert len(notices) == 1
+        assert notices[0].recipient_role == "patient"
+        assert notices[0].event == "linked"
+        assert notices[0].counterpart_name == "사회복지사로가입"
+
 
 def test_accept_invitation_by_token_rejects_mismatched_relation_type_for_existing_account():
     """토큰 기반 accept_invitation()도 caregiver_id로 기존 계정을 재사용할 때 같은 검증을 받는다."""
@@ -352,6 +359,13 @@ def test_accept_patient_invitation_creates_real_patient_and_link():
         assert result["status"] == "accepted"
         assert patient.name == "환자본인"
         assert patient.hashed_password is not None  # 실제 로그인 가능한 계정
+
+        notices = session.exec(select(models.RelationNotice)).all()
+        assert len(notices) == 1
+        assert notices[0].recipient_role == "caregiver"
+        assert notices[0].recipient_id == caregiver.id
+        assert notices[0].event == "linked"
+        assert notices[0].counterpart_name == "환자본인"
 
         link = session.exec(select(models.CaregiverPatient)).one()
         assert link.caregiver_id == caregiver.id

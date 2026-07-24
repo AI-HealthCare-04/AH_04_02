@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Phone } from "lucide-react";
+import { Phone, RotateCw } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { createInvitation } from "../api/care";
+import { createInvitation, deleteInvitation } from "../api/care";
 import { copyTextToClipboard } from "../lib/clipboard";
 
 /**
@@ -30,6 +30,7 @@ export default function InvitePatientPanel({
 }) {
   const [phone, setPhone] = useState("");
   const [method, setMethod] = useState<InviteMethod>("url");
+  const [inviteId, setInviteId] = useState<number | null>(null);
   const [inviteUrl, setInviteUrl] = useState("");
   const [urlCopied, setUrlCopied] = useState(false);
   const [sending, setSending] = useState(false);
@@ -44,10 +45,37 @@ export default function InvitePatientPanel({
         inviter_caregiver_id: caregiverId,
         invited_phone: phone || undefined,
       });
+      setInviteId(created.id);
       setInviteUrl(window.location.origin + created.invite_url);
       onCreated?.();
     } catch {
       setError("초대를 만들지 못했어요.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // [2026-07-24 추가] 기존 초대 링크를 무효화하고 새 코드를 발급한다 — 링크가 유출됐거나
+  // 오래돼서 새로 받고 싶을 때 쓴다.
+  const handleRegenerate = async () => {
+    if (sending) return;
+    setSending(true);
+    setError("");
+    try {
+      if (inviteId != null) {
+        await deleteInvitation(inviteId);
+      }
+      const created = await createInvitation({
+        relation_type: "patient",
+        inviter_caregiver_id: caregiverId,
+        invited_phone: phone || undefined,
+      });
+      setInviteId(created.id);
+      setInviteUrl(window.location.origin + created.invite_url);
+      setUrlCopied(false);
+      onCreated?.();
+    } catch {
+      setError("초대를 다시 만들지 못했어요.");
     } finally {
       setSending(false);
     }
@@ -113,7 +141,16 @@ export default function InvitePatientPanel({
           ) : (
             <>
               <div className="rounded-xl px-4 py-3 bg-[#F2E8D8] border border-[rgba(30,26,23,0.08)]">
-                <p className="text-[12px] font-bold text-[#8A7E75] mb-1">생성된 초대 링크</p>
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-[12px] font-bold text-[#8A7E75]">생성된 초대 링크</p>
+                  <button
+                    onClick={handleRegenerate}
+                    disabled={sending}
+                    className="flex items-center gap-1 text-[11px] font-bold text-[#C1653D] disabled:opacity-50"
+                  >
+                    <RotateCw className="w-3 h-3" /> 재발급
+                  </button>
+                </div>
                 <p className="text-[13px] break-all text-[#1E1A17]">{inviteUrl}</p>
               </div>
               <a
@@ -143,6 +180,14 @@ export default function InvitePatientPanel({
           ) : (
             <div className="flex items-center gap-2 px-4 py-3.5 rounded-xl bg-[#F2E8D8] border border-[rgba(30,26,23,0.10)]">
               <span className="flex-1 text-[13px] font-mono truncate text-[#1E1A17]">{inviteUrl}</span>
+              <button
+                onClick={handleRegenerate}
+                disabled={sending}
+                aria-label="초대 링크 재발급"
+                className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center bg-[#C1653D]/15 text-[#C1653D] disabled:opacity-50"
+              >
+                <RotateCw className="w-4 h-4" />
+              </button>
               <button
                 onClick={copyUrl}
                 className={`shrink-0 px-4 py-2 rounded-full text-[13px] font-bold ${
@@ -175,6 +220,13 @@ export default function InvitePatientPanel({
                 <QRCodeSVG value={inviteUrl} size={160} />
               </div>
               <p className="text-[12px] font-mono break-all text-center text-[#1E1A17]">{inviteUrl}</p>
+              <button
+                onClick={handleRegenerate}
+                disabled={sending}
+                className="flex items-center gap-1.5 text-[13px] font-bold text-[#C1653D] disabled:opacity-50"
+              >
+                <RotateCw className="w-3.5 h-3.5" /> 재발급
+              </button>
             </>
           )}
         </div>
