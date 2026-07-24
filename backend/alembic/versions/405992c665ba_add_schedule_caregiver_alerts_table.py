@@ -1,7 +1,7 @@
 """add schedule_caregiver_alerts table
 
 Revision ID: 405992c665ba
-Revises: bee05b2591cb
+Revises: a313929ff868
 Create Date: 2026-07-24 11:45:29.470240
 
 """

@@ -926,6 +926,14 @@ def delete_schedule(
     ).all()
     for legacy_log in legacy_logs:
         session.delete(legacy_log)
+    # [2026-07-24 수정, 코드 리뷰 반영] schedule_caregiver_alerts.schedule_id도 같은 FK
+    # 참조라 위와 같은 이유로 먼저 지워야 한다 — 새 기본값(명시 선택 없으면 전원)이라
+    # caregiver_alert=True인 일정 대부분이 이 행을 갖게 되어, 방치하면 흔하게 터진다.
+    alert_rows = session.exec(
+        select(ScheduleCaregiverAlert).where(ScheduleCaregiverAlert.schedule_id == schedule_id)
+    ).all()
+    for alert_row in alert_rows:
+        session.delete(alert_row)
     session.flush()
     session.delete(schedule)
     session.commit()

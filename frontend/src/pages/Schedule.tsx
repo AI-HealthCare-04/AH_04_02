@@ -272,7 +272,10 @@ export default function SchedulePage() {
             drug_name: name,
             time_slot: e.time,
             dose_timing: e.doseTiming,
-            caregiver_alert: alertCaregiverIds.length > 0,
+            // [2026-07-24 수정] 연결된 보호자가 아예 없을 때(caregivers.length === 0)는
+            // alertCaregiverIds도 항상 []라서, 이 조건이 없으면 kill switch가 꺼진 채로
+            // 영구 저장되고 이후 보호자를 연결해도 이 일정만 계속 알림에서 빠졌다(리뷰 발견 회귀).
+            caregiver_alert: caregivers.length === 0 || alertCaregiverIds.length > 0,
             alert_caregiver_ids: alertCaregiverIds,
           })
         )
