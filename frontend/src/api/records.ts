@@ -9,6 +9,9 @@ export interface FieldFlag {
   id: number;
   field_name: string;
   reason: string;
+  // [2026-07-25 추가] 보호자·기관이 지정한 정답 — 환자는 이 값을 드롭다운에서
+  // 선택·확인만 한다(자유 입력 불가).
+  suggested_value: string;
   corrected: boolean;
 }
 
@@ -138,6 +141,7 @@ export interface RecordResult {
   created_at: string;
   uploaded_by_name: string | null;
   caregiver_review_status: CaregiverReviewStatus;
+  has_image: boolean; // [2026-07-25 추가] 처방전 원본 사진 저장 여부 — GET /records/{id}/image
   medications: OcrMedication[];
   guide: {
     medication_guide: { drugs: GuideDrug[] };
@@ -268,6 +272,16 @@ export interface RecordSummary {
   // [2026-07-21 추가] 즐겨찾기처럼 목록 위쪽에 고정 — 목록은 이 값 기준으로 이미 정렬되어 온다
   pinned: boolean;
   caregiver_review_status: CaregiverReviewStatus;
+  has_image: boolean;
+}
+
+/** [2026-07-25 추가] 처방전 원본 사진 — 인증이 필요한 엔드포인트라 <img src="...">로
+ * 바로 못 쓴다(브라우저가 직접 요청하면 Authorization 헤더가 안 붙음). Blob으로 받아서
+ * object URL을 만들어 반환 — 다 쓰면 호출부가 URL.revokeObjectURL()로 정리해야 한다.
+ * record_id로만 조회해서 이 처방전에 연결된 사진만 불러온다(다른 기록의 사진이 섞일 수 없음). */
+export async function getRecordImageBlobUrl(recordId: number): Promise<string> {
+  const { data } = await monitoringClient.get(`/records/${recordId}/image`, { responseType: "blob" });
+  return URL.createObjectURL(data);
 }
 
 /**
@@ -375,6 +389,7 @@ export interface FieldFlagRequest {
   ocr_result_id: number;
   field_name: string;
   reason: string;
+  suggested_value: string;
 }
 
 /** 보호자·기관이 "수정이 필요해요"로 지목한 칸들을 저장하고 환자에게 알린다. */
@@ -389,11 +404,13 @@ export async function markReviewed(recordId: number) {
   return normalizeRecordResult(data);
 }
 
-/** 환자가 지목된 칸 하나를 고친다 — 활성 플래그가 없는 칸은 서버가 거부한다. */
-export async function correctMedicationField(recordId: number, medicationId: number, fieldName: string, value: string) {
+/** 환자가 지목된 칸 하나를 고친다 — 적용되는 값은 항상 보호자·기관이 지정한
+ * suggested_value뿐이라(자유 입력 없음), 어떤 칸인지만 알려주면 된다. 활성 플래그가
+ * 없는 칸은 서버가 거부한다. */
+export async function correctMedicationField(recordId: number, medicationId: number, fieldName: string) {
   const { data } = await monitoringClient.patch<RecordResult>(
     `/records/${recordId}/medications/${medicationId}/correct`,
-    { field_name: fieldName, value }
+    { field_name: fieldName }
   );
   return normalizeRecordResult(data);
 }
@@ -403,7 +420,7 @@ export interface RecordCorrectionNotice {
   record_id: number;
   patient_id: number;
   patient_name: string;
-  event: "correction_requested" | "correction_completed";
+  event: "review_pending" | "correction_requested" | "correction_completed";
   created_at: string;
   read_at: string | null;
 }

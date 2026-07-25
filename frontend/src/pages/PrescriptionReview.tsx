@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { AlertCircle, Check, Plus, X } from "lucide-react";
 import NavBar from "../components/NavBar";
 import LoadingDots from "../components/LoadingDots";
+import PrescriptionImageViewer from "../components/PrescriptionImageViewer";
 import {
   addMedicationItem,
   confirmMedications,
@@ -194,11 +195,10 @@ export default function PrescriptionReview() {
   // 그대로 record/edited에 반영한다.
   const handleCorrectField = async (medicationId: number, field: keyof OcrMedication) => {
     if (!record) return;
-    const value = String(edited[medicationId]?.[field] ?? "").trim();
     const key = `${medicationId}:${field}`;
     setCorrectingField(key);
     try {
-      const updated = await correctMedicationField(record.record_id, medicationId, field, value);
+      const updated = await correctMedicationField(record.record_id, medicationId, field);
       setRecord(updated);
       const nextEdited: Record<number, OcrMedication> = {};
       updated.medications.forEach((m) => { nextEdited[m.id] = { ...m }; });
@@ -518,6 +518,8 @@ export default function PrescriptionReview() {
             const allDone = correctedCount === totalFlags;
             return (
               <>
+                {/* [2026-07-25 추가] 수정하면서 원본 사진을 참고할 수 있게 — 챗봇처럼 열었다 닫았다 */}
+                {record.has_image && <PrescriptionImageViewer recordId={record.record_id} floating />}
                 <p className="text-[13px] font-bold mb-1" style={{ color: C.terracottaLight }}>처방전 수정</p>
                 <h1 className="text-[26px] font-black mb-2" style={{ color: C.dark }}>보호자·기관이 요청한 칸을 확인해 주세요</h1>
                 <p className="text-[14px] mb-6" style={{ color: C.muted }}>
@@ -584,18 +586,26 @@ export default function PrescriptionReview() {
                                   수정 필요
                                 </span>
                               </label>
-                              <p className="text-[12px] mb-1.5" style={{ color: "#D94F4F" }}>({flag.reason})</p>
+                              {/* [2026-07-25 수정] 이유는 선택 입력이라 비어있을 수 있다 — 빈 괄호가 뜨지 않게 */}
+                              {flag.reason && (
+                                <p className="text-[12px] mb-1.5" style={{ color: "#D94F4F" }}>({flag.reason})</p>
+                              )}
                               <div className="flex gap-2">
-                                <input
+                                {/* [2026-07-25 추가] 자유 입력 대신 드롭다운 — 보호자·기관이 지정한
+                                    정답(suggested_value)만 고를 수 있고, 다른 값은 아예 선택지에 없다. */}
+                                <select
                                   value={String(edited[m.id]?.[key] ?? "")}
                                   onChange={(e) => update(m.id, key, e.target.value)}
                                   disabled={saving}
                                   className="flex-1 min-w-0 px-4 py-2.5 rounded-xl border text-[14px] outline-none"
                                   style={{ borderColor: "#D94F4F", background: C.white, color: C.dark }}
-                                />
+                                >
+                                  <option value="">선택하세요</option>
+                                  <option value={flag.suggested_value}>{flag.suggested_value}</option>
+                                </select>
                                 <button
                                   onClick={() => handleCorrectField(m.id, key)}
-                                  disabled={saving}
+                                  disabled={saving || edited[m.id]?.[key] !== flag.suggested_value}
                                   className="px-4 py-2 rounded-xl text-[13px] font-bold text-white disabled:opacity-50 shrink-0"
                                   style={{ background: C.terracotta }}
                                 >

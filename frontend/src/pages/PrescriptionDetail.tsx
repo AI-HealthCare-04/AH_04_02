@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import NavBar from "../components/NavBar";
 import LoadingDots from "../components/LoadingDots";
+import PrescriptionImageViewer from "../components/PrescriptionImageViewer";
 import { getRecord, type RecordResult } from "../api/records";
 import { C } from "../theme";
 import { getCurrentUserName } from "../lib/session";
@@ -103,6 +104,12 @@ export default function PrescriptionDetail() {
                 ))}
               </div>
             </div>
+
+            {result.has_image && (
+              <div className="flex justify-end mb-3">
+                <PrescriptionImageViewer recordId={result.record_id} />
+              </div>
+            )}
 
             <div
               className="rounded-xl px-4 py-3 mb-6"

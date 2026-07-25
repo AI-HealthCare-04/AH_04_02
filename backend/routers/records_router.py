@@ -17,10 +17,13 @@ import json
 import re
 from collections.abc import Sequence
 from datetime import datetime
+from pathlib import Path
 
 from core.database import get_session
 from core.dependencies import Actor, get_current_actor, require_actor_patient_access
+from core.push import send_push_to_recipient
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from models import (
     Caregiver,
     CaregiverPatient,
@@ -41,6 +44,10 @@ from routers.ocr_router import run_ocr
 from routers.rag_router import run_rag
 
 router = APIRouter(prefix="/records", tags=["Records"])
+
+# [2026-07-25 추가] ocr_router.py가 저장한 처방전 원본 사진(image_path, backend 루트
+# 기준 상대경로)을 절대경로로 풀 때 쓴다.
+_ROOT = Path(__file__).parent.parent
 
 # [7/9 추가] OCR은 "1일 N회"까지만 뽑아내고 몇 시에·식전/식후인지는 파싱하지 않는다
 # (parsing_rules.py 참고 — 그 정보 자체가 OcrResult에 없음). 그래서 여기서는 횟수만 보고
@@ -159,15 +166,33 @@ def _create_schedules_from_ocr(
     return duplicate_drug_names
 
 
-# [2026-07-25 추가] 처방전이 완료(guide 생성)될 때 보호자 검토 대상인지 정한다 — 연결된
-# 보호자·기관이 하나도 없으면 검토할 사람이 없으니 대상에서 뺀다("none").
-def _initial_caregiver_review_status(patient_id: int, session: Session) -> str:
-    has_caregiver = session.exec(
-        select(CaregiverPatient)
-        .where(CaregiverPatient.patient_id == patient_id)
+# [2026-07-25 추가] 처방전이 완료(guide 생성)될 때 보호자 검토 대상인지 정하고, 대상이면
+# 연결된 보호자·기관 전원에게 "새 처방전이 등록됐어요" 알림을 남긴다(알림함 + 나중에
+# 프론트가 Web Push 구독을 붙이면 그쪽으로도 — 지금은 구독이 없으면 send_push_to_recipient가
+# 조용히 건너뛴다). 연결된 보호자·기관이 하나도 없으면 검토할 사람이 없으니 대상에서 뺀다("none").
+def _initial_caregiver_review_status(record: MedicalRecord, session: Session) -> str:
+    caregiver_ids = session.exec(
+        select(CaregiverPatient.caregiver_id)
+        .where(CaregiverPatient.patient_id == record.patient_id)
         .where(CaregiverPatient.status != "revoked")
-    ).first()
-    return "pending" if has_caregiver else "none"
+    ).all()
+    if not caregiver_ids:
+        return "none"
+    for caregiver_id in caregiver_ids:
+        session.add(
+            RecordCorrectionNotice(
+                recipient_role="caregiver",
+                recipient_id=caregiver_id,
+                record_id=record.id,
+                event="review_pending",
+            )
+        )
+        send_push_to_recipient(
+            session, "caregiver", caregiver_id,
+            title="새 처방전이 등록됐어요", body="검토가 필요한 처방전이 있어요.",
+            url=f"/records/{record.id}/guide",
+        )
+    return "pending"
 
 
 def _build_record_response(
@@ -199,6 +224,9 @@ def _build_record_response(
         "created_at": record.created_at.isoformat(),
         "uploaded_by_name": uploader.name if uploader else None,
         "caregiver_review_status": record.caregiver_review_status,
+        # [2026-07-25 추가] 원본 사진 보기 버튼을 보여줄지 — 수동 입력이거나 이 기능
+        # 이전에 등록된 처방전은 사진이 없다.
+        "has_image": bool(record.image_path and record.image_path.startswith("uploads/prescriptions/")),
         "medications": [
             {
                 "id": item.id,  # [7/8 추가] 처방전확인 화면에서 항목별 수정 시 식별용
@@ -219,6 +247,7 @@ def _build_record_response(
                         "id": flag.id,
                         "field_name": flag.field_name,
                         "reason": flag.reason,
+                        "suggested_value": flag.suggested_value,
                         "corrected": flag.corrected,
                     }
                     for flag in flags_by_item.get(item.id, [])
@@ -501,6 +530,7 @@ def list_records(
                 "uploaded_by_name": uploader.name if uploader else None,
                 "pinned": r.pinned,
                 "caregiver_review_status": r.caregiver_review_status,
+                "has_image": bool(r.image_path and r.image_path.startswith("uploads/prescriptions/")),
             }
         )
     return summaries
@@ -667,7 +697,7 @@ async def confirm_medications(
     def _mark_completed() -> None:
         record.status = "completed"
         record.failure_reason = None
-        record.caregiver_review_status = _initial_caregiver_review_status(record.patient_id, session)
+        record.caregiver_review_status = _initial_caregiver_review_status(record, session)
         session.add(record)
         session.commit()
         session.refresh(record)
@@ -708,6 +738,9 @@ class FieldFlagRequest(BaseModel):
     ocr_result_id: int
     field_name: str
     reason: str
+    # [2026-07-25 추가] 보호자·기관이 생각하는 정답 — 환자는 이 값을 드롭다운에서
+    # 선택만 하지, 자유 입력으로 다른 값을 저장할 수 없다.
+    suggested_value: str
 
 
 class RequestCorrectionPayload(BaseModel):
@@ -744,13 +777,15 @@ async def request_correction(
                 raise HTTPException(404, "해당 약물 항목을 찾을 수 없어요")
             if flag.field_name not in _CORRECTABLE_FIELDS:
                 raise HTTPException(422, f"수정 요청할 수 없는 항목이에요: {flag.field_name}")
-            if not flag.reason.strip():
-                raise HTTPException(422, "수정이 필요한 이유를 적어주세요")
+            # [2026-07-25 수정] 이유는 선택 — 정답(suggested_value)만 필수로 남긴다.
+            if not flag.suggested_value.strip():
+                raise HTTPException(422, "정답(수정할 값)을 입력해주세요")
             session.add(
                 MedicationFieldFlag(
                     ocr_result_id=flag.ocr_result_id,
                     field_name=flag.field_name,
                     reason=flag.reason.strip(),
+                    suggested_value=flag.suggested_value.strip(),
                 )
             )
 
@@ -763,6 +798,11 @@ async def request_correction(
                 record_id=rec.id,
                 event="correction_requested",
             )
+        )
+        send_push_to_recipient(
+            session, "patient", rec.patient_id,
+            title="처방전 수정 요청이 왔어요", body="보호자·기관이 확인해달라는 칸이 있어요.",
+            url=f"/records/{rec.id}/review?mode=correction",
         )
         session.commit()
         session.refresh(rec)
@@ -799,8 +839,10 @@ async def mark_reviewed(
 
 
 class FieldCorrectionPayload(BaseModel):
+    # [2026-07-25 수정] 자유 입력 value를 없앴다 — 이 칸에 적용될 값은 보호자·기관이
+    # 미리 지정한 suggested_value 하나뿐이라(환자는 드롭다운에서 그 값을 선택·확인만
+    # 함), 환자가 직접 값을 보낼 필요도, 다른 값을 보낼 여지도 없다.
     field_name: str
-    value: str
 
 
 @router.patch("/{record_id}/medications/{medication_id}/correct")
@@ -835,7 +877,7 @@ async def correct_medication_field(
         if not flag:
             raise HTTPException(409, "보호자·기관이 수정을 요청한 칸이 아니에요")
 
-        setattr(item, payload.field_name, payload.value.strip())
+        setattr(item, payload.field_name, flag.suggested_value)
         flag.corrected = True
         flag.corrected_at = datetime.now()
         session.add(item)
@@ -863,6 +905,11 @@ async def correct_medication_field(
                         record_id=rec.id,
                         event="correction_completed",
                     )
+                )
+                send_push_to_recipient(
+                    session, "caregiver", caregiver_id,
+                    title="환자가 처방전을 수정했어요", body="요청한 칸을 모두 고쳤어요. 확인하고 검토를 완료해주세요.",
+                    url=f"/records/{rec.id}/guide",
                 )
             session.commit()
 
@@ -932,6 +979,29 @@ def mark_correction_notice_read(
     session.add(notice)
     session.commit()
     return {"status": "read"}
+
+
+@router.get("/{record_id}/image")
+def get_record_image(
+    record_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """[2026-07-25 추가] 처방전 원본 사진 — 보호자·기관이 수정을 요청할 때, 환자가 수정할
+    때 둘 다 참고할 수 있게. record_id로만 조회해서 이 기록에 연결된 사진만 내려준다
+    (다른 처방전 사진이 섞여 나올 수 없음). 수동 입력(manual_entry)이거나 이 기능 이전에
+    등록된 처방전(원본 파일명만 저장돼 있던 시절)은 사진이 없다 — 404."""
+    record = session.get(MedicalRecord, record_id)
+    if not record or record.deleted_at is not None:
+        raise HTTPException(404, "해당 기록을 찾을 수 없어요")
+    require_actor_patient_access(record.patient_id, actor, session)
+
+    if not record.image_path or not record.image_path.startswith("uploads/prescriptions/"):
+        raise HTTPException(404, "저장된 처방전 사진이 없어요")
+    image_file = _ROOT / record.image_path
+    if not image_file.is_file():
+        raise HTTPException(404, "저장된 처방전 사진이 없어요")
+    return FileResponse(image_file)
 
 
 @router.get("/{record_id}")

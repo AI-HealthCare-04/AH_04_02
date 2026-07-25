@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import NavBar from "../components/NavBar";
 import LoadingDots from "../components/LoadingDots";
+import PrescriptionImageViewer from "../components/PrescriptionImageViewer";
 import {
   formatUniqueSourceRefs,
   getRecord,
@@ -30,6 +31,17 @@ const REVIEW_STATUS_LABEL: Record<string, { text: string; bg: string; color: str
 // 들어가는 DrugDetail.tsx에 이미 있어 중복이었다. 생활습관 관련 경고는 "생활습관" 탭의
 // 비권장(avoid) 항목으로 흡수됐다.
 const TABS = ["복약 지도", "생활습관"] as const;
+
+// [2026-07-25 추가] 정답 입력칸의 예시 — 칸마다 단위가 달라서 하나의 예시("예: 2정")로는
+// 진단명·약효분류 같은 텍스트 칸에서 오해를 줄 수 있다.
+const SUGGESTED_VALUE_EXAMPLE: Partial<Record<(typeof FIELDS)[number]["key"], string>> = {
+  dosage: "예: 2정",
+  dose_amount: "예: 5mg",
+  frequency: "예: 2회",
+  total_days: "예: 30일",
+  diagnosis: "예: 제2형 당뇨병",
+  drug_class: "예: 스타틴계",
+};
 
 function isCategoryEmpty(category: LifestyleCategory): boolean {
   return category.recommended.length === 0 && category.avoid.length === 0;
@@ -73,9 +85,14 @@ export default function MedGuide() {
   // 확인하게 하기 위함. isCaregiver는 이 화면을 보는 사람이 보호자/기관 계정인지.
   const isCaregiver = getCurrentCaregiverId() != null;
   const [flagging, setFlagging] = useState(false);
-  // key: `${ocr_result_id}:${field_name}`, value: 사유 텍스트(선택된 칸만 존재)
-  const [selectedFlags, setSelectedFlags] = useState<Record<string, string>>({});
+  // key: `${ocr_result_id}:${field_name}`, value: 사유+정답(선택된 칸만 존재)
+  // [2026-07-25 추가] suggestedValue — 환자가 자유 입력 대신 이 값만 드롭다운에서
+  // 고르게 하려면 보호자·기관이 정답을 미리 지정해둬야 한다.
+  const [selectedFlags, setSelectedFlags] = useState<Record<string, { reason: string; suggestedValue: string }>>({});
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  // [2026-07-25 추가] 제출 실패(빈 칸/네트워크 오류)를 팝업으로 알린다 — 입력한 내용은
+  // selectedFlags에 그대로 남아있어서 팝업을 닫고 이어서 작성할 수 있다(처음부터 다시 X).
+  const [flagError, setFlagError] = useState("");
 
   useEffect(() => {
     if (!recordId) return;
@@ -89,7 +106,7 @@ export default function MedGuide() {
     const key = `${medId}:${field}`;
     setSelectedFlags((prev) => {
       const next = { ...prev };
-      if (checked) next[key] = "";
+      if (checked) next[key] = { reason: "", suggestedValue: "" };
       else delete next[key];
       return next;
     });
@@ -97,16 +114,22 @@ export default function MedGuide() {
 
   const handleSubmitFlags = async () => {
     if (!result) return;
-    const flags: FieldFlagRequest[] = Object.entries(selectedFlags)
-      .filter(([, reason]) => reason.trim())
-      .map(([key, reason]) => {
-        const [medId, fieldName] = key.split(":");
-        return { ocr_result_id: Number(medId), field_name: fieldName, reason: reason.trim() };
-      });
-    if (flags.length === 0) {
-      setError("수정이 필요한 칸에 이유를 적어주세요.");
+    // [2026-07-25 수정] 이유는 선택 — 정답(suggestedValue)만 필수. 비어있으면 팝업으로
+    // 알리고 selectedFlags는 그대로 둬서 이어서 채울 수 있게 한다.
+    const entries = Object.entries(selectedFlags);
+    if (entries.length === 0 || entries.some(([, v]) => !v.suggestedValue.trim())) {
+      setFlagError("정답을 입력하지 않은 칸이 있어요. 마저 입력해주세요.");
       return;
     }
+    const flags: FieldFlagRequest[] = entries.map(([key, v]) => {
+      const [medId, fieldName] = key.split(":");
+      return {
+        ocr_result_id: Number(medId),
+        field_name: fieldName,
+        reason: v.reason.trim(),
+        suggested_value: v.suggestedValue.trim(),
+      };
+    });
     setReviewSubmitting(true);
     try {
       setResult(await requestCorrection(result.record_id, flags));
@@ -114,7 +137,7 @@ export default function MedGuide() {
       setSelectedFlags({});
       setError("");
     } catch {
-      setError("수정 요청을 보내지 못했어요. 잠시 후 다시 시도해 주세요.");
+      setFlagError("수정 요청을 보내지 못했어요. 잠시 후 다시 시도해 주세요.");
     } finally {
       setReviewSubmitting(false);
     }
@@ -166,7 +189,10 @@ export default function MedGuide() {
           <ChevronLeft className="w-3.5 h-3.5" /> 처방 상세로
         </button>
 
-        <p className="text-[13px] font-bold mb-1" style={{ color: C.terracotta }}>{guide.lifestyle_guide.diagnosis}</p>
+        <div className="flex items-center justify-between gap-3 mb-1">
+          <p className="text-[13px] font-bold" style={{ color: C.terracotta }}>{guide.lifestyle_guide.diagnosis}</p>
+          {result.has_image && <PrescriptionImageViewer recordId={result.record_id} />}
+        </div>
         <h1 className="text-[24px] font-black mb-6" style={{ color: C.dark }}>복약 가이드</h1>
 
         {/* [2026-07-25 추가] 환자가 등록한 처방전을 연결된 보호자·기관이 한 번은 확인하게
@@ -220,38 +246,67 @@ export default function MedGuide() {
             ) : (
               <div className="mt-2">
                 <p className="text-[13px] mb-3" style={{ color: C.muted }}>
-                  문제가 있는 칸을 고르고 이유를 적어주세요. 환자에게 바로 알림이 가요.
+                  문제가 있는 칸을 고르고 정답을 입력해주세요. 이유는 선택이에요. 환자에게 바로 알림이 가요.
                 </p>
-                <div className="space-y-3">
+                {/* [2026-07-25 수정] 환자가 처방전을 확인·수정할 때 보는 것과 같은 칸 구조
+                    (레이블 박스 그리드)로 보여준다 — 체크한 칸만 빨간 테두리로 표시. */}
+                <div className="space-y-4">
                   {result.medications.map((m) => (
-                    <div key={m.id} className="rounded-xl p-4" style={{ background: C.white }}>
-                      <p className="text-[14px] font-bold mb-2" style={{ color: C.dark }}>{m.drug_name}</p>
-                      <div className="space-y-2">
+                    <div key={m.id} className="rounded-2xl overflow-hidden" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
+                      <div className="px-6 py-4" style={{ background: C.surface }}>
+                        <p className="font-black text-[15px]" style={{ color: C.dark }}>💊 {m.drug_name}</p>
+                      </div>
+                      <div className="p-6 grid grid-cols-2 gap-4">
                         {FIELDS.filter(({ key }) => key !== "drug_name").map(({ key, label }) => {
                           const flagKey = `${m.id}:${key}`;
                           const checked = flagKey in selectedFlags;
                           return (
                             <div key={key}>
-                              <label className="flex items-center gap-2 text-[13px]" style={{ color: C.dark }}>
+                              <label
+                                className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider mb-1.5 cursor-pointer"
+                                style={{ color: checked ? "#D94F4F" : C.muted }}
+                              >
                                 <input
                                   type="checkbox"
                                   checked={checked}
                                   onChange={(e) => toggleFlag(m.id, key, e.target.checked)}
-                                  className="w-4 h-4 accent-current"
+                                  className="w-3.5 h-3.5 accent-current"
                                 />
                                 {label}
-                                <span style={{ color: C.muted }}>({String(m[key]) || "빈 값"})</span>
                               </label>
+                              <p
+                                className="text-[14px] px-4 py-2.5 rounded-xl font-medium"
+                                style={{
+                                  color: C.dark,
+                                  background: checked ? "rgba(217,79,79,0.06)" : "rgba(30,26,23,0.04)",
+                                  border: checked ? "2px solid #D94F4F" : "2px solid transparent",
+                                }}
+                              >
+                                {String(m[key]) || "-"}
+                              </p>
                               {checked && (
-                                <input
-                                  value={selectedFlags[flagKey]}
-                                  onChange={(e) =>
-                                    setSelectedFlags((prev) => ({ ...prev, [flagKey]: e.target.value }))
-                                  }
-                                  placeholder="이유를 적어주세요 (예: 1정이 아니라 2정이에요)"
-                                  className="w-full mt-1.5 px-3 py-2 rounded-lg border text-[13px] outline-none"
-                                  style={{ borderColor: `${C.terracottaLight}60` }}
-                                />
+                                <div className="mt-1.5 space-y-1.5">
+                                  <input
+                                    value={selectedFlags[flagKey].reason}
+                                    onChange={(e) =>
+                                      setSelectedFlags((prev) => ({ ...prev, [flagKey]: { ...prev[flagKey], reason: e.target.value } }))
+                                    }
+                                    placeholder="이유 (선택) — 예: 1정이 아니라 2정이에요"
+                                    className="w-full px-3 py-2 rounded-lg border text-[13px] outline-none"
+                                    style={{ borderColor: `${C.terracottaLight}60` }}
+                                  />
+                                  {/* [2026-07-25 추가] 정답 — 환자는 이 값을 드롭다운에서 선택만 하게 되므로
+                                      여기서 정확한 값을 입력해둬야 한다. 칸마다 단위가 달라서 예시도 칸별로. */}
+                                  <input
+                                    value={selectedFlags[flagKey].suggestedValue}
+                                    onChange={(e) =>
+                                      setSelectedFlags((prev) => ({ ...prev, [flagKey]: { ...prev[flagKey], suggestedValue: e.target.value } }))
+                                    }
+                                    placeholder={SUGGESTED_VALUE_EXAMPLE[key] ?? "정답을 입력해주세요"}
+                                    className="w-full px-3 py-2 rounded-lg border text-[13px] outline-none font-bold"
+                                    style={{ borderColor: C.terracotta, color: C.terracotta }}
+                                  />
+                                </div>
                               )}
                             </div>
                           );
@@ -279,6 +334,28 @@ export default function MedGuide() {
                     style={{ background: C.terracotta }}
                   >
                     수정 요청 보내기
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* [2026-07-25 추가] 빈 칸/전송 실패는 팝업으로 알린다 — selectedFlags는 그대로
+                남아있어서 닫고 이어서 작성할 수 있다. */}
+            {flagError && (
+              <div
+                className="fixed inset-0 z-50 flex items-center justify-center px-4"
+                style={{ background: "rgba(30,26,23,0.55)" }}
+                onClick={() => setFlagError("")}
+              >
+                <div className="rounded-3xl p-6 w-full max-w-sm" onClick={(e) => e.stopPropagation()} style={{ background: C.surface }}>
+                  <p className="text-[15px] font-black mb-2" style={{ color: C.dark }}>다시 확인해주세요</p>
+                  <p className="text-[13px] mb-5" style={{ color: C.muted }}>{flagError}</p>
+                  <button
+                    onClick={() => setFlagError("")}
+                    className="w-full py-3 rounded-full font-bold text-[14px] text-white"
+                    style={{ background: C.terracotta }}
+                  >
+                    확인
                   </button>
                 </div>
               </div>

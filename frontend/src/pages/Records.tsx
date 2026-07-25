@@ -4,6 +4,7 @@ import { Search, FileText, ChevronRight, Trash2, Star, CheckSquare, Square } fro
 import NavBar from "../components/NavBar";
 import LoadingDots from "../components/LoadingDots";
 import PatientContextBanner from "../components/PatientContextBanner";
+import PrescriptionImageViewer from "../components/PrescriptionImageViewer";
 import { deleteRecord, listRecords, pinRecord, type RecordSummary } from "../api/records";
 import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
@@ -227,15 +228,28 @@ export default function Records() {
                   key={r.record_id}
                   role="button"
                   tabIndex={0}
-                  onClick={() => (selectMode ? toggleSelected(r.record_id) : navigate(`/records/${r.record_id}`))}
+                  onClick={() =>
+                    selectMode
+                      ? toggleSelected(r.record_id)
+                      : navigate(r.caregiver_review_status === "needs_correction" ? `/records/${r.record_id}/guide` : `/records/${r.record_id}`)
+                  }
                   onKeyDown={(e) =>
-                    e.key === "Enter" && (selectMode ? toggleSelected(r.record_id) : navigate(`/records/${r.record_id}`))
+                    e.key === "Enter" &&
+                    (selectMode
+                      ? toggleSelected(r.record_id)
+                      : navigate(r.caregiver_review_status === "needs_correction" ? `/records/${r.record_id}/guide` : `/records/${r.record_id}`))
                   }
                   className="w-full text-left rounded-2xl p-5 transition-transform hover:-translate-y-0.5 cursor-pointer"
                   style={{
                     background: C.surface,
                     boxShadow: "0 2px 16px rgba(30,26,23,0.07)",
-                    border: selected ? `2px solid ${C.terracotta}` : "2px solid transparent",
+                    // [2026-07-25 추가] 보호자·기관이 수정을 요청한 내역은 주황 테두리로 눈에 띄게 —
+                    // 선택 모드의 테라코타 테두리와 겹치지 않도록 selected가 우선한다.
+                    border: selected
+                      ? `2px solid ${C.terracotta}`
+                      : r.caregiver_review_status === "needs_correction"
+                        ? "2px solid #E8A33D"
+                        : "2px solid transparent",
                   }}
                 >
                   <div className="flex items-start justify-between mb-3">
@@ -325,6 +339,7 @@ export default function Records() {
                           {REVIEW_STATUS_LABEL[r.caregiver_review_status].text}
                         </button>
                       )}
+                      {r.has_image && <PrescriptionImageViewer recordId={r.record_id} />}
                     </div>
                     <span className="flex items-center gap-1 text-[13px] font-bold" style={{ color: C.terracotta }}>
                       자세히 보기 <ChevronRight className="w-3.5 h-3.5" />

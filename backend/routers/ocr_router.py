@@ -16,6 +16,7 @@ import json
 import os
 import sys
 import tempfile
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -50,6 +51,12 @@ if _RAG_DIR.is_dir() and str(_RAG_DIR) not in sys.path:
 router = APIRouter(prefix="/ocr", tags=["OCR"])
 
 _ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
+
+# [2026-07-25 추가] 처방전 원본 사진 저장 — 지금까지는 OCR 텍스트만 남기고 사진 자체는
+# 버렸는데(image_path에 원본 파일명만 기록), 보호자·기관이 수정을 요청할 때 원본을
+# 참고할 방법이 없었다. 로컬 디스크에 record별로 저장하고, image_path에는 실제 경로를
+# 남긴다. 클라우드 저장소 전환은 나중에(팀 논의) — 지금은 가장 단순한 형태로 우선 연결.
+_UPLOAD_DIR = _ROOT / "uploads" / "prescriptions"
 
 
 @router.get("/ping")
@@ -325,7 +332,21 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
     if not content:
         raise HTTPException(status_code=400, detail="사진 파일이 비어있어요. 다시 찍어서 올려주시겠어요?")
 
-    record = MedicalRecord(patient_id=patient_id, image_path=filename, status="processing")
+    # [2026-07-25 추가] 원본 사진을 record별로 저장 — 파일명은 patient_id/원본 파일명이
+    # 그대로 노출되지 않도록 uuid로 새로 만든다(개인정보가 파일 경로에 남지 않게).
+    stored_name = f"{uuid.uuid4().hex}{ext.lower()}"
+
+    def _save_image() -> None:
+        _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        (_UPLOAD_DIR / stored_name).write_bytes(content)
+
+    await asyncio.to_thread(_save_image)
+
+    record = MedicalRecord(
+        patient_id=patient_id,
+        image_path=f"uploads/prescriptions/{stored_name}",
+        status="processing",
+    )
 
     # session.add/commit/refresh는 동기 SQLModel 호출이라, async def 안에서 그대로 부르면
     # 이벤트 루프를 막는다 — 아래 CLOVA 호출(asyncio.to_thread로 이미 감싸져 있음)과 같은

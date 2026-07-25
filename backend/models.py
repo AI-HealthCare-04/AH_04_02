@@ -374,6 +374,9 @@ class MedicationFieldFlag(SQLModel, table=True):
     ocr_result_id: int = Field(foreign_key="ocr_results.id")
     field_name: str
     reason: str
+    # [2026-07-25 추가] 보호자·기관이 생각하는 정답 — 환자가 자유 입력 대신 이 값을
+    # 드롭다운에서 선택만 하도록 강제한다(오타·다른 값으로 저장되는 걸 막기 위함).
+    suggested_value: str
     corrected: bool = False
     created_at: datetime = Field(default_factory=datetime.now)
     corrected_at: datetime | None = None

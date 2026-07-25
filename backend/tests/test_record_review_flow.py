@@ -94,7 +94,7 @@ class TestRequestCorrection:
 
         r = client.post(
             f"/records/{rec.id}/request-correction",
-            json={"flags": [{"ocr_result_id": ocr.id, "field_name": "dosage", "reason": "1정이 아니라 2정이에요"}]},
+            json={"flags": [{"ocr_result_id": ocr.id, "field_name": "dosage", "reason": "1정이 아니라 2정이에요", "suggested_value": "2정"}]},
             headers={"Authorization": f"Bearer {_token(cg.id, 'caregiver')}"},
         )
         assert r.status_code == 200
@@ -118,7 +118,7 @@ class TestRequestCorrection:
         rec, ocr = _make_completed_record(session, pt.id)
         r = client.post(
             f"/records/{rec.id}/request-correction",
-            json={"flags": [{"ocr_result_id": ocr.id, "field_name": "dosage", "reason": "틀렸어요"}]},
+            json={"flags": [{"ocr_result_id": ocr.id, "field_name": "dosage", "reason": "틀렸어요", "suggested_value": "2정"}]},
             headers={"Authorization": f"Bearer {_token(pt.id, 'patient')}"},
         )
         assert r.status_code == 403
@@ -129,7 +129,7 @@ class TestRequestCorrection:
         rec, ocr = _make_completed_record(session, pt.id)
         r = client.post(
             f"/records/{rec.id}/request-correction",
-            json={"flags": [{"ocr_result_id": ocr.id, "field_name": "dosage", "reason": "틀렸어요"}]},
+            json={"flags": [{"ocr_result_id": ocr.id, "field_name": "dosage", "reason": "틀렸어요", "suggested_value": "2정"}]},
             headers={"Authorization": f"Bearer {_token(other.id, 'caregiver')}"},
         )
         assert r.status_code == 403
@@ -141,19 +141,32 @@ class TestRequestCorrection:
         rec, ocr = _make_completed_record(session, pt.id)
         r = client.post(
             f"/records/{rec.id}/request-correction",
-            json={"flags": [{"ocr_result_id": ocr.id, "field_name": "id", "reason": "안돼요"}]},
+            json={"flags": [{"ocr_result_id": ocr.id, "field_name": "id", "reason": "안돼요", "suggested_value": "x"}]},
             headers={"Authorization": f"Bearer {_token(cg.id, 'caregiver')}"},
         )
         assert r.status_code == 422
 
-    def test_empty_reason_rejected(self, client: TestClient, session: Session):
+    def test_empty_reason_allowed(self, client: TestClient, session: Session):
+        """[2026-07-25 수정] 이유는 선택 입력으로 바뀌었다 — 정답만 있으면 통과해야 한다."""
         cg = _make_caregiver(session)
         pt = _make_patient(session)
         _link(session, cg, pt)
         rec, ocr = _make_completed_record(session, pt.id)
         r = client.post(
             f"/records/{rec.id}/request-correction",
-            json={"flags": [{"ocr_result_id": ocr.id, "field_name": "dosage", "reason": "   "}]},
+            json={"flags": [{"ocr_result_id": ocr.id, "field_name": "dosage", "reason": "   ", "suggested_value": "2정"}]},
+            headers={"Authorization": f"Bearer {_token(cg.id, 'caregiver')}"},
+        )
+        assert r.status_code == 200
+
+    def test_empty_suggested_value_rejected(self, client: TestClient, session: Session):
+        cg = _make_caregiver(session)
+        pt = _make_patient(session)
+        _link(session, cg, pt)
+        rec, ocr = _make_completed_record(session, pt.id)
+        r = client.post(
+            f"/records/{rec.id}/request-correction",
+            json={"flags": [{"ocr_result_id": ocr.id, "field_name": "dosage", "reason": "틀렸어요", "suggested_value": "  "}]},
             headers={"Authorization": f"Bearer {_token(cg.id, 'caregiver')}"},
         )
         assert r.status_code == 422
@@ -168,7 +181,7 @@ class TestRequestCorrection:
         session.commit()
         r = client.post(
             f"/records/{rec.id}/request-correction",
-            json={"flags": [{"ocr_result_id": ocr.id, "field_name": "dosage", "reason": "틀렸어요"}]},
+            json={"flags": [{"ocr_result_id": ocr.id, "field_name": "dosage", "reason": "틀렸어요", "suggested_value": "2정"}]},
             headers={"Authorization": f"Bearer {_token(cg.id, 'caregiver')}"},
         )
         assert r.status_code == 409
@@ -210,12 +223,12 @@ class TestCorrectMedicationField:
         pt = _make_patient(session)
         _link(session, cg, pt)
         rec, ocr = _make_completed_record(session, pt.id, review_status="needs_correction")
-        session.add(MedicationFieldFlag(ocr_result_id=ocr.id, field_name="dosage", reason="1정이 아니라 2정이에요"))
+        session.add(MedicationFieldFlag(ocr_result_id=ocr.id, field_name="dosage", reason="1정이 아니라 2정이에요", suggested_value="2정"))
         session.commit()
 
         r = client.patch(
             f"/records/{rec.id}/medications/{ocr.id}/correct",
-            json={"field_name": "dosage", "value": "2정"},
+            json={"field_name": "dosage"},
             headers={"Authorization": f"Bearer {_token(pt.id, 'patient')}"},
         )
         assert r.status_code == 200
@@ -231,13 +244,13 @@ class TestCorrectMedicationField:
         pt = _make_patient(session)
         _link(session, cg, pt)
         rec, ocr = _make_completed_record(session, pt.id, review_status="needs_correction")
-        session.add(MedicationFieldFlag(ocr_result_id=ocr.id, field_name="dosage", reason="틀렸어요"))
+        session.add(MedicationFieldFlag(ocr_result_id=ocr.id, field_name="dosage", reason="틀렸어요", suggested_value="2정"))
         session.commit()
 
         # frequency엔 플래그가 없으니 고칠 수 없어야 함 — UI 잠금이 우회되더라도 서버가 막는다.
         r = client.patch(
             f"/records/{rec.id}/medications/{ocr.id}/correct",
-            json={"field_name": "frequency", "value": "2회"},
+            json={"field_name": "frequency"},
             headers={"Authorization": f"Bearer {_token(pt.id, 'patient')}"},
         )
         assert r.status_code == 409
@@ -249,20 +262,20 @@ class TestCorrectMedicationField:
         pt = _make_patient(session)
         _link(session, cg, pt)
         rec, ocr = _make_completed_record(session, pt.id, review_status="needs_correction")
-        session.add(MedicationFieldFlag(ocr_result_id=ocr.id, field_name="dosage", reason="틀렸어요"))
+        session.add(MedicationFieldFlag(ocr_result_id=ocr.id, field_name="dosage", reason="틀렸어요", suggested_value="2정"))
         session.commit()
         headers = {"Authorization": f"Bearer {_token(pt.id, 'patient')}"}
 
         first = client.patch(
             f"/records/{rec.id}/medications/{ocr.id}/correct",
-            json={"field_name": "dosage", "value": "2정"},
+            json={"field_name": "dosage"},
             headers=headers,
         )
         assert first.status_code == 200
 
         second = client.patch(
             f"/records/{rec.id}/medications/{ocr.id}/correct",
-            json={"field_name": "dosage", "value": "3정"},
+            json={"field_name": "dosage"},
             headers=headers,
         )
         assert second.status_code == 409
@@ -272,16 +285,16 @@ class TestCorrectMedicationField:
         pt = _make_patient(session)
         _link(session, cg, pt)
         rec, ocr = _make_completed_record(session, pt.id, review_status="needs_correction")
-        session.add(MedicationFieldFlag(ocr_result_id=ocr.id, field_name="dosage", reason="틀렸어요"))
-        session.add(MedicationFieldFlag(ocr_result_id=ocr.id, field_name="frequency", reason="틀렸어요"))
+        session.add(MedicationFieldFlag(ocr_result_id=ocr.id, field_name="dosage", reason="틀렸어요", suggested_value="2정"))
+        session.add(MedicationFieldFlag(ocr_result_id=ocr.id, field_name="frequency", reason="틀렸어요", suggested_value="2회"))
         session.commit()
         headers = {"Authorization": f"Bearer {_token(pt.id, 'patient')}"}
 
-        client.patch(f"/records/{rec.id}/medications/{ocr.id}/correct", json={"field_name": "dosage", "value": "2정"}, headers=headers)
+        client.patch(f"/records/{rec.id}/medications/{ocr.id}/correct", json={"field_name": "dosage"}, headers=headers)
         notices_after_first = session.exec(select(RecordCorrectionNotice)).all()
         assert len(notices_after_first) == 0  # 아직 미수정 플래그(frequency) 남아있음
 
-        client.patch(f"/records/{rec.id}/medications/{ocr.id}/correct", json={"field_name": "frequency", "value": "2회"}, headers=headers)
+        client.patch(f"/records/{rec.id}/medications/{ocr.id}/correct", json={"field_name": "frequency"}, headers=headers)
         notices_after_second = session.exec(select(RecordCorrectionNotice)).all()
         assert len(notices_after_second) == 1
         assert notices_after_second[0].recipient_role == "caregiver"
@@ -293,7 +306,7 @@ class TestCorrectMedicationField:
         rec, ocr = _make_completed_record(session, pt.id, review_status="needs_correction")
         r = client.patch(
             f"/records/{rec.id}/medications/{ocr.id}/correct",
-            json={"field_name": "id", "value": "999"},
+            json={"field_name": "id"},
             headers={"Authorization": f"Bearer {_token(pt.id, 'patient')}"},
         )
         assert r.status_code == 422
@@ -323,6 +336,12 @@ class TestInitialReviewStatusOnConfirm:
         session.refresh(rec)
         assert rec.status == "completed"
         assert rec.caregiver_review_status == "pending"
+
+        notices = session.exec(select(RecordCorrectionNotice)).all()
+        assert len(notices) == 1
+        assert notices[0].recipient_role == "caregiver"
+        assert notices[0].recipient_id == cg.id
+        assert notices[0].event == "review_pending"
 
     def test_no_caregiver_sets_none(self, client: TestClient, session: Session):
         pt = _make_patient(session)
@@ -355,7 +374,7 @@ class TestCorrectionNotices:
         rec, ocr = _make_completed_record(session, pt.id)
         client.post(
             f"/records/{rec.id}/request-correction",
-            json={"flags": [{"ocr_result_id": ocr.id, "field_name": "dosage", "reason": "틀렸어요"}]},
+            json={"flags": [{"ocr_result_id": ocr.id, "field_name": "dosage", "reason": "틀렸어요", "suggested_value": "2정"}]},
             headers={"Authorization": f"Bearer {_token(cg.id, 'caregiver')}"},
         )
 
@@ -378,7 +397,7 @@ class TestCorrectionNotices:
         rec, ocr = _make_completed_record(session, pt.id)
         client.post(
             f"/records/{rec.id}/request-correction",
-            json={"flags": [{"ocr_result_id": ocr.id, "field_name": "dosage", "reason": "틀렸어요"}]},
+            json={"flags": [{"ocr_result_id": ocr.id, "field_name": "dosage", "reason": "틀렸어요", "suggested_value": "2정"}]},
             headers={"Authorization": f"Bearer {_token(cg.id, 'caregiver')}"},
         )
         headers = {"Authorization": f"Bearer {_token(pt.id, 'patient')}"}
