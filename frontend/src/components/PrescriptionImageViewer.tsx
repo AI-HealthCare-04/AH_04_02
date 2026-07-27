@@ -125,6 +125,19 @@ export default function PrescriptionImageViewer({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // [2026-07-27 버그수정] 전체화면 모달(floating=false)이 열려 있는 동안 뒤 페이지의
+  // 스크롤을 잠그지 않고 있었다 — 사진 영역 밖(반투명 배경)에서 휠을 스크롤하면 화면에
+  // 보이지 않는 뒤 페이지가 스크롤되면서 스크롤바가 나타났다 사라졌다 해 레이아웃이 흔들리고
+  // (화면이 커졌다 작아졌다 하는 것처럼 보임), 그 와중에 닫기(X) 버튼의 실제 화면 위치도
+  // 같이 흔들려 클릭이 빗나갔다. NavBar.tsx의 모바일 드로어와 동일한 패턴으로 잠근다.
+  useEffect(() => {
+    if (floating || !open) return;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [floating, open]);
+
   useEffect(() => {
     if (!open) return;
     let cancelled = false;

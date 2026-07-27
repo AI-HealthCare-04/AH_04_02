@@ -264,7 +264,7 @@ export default function DrugInfo() {
               {!drugInfoLoading && !hasPatientSummary && !drugInfo?.side_effects && !drugInfo?.interactions && !drugInfo?.storage && !drugInfo?.dur_cautions?.length && (
                 <div className="rounded-2xl p-6" style={{ background: "#F5F2ED" }}>
                   <p className="text-[13px]" style={{ color: C.muted }}>
-                    부작용·약물 상호작용·보관 방법 정보를 아직 확인하지 못했어요.
+                    부작용·약물 상호작용·보관 방법에 대해 조회되는 내용이 없어요.
                   </p>
                 </div>
               )}

@@ -90,8 +90,13 @@ def _fetch_permit_precautions(candidates: list[str]) -> list[str]:
 
 
 def _fetch_eyakeun_info(candidates: list[str]) -> dict:
-    """e약은요(경고/주의사항/부작용/상호작용/보관법) — 후보 이름을 순서대로 시도해
-    처음 걸리는 것만 쓴다."""
+    """e약은요(경고/주의사항/부작용/상호작용/보관법) — 후보 이름을 순서대로 시도한다.
+
+    [2026-07-27 버그수정] 예전엔 어느 후보든 부분일치 히트가 하나라도 있으면 그 자리에서
+    멈췄는데, e약은요 partial-match API 특성상 첫 후보가 실제로는 다른(정보가 부실한)
+    품목에 걸릴 수 있다 — 부작용/보관법은 허가사항에 원래 항상 있는 항목이라 이 필드가
+    비어 있으면 대부분 "덜 정확한 히트를 골랐다"는 신호다. 그래서 이 두 필드가 모두 채워진
+    히트를 찾을 때까지 남은 후보를 계속 시도하고, 끝까지 못 찾으면 첫 히트로 폴백한다."""
     precaution_parts: list[str] = []
     side_effects: str | None = None
     interactions: str | None = None
@@ -99,18 +104,25 @@ def _fetch_eyakeun_info(candidates: list[str]) -> dict:
     try:
         from rag.mfds_client import search_by_name
 
+        best_hit = None
         for candidate in candidates:
             hits = search_by_name(candidate, num_of_rows=1)
-            if hits:
-                hit = hits[0]
-                if hit.atpn_warn_qesitm:
-                    precaution_parts.append(f"[경고] {hit.atpn_warn_qesitm.strip()}")
-                if hit.atpn_qesitm:
-                    precaution_parts.append(hit.atpn_qesitm.strip())
-                side_effects = hit.se_qesitm.strip() if hit.se_qesitm else None
-                interactions = hit.intrc_qesitm.strip() if hit.intrc_qesitm else None
-                storage = hit.deposit_method_qesitm.strip() if hit.deposit_method_qesitm else None
+            if not hits:
+                continue
+            if best_hit is None:
+                best_hit = hits[0]
+            if hits[0].se_qesitm and hits[0].deposit_method_qesitm:
+                best_hit = hits[0]
                 break
+
+        if best_hit is not None:
+            if best_hit.atpn_warn_qesitm:
+                precaution_parts.append(f"[경고] {best_hit.atpn_warn_qesitm.strip()}")
+            if best_hit.atpn_qesitm:
+                precaution_parts.append(best_hit.atpn_qesitm.strip())
+            side_effects = best_hit.se_qesitm.strip() if best_hit.se_qesitm else None
+            interactions = best_hit.intrc_qesitm.strip() if best_hit.intrc_qesitm else None
+            storage = best_hit.deposit_method_qesitm.strip() if best_hit.deposit_method_qesitm else None
     except Exception:  # noqa: BLE001 — 키 미설정/네트워크 실패/미등재 약품명 등 어떤 이유로든 조용히 폴백
         pass
     return {

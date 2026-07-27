@@ -90,6 +90,36 @@ class TestDrugInfoSuccess:
         assert data["precautions"] == "이 약을 복용하는 동안 술을 마시지 마세요."
         assert data["dur_cautions"] == []
 
+    def test_first_candidate_sparse_hit_does_not_block_second_candidate_full_hit(self):
+        """[2026-07-27 회귀 방지] 원문(용량 포함) 후보로 검색했을 때 부작용/보관법이 빈
+        히트가 걸려도, 용량 표기를 뗀 두 번째 후보로 다시 시도해 그 필드가 채워진 히트가
+        있으면 그걸 채택해야 한다 — 두 번째 처방전 등록 후 부작용/보관법이 실제로는 있는데
+        빈 값으로 표시되던 버그의 재현 케이스."""
+        sparse_hit = _drug_info_hit(
+            item_name="테스트약정 10mg",
+            se_qesitm=None,
+            intrc_qesitm=None,
+            deposit_method_qesitm=None,
+        )
+        full_hit = _drug_info_hit(item_name="테스트약")
+
+        def _search_by_name(candidate, num_of_rows=1):
+            return [sparse_hit] if candidate == "테스트약정 10mg" else [full_hit]
+
+        with (
+            patch("rag.mfds_client.search_permit_detail", return_value=[]),
+            patch("rag.mfds_client.search_by_name", side_effect=_search_by_name),
+            patch("rag.dur_master.search_elderly_caution", return_value=[]),
+            patch("rag.dur_master.search_age_taboo", return_value=[]),
+            patch("rag.dur_master.search_pregnancy_taboo", return_value=[]),
+            patch("routers.ocr_router._summarize_precautions_for_patient", return_value=None),
+        ):
+            r = client.get("/ocr/drug-info", params={"drug_name": "테스트약정 10mg"})
+
+        data = r.json()
+        assert data["side_effects"] == "어지러움, 두통이 나타날 수 있습니다."
+        assert data["storage"] == "실온보관, 습기를 피하세요."
+
     def test_permit_detail_with_no_nb_doc_data_falls_back_to_emed_only(self):
         """허가정보는 매칭됐지만 사용상의주의사항(nb_doc_data) 자체가 빈 품목도 있다."""
         with (
