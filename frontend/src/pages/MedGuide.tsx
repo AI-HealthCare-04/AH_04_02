@@ -235,6 +235,9 @@ export default function MedGuide() {
               </>
             ) : (
               <div className="mt-2">
+                {/* [2026-07-27 추가] 칸별로 검토하는 동안 원본 사진을 참고할 수 있게 — 환자가
+                    처방전을 확인·수정할 때와 동일하게 챗봇 버튼 위에 뜨는 작은 팝업. */}
+                {result.has_image && <PrescriptionImageViewer recordId={result.record_id} floating />}
                 <p className="text-[13px] mb-3" style={{ color: C.muted }}>
                   {/* [2026-07-27 수정] 이유는 선택이라는 안내는 실제로 칸을 지목할 때만 의미가
                       있어서, 지목 안 하고 그냥 검토만 하는 경우까지 아우르는 문구로 바꿨다. */}

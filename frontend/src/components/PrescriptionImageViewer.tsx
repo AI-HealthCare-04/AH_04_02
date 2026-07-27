@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent, type PointerEvent, type WheelEvent } from "react";
+import { createPortal } from "react-dom";
 import { Camera, X, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import { getRecordImageBlobUrl } from "../api/records";
 import { C } from "../theme";
@@ -173,7 +174,13 @@ export default function PrescriptionImageViewer({
   ) : null;
 
   if (floating) {
-    return (
+    // [2026-07-27 수정] fixed 요소를 document.body로 포탈 — 목록 화면(Records.tsx/
+    // MedGuideList.tsx)의 카드에 hover:-translate-y-0.5 같은 transform이 있으면, 그
+    // transform이 걸린 조상이 fixed 자식의 컨테이닝 블록이 돼버려서(CSS 스펙) 이 팝업이
+    // 뷰포트가 아니라 카드 기준으로 배치되고, 카드의 :hover가 드래그 중 켜졌다 꺼졌다
+    // 하면서 화면이 깜빡였다. body에 직접 포탈하면 어느 화면에 놓이든 항상 뷰포트
+    // 기준으로 고정된다.
+    return createPortal(
       <>
         {/* [2026-07-25] bottom-24 — ChatFab.tsx의 전역 챗봇 버튼(bottom-6, 56px)과
             겹치지 않게 그 위에 쌓는다. */}
@@ -196,7 +203,8 @@ export default function PrescriptionImageViewer({
             <div className="p-3 flex-1 min-h-0">{body}</div>
           </div>
         )}
-      </>
+      </>,
+      document.body
     );
   }
 
@@ -209,27 +217,31 @@ export default function PrescriptionImageViewer({
       >
         <Camera className="w-3.5 h-3.5" /> 처방전 사진 보기
       </button>
-      {open && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-3"
-          style={{ background: "rgba(30,26,23,0.7)" }}
-          onClick={toggle}
-        >
+      {/* [2026-07-27 수정] 위 floating과 같은 이유로 body에 포탈 — 등록내역·복약가이드
+          목록의 카드(hover 시 transform)에 이 버튼이 들어가도 팝업은 항상 뷰포트 기준. */}
+      {open &&
+        createPortal(
           <div
-            className="rounded-3xl p-5 w-[95vw] h-[92vh] max-w-5xl flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-            style={{ background: C.surface }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-3"
+            style={{ background: "rgba(30,26,23,0.7)" }}
+            onClick={toggle}
           >
-            <div className="flex items-center justify-between mb-3 shrink-0">
-              <span className="text-[15px] font-black" style={{ color: C.dark }}>처방전 원본 사진</span>
-              <button onClick={toggle} aria-label="닫기">
-                <X className="w-5 h-5" style={{ color: C.muted }} />
-              </button>
+            <div
+              className="rounded-3xl p-5 w-[95vw] h-[92vh] max-w-5xl flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+              style={{ background: C.surface }}
+            >
+              <div className="flex items-center justify-between mb-3 shrink-0">
+                <span className="text-[15px] font-black" style={{ color: C.dark }}>처방전 원본 사진</span>
+                <button onClick={toggle} aria-label="닫기">
+                  <X className="w-5 h-5" style={{ color: C.muted }} />
+                </button>
+              </div>
+              <div className="flex-1 min-h-0">{body}</div>
             </div>
-            <div className="flex-1 min-h-0">{body}</div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
     </>
   );
 }

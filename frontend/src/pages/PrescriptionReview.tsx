@@ -633,6 +633,9 @@ export default function PrescriptionReview() {
           </div>
         ) : (
           <>
+            {/* [2026-07-27 추가] 처음 확인·수정하는 화면에도 원본 사진을 참고할 수 있게 —
+                보호자·기관이 지목한 칸을 고치는 화면(위 correction 모드)과 동일하게. */}
+            {record.has_image && <PrescriptionImageViewer recordId={record.record_id} floating />}
             <p className="text-[13px] font-bold mb-1" style={{ color: C.terracottaLight }}>처방전 인식 완료</p>
             <h1 className="text-[26px] font-black mb-2" style={{ color: C.dark }}>처방전 확인 및 수정</h1>
             <p className="text-[14px] mb-6" style={{ color: C.muted }}>
