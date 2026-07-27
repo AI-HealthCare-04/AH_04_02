@@ -8,7 +8,6 @@ extract_frequency/extract_days는 원래 hs/ac/pc(타이밍)와 함께 prn도 "1
 """
 from services.parsing_rules import extract_days, extract_frequency, parse_prescription
 
-
 # ── extract_frequency ───────────────────────────────────────────────────────
 
 def test_extract_frequency_recognizes_korean_prn_text():

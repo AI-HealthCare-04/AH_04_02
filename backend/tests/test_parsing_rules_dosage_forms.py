@@ -17,7 +17,6 @@ from services.parsing_rules import (
     parse_prescription,
 )
 
-
 # ── DRUG_NAME_RE — 정제/캡슐 외 제형 인식 ──────────────────────────────────
 
 def test_drug_name_re_matches_patch_common_spelling():
@@ -248,3 +247,26 @@ def test_parse_prescription_gum_form_is_recognized():
     assert len(meds) == 1
     assert meds[0]["drug_name"].startswith("니코틴껌")
     assert meds[0]["dosage"] == "1개"
+
+
+# ── [2026-07-27 버그수정, PR #99 코드 리뷰 반영 — pecs0310] "N개월분"이 복용량으로 오인식 ──
+
+def test_extract_dose_quantity_does_not_treat_month_supply_as_gae_unit():
+    """[재현] "1개월분"의 "1개"가 DOSE_QTY_UNITS의 "개"에 걸려 1회 복용량으로
+    오인식됐다 — "개월"은 공급 기간이지 낱개 수량이 아니다."""
+    assert extract_dose_quantity("1개월분", form="") == ""
+
+
+def test_extract_dose_quantity_still_recognizes_gae_unit_without_month():
+    """"개"가 실제 낱개 단위로 쓰이는 경우(월 뒤따르지 않음)는 회귀 없이 그대로 인식돼야 한다."""
+    assert extract_dose_quantity("1회 1개, 1일 4회", form="") == "1개"
+
+
+def test_parse_prescription_month_supply_does_not_produce_fake_dosage():
+    """[실사용 재현] "인슐린프리필드시린지 1일 1회 1개월분" → dosage가 "1개"(개월분의 개)나
+    "1시린지"(개 제외 후 bare-fallback으로 드러난 약품명 제형)로 잘못 채워지면 안 된다 —
+    이 텍스트엔 1회 복용량 정보 자체가 없으므로 빈 값이어야 한다."""
+    raw = "1. 인슐린프리필드시린지 1일 1회 1개월분"
+    meds, _ = parse_prescription(raw)
+    assert len(meds) == 1
+    assert meds[0]["dosage"] == ""
