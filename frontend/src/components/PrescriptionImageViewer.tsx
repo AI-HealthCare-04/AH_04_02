@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
+import { createPortal } from "react-dom";
 import { Camera, X, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import { getRecordImageBlobUrl } from "../api/records";
 import { C } from "../theme";
@@ -45,6 +46,11 @@ function ZoomableImage({ url }: { url: string }) {
 
   const handlePointerDown = (e: PointerEvent<HTMLImageElement>) => {
     if (scale === MIN_SCALE) return;
+    // [2026-07-27 추가] 이걸 안 부르면 확대된 사진을 드래그하다 커서가 사진 밖(제목·닫기
+    // 버튼 등 텍스트가 있는 영역)으로 나가는 순간 브라우저가 그 텍스트를 네이티브
+    // 드래그-선택으로 잡아버려서 화면이 깜빡이고, 마우스를 떼도 선택이 남아 있어서
+    // 닫기 버튼 클릭이 씹히는 원인이었다.
+    e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     dragRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
   };
@@ -55,8 +61,9 @@ function ZoomableImage({ url }: { url: string }) {
     setPan({ x: d.panX + (e.clientX - d.x), y: d.panY + (e.clientY - d.y) });
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (e: PointerEvent<HTMLImageElement>) => {
     dragRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
   const reset = () => {
@@ -123,10 +130,13 @@ function ZoomableImage({ url }: { url: string }) {
   );
 }
 
-// [2026-07-25 추가] 처방전 원본 사진 팝업 — record_id로만 불러오므로 이 처방전에 연결된
-// 사진만 열람된다(다른 기록의 사진이 섞일 수 없음). floating=true면 PrescriptionReview.tsx의
-// 수정 화면에서 "챗봇처럼" 열었다 닫았다 할 수 있는 작은 패널로, 아니면 목록·상세 화면의
-// 일반 버튼+화면을 거의 채우는 모달로 동작한다. 둘 다 휠로 확대·축소, 드래그로 이동 가능.
+// [2026-07-25 추가, 2026-07-27 수정] 처방전 원본 사진 팝업 — record_id로만 불러오므로 이
+// 처방전에 연결된 사진만 열람된다(다른 기록의 사진이 섞일 수 없음). floating=true면 트리거가
+// 챗봇 버튼 위에 뜨는 작은 카메라 아이콘(PrescriptionReview.tsx 수정 화면, MedGuide.tsx 검토
+// 화면), 아니면 "처방전 사진 보기" 일반 버튼(목록·상세 화면)이다 — 어느 쪽이든 눌렀을 때
+// 열리는 화면은 항상 같은, 화면 대부분을 채우는 모달(휠 확대·축소, 드래그 이동 가능). 처음엔
+// floating 트리거가 작은 패널을 따로 열었는데, 편집 중 세부 내용을 확인하기엔 너무 작다는
+// 피드백을 반영해 다른 화면들과 동일한 큰 모달로 통일했다.
 export default function PrescriptionImageViewer({
   recordId,
   floating = false,
@@ -210,44 +220,14 @@ export default function PrescriptionImageViewer({
     <ZoomableImage url={url} />
   ) : null;
 
-  if (floating) {
-    return (
-      <>
-        {/* [2026-07-25] bottom-24 — ChatFab.tsx의 전역 챗봇 버튼(bottom-6, 56px)과
-            겹치지 않게 그 위에 쌓는다. */}
-        <button
-          onClick={toggle}
-          className="fixed bottom-24 right-6 z-50 rounded-full flex items-center justify-center"
-          style={{ width: 52, height: 52, background: C.terracotta, boxShadow: "0 4px 16px rgba(193,101,61,0.35)" }}
-          aria-label="처방전 원본 사진 보기"
-        >
-          {open ? <X className="w-5 h-5 text-white" /> : <Camera className="w-5 h-5 text-white" />}
-        </button>
-        {open && (
-          <div
-            className="fixed bottom-44 right-6 z-50 w-80 h-96 rounded-2xl overflow-hidden flex flex-col"
-            style={{ background: C.surface, boxShadow: "0 8px 32px rgba(30,26,23,0.25)" }}
-          >
-            <div className="px-4 py-3 shrink-0" style={{ background: C.dark }}>
-              <span className="text-[13px] font-bold text-white">처방전 원본 사진</span>
-            </div>
-            <div className="p-3 flex-1 min-h-0">{body}</div>
-          </div>
-        )}
-      </>
-    );
-  }
-
-  return (
-    <>
-      <button
-        onClick={toggle}
-        className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[12px] font-bold"
-        style={{ background: `${C.terracotta}15`, color: C.terracotta }}
-      >
-        <Camera className="w-3.5 h-3.5" /> 처방전 사진 보기
-      </button>
-      {open && (
+  // [2026-07-27] fixed 요소를 document.body로 포탈 — 목록 화면(Records.tsx/
+  // MedGuideList.tsx)의 카드에 hover:-translate-y-0.5 같은 transform이 있으면, 그
+  // transform이 걸린 조상이 fixed 자식의 컨테이닝 블록이 돼버려서(CSS 스펙) 팝업이
+  // 뷰포트가 아니라 카드 기준으로 배치되고, 카드의 :hover가 드래그 중 켜졌다 꺼졌다
+  // 하면서 화면이 깜빡였다. body에 직접 포탈하면 어느 화면에 놓이든 항상 뷰포트
+  // 기준으로 고정된다.
+  const modal = open
+    ? createPortal(
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-3"
           style={{ background: "rgba(30,26,23,0.7)" }}
@@ -266,8 +246,40 @@ export default function PrescriptionImageViewer({
             </div>
             <div className="flex-1 min-h-0">{body}</div>
           </div>
-        </div>
-      )}
+        </div>,
+        document.body
+      )
+    : null;
+
+  if (floating) {
+    return createPortal(
+      <>
+        {/* [2026-07-25] bottom-24 — ChatFab.tsx의 전역 챗봇 버튼(bottom-6, 56px)과
+            겹치지 않게 그 위에 쌓는다. */}
+        <button
+          onClick={toggle}
+          className="fixed bottom-24 right-6 z-50 rounded-full flex items-center justify-center"
+          style={{ width: 52, height: 52, background: C.terracotta, boxShadow: "0 4px 16px rgba(193,101,61,0.35)" }}
+          aria-label="처방전 원본 사진 보기"
+        >
+          {open ? <X className="w-5 h-5 text-white" /> : <Camera className="w-5 h-5 text-white" />}
+        </button>
+        {modal}
+      </>,
+      document.body
+    );
+  }
+
+  return (
+    <>
+      <button
+        onClick={toggle}
+        className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[12px] font-bold"
+        style={{ background: `${C.terracotta}15`, color: C.terracotta }}
+      >
+        <Camera className="w-3.5 h-3.5" /> 처방전 사진 보기
+      </button>
+      {modal}
     </>
   );
 }

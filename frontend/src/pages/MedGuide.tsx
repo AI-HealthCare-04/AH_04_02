@@ -15,7 +15,7 @@ import {
 } from "../api/records";
 import { C } from "../theme";
 import { getCurrentCaregiverId, getCurrentUserName } from "../lib/session";
-import { FIELDS } from "./PrescriptionReview";
+import { FIELDS } from "../lib/prescriptionFields";
 
 // [2026-07-25 추가] caregiver_review_status 뱃지 표시.
 const REVIEW_STATUS_LABEL: Record<string, { text: string; bg: string; color: string }> = {
@@ -84,7 +84,7 @@ export default function MedGuide() {
   // [2026-07-25 추가] 보호자·기관 검토 흐름 — 환자가 등록한 모든 처방전을 한 번은
   // 확인하게 하기 위함. isCaregiver는 이 화면을 보는 사람이 보호자/기관 계정인지.
   const isCaregiver = getCurrentCaregiverId() != null;
-  const [flagging, setFlagging] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
   // key: `${ocr_result_id}:${field_name}`, value: 사유+정답(선택된 칸만 존재)
   // [2026-07-25 추가] suggestedValue — 환자가 자유 입력 대신 이 값만 드롭다운에서
   // 고르게 하려면 보호자·기관이 정답을 미리 지정해둬야 한다.
@@ -133,7 +133,7 @@ export default function MedGuide() {
     setReviewSubmitting(true);
     try {
       setResult(await requestCorrection(result.record_id, flags));
-      setFlagging(false);
+      setReviewing(false);
       setSelectedFlags({});
       setError("");
     } catch {
@@ -217,36 +217,31 @@ export default function MedGuide() {
 
             {result.caregiver_review_status === "reviewed" ? (
               <p className="text-[13px] mt-1" style={{ color: C.muted }}>검토를 완료했어요.</p>
-            ) : !flagging ? (
+            ) : !reviewing ? (
               <>
                 <p className="text-[13px] mt-1 mb-3" style={{ color: C.muted }}>
                   {result.caregiver_review_status === "needs_correction"
-                    ? "환자에게 수정을 요청했어요. 아래에서 수정 완료된 칸을 확인하고 최종 검토해 주세요."
-                    : "내용을 확인하고, 문제가 없으면 검토했어요를 눌러주세요."}
+                    ? "환자가 수정을 완료했어요. 검토하기를 눌러 칸별로 확인해 주세요."
+                    : "검토하기를 눌러 환자가 확인한 처방전 내용을 그대로 확인해 주세요."}
                 </p>
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleMarkReviewed}
-                    disabled={reviewSubmitting}
-                    className="flex-1 py-2.5 rounded-full font-bold text-[13px] text-white disabled:opacity-50"
-                    style={{ background: C.success }}
-                  >
-                    ✓ 검토했어요
-                  </button>
-                  <button
-                    onClick={() => setFlagging(true)}
-                    disabled={reviewSubmitting}
-                    className="flex-1 py-2.5 rounded-full font-bold text-[13px] border-2 disabled:opacity-50"
-                    style={{ borderColor: "rgba(30,26,23,0.15)", color: C.dark }}
-                  >
-                    수정이 필요해요
-                  </button>
-                </div>
+                <button
+                  onClick={() => setReviewing(true)}
+                  disabled={reviewSubmitting}
+                  className="w-full py-2.5 rounded-full font-bold text-[13px] text-white disabled:opacity-50"
+                  style={{ background: C.terracotta }}
+                >
+                  검토하기
+                </button>
               </>
             ) : (
               <div className="mt-2">
+                {/* [2026-07-27 추가] 칸별로 검토하는 동안 원본 사진을 참고할 수 있게 — 환자가
+                    처방전을 확인·수정할 때와 동일하게 챗봇 버튼 위에 뜨는 작은 팝업. */}
+                {result.has_image && <PrescriptionImageViewer recordId={result.record_id} floating />}
                 <p className="text-[13px] mb-3" style={{ color: C.muted }}>
-                  문제가 있는 칸을 고르고 정답을 입력해주세요. 이유는 선택이에요. 환자에게 바로 알림이 가요.
+                  {/* [2026-07-27 수정] 이유는 선택이라는 안내는 실제로 칸을 지목할 때만 의미가
+                      있어서, 지목 안 하고 그냥 검토만 하는 경우까지 아우르는 문구로 바꿨다. */}
+                  문제가 있는 칸을 고르면 정답을 입력할 수 있어요. 문제가 없으면 아래 검토했어요를 눌러주세요.
                 </p>
                 {/* [2026-07-25 수정] 환자가 처방전을 확인·수정할 때 보는 것과 같은 칸 구조
                     (레이블 박스 그리드)로 보여준다 — 체크한 칸만 빨간 테두리로 표시. */}
@@ -315,17 +310,18 @@ export default function MedGuide() {
                     </div>
                   ))}
                 </div>
+                {/* [2026-07-27 수정] "수정이 필요해요"를 상단이 아니라 여기(칸별 검토를 마친
+                    뒤)로 옮겼다 — 보호자·기관이 내용을 실제로 보지도 않고 바로 판단을 눌러버리는
+                    걸 막기 위함. 검토했어요는 지목한 칸이 없어도 항상 누를 수 있고, 수정이
+                    필요해요는 최소 1칸을 지목해야 활성화된다(정답까지 채워야 실제 제출됨). */}
                 <div className="flex gap-2 mt-4">
                   <button
-                    onClick={() => {
-                      setFlagging(false);
-                      setSelectedFlags({});
-                      setError("");
-                    }}
-                    className="flex-1 py-2.5 rounded-full font-bold text-[13px] border-2"
-                    style={{ borderColor: "rgba(30,26,23,0.15)", color: C.muted }}
+                    onClick={handleMarkReviewed}
+                    disabled={reviewSubmitting}
+                    className="flex-1 py-2.5 rounded-full font-bold text-[13px] text-white disabled:opacity-50"
+                    style={{ background: C.success }}
                   >
-                    취소
+                    ✓ 검토했어요
                   </button>
                   <button
                     onClick={handleSubmitFlags}
@@ -333,7 +329,7 @@ export default function MedGuide() {
                     className="flex-1 py-2.5 rounded-full font-bold text-[13px] text-white disabled:opacity-50"
                     style={{ background: C.terracotta }}
                   >
-                    수정 요청 보내기
+                    수정이 필요해요
                   </button>
                 </div>
               </div>
