@@ -157,6 +157,23 @@ def test_extract_dose_quantity_with_patch_sheet_unit():
     assert extract_dose_quantity("1회 1매 부착, 1일 1회 교체", form="패치") == "1매"
 
 
+# ── extract_dose_quantity — [2026-07-27 추가] 숫자가 "회"에 붙는 스프레이 표기 ──
+
+def test_extract_dose_quantity_spray_count_attached_to_hoe_with_ssik():
+    """[실사용 예시] "양쪽 비공 1회씩 분사"처럼 숫자가 분사가 아니라 "회"에 붙어
+    나오는 표기 — 분무/분사에 숫자가 직접 안 붙어 있으면 예전엔 빈 값이었다."""
+    assert extract_dose_quantity("양쪽 비공 1회씩 분사, 1일 3회") == "1분사"
+
+
+def test_extract_dose_quantity_spray_count_attached_to_hoe_without_ssik():
+    assert extract_dose_quantity("매회 1회 분무, 1일 3회") == "1분무"
+
+
+def test_extract_dose_quantity_direct_spray_count_still_takes_priority():
+    """숫자가 분무/분사에 직접 붙어 있으면(더 명시적) 그걸 우선한다."""
+    assert extract_dose_quantity("1회 2분무, 1일 3회") == "2분무"
+
+
 # ── _detect_format — 크림/연고/패치 등도 list 포맷으로 인식 ──────────────────
 
 def test_detect_format_recognizes_list_with_ointment_entry():

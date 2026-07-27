@@ -114,6 +114,10 @@ DOSE_QTY_ABBREV_RE = re.compile(r"(?<![A-Za-z])(\d+(?:\.\d+)?)\s*(T|C)\b")  # 1T
 # 같은 이유로 추가한다.
 DOSE_QTY_VOLUME_UNITS = "ml|mL|방울|분무|분사|퍼프|g|단위"
 DOSE_QTY_VOLUME_UNIT_RE = re.compile(rf"(\d+(?:\.\d+)?)\s*({DOSE_QTY_VOLUME_UNITS})", re.IGNORECASE)
+# [2026-07-27 추가] 스프레이는 "1회 2분무"처럼 숫자가 분무/분사에 바로 붙기도 하지만,
+# "양쪽 비공 1회씩 분사"/"1회 분무"처럼 숫자가 "회"(한 번 뿌릴 때)에 붙고 분무/분사가
+# 뒤에 따로 오는 표기도 흔하다 — 이때는 그 "N회"의 N을 분무 횟수로 본다.
+SPRAY_COUNT_RE = re.compile(r"(\d+)\s*회\s*씩?\s*(분무|분사)")
 # 약품명(DRUG_NAME_RE group 1)이 실제로 끝나는 제형 — (3) 케이스에서 단위 없는 숫자 컬럼에
 # 이 제형을 붙여 "1.00" + "정" → "1정"을 완성한다.
 DRUG_FORM_RE = re.compile(
@@ -128,6 +132,11 @@ _BARE_QTY_RE = re.compile(
 KOR_FREQ_RE     = re.compile(r"(?:1\s*일|하루)\s*(\d+)\s*(?:회|번)")  # 1 일 3 회 같은 비표준 공백 허용
 BARE_FREQ_RE    = re.compile(r"(?<!\d)(\d+)\s*회(?!\s*[가-힣\)])")
 ABBREV_FREQ_RE  = re.compile(r"\b(qd|od|bid|tid|qid|prn|hs|ac|pc)\b", re.IGNORECASE)
+# [2026-07-27 추가] "필요시"(PRN, 정해진 횟수·기간 없이 필요할 때만 복용)는 hs/ac/pc처럼
+# "횟수"가 아니라 "조건"이라 extract_frequency/extract_days가 원래는 빈 값으로 걸러냈는데,
+# 이 값 자체를 1일 투약횟수/총 투약일수 화면에 그대로 보여달라는 요청 — 영문 약어("prn")뿐
+# 아니라 처방전에 바로 적히는 한글 표기("필요시")도 인식한다.
+PRN_RE          = re.compile(r"필요\s*시|\bprn\b", re.IGNORECASE)
 DAYS_KOR_RE     = re.compile(r"(\d+)\s*일\s*분")
 DAYS_ABBREV_RE  = re.compile(r"#\s*(\d+)")
 # [2026-07-20 버그수정] CLOVA가 표(연락처/발행일/처방 내역 등)를 개행 없이 한 줄로 합쳐
@@ -175,14 +184,19 @@ def extract_dose_quantity(text: str, form: str = "") -> str:
 
     1) "1회 1정"/"1정"처럼 텍스트에 단위가 그대로 있으면 그걸 쓴다.
     2) "10ml"/"1방울"처럼 부피·방울 단위(시럽/점안액 등)가 있으면 그걸 쓴다.
-    3) "1T"/"1C" 같은 약식 표기(T=정, C=캡슐)를 본다.
-    4) 그래도 없으면 단위 없이 숫자만 있는 컬럼(예: "1.00")을 찾아, 약품명의 제형(form,
+    3) "1회씩 분사"/"1회 분무"처럼 숫자가 분무/분사가 아니라 "회"에 붙어 나오는
+       스프레이 표기를 본다.
+    4) "1T"/"1C" 같은 약식 표기(T=정, C=캡슐)를 본다.
+    5) 그래도 없으면 단위 없이 숫자만 있는 컬럼(예: "1.00")을 찾아, 약품명의 제형(form,
        예: "정"/"캡슐")을 붙여 완성한다 — form이 없으면 조합할 수 없어 빈 문자열을 반환한다.
     """
     m = DOSE_QTY_UNIT_RE.search(text)
     if m:
         return f"{m.group(1)}{m.group(2)}"
     m = DOSE_QTY_VOLUME_UNIT_RE.search(text)
+    if m:
+        return f"{m.group(1)}{m.group(2)}"
+    m = SPRAY_COUNT_RE.search(text)
     if m:
         return f"{m.group(1)}{m.group(2)}"
     m = DOSE_QTY_ABBREV_RE.search(text)
@@ -267,15 +281,21 @@ def extract_frequency(text: str) -> str:
     먹는지(횟수)를 묻는 필드인데, 식전/식후는 언제 먹는지(타이밍)라 전혀 다른 정보다.
     명시적인 횟수를 못 찾았으면 "식후"를 억지로 끼워맞추지 말고 빈 값으로 남겨서
     사용자가 직접 채우게 한다(모르는 걸 아는 척 지어내지 않음).
+
+    [2026-07-27 추가] "필요시"(PRN)는 위와 같은 이유(횟수가 아니라 조건)로 원래는
+    hs/ac/pc와 함께 걸러졌는데, 이 값 자체를 화면에 그대로 보여달라는 요청이 있어
+    hs/ac/pc와 분리해 예외로 반환한다 — 영문 약어("prn")와 한글 표기("필요시") 둘 다.
     """
     m = KOR_FREQ_RE.search(text)
     if m:
         return f"{m.group(1)}회"
+    if PRN_RE.search(text):
+        return "필요시"
     m = ABBREV_FREQ_RE.search(text)
     if m:
         mapped = FREQ_ABBREV_MAP.get(m.group(1).lower(), m.group(1))
-        # prn/hs/ac/pc는 횟수가 아니라 타이밍/조건이라("필요시"/"취침 전"/"식전"/"식후")
-        # 위와 같은 이유로 여기서도 걸러낸다 — 진짜 횟수(qd/od/bid/tid/qid)만 반환.
+        # hs/ac/pc는 횟수가 아니라 타이밍이라("취침 전"/"식전"/"식후") 여기서도 걸러낸다
+        # — 진짜 횟수(qd/od/bid/tid/qid)만 반환.
         if mapped.endswith("회"):
             return mapped
         return ""
@@ -291,12 +311,16 @@ def extract_drug_code_list(text: str) -> list:
 
 
 def extract_days(text: str) -> str:
+    """[2026-07-27 추가] 명시적인 일수("30일분"/"#30")를 못 찾았는데 "필요시"(PRN)가
+    있으면 정해진 기간이 없다는 뜻이므로, 빈 값 대신 그 자체를 총 투약일수로 보여준다."""
     m = DAYS_KOR_RE.search(text)
     if m:
         return f"{m.group(1)}일"
     m = DAYS_ABBREV_RE.search(text)
     if m:
         return f"{m.group(1)}일"
+    if PRN_RE.search(text):
+        return "필요시"
     return ""
 
 

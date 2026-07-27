@@ -152,6 +152,23 @@ export default function PrescriptionImageViewer({
     };
   }, [floating, open]);
 
+  // [2026-07-27 버그수정] 스크롤 잠금(위)과 ZoomableImage 내부의 { passive: false } 휠
+  // 리스너 두 가지를 고쳤는데도 확대/축소 깜빡임이 재현됐다 — 진짜 원인은 트랙패드
+  // 핀치줌(ctrl+wheel로 브라우저에 전달됨)이었다. 이 제스처는 커서가 사진 위(ZoomableImage
+  // 내부 리스너가 있는 곳)를 벗어나 팝업의 다른 부분(제목줄·여백·닫기 버튼 등) 위에 있을
+  // 때는 아무도 막지 않아서 브라우저 자체의 페이지 확대/축소가 그대로 일어났다 —
+  // overflow:hidden은 "스크롤"만 막지 "페이지 줌"은 막지 못한다(서로 다른 브라우저
+  // 기능). 팝업이 열려 있는 동안은 document 전체에서 ctrlKey가 있는 휠 이벤트(핀치줌)만
+  // 콕 집어 막는다 — 일반 스크롤(ctrlKey 없음)은 그대로 둬도 body가 이미 잠겨 있어 안전하다.
+  useEffect(() => {
+    if (!open) return;
+    const blockPinchZoom = (e: WheelEvent) => {
+      if (e.ctrlKey) e.preventDefault();
+    };
+    document.addEventListener("wheel", blockPinchZoom, { passive: false });
+    return () => document.removeEventListener("wheel", blockPinchZoom);
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
