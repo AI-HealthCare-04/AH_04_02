@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import NavBar from "../components/NavBar";
+import LoadingDots from "../components/LoadingDots";
 import { getDrugIndication, getRecord, type DrugIndicationInfo, type RecordResult } from "../api/records";
 import { C } from "../theme";
 import { getCurrentUserName } from "../lib/session";
@@ -31,6 +32,16 @@ export default function DrugInfo() {
   // [2026-07-20] 처방 시점에 생성된 RAG 가이드의 주의사항(이 환자의 실제 처방 맥락 반영) —
   // 없으면 아래에서 e약은요/허가사항 live 조회(drugInfo)의 환자용 요약 또는 원문으로 폴백한다.
   const guideCautionText = guideDrug?.precautions?.length ? guideDrug.precautions.join(" ") : guideDrug?.caution;
+
+  // [2026-07-25 추가] 뱃지("1정"/"5mg"/"1일 1회")의 숫자만 보면 어떤 값이 사용량이고
+  // 어떤 값이 투여량인지 헷갈릴 수 있어 — 어르신도 바로 이해할 수 있게 문장으로 풀어 쓴다.
+  const doseExplanation = [
+    med?.dosage ? `1회 사용량은 ${med.dosage}` : null,
+    med?.dose_amount ? `1회 투여량은 ${med.dose_amount}` : null,
+    med?.frequency ? `1일 ${med.frequency} 복용해요` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
 
   useEffect(() => {
     if (!med) return;
@@ -64,7 +75,7 @@ export default function DrugInfo() {
         </button>
 
         {loading ? (
-          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>
+          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
         ) : !med ? (
           <p className="text-center py-16 text-[14px]" style={{ color: "#D94F4F" }}>{error || "약품 정보를 찾을 수 없어요."}</p>
         ) : (
@@ -82,12 +93,22 @@ export default function DrugInfo() {
                     <span className="px-3 py-1 rounded-full text-[12px] font-bold" style={{ background: "rgba(255,255,255,0.18)", color: C.white }}>
                       {med.dosage}
                     </span>
+                    {med.dose_amount && (
+                      <span className="px-3 py-1 rounded-full text-[12px] font-bold" style={{ background: "rgba(255,255,255,0.18)", color: C.white }}>
+                        {med.dose_amount}
+                      </span>
+                    )}
                     {med.frequency && (
                       <span className="px-3 py-1 rounded-full text-[12px] font-bold" style={{ background: "rgba(255,255,255,0.18)", color: C.white }}>
                         {med.frequency}
                       </span>
                     )}
                   </div>
+                  {/* [2026-07-25 추가] 어르신도 뱃지의 숫자·단위가 뭘 뜻하는지 바로 알 수 있게
+                      풀어 쓴 설명 — 값이 있는 항목만 이어붙인다. */}
+                  {doseExplanation && (
+                    <p className="text-[13px] mt-2" style={{ color: "rgba(255,255,255,0.75)" }}>{doseExplanation}</p>
+                  )}
                 </div>
               </div>
             </div>

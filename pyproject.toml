@@ -31,6 +31,7 @@ dependencies = [
     "alembic>=1.18.5",
     "langfuse>=3.0",
     "torch",  # sentence-transformers 간접 의존성 — CPU 전용 wheel 강제하려고 직접 명시(아래 tool.uv.sources)
+    "pywebpush>=2.0",  # [2026-07-24 추가] Web Push 실발송(VAPID) — 프론트 서비스워커/구독은 HTTPS 배포 이후
 ]
 
 # backend(routers/chat_router.py)가 rag/를 sys.path에 얹어 같은 프로세스에서 import하므로

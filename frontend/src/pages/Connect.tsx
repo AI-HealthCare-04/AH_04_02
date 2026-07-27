@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { User, AlertCircle, RotateCw, Trash2 } from "lucide-react";
 import NavBar from "../components/NavBar";
+import LoadingDots from "../components/LoadingDots";
 import InvitePatientPanel from "../components/InvitePatientPanel";
 import {
   acceptInvitationAsCaregiver,
@@ -40,6 +41,15 @@ const RELATION_LABEL: Record<RelationType, string> = {
   life_support_worker: "생활지원사",
   social_worker: "사회복지사",
 };
+
+// [2026-07-24 추가] "연결된 사람" 목록의 relation_type 표시 — Caregiver.relation_type은
+// 초대(Invitation.relation_type)와 달리 "organization"도 값으로 올 수 있는데(개인 가입
+// 화면에서 기관으로 가입한 경우), RELATION_LABEL엔 그 키가 없어서 지금까지 원문 그대로
+// "organization"이 화면에 노출되고 있었다. 기관 계정은 라벨 대신 실제 기관명을 보여준다.
+function formatCaregiverRelation(c: Caregiver): string {
+  if (c.relation_type === "organization") return `기관명: ${c.org_name ?? "알 수 없음"}`;
+  return RELATION_LABEL[c.relation_type as RelationType] ?? c.relation_type;
+}
 
 // [2026-07-24 추가] event별로 다른 문구를 만든다 — patient_name과 counterpart_name이 같으면
 // (환자 본인이 처리한 경우) 굳이 이름을 두 번 반복하지 않는다.
@@ -728,7 +738,7 @@ export default function Connect() {
               <h2 className="text-[15px] font-black text-[#1E1A17]">연결된 사람 ({caregivers.length}명)</h2>
             </div>
             {loading ? (
-              <p className="px-6 py-8 text-center text-[14px] text-[#8A7E75]">불러오는 중이에요...</p>
+              <p className="px-6 py-8 text-center text-[14px] text-[#8A7E75]"><LoadingDots /></p>
             ) : caregivers.length === 0 ? (
               <div className="py-14 text-center">
                 <User className="w-9 h-9 mx-auto mb-3 text-[#8A7E75] opacity-30" />
@@ -739,9 +749,7 @@ export default function Connect() {
                 <div key={c.id} className="flex items-center justify-between px-6 py-4 border-b border-[#F4F0EA] last:border-0">
                   <div>
                     <p className="text-[14px] font-bold text-[#1E1A17]">{c.name}</p>
-                    <p className="text-[13px] text-[#8A7E75]">
-                      {RELATION_LABEL[c.relation_type as RelationType] ?? c.relation_type}
-                    </p>
+                    <p className="text-[13px] text-[#8A7E75]">{formatCaregiverRelation(c)}</p>
                   </div>
                   <button
                     onClick={() => handleUnlink(c.id)}

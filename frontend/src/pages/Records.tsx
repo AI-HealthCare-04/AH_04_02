@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Search, FileText, ChevronRight, Trash2, Star, CheckSquare, Square } from "lucide-react";
 import NavBar from "../components/NavBar";
+import LoadingDots from "../components/LoadingDots";
 import PatientContextBanner from "../components/PatientContextBanner";
+import PrescriptionImageViewer from "../components/PrescriptionImageViewer";
 import { deleteRecord, listRecords, pinRecord, type RecordSummary } from "../api/records";
 import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
@@ -12,6 +14,13 @@ const STATUS_LABEL: Record<RecordSummary["status"], { text: string; bg: string; 
   review_required: { text: "확인 필요", bg: C.warningBg, color: C.warningText },
   processing: { text: "처리 중", bg: C.bubbleBg, color: C.muted },
   failed: { text: "실패", bg: "rgba(217,79,79,0.12)", color: "#D94F4F" },
+};
+
+// [2026-07-25 추가] 보호자·기관 검토 상태 — "none"(연결된 보호자·기관 없음)은 뱃지 자체를 안 보여준다.
+const REVIEW_STATUS_LABEL: Record<string, { text: string; bg: string; color: string }> = {
+  pending: { text: "보호자 검토 대기", bg: `${C.terracotta}15`, color: C.terracotta },
+  needs_correction: { text: "내가 수정할 칸 있어요", bg: "#F5E6C8", color: "#8A6D1F" },
+  reviewed: { text: "보호자 검토 완료", bg: `${C.success}20`, color: "#4A7A47" },
 };
 
 export default function Records() {
@@ -202,7 +211,7 @@ export default function Records() {
         {error && <p className="text-[13px] mb-4" style={{ color: "#D94F4F" }}>{error}</p>}
 
         {loading ? (
-          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>
+          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
         ) : filtered.length === 0 ? (
           <div className="rounded-2xl p-10 text-center" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
             <p className="text-[14px]" style={{ color: C.muted }}>
@@ -219,15 +228,28 @@ export default function Records() {
                   key={r.record_id}
                   role="button"
                   tabIndex={0}
-                  onClick={() => (selectMode ? toggleSelected(r.record_id) : navigate(`/records/${r.record_id}`))}
+                  onClick={() =>
+                    selectMode
+                      ? toggleSelected(r.record_id)
+                      : navigate(r.caregiver_review_status === "needs_correction" ? `/records/${r.record_id}/guide` : `/records/${r.record_id}`)
+                  }
                   onKeyDown={(e) =>
-                    e.key === "Enter" && (selectMode ? toggleSelected(r.record_id) : navigate(`/records/${r.record_id}`))
+                    e.key === "Enter" &&
+                    (selectMode
+                      ? toggleSelected(r.record_id)
+                      : navigate(r.caregiver_review_status === "needs_correction" ? `/records/${r.record_id}/guide` : `/records/${r.record_id}`))
                   }
                   className="w-full text-left rounded-2xl p-5 transition-transform hover:-translate-y-0.5 cursor-pointer"
                   style={{
                     background: C.surface,
                     boxShadow: "0 2px 16px rgba(30,26,23,0.07)",
-                    border: selected ? `2px solid ${C.terracotta}` : "2px solid transparent",
+                    // [2026-07-25 추가] 보호자·기관이 수정을 요청한 내역은 주황 테두리로 눈에 띄게 —
+                    // 선택 모드의 테라코타 테두리와 겹치지 않도록 selected가 우선한다.
+                    border: selected
+                      ? `2px solid ${C.terracotta}`
+                      : r.caregiver_review_status === "needs_correction"
+                        ? "2px solid #E8A33D"
+                        : "2px solid transparent",
                   }}
                 >
                   <div className="flex items-start justify-between mb-3">
@@ -293,10 +315,32 @@ export default function Records() {
                   <p className="text-[13px] mb-4" style={{ color: C.muted }}>
                     {r.drug_names.length > 0 ? r.drug_names.join(", ") : "인식된 약품 없음"}
                   </p>
-                  <div className="border-t pt-3 flex items-center justify-between" style={{ borderColor: "rgba(30,26,23,0.08)" }}>
-                    <span className="px-3 py-1 rounded-full text-[12px] font-bold" style={{ background: s.bg, color: s.color }}>
-                      {s.text}
-                    </span>
+                  <div className="border-t pt-3 flex items-center justify-between flex-wrap gap-2" style={{ borderColor: "rgba(30,26,23,0.08)" }}>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="px-3 py-1 rounded-full text-[12px] font-bold" style={{ background: s.bg, color: s.color }}>
+                        {s.text}
+                      </span>
+                      {r.caregiver_review_status !== "none" && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(
+                              r.caregiver_review_status === "needs_correction"
+                                ? `/records/${r.record_id}/review?mode=correction`
+                                : `/records/${r.record_id}`
+                            );
+                          }}
+                          className="px-3 py-1 rounded-full text-[12px] font-bold"
+                          style={{
+                            background: REVIEW_STATUS_LABEL[r.caregiver_review_status].bg,
+                            color: REVIEW_STATUS_LABEL[r.caregiver_review_status].color,
+                          }}
+                        >
+                          {REVIEW_STATUS_LABEL[r.caregiver_review_status].text}
+                        </button>
+                      )}
+                      {r.has_image && <PrescriptionImageViewer recordId={r.record_id} />}
+                    </div>
                     <span className="flex items-center gap-1 text-[13px] font-bold" style={{ color: C.terracotta }}>
                       자세히 보기 <ChevronRight className="w-3.5 h-3.5" />
                     </span>

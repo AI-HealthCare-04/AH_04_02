@@ -220,6 +220,45 @@ class RelationNotice(SQLModel, table=True):
     read_at: datetime | None = None
 
 
+# [2026-07-25 추가] 처방전 검토 알림 — RelationNotice와 같은 recipient_role/recipient_id
+# 패턴이지만 "관계" 이벤트가 아니라 "처방전 하나"에 딸린 이벤트라 별도 테이블로 분리했다
+# (patient_name/counterpart_name 같은 관계 전용 필드가 안 맞음).
+# event: "correction_requested"(보호자·기관 → 환자, 수정 요청) |
+#        "correction_completed"(환자 → 보호자·기관, 수정 완료 알림)
+class RecordCorrectionNotice(SQLModel, table=True):
+    __tablename__ = "record_correction_notices"
+
+    id: int | None = Field(default=None, primary_key=True)
+    recipient_role: str  # "patient" | "caregiver"
+    recipient_id: int
+    record_id: int = Field(foreign_key="medical_records.id")
+    event: str
+    created_at: datetime = Field(default_factory=datetime.now)
+    read_at: datetime | None = None
+
+
+# [2026-07-24 추가] Web Push 구독 정보 — 브라우저의 PushManager.subscribe()가 반환하는
+# endpoint/keys를 그대로 저장한다. NotificationSetting처럼 patient_id로 묶지 않고
+# RelationNotice와 동일하게 "이 알림을 받을 계정"(recipient_role/recipient_id) 기준으로
+# 저장한다 — 보호자 한 명이 환자 여러 명을 볼 때, 어떤 환자의 알림이든 보호자 본인 기기
+# 하나로 받아야 하기 때문이다. 한 사람이 여러 기기(폰+PC)를 쓸 수 있어 계정당 여러 행이
+# 가능하고, endpoint(기기·브라우저별로 고유)로 구분한다.
+class PushSubscription(SQLModel, table=True):
+    __tablename__ = "push_subscriptions"
+    __table_args__ = (UniqueConstraint("recipient_role", "recipient_id", "endpoint", name="uq_push_subscription"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    recipient_role: str  # "patient" | "caregiver"
+    recipient_id: int
+    # [2026-07-24 수정] MySQL은 TEXT/BLOB 컬럼을 UNIQUE 제약에 그대로 못 쓴다("key length"
+    # 지정 필요) — 실제 Web Push endpoint(FCM/Mozilla 등)는 항상 몇백 자 안쪽이라 Text 대신
+    # 길이 제한 있는 VARCHAR(512)로 충분하다.
+    endpoint: str = Field(max_length=512)
+    p256dh: str
+    auth: str
+    created_at: datetime = Field(default_factory=datetime.now)
+
+
 # ── 비밀번호 재설정 임시코드 [2026-07-15 추가, REQ-039] ──
 # Patient/Caregiver 둘 다 로그인 대상이라 subject_type으로 구분한다(다형 참조) — FK를
 # 어느 한쪽 테이블로 고정할 수 없어 애플리케이션 레벨에서만 유효성을 검증한다.
@@ -279,6 +318,12 @@ class MedicalRecord(SQLModel, table=True):
     # [2026-07-23 추가] raw_text에서 뽑아낸 조제일자("YYYY-MM-DD") — 재처방인지(같은 약,
     # 다른 날짜) 판단하는 근거. 날짜를 못 찾으면 None(기존처럼 이름만으로 중복 판정).
     prescription_date: str | None = Field(default=None)
+    # [2026-07-25 추가] 보호자·기관 검토 상태 — OCR 신뢰도(review_required)와 무관하게,
+    # 환자가 등록한 모든 처방전을 연결된 보호자/기관이 한 번은 확인하게 하기 위함.
+    # "none": 연결된 보호자·기관이 없어 검토 대상 아님 / "pending": 검토 대기
+    # "needs_correction": 보호자·기관이 특정 칸에 수정을 요청함(환자 응답 대기)
+    # "reviewed": 보호자·기관이 최종 확인 완료
+    caregiver_review_status: str = "none"
 
 
 # ── OCR 추출 결과 (약품 1개 = 1행, 담당: 권순현) ──
@@ -289,7 +334,12 @@ class OcrResult(SQLModel, table=True):
     record_id: int = Field(foreign_key="medical_records.id")
     drug_name: str
     drug_code: str = ""  # [7/6 추가] HIRA 약가마스터 매칭용 코드 (ocr_interface.py의 OCRResult와 동기화)
-    dosage: str = ""       # 미인식이면 빈 문자열 (1회 복용량 — 예: "1정", "2캡슐". mg 등 성분 함량은 drug_name에 있음)
+    dosage: str = ""       # 미인식이면 빈 문자열 (1회 사용량 — 예: "1정", "2캡슐". mg 등 성분 함량은 drug_name에 있음)
+    # [2026-07-25 추가] 1회 투여량 — mg/ml처럼 질량·부피 단위의 실제 투여량. dosage(사용량,
+    # 정/캡슐/패치 등 개수 단위)와 별개 필드. 인식 규칙은 parsing_rules.py의
+    # reconcile_dose_fields() 참고 — 둘 다 인식되면 그대로, 사용량만 없으면 투여량과
+    # 약품명에 포함된 단위당 함량으로 역산, 투여량만 없으면 사용량만 표기(지어내지 않음).
+    dose_amount: str = ""
     frequency: str = ""    # 1일 투여횟수 (예: "1일 3회")
     total_days: str = ""   # [2026-07-18 추가] 총 투약일수 (예: "30일")
     diagnosis: str = ""
@@ -311,6 +361,25 @@ class OcrResult(SQLModel, table=True):
         if self.matched_drug_name and not self.needs_review:
             return self.matched_drug_name
         return self.drug_name
+
+
+# [2026-07-25 추가] 보호자·기관이 "수정이 필요해요"를 누르면서 지목한 칸 하나 — OcrResult의
+# 필드 이름(drug_name/dosage/dose_amount/frequency/total_days/diagnosis/drug_class) 중
+# 하나 + 사유. 환자가 그 칸을 고치면 corrected=True로 바뀐다(값 자체는 OcrResult에 그대로
+# 저장 — 이 테이블은 "무엇을, 왜 고쳐야 하는지"와 "고쳤는지"만 추적한다).
+class MedicationFieldFlag(SQLModel, table=True):
+    __tablename__ = "medication_field_flags"
+
+    id: int | None = Field(default=None, primary_key=True)
+    ocr_result_id: int = Field(foreign_key="ocr_results.id")
+    field_name: str
+    reason: str
+    # [2026-07-25 추가] 보호자·기관이 생각하는 정답 — 환자가 자유 입력 대신 이 값을
+    # 드롭다운에서 선택만 하도록 강제한다(오타·다른 값으로 저장되는 걸 막기 위함).
+    suggested_value: str
+    corrected: bool = False
+    created_at: datetime = Field(default_factory=datetime.now)
+    corrected_at: datetime | None = None
 
 
 # ── RAG 가이드 결과 (담당: 김영혜) ──
@@ -359,6 +428,23 @@ class MedicationSchedule(SQLModel, table=True):
     # 위해 필요(안 그러면 삭제한 처방전의 약이 대시보드/알림에 계속 남는다). monitoring_router.py
     # 로 직접 만든 일정은 처방전과 무관하니 그대로 None.
     record_id: int | None = Field(default=None, foreign_key="medical_records.id", index=True)
+
+
+# [2026-07-24 추가] 이 일정의 알림을 받을 보호자를 일정별로 명시적으로 골라둔다 —
+# 예전엔 caregiver_alert=True면 "환자와 연결된 caregiver 중 가장 먼저 연결된 1명"에게만
+# 갔다(core/scheduler.py._recipients 참고, 실제 주/부 보호자 구분이 없어 생긴 임의의
+# 단순화였음) — 2번째·3번째로 연결된 보호자·지원인력에게는 애초에 안 갔고, 화면 라벨
+# "보호자에게도 알림"도 실제로 누가 받는지 보여주지 못했다. 이 테이블에 행이 있으면
+# 그 caregiver_id들에게만, 행이 하나도 없으면(과거 데이터·아직 이 화면을 안 거친 일정)
+# 이 환자와 연결된 caregiver 전원에게 보낸다(안전한 방향의 기본값 — 아무도 못 받는
+# 것보다 전원이 받는 게 낫다는 판단). schedule.caregiver_alert가 False면 이 테이블과
+# 무관하게 아무에게도 안 감(기존 kill switch 그대로 유지).
+class ScheduleCaregiverAlert(SQLModel, table=True):
+    __tablename__ = "schedule_caregiver_alerts"
+
+    id: int | None = Field(default=None, primary_key=True)
+    schedule_id: int = Field(foreign_key="medication_schedules.id", index=True)
+    caregiver_id: int = Field(foreign_key="caregivers.id", index=True)
 
 
 # ── 복약 기록 (담당: 박소정) ──

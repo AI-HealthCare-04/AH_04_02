@@ -2,9 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AlertCircle, Check, Plus, X } from "lucide-react";
 import NavBar from "../components/NavBar";
+import LoadingDots from "../components/LoadingDots";
+import PrescriptionImageViewer from "../components/PrescriptionImageViewer";
 import {
   addMedicationItem,
   confirmMedications,
+  correctMedicationField,
   getDrugIndication,
   getRecord,
   removeMedicationItem,
@@ -39,22 +42,33 @@ function expandInterval(startTime: string, intervalHours: number): string[] {
   return times;
 }
 
-const FIELDS: { key: keyof OcrMedication; label: string }[] = [
+// [2026-07-25] MedGuide.tsx의 보호자 "수정이 필요해요" 패널이 지목할 수 있는 칸 목록을
+// 여기와 똑같이 맞춰야 해서(같은 칸 구조 재사용) export한다.
+export const FIELDS: { key: keyof OcrMedication; label: string }[] = [
   { key: "drug_name", label: "약품명" },
-  { key: "dosage", label: "1회 복용량" },
+  { key: "dosage", label: "1회 사용량" },
+  { key: "dose_amount", label: "1회 투여량" },
   { key: "frequency", label: "1일 투약횟수" },
   { key: "total_days", label: "총 투약일수" },
   { key: "diagnosis", label: "진단명" },
   { key: "drug_class", label: "약효분류" },
 ];
 
-// 용량엔 반드시 숫자+단위가 같이 있어야 함 (예: "500mg") — "500"처럼 단위 빠진 OCR 오류를 잡아냄
-// [PR #90 리뷰 반영 — pecs0310] parsing_rules.py의 DOSE_QTY_UNITS(정|캡슐|캅셀|포|병|환)와
-// 맞춰 캅셀(대체 표기)/병/환을 추가 — 이 세 단위가 빠져 있어서 해당 단위로 처방된 항목은
-// isDosageValid()가 계속 실패로 잡고, allOk가 false가 돼 "확인 완료" 제출 자체가 막혀 있었다.
-const DOSAGE_RE = /(\d+\/\d+|\d+\.?\d*)\s*(mg|g|ml|mcg|iu|정|캡슐|캅셀|포|병|환|밀리그램|그램)/i;
-function isDosageValid(dosage: string) {
-  return DOSAGE_RE.test(dosage.trim());
+// 1회 사용량엔 반드시 숫자+개수단위가 같이 있어야 함 (예: "1정") — "1"처럼 단위 빠진 OCR
+// 오류를 잡아냄. [PR #90 리뷰 반영 — pecs0310] parsing_rules.py의
+// DOSE_QTY_UNITS(정|캡슐|캅셀|포|병|환)와 맞춰 캅셀(대체 표기)/병/환을 추가 — 이 세 단위가
+// 빠져 있어서 해당 단위로 처방된 항목은 isUsageValid()가 계속 실패로 잡고, allOk가
+// false가 돼 "확인 완료" 제출 자체가 막혀 있었다.
+const USAGE_RE = /(\d+\.?\d*)\s*(정|캡슐|캅셀|포|병|환)/i;
+function isUsageValid(dosage: string) {
+  return USAGE_RE.test(dosage.trim());
+}
+
+// [2026-07-25 추가] 1회 투여량 — mg/ml 등 질량·부피 단위. 1회 사용량(개수 단위)과
+// 별개 필드라 단위도 따로 검증한다. "50/1000mg"(복합제) 표기도 허용.
+const AMOUNT_RE = /(\d+\/\d+|\d+\.?\d*)\s*(mg|g|ml|mcg|iu|밀리그램|그램)/i;
+function isAmountValid(amount: string) {
+  return AMOUNT_RE.test(amount.trim());
 }
 
 type FieldIssue = { field: keyof OcrMedication; message: string };
@@ -69,10 +83,14 @@ function computeIssues(m: OcrMedication, drugNameOk: boolean | undefined, nameOv
   } else if (!m.drug_name.trim()) {
     issues.push({ field: "drug_name", message: "약품명이 비어있어요. 입력해주세요." });
   }
-  if (m.dosage.trim() && !isDosageValid(m.dosage)) {
-    issues.push({ field: "dosage", message: "1회 복용량 형식이 잘못됐어요 (예: 1정, 2캡슐처럼 단위를 함께 입력)." });
+  if (m.dosage.trim() && !isUsageValid(m.dosage)) {
+    issues.push({ field: "dosage", message: "1회 사용량 형식이 잘못됐어요 (예: 1정, 2캡슐처럼 단위를 함께 입력)." });
   } else if (!m.dosage.trim()) {
-    issues.push({ field: "dosage", message: "1회 복용량이 비어있어요. 입력해주세요." });
+    issues.push({ field: "dosage", message: "1회 사용량이 비어있어요. 입력해주세요." });
+  }
+  // [2026-07-25 추가] 1회 투여량(mg/ml)은 선택 항목 — 값이 있을 때만 형식을 검사한다.
+  if (m.dose_amount.trim() && !isAmountValid(m.dose_amount)) {
+    issues.push({ field: "dose_amount", message: "1회 투여량 형식이 잘못됐어요 (예: 5mg, 10ml처럼 단위를 함께 입력)." });
   }
   // [2026-07-18] 약효분류는 OCR로 못 잡는 경우가 많아 필수에서 제외 — 비어있어도 확인 완료로
   // 넘어갈 수 있다. 총 투약일수도 같은 이유로 필수가 아니다.
@@ -120,6 +138,9 @@ export default function PrescriptionReview() {
   const [showFinalModal, setShowFinalModal] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
+  // [2026-07-25 추가] 보호자·기관이 "수정이 필요해요"로 지목한 칸만 고치는 correction
+  // 모드 — key: `${medicationId}:${field}`, 저장 요청 중인 칸.
+  const [correctingField, setCorrectingField] = useState<string | null>(null);
   // 항목별 입력칸을 감싸는 컨테이너 — blur 시 포커스가 "같은 항목의 다른 칸"으로
   // 이동하는 중인지 판별해서, 그 경우엔 아직 확인 완료 처리하지 않기 위함
   const itemContainerRefs = useRef<Record<number, HTMLDivElement | null>>({});
@@ -167,6 +188,27 @@ export default function PrescriptionReview() {
 
   const update = (id: number, field: keyof OcrMedication, value: string) => {
     setEdited((prev) => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
+  };
+
+  // [2026-07-25 추가] correction 모드 — 보호자·기관이 지목한 칸 하나를 저장한다. 성공하면
+  // 서버가 그 칸의 플래그를 corrected=true로 바꿔서 내려주니(초록/완료로 바뀜), 응답을
+  // 그대로 record/edited에 반영한다.
+  const handleCorrectField = async (medicationId: number, field: keyof OcrMedication) => {
+    if (!record) return;
+    const key = `${medicationId}:${field}`;
+    setCorrectingField(key);
+    try {
+      const updated = await correctMedicationField(record.record_id, medicationId, field);
+      setRecord(updated);
+      const nextEdited: Record<number, OcrMedication> = {};
+      updated.medications.forEach((m) => { nextEdited[m.id] = { ...m }; });
+      setEdited(nextEdited);
+      setError("");
+    } catch {
+      setError("수정에 실패했어요. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setCorrectingField(null);
+    }
   };
 
   // 필드(약품명/투약량/투약횟수)는 문제없는데 복용시간만 만지작거리다 끝난 경우에도
@@ -333,6 +375,7 @@ export default function PrescriptionReview() {
           id: m.id,
           drug_name: e.drug_name.trim(),
           dosage: e.dosage.trim(),
+          dose_amount: e.dose_amount.trim(),
           frequency: e.frequency.trim(),
           total_days: e.total_days.trim(),
           diagnosis: e.diagnosis.trim(),
@@ -460,9 +503,133 @@ export default function PrescriptionReview() {
       <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         {loading ? (
-          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>
+          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>
+            <LoadingDots label="처방전 정보를 불러오는 중이에요" />
+          </p>
         ) : !record ? (
           <p className="text-center py-16 text-[14px]" style={{ color: "#D94F4F" }}>{error || "기록을 찾을 수 없어요."}</p>
+        ) : record.status === "completed" && record.medications.some((m) => m.field_flags.length > 0) ? (
+          (() => {
+            const totalFlags = record.medications.reduce((sum, m) => sum + m.field_flags.length, 0);
+            const correctedCount = record.medications.reduce(
+              (sum, m) => sum + m.field_flags.filter((f) => f.corrected).length,
+              0
+            );
+            const allDone = correctedCount === totalFlags;
+            return (
+              <>
+                {/* [2026-07-25 추가] 수정하면서 원본 사진을 참고할 수 있게 — 챗봇처럼 열었다 닫았다 */}
+                {record.has_image && <PrescriptionImageViewer recordId={record.record_id} floating />}
+                <p className="text-[13px] font-bold mb-1" style={{ color: C.terracottaLight }}>처방전 수정</p>
+                <h1 className="text-[26px] font-black mb-2" style={{ color: C.dark }}>보호자·기관이 요청한 칸을 확인해 주세요</h1>
+                <p className="text-[14px] mb-6" style={{ color: C.muted }}>
+                  빨간 테두리 칸만 수정할 수 있어요. 나머지 칸은 이미 확인된 내용이라 잠겨 있어요.
+                </p>
+
+                <div
+                  className="px-5 py-4 rounded-2xl mb-6"
+                  style={{ background: allDone ? `${C.success}12` : C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}
+                >
+                  <p className="text-[14px] font-bold" style={{ color: allDone ? "#4A7A47" : C.dark }}>
+                    {allDone
+                      ? "✓ 모두 수정했어요! 보호자·기관에게 알렸어요."
+                      : `${correctedCount} / ${totalFlags}칸 수정 완료`}
+                  </p>
+                </div>
+
+                {error && <p className="text-[14px] text-center py-3" style={{ color: "#D94F4F" }}>{error}</p>}
+
+                <div className="space-y-4 mb-8">
+                  {record.medications.map((m) => (
+                    <div key={m.id} className="rounded-2xl overflow-hidden" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
+                      <div className="px-6 py-4" style={{ background: C.surface }}>
+                        <p className="font-black text-[15px]" style={{ color: C.dark }}>💊 {m.drug_name}</p>
+                      </div>
+                      <div className="p-6 grid grid-cols-2 gap-4">
+                        {FIELDS.map(({ key, label }) => {
+                          const flag = m.field_flags.find((f) => f.field_name === key);
+                          const spanFull = key === "drug_name";
+                          if (!flag) {
+                            return (
+                              <div key={key} className={spanFull ? "col-span-2" : ""}>
+                                <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5" style={{ color: C.muted }}>
+                                  {label}
+                                </label>
+                                <p className="text-[14px] px-4 py-2.5 rounded-xl" style={{ color: C.muted, background: "rgba(30,26,23,0.04)" }}>
+                                  {String(m[key]) || "-"}
+                                </p>
+                              </div>
+                            );
+                          }
+                          if (flag.corrected) {
+                            return (
+                              <div key={key} className={spanFull ? "col-span-2" : ""}>
+                                <label className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider mb-1.5" style={{ color: "#4A7A47" }}>
+                                  {label}
+                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-black normal-case tracking-normal" style={{ background: C.success, color: C.white }}>
+                                    수정완료
+                                  </span>
+                                </label>
+                                <p className="text-[14px] px-4 py-2.5 rounded-xl font-medium" style={{ color: C.dark, background: `${C.success}12` }}>
+                                  {String(m[key])}
+                                </p>
+                              </div>
+                            );
+                          }
+                          const flagKey = `${m.id}:${key}`;
+                          const saving = correctingField === flagKey;
+                          return (
+                            <div key={key} className={spanFull ? "col-span-2" : ""}>
+                              <label className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider mb-1" style={{ color: "#D94F4F" }}>
+                                {label}
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-black normal-case tracking-normal" style={{ background: "#D94F4F", color: C.white }}>
+                                  수정 필요
+                                </span>
+                              </label>
+                              {/* [2026-07-25 수정] 이유는 선택 입력이라 비어있을 수 있다 — 빈 괄호가 뜨지 않게 */}
+                              {flag.reason && (
+                                <p className="text-[12px] mb-1.5" style={{ color: "#D94F4F" }}>({flag.reason})</p>
+                              )}
+                              <div className="flex gap-2">
+                                {/* [2026-07-25 추가] 자유 입력 대신 드롭다운 — 보호자·기관이 지정한
+                                    정답(suggested_value)만 고를 수 있고, 다른 값은 아예 선택지에 없다. */}
+                                <select
+                                  value={String(edited[m.id]?.[key] ?? "")}
+                                  onChange={(e) => update(m.id, key, e.target.value)}
+                                  disabled={saving}
+                                  className="flex-1 min-w-0 px-4 py-2.5 rounded-xl border text-[14px] outline-none"
+                                  style={{ borderColor: "#D94F4F", background: C.white, color: C.dark }}
+                                >
+                                  <option value="">선택하세요</option>
+                                  <option value={flag.suggested_value}>{flag.suggested_value}</option>
+                                </select>
+                                <button
+                                  onClick={() => handleCorrectField(m.id, key)}
+                                  disabled={saving || edited[m.id]?.[key] !== flag.suggested_value}
+                                  className="px-4 py-2 rounded-xl text-[13px] font-bold text-white disabled:opacity-50 shrink-0"
+                                  style={{ background: C.terracotta }}
+                                >
+                                  {saving ? "저장 중..." : "저장"}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  onClick={() => navigate(`/records/${record.record_id}`)}
+                  className="w-full py-4 rounded-full text-white font-black text-[16px]"
+                  style={{ background: C.terracotta }}
+                >
+                  처방 상세로 돌아가기
+                </button>
+              </>
+            );
+          })()
         ) : record.status !== "review_required" ? (
           <div className="rounded-2xl p-10 text-center" style={{ background: C.surface }}>
             <p className="text-[14px]" style={{ color: C.muted }}>이미 확인이 끝난 처방전이에요.</p>

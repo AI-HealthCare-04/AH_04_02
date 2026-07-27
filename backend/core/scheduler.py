@@ -15,7 +15,10 @@ NotificationLog의 (schedule_id, due_date, time_slot, kind) UniqueConstraint다 
 
 알려진 한계(팀 공유 필요, 코멘트에도 명시):
 - 서버 로컬 시간대만 가정한다(Patient/MedicationSchedule의 timezone 필드는 아직 안 씀).
-- 배달 채널은 core/email.py(mock/smtp)뿐이다 — 프론트에 Web Push/FCM 인프라가 없다.
+- [2026-07-24 수정] 배달 채널은 core/email.py(mock/smtp) + core/push.py(Web Push)다.
+  단, push는 백엔드/DB만 준비된 상태 — 프론트에 서비스워커 구독 흐름이 아직 없어
+  PushSubscription이 항상 0건이라 core/push.py가 조용히 no-op한다(HTTPS 배포 이후
+  프론트 작업 붙이면 이 경로가 그대로 살아남).
 - 여러 서버가 동시에 이 루프를 돌리는 멀티워커 배포는 가정하지 않는다(각자 로컬에서
   스케줄러를 꺼둘 수 있게 SCHEDULER_ENABLED로 게이트만 해둠 — 실제 운영 배포시 재검토 필요).
 """
@@ -29,7 +32,6 @@ from datetime import date, datetime, timedelta
 
 from models import (
     Caregiver,
-    CaregiverPatient,
     MedicationRecord,
     MedicationSchedule,
     NotificationLog,
@@ -40,6 +42,8 @@ from sqlmodel import Session, func, select
 
 from core.database import engine
 from core.email import send_email
+from core.push import send_push_to_recipient
+from core.schedule_alerts import effective_alert_caregiver_ids
 
 logger = logging.getLogger(__name__)
 
@@ -106,9 +110,15 @@ def _already_logged(session: Session, schedule_id: int, due_date: str, time_slot
 
 
 def _recipients(session: Session, patient: Patient, schedule: MedicationSchedule) -> list[tuple[str, str]]:
-    """(채널라벨, 이메일) 목록. 첫 연결(caregiver_patients 최초 1건)만 "주 보호자"로 취급한다.
-    "최초 연결 = 주 보호자"는 임의의 단순화이며, 실제 주/부 보호자 구분 필드가 생기면
-    바꿔야 한다(라운드2에서 확인된 한계, 팀 공유 필요).
+    """(채널라벨, 이메일) 목록.
+
+    [2026-07-24 수정] "첫 연결(caregiver_patients 최초 1건)만 주 보호자로 취급"하던
+    임의의 단순화를 제거했다 — 실제 주/부 보호자 구분 필드가 없어 생긴 한계였고, 2번째·
+    3번째로 연결된 보호자·지원인력에게는 애초에 알림이 안 갔다(Schedule.tsx의 "보호자에게도
+    알림" 라벨이 사실과 달랐던 원인). 이제 core/schedule_alerts.py.effective_alert_caregiver_ids
+    (monitoring_router.py의 API 응답과 공유하는 계산)를 그대로 써서, 일정마다 환자·보호자가
+    직접 고른 caregiver들에게만 보낸다 — 명시적으로 고른 적 없는 일정(과거 데이터 포함)은
+    연결된 caregiver 전원에게 보낸다.
 
     [2026-07-23 삭제] care_level(자가진단) 기반 "전원 알림" 분기를 제거했다 — 자가진단을 만드는
     화면이 없어 assessment가 항상 None이라 이 분기는 실질적으로 한 번도 탄 적이 없었다.
@@ -116,35 +126,45 @@ def _recipients(session: Session, patient: Patient, schedule: MedicationSchedule
     [2026-07-19 round5 수정] schedule.caregiver_alert(monitoring_router.py 스케줄 생성/수정
     API에 이미 있는 "이 일정만 보호자에게 알릴지" per-schedule 토글)를 지금까지 전혀 참고하지
     않고 있었다 — 환자가 특정 약 일정에서 이 값을 False로 꺼도 스케줄러가 무시하고 보호자에게
-    계속 알림을 보내던 실제 버그. False면 보호자 후보를 아예 안 만든다(환자 본인 몫은 그대로).
-    """
+    계속 알림을 보내던 실제 버그. False면 보호자 후보를 아예 안 만든다(환자 본인 몫은 그대로,
+    effective_alert_caregiver_ids 내부에서 처리).
+
+    [2026-07-24 추가] NotificationSetting.care_alert_enabled("돌봄 알림" — 알림 설정 화면)를
+    보호자 몫에만 별도로 적용한다 — 팀 요청: 이 스위치를 끄면 "누구에게 보낼지"(alert_caregiver_ids
+    선택, schedule.caregiver_alert)는 그대로 두고 실제 발송만 막아야 한다(껐다 켜면 다시 같은
+    사람들에게 그대로 가야 하므로). 그래서 selection을 지우거나 바꾸는 대신 여기서 조건부로
+    건너뛴다 — 환자 본인 알림(medication_reminder_enabled, _deliver에서 이미 처리)과는
+    완전히 별개의 스위치다."""
     recipients: list[tuple[str, str]] = []
     if patient.email_opt_in and patient.email:
         recipients.append(("email:patient", patient.email))
 
-    if not schedule.caregiver_alert:
-        return recipients
-
-    # [2026-07-19 round5 수정] order_by 없이는 "최초 연결"이 SQLite에서는 우연히 삽입 순서와
-    # 같게 보이지만 SQL 표준상 보장되지 않는다 — 이 팀의 실제 dev/운영 DB는 MySQL이라(공유
-    # Aiven DB) 백엔드마다 순서가 달라질 수 있다. id 오름차순으로 명시해 "최초 연결"이 어느
-    # 백엔드에서도 실제로 최초 연결을 가리키도록 고정한다.
-    # [2026-07-23 추가] status != "revoked" — 연결이 끊긴(또는 기관이 끊는 중인) 보호자에게
-    # 계속 알림이 가던 걸 막는다. revocation_pending은 아직 실제로 끊긴 게 아니므로 포함한다.
-    links = session.exec(
-        select(CaregiverPatient)
-        .where(CaregiverPatient.patient_id == patient.id)
-        .where(CaregiverPatient.status != "revoked")
-        .order_by(CaregiverPatient.id)
-    ).all()
-    if not links:
-        return recipients
-
-    for link in links[:1]:
-        caregiver = session.get(Caregiver, link.caregiver_id)
-        if caregiver and caregiver.email_opt_in and caregiver.email:
-            recipients.append((f"email:caregiver:{caregiver.id}", caregiver.email))
+    setting = session.get(NotificationSetting, patient.id)
+    care_alert_enabled = setting.care_alert_enabled if setting else True
+    if care_alert_enabled:
+        for caregiver_id in effective_alert_caregiver_ids(schedule, session):
+            caregiver = session.get(Caregiver, caregiver_id)
+            if caregiver and caregiver.email_opt_in and caregiver.email:
+                recipients.append((f"email:caregiver:{caregiver.id}", caregiver.email))
     return recipients
+
+
+def _push_targets(session: Session, patient: Patient, schedule: MedicationSchedule) -> list[tuple[str, int | None]]:
+    """(recipient_role, recipient_id) 목록 — _recipients()와 동일하게
+    effective_alert_caregiver_ids(일정마다 환자·보호자가 직접 고른 caregiver, 명시적
+    선택이 없으면 연결된 전원)를 그대로 쓴다. email_opt_in은 이메일 전용 동의라 여기선
+    보지 않는다 — push는 구독이 실제로 있는지만으로 판단하고, 구독이 없으면 core/push.py가
+    알아서 아무것도 안 보낸다. care_alert_enabled도 _recipients()와 동일하게 존중한다."""
+    targets: list[tuple[str, int | None]] = [("patient", patient.id)]
+
+    setting = session.get(NotificationSetting, patient.id)
+    care_alert_enabled = setting.care_alert_enabled if setting else True
+    if not care_alert_enabled:
+        return targets
+
+    for caregiver_id in effective_alert_caregiver_ids(schedule, session):
+        targets.append(("caregiver", caregiver_id))
+    return targets
 
 
 def _same_slot_drug_names(session: Session, schedule: MedicationSchedule) -> list[str]:
@@ -188,6 +208,24 @@ def _deliver(session: Session, schedule: MedicationSchedule, patient: Patient, k
     for label, email in recipients:
         send_email(to=email, subject=subject, body=body)
         channels.append(label)
+
+    # [2026-07-24 추가] Web Push — all_push_enabled(기본 True)가 꺼져 있으면 스킵한다.
+    # medication_reminder_enabled(위에서 이미 체크)와 별개로 push 채널만 따로 끌 수
+    # 있는 토글. 캐어기버 본인의 push 선호도를 patient별 설정으로 같이 묶는 건 단순화다
+    # (환자 단위 NotificationSetting을 그대로 재사용) — 실제 요구가 생기면 분리 필요.
+    if setting is None or setting.all_push_enabled:
+        for role, recipient_id in _push_targets(session, patient, schedule):
+            if recipient_id is None:
+                continue
+            attempted = send_push_to_recipient(
+                session, role, recipient_id, title=subject, body=body, url="/schedule"
+            )
+            # [2026-07-24] 구독이 없거나 VAPID 키가 없으면 아무 일도 안 했다는 뜻이라
+            # channels에 남기지 않는다 — "발송했다"는 로그가 실제로 아무것도 안 보낸
+            # 경우까지 포함하면 나중에 발송 이력을 신뢰할 수 없게 된다.
+            if attempted:
+                channels.append(f"push:{role}:{recipient_id}")
+
     return "sent", channels
 
 

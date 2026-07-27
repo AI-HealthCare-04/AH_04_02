@@ -2,37 +2,17 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bell, CalendarClock, ChevronLeft, ClipboardList, LayoutDashboard, Search, X } from "lucide-react";
 import NavBar from "../components/NavBar";
+import LoadingDots from "../components/LoadingDots";
 import { getCaregiverPatients, getCaregivers, unlinkCaregiverPatient, type Caregiver, type Patient } from "../api/monitoring";
+import { computeAge, GENDER_LABEL } from "../lib/age";
 import { getCurrentCaregiverId, getCurrentUserName } from "../lib/session";
 import { C } from "../theme";
-
-const GENDER_LABEL: Record<string, string> = { male: "남성", female: "여성" };
 
 const STATUS_META: Record<Patient["medication_status"], { label: string; bg: string; color: string }> = {
   active: { label: "복약중", bg: `${C.success}30`, color: C.successText },
   paused: { label: "중단", bg: "rgba(30,26,23,0.08)", color: C.muted },
   none: { label: "-", bg: "rgba(30,26,23,0.04)", color: C.muted },
 };
-
-/** [2026-07-22 추가] 환자 관리 테이블의 "나이" 컬럼용 — birth_date는 자유 텍스트 입력이라
- * ("1945.03.15" 같은) 흔한 구분자(.,-,/)만 관대하게 파싱하고, 못 읽으면 나이를 지어내지
- * 않고 null(표에서 "-")로 둔다. */
-function computeAge(birthDate: string | null): number | null {
-  if (!birthDate) return null;
-  const match = birthDate.match(/(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})/);
-  if (!match) return null;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const birth = new Date(year, month - 1, day);
-  if (Number.isNaN(birth.getTime())) return null;
-  const now = new Date();
-  let age = now.getFullYear() - birth.getFullYear();
-  const hadBirthdayThisYear =
-    now.getMonth() > birth.getMonth() || (now.getMonth() === birth.getMonth() && now.getDate() >= birth.getDate());
-  if (!hadBirthdayThisYear) age -= 1;
-  return age;
-}
 
 export default function PatientManagement() {
   const navigate = useNavigate();
@@ -192,7 +172,7 @@ export default function PatientManagement() {
 
         <div className="rounded-2xl overflow-hidden overflow-x-auto" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
           {loading ? (
-            <p className="px-6 py-10 text-center text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>
+            <p className="px-6 py-10 text-center text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
           ) : filtered.length === 0 ? (
             <p className="px-6 py-10 text-center text-[14px]" style={{ color: C.muted }}>
               {patients.length === 0 ? "등록된 환자가 없어요." : "검색 결과가 없어요."}
@@ -260,7 +240,7 @@ export default function PatientManagement() {
                             <ClipboardList className="inline w-3.5 h-3.5 mr-1" /> 등록내역
                           </button>
                           <button
-                            onClick={() => openPatientMenu(p.id, "/monitoring")}
+                            onClick={() => openPatientMenu(p.id, `/monitoring?patient_id=${p.id}`)}
                             className="px-4 py-2 rounded-full text-[13px] font-bold whitespace-nowrap"
                             style={{ background: `${C.terracotta}12`, color: C.terracotta }}
                           >

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import NavBar from "../components/NavBar";
+import LoadingDots from "../components/LoadingDots";
 import PatientContextBanner from "../components/PatientContextBanner";
 import { getNotificationSettings, updateNotificationSettings, type NotificationSettings } from "../api/care";
 import { applyFontScale, getCurrentUserName, getFontScale, type FontScale, useGuardedPatientId } from "../lib/session";
@@ -68,7 +69,7 @@ export default function Settings() {
         <h1 className="text-[26px] font-black text-[#1E1A17] mb-1">화면·챗봇 설정</h1>
         <p className="text-[14px] text-[#8A7E75] mb-7">챗봇 이름과 글자 크기를 원하는 대로 바꿀 수 있어요.</p>
 
-        {loading && <p className="text-[14px] text-[#8A7E75]">불러오는 중이에요...</p>}
+        {loading && <p className="text-[14px] text-[#8A7E75]"><LoadingDots /></p>}
         {error && <p className="text-[13px] text-[#D94F4F] mb-4">{error}</p>}
 
         {settings && (
