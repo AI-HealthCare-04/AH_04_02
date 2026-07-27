@@ -16,6 +16,7 @@ import {
 } from "../api/records";
 import { C } from "../theme";
 import { getCurrentUserName } from "../lib/session";
+import { FIELDS } from "../lib/prescriptionFields";
 import { DOSE_TIMINGS } from "./Schedule";
 
 // [2026-07-21 추가] 처방확인 화면에서 "1일 N회"를 보고 복용시간을 바로 추정해서 보여줌 —
@@ -42,17 +43,6 @@ function expandInterval(startTime: string, intervalHours: number): string[] {
   return times;
 }
 
-// [2026-07-25] MedGuide.tsx의 보호자 "수정이 필요해요" 패널이 지목할 수 있는 칸 목록을
-// 여기와 똑같이 맞춰야 해서(같은 칸 구조 재사용) export한다.
-export const FIELDS: { key: keyof OcrMedication; label: string }[] = [
-  { key: "drug_name", label: "약품명" },
-  { key: "dosage", label: "1회 사용량" },
-  { key: "dose_amount", label: "1회 투여량" },
-  { key: "frequency", label: "1일 투약횟수" },
-  { key: "total_days", label: "총 투약일수" },
-  { key: "diagnosis", label: "진단명" },
-  { key: "drug_class", label: "약효분류" },
-];
 
 // 1회 사용량엔 반드시 숫자+개수단위가 같이 있어야 함 (예: "1정") — "1"처럼 단위 빠진 OCR
 // 오류를 잡아냄. [PR #90 리뷰 반영 — pecs0310] parsing_rules.py의
@@ -643,6 +633,9 @@ export default function PrescriptionReview() {
           </div>
         ) : (
           <>
+            {/* [2026-07-27 추가] 처음 확인·수정하는 화면에도 원본 사진을 참고할 수 있게 —
+                보호자·기관이 지목한 칸을 고치는 화면(위 correction 모드)과 동일하게. */}
+            {record.has_image && <PrescriptionImageViewer recordId={record.record_id} floating />}
             <p className="text-[13px] font-bold mb-1" style={{ color: C.terracottaLight }}>처방전 인식 완료</p>
             <h1 className="text-[26px] font-black mb-2" style={{ color: C.dark }}>처방전 확인 및 수정</h1>
             <p className="text-[14px] mb-6" style={{ color: C.muted }}>
