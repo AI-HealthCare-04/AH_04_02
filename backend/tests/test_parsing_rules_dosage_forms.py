@@ -52,10 +52,58 @@ def test_drug_name_re_matches_pill_form():
     assert m.group(1) == "우황청심환"
 
 
+def test_drug_name_re_matches_nasal_spray_form():
+    """[2026-07-27 추가 재현] "나잘스프레이"가 처방전에 있으면 이 약 자체가 인식
+    결과에서 사라진다고 신고됨 — "스프레이"가 제형 목록에 없었다."""
+    m = DRUG_NAME_RE.search("나잘스프레이 1회 2분무 1일 3회 #7")
+    assert m is not None
+    assert m.group(1) == "나잘스프레이"
+
+
 def test_drug_name_re_still_matches_tablet_and_capsule():
     """기존 정제/캡슐 인식은 회귀 없이 그대로 동작해야 한다."""
     assert DRUG_NAME_RE.search("타이레놀정500mg").group(1) == "타이레놀정"
     assert DRUG_NAME_RE.search("오메프라졸캡슐20mg").group(1) == "오메프라졸캡슐"
+
+
+# ── DRUG_NAME_RE — [2026-07-27 추가] 제형 표준 참고표 기준 추가 제형 ──────────
+
+def test_drug_name_re_matches_granule_forms():
+    assert DRUG_NAME_RE.search("타이레놀과립500mg").group(1) == "타이레놀과립"
+    assert DRUG_NAME_RE.search("아스피린세립100mg").group(1) == "아스피린세립"
+
+
+def test_drug_name_re_matches_liquid_forms():
+    assert DRUG_NAME_RE.search("종합감기엘릭서").group(1) == "종합감기엘릭서"
+    assert DRUG_NAME_RE.search("자양강장드링크").group(1) == "자양강장드링크"
+
+
+def test_drug_name_re_matches_injection_container_forms():
+    assert DRUG_NAME_RE.search("에피네프린앰플 1mg/ml").group(1) == "에피네프린앰플"
+    assert DRUG_NAME_RE.search("인슐린바이알").group(1) == "인슐린바이알"
+    assert DRUG_NAME_RE.search("인슐린프리필드시린지").group(1) == "인슐린프리필드시린지"
+
+
+def test_drug_name_re_matches_paste_form():
+    assert DRUG_NAME_RE.search("트리암시놀론페이스트").group(1) == "트리암시놀론페이스트"
+
+
+def test_drug_name_re_matches_suppository_forms():
+    assert DRUG_NAME_RE.search("디클로페낙좌제").group(1) == "디클로페낙좌제"
+    assert DRUG_NAME_RE.search("인도메타신좌약").group(1) == "인도메타신좌약"
+
+
+def test_drug_name_re_matches_film_form():
+    assert DRUG_NAME_RE.search("온단세트론필름").group(1) == "온단세트론필름"
+
+
+def test_drug_name_re_matches_troche_and_lozenge_forms():
+    assert DRUG_NAME_RE.search("벤지다민트로키").group(1) == "벤지다민트로키"
+    assert DRUG_NAME_RE.search("포비돈로젠지").group(1) == "포비돈로젠지"
+
+
+def test_drug_name_re_matches_gum_form():
+    assert DRUG_NAME_RE.search("니코틴껌").group(1) == "니코틴껌"
 
 
 # ── extract_dose_quantity — 부피·방울 단위 ──────────────────────────────────
@@ -74,6 +122,39 @@ def test_extract_dose_quantity_drop_unit_does_not_fall_back_to_drug_form():
     result = extract_dose_quantity("1방울 1일 3회", form="액")
     assert result == "1방울"
     assert result != "1액"
+
+
+# ── extract_dose_quantity — [2026-07-27 추가] g/단위/분사/퍼프/앰플/바이알/시린지/개/매 ──
+
+def test_extract_dose_quantity_with_gram_unit_for_powder():
+    """산제/과립제는 흔히 "1회 2g"처럼 중량으로 복용량을 표기한다."""
+    assert extract_dose_quantity("1회 2g, 1일 3회 (식후)", form="산") == "2g"
+
+
+def test_extract_dose_quantity_with_insulin_unit():
+    """[실사용 예시] "인슐린 프리필드펜 1회 10단위(Unit)"."""
+    assert extract_dose_quantity("1회 10단위 피하주사, 1일 1회", form="시린지") == "10단위"
+
+
+def test_extract_dose_quantity_with_puff_unit_for_inhaler():
+    assert extract_dose_quantity("1회 2퍼프, 1일 2회 흡입", form="스프레이") == "2퍼프"
+
+
+def test_extract_dose_quantity_with_spray_count_unit():
+    assert extract_dose_quantity("양쪽 비공 1회 1분사, 1일 3회", form="스프레이") == "1분사"
+
+
+def test_extract_dose_quantity_with_stick_unit():
+    assert extract_dose_quantity("1회 1스틱, 1일 3회 (식후)", form="시럽") == "1스틱"
+
+
+def test_extract_dose_quantity_with_ampoule_and_vial_units():
+    assert extract_dose_quantity("1회 1앰플 정맥주사, 1일 1회", form="주") == "1앰플"
+    assert extract_dose_quantity("1회 1바이알 근육주사, 1일 1회", form="주") == "1바이알"
+
+
+def test_extract_dose_quantity_with_patch_sheet_unit():
+    assert extract_dose_quantity("1회 1매 부착, 1일 1회 교체", form="패치") == "1매"
 
 
 # ── _detect_format — 크림/연고/패치 등도 list 포맷으로 인식 ──────────────────
@@ -117,3 +198,36 @@ def test_parse_prescription_pill_form_is_recognized():
     meds, _ = parse_prescription(raw)
     assert len(meds) == 1
     assert meds[0]["drug_name"].startswith("우황청심환")
+
+
+def test_parse_prescription_nasal_spray_is_not_dropped_from_results():
+    """[재현] "나잘스프레이"가 DRUG_NAME_RE 매칭 실패로 결과에서 통째로 사라졌었다."""
+    raw = "1. 나잘스프레이 1회 2분무, 1일 3회, 7일분"
+    meds, _ = parse_prescription(raw)
+    assert len(meds) == 1
+    assert meds[0]["drug_name"].startswith("나잘스프레이")
+    assert meds[0]["dosage"] == "2분무"
+
+
+def test_parse_prescription_insulin_syringe_reads_unit_dose_quantity():
+    """[실사용 예시] 인슐린 프리필드시린지 — "1회 10단위"."""
+    raw = "1. 인슐린프리필드시린지 1회 10단위 피하주사, 1일 1회, 30일분"
+    meds, _ = parse_prescription(raw)
+    assert len(meds) == 1
+    assert meds[0]["drug_name"].startswith("인슐린프리필드시린지")
+    assert meds[0]["dosage"] == "10단위"
+
+
+def test_parse_prescription_powder_reads_gram_dose_quantity():
+    raw = "1. 타이레놀산 1회 2g, 1일 3회 (식후), 5일분"
+    meds, _ = parse_prescription(raw)
+    assert len(meds) == 1
+    assert meds[0]["dosage"] == "2g"
+
+
+def test_parse_prescription_gum_form_is_recognized():
+    raw = "1. 니코틴껌 1회 1개, 1일 4회, 14일분"
+    meds, _ = parse_prescription(raw)
+    assert len(meds) == 1
+    assert meds[0]["drug_name"].startswith("니코틴껌")
+    assert meds[0]["dosage"] == "1개"
