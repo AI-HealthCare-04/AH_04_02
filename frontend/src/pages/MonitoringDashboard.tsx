@@ -11,7 +11,7 @@ import {
   type Patient,
   type Schedule,
 } from "../api/monitoring";
-import { getCurrentCaregiverId, getCurrentUserName } from "../lib/session";
+import { getCurrentCaregiverId, getCurrentPatientId, getCurrentUserName } from "../lib/session";
 import { C } from "../theme";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
@@ -104,12 +104,15 @@ function MonitoringSummary({ patients, onSelect }: { patients: Patient[]; onSele
 export default function MonitoringDashboard() {
   const navigate = useNavigate();
   const caregiverId = getCurrentCaregiverId();
+  // [2026-07-27 추가] 환자 본인 계정은 caregiverId가 없다 — 여러 환자 중 고를 필요 없이
+  // 항상 자기 자신의 기록을 본다.
+  const selfPatientId = getCurrentPatientId();
   const [searchParams, setSearchParams] = useSearchParams();
   // [2026-07-24 수정] localStorage의 "마지막으로 본 환자"에 암묵적으로 의존하던 걸
   // patient_id 쿼리파라미터로 바꿨다 — 없으면 요약 화면, 있으면 그 환자의 상세 화면이라는
   // 게 URL만 보고도 명확해지고, 새로고침·공유해도 같은 화면이 뜬다.
   const patientIdParam = searchParams.get("patient_id");
-  const patientId = patientIdParam ? Number(patientIdParam) : null;
+  const patientId = patientIdParam ? Number(patientIdParam) : caregiverId ? null : selfPatientId;
 
   const [patients, setPatients] = useState<Patient[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -127,13 +130,15 @@ export default function MonitoringDashboard() {
   };
 
   useEffect(() => {
-    // [2026-07-27 수정] 이 화면은 보호자·기관 전용(getCaregiverPatients 호출)인데,
-    // caregiverId가 없으면(환자 본인 계정 등) 이 effect도 다음 effect(patientId 기준)도
-    // 둘 다 아무것도 안 하고 끝나서 loading이 영원히 true로 남아 "불러오는 중"에서
-    // 멈춰 있었다 — PatientManagement.tsx와 동일하게 여기서 바로 끝내야 한다.
+    // [2026-07-27 수정] caregiverId가 없으면 환자 본인 계정 — getCaregiverPatients를 부를
+    // 필요가 없다(고를 환자 목록 자체가 없음). patientId는 위에서 이미 selfPatientId로
+    // 정해져 있으니 아래 두 번째 effect가 그 값으로 로딩을 마무리한다. selfPatientId까지
+    // 없는 비정상 상태일 때만 에러로 끝낸다(PatientManagement.tsx와 동일한 패턴).
     if (!caregiverId) {
-      setError("보호자·기관 계정으로 로그인해야 볼 수 있는 화면이에요.");
-      setLoading(false);
+      if (selfPatientId == null) {
+        setError("로그인 정보를 확인할 수 없어요.");
+        setLoading(false);
+      }
       return;
     }
     getCaregiverPatients(caregiverId)
@@ -230,15 +235,19 @@ export default function MonitoringDashboard() {
     <div className="min-h-screen" style={{ background: C.ivory }}>
       <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-4xl mx-auto px-6 sm:px-8 py-10">
-        <button
-          onClick={() => setSearchParams({})}
-          className="text-[13px] font-bold mb-3 inline-block"
-          style={{ color: C.muted }}
-        >
-          ← 전체 요약
-        </button>
+        {/* [2026-07-27 수정] "전체 요약"은 여러 환자를 관리하는 보호자·기관 전용 화면이라
+            환자 본인 계정에는 돌아갈 곳이 없다 — caregiverId가 있을 때만 보여준다. */}
+        {caregiverId && (
+          <button
+            onClick={() => setSearchParams({})}
+            className="text-[13px] font-bold mb-3 inline-block"
+            style={{ color: C.muted }}
+          >
+            ← 전체 요약
+          </button>
+        )}
         <h1 className="text-[24px] font-black mb-6" style={{ color: C.dark }}>
-          {selectedPatient ? `${selectedPatient.name}님 모니터링` : "모니터링 대시보드"}
+          {!caregiverId ? "나의 복약 기록" : selectedPatient ? `${selectedPatient.name}님 모니터링` : "모니터링 대시보드"}
         </h1>
 
         {patients.length > 0 && (
