@@ -329,6 +329,8 @@ echo 'VITE_MONITORING_API_URL=https://yakcong.duckdns.org/api' > frontend/.env
 docker compose restart backend frontend
 ```
 
+> ⚠️ 주의: 위 sed/echo 명령어는 파일 전체 값을 덮어씁니다. CORS_ALLOWED_ORIGINS에 이미 다른 도메인(예: 스테이징)이 콤마로 함께 등록되어 있거나, frontend/.env에 다른 변수가 있다면 이 명령어 대신 직접 파일을 열어 해당 줄만 수정하세요.
+
 ---
 
 | 날짜 | 2026.07.20 |
