@@ -239,6 +239,26 @@ class TestCorrectMedicationField:
         session.refresh(ocr)
         assert ocr.dosage == "2정"
 
+    def test_caregiver_role_forbidden(self, client: TestClient, session: Session):
+        """[2026-07-27 추가, 코드 리뷰 반영] 수정을 요청한 보호자 본인이 스스로 그
+        suggested_value를 적용해버리면 "환자가 확인하고 반영"하는 검토 흐름의 목적이
+        무력화된다 — 연결된 보호자·기관이라도 이 엔드포인트는 호출할 수 없어야 한다."""
+        cg = _make_caregiver(session)
+        pt = _make_patient(session)
+        _link(session, cg, pt)
+        rec, ocr = _make_completed_record(session, pt.id, review_status="needs_correction")
+        session.add(MedicationFieldFlag(ocr_result_id=ocr.id, field_name="dosage", reason="1정이 아니라 2정이에요", suggested_value="2정"))
+        session.commit()
+
+        r = client.patch(
+            f"/records/{rec.id}/medications/{ocr.id}/correct",
+            json={"field_name": "dosage"},
+            headers={"Authorization": f"Bearer {_token(cg.id, 'caregiver')}"},
+        )
+        assert r.status_code == 403
+        session.refresh(ocr)
+        assert ocr.dosage == "1정"  # 안 바뀜
+
     def test_rejects_field_without_active_flag(self, client: TestClient, session: Session):
         cg = _make_caregiver(session)
         pt = _make_patient(session)

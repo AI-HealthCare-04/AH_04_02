@@ -854,7 +854,15 @@ async def correct_medication_field(
     session: Session = Depends(get_session),
 ):
     """환자가 보호자·기관이 지목한 칸 하나를 수정한다 — 활성 플래그가 있는 칸만 허용한다
-    (프론트 잠금은 UI일 뿐이라, 서버에서도 실제로 지목된 칸인지 확인해야 함)."""
+    (프론트 잠금은 UI일 뿐이라, 서버에서도 실제로 지목된 칸인지 확인해야 함).
+
+    [2026-07-27 수정, 코드 리뷰 반영] role 체크가 없어서 require_actor_patient_access를
+    통과하는 연결된 보호자·기관도 호출할 수 있었다 — 수정을 요청한 보호자 본인이 그
+    suggested_value를 스스로 적용해버리면 "환자가 확인하고 반영"하는 검토 흐름의 목적이
+    무력화된다. request_correction/mark_reviewed와 반대로 여기는 환자 전용으로 막는다."""
+    role, _subject = actor
+    if role != "patient":
+        raise HTTPException(403, "환자 본인만 수정을 반영할 수 있어요")
     if payload.field_name not in _CORRECTABLE_FIELDS:
         raise HTTPException(422, f"수정할 수 없는 항목이에요: {payload.field_name}")
 
