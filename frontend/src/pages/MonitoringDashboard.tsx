@@ -127,7 +127,15 @@ export default function MonitoringDashboard() {
   };
 
   useEffect(() => {
-    if (!caregiverId) return;
+    // [2026-07-27 수정] 이 화면은 보호자·기관 전용(getCaregiverPatients 호출)인데,
+    // caregiverId가 없으면(환자 본인 계정 등) 이 effect도 다음 effect(patientId 기준)도
+    // 둘 다 아무것도 안 하고 끝나서 loading이 영원히 true로 남아 "불러오는 중"에서
+    // 멈춰 있었다 — PatientManagement.tsx와 동일하게 여기서 바로 끝내야 한다.
+    if (!caregiverId) {
+      setError("보호자·기관 계정으로 로그인해야 볼 수 있는 화면이에요.");
+      setLoading(false);
+      return;
+    }
     getCaregiverPatients(caregiverId)
       .then(setPatients)
       .catch(() => {})
@@ -204,7 +212,9 @@ export default function MonitoringDashboard() {
         <main className="max-w-4xl mx-auto px-6 sm:px-8 py-10">
           <h1 className="text-[24px] font-black mb-1" style={{ color: C.dark }}>모니터링 대시보드</h1>
           <p className="text-[14px] mb-7" style={{ color: C.muted }}>연결된 환자들의 오늘 복약 현황을 한눈에 확인하세요.</p>
-          {loading ? (
+          {error ? (
+            <p className="text-center py-16 text-[14px]" style={{ color: "#D94F4F" }}>{error}</p>
+          ) : loading ? (
             <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
           ) : (
             <MonitoringSummary patients={patients} onSelect={selectPatient} />
