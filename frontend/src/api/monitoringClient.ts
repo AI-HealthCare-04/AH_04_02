@@ -53,20 +53,8 @@ function refreshAccessToken(): Promise<string> {
       .then(({ data }) => {
         localStorage.setItem("access_token", data.access_token);
         localStorage.setItem("user_name", data.name);
-        // [2026-07-27 버그수정] Login.tsx/전환 로직은 로그인 시점에 반대 role의 키를
-        // 항상 지우는데(예: 환자 로그인 시 caregiver_id 제거), 이 조용한 토큰 갱신
-        // 경로만 그걸 안 했다 — 그러면 예전 role의 id가 localStorage에 계속 남아있다가,
-        // 그 값으로 /caregivers/{id}/patients 같은 소유권 체크 API를 부르면 403이 나서
-        // useGuardedPatientId가 계속 "/patients"로 튕겨내는(메뉴 클릭 → 로딩 → 같은
-        // 화면으로 복귀) 버그의 원인이 됐다. 다른 로그인/전환 경로와 동일하게 반대
-        // role의 키를 지워서 이 drift를 막는다.
-        if (data.role === "patient") {
-          localStorage.setItem("patient_id", String(data.caregiver_id));
-          localStorage.removeItem("caregiver_id");
-        } else {
-          localStorage.setItem("caregiver_id", String(data.caregiver_id));
-          localStorage.removeItem("patient_id");
-        }
+        if (data.role === "patient") localStorage.setItem("patient_id", String(data.caregiver_id));
+        else localStorage.setItem("caregiver_id", String(data.caregiver_id));
         return data.access_token;
       })
       .finally(() => {
