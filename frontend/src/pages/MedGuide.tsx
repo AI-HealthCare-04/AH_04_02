@@ -15,7 +15,7 @@ import {
 } from "../api/records";
 import { C } from "../theme";
 import { getCurrentCaregiverId, getCurrentUserName } from "../lib/session";
-import { FIELDS } from "./PrescriptionReview";
+import { FIELDS } from "../lib/prescriptionFields";
 
 // [2026-07-25 추가] caregiver_review_status 뱃지 표시.
 const REVIEW_STATUS_LABEL: Record<string, { text: string; bg: string; color: string }> = {
