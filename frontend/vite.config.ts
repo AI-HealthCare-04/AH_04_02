@@ -32,7 +32,7 @@ export default defineConfig({
   server: {
     // [7/13] cloudflared quick tunnel은 매번 랜덤 서브도메인이 나와서 특정 도메인을
     // 하드코딩할 수 없다 — trycloudflare.com 서브도메인 전체만 허용(전체 허용은 아님).
-    allowedHosts: ['.trycloudflare.com'],
+    allowedHosts: ['.trycloudflare.com', 'yakcong.duckdns.org'],
     // [7/13] 팀원 공유용 터널(cloudflared 등)에서 백엔드를 직접 인터넷에 노출하지 않고,
     // 프론트(같은 origin)를 통해서만 접근하게 하는 선택적 프록시. VITE_MONITORING_API_URL을
     // "/api"로 두면 monitoringClient가 이 경로로 호출하고, 여기서 실제 백엔드(localhost:8000)로
