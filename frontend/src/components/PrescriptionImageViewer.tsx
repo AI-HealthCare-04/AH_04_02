@@ -31,6 +31,11 @@ function ZoomableImage({ url }: { url: string }) {
 
   const handlePointerDown = (e: PointerEvent<HTMLImageElement>) => {
     if (scale === MIN_SCALE) return;
+    // [2026-07-27 추가] 이걸 안 부르면 확대된 사진을 드래그하다 커서가 사진 밖(제목·닫기
+    // 버튼 등 텍스트가 있는 영역)으로 나가는 순간 브라우저가 그 텍스트를 네이티브
+    // 드래그-선택으로 잡아버려서 화면이 깜빡이고, 마우스를 떼도 선택이 남아 있어서
+    // 닫기 버튼 클릭이 씹히는 원인이었다.
+    e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     dragRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
   };
@@ -41,8 +46,9 @@ function ZoomableImage({ url }: { url: string }) {
     setPan({ x: d.panX + (e.clientX - d.x), y: d.panY + (e.clientY - d.y) });
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (e: PointerEvent<HTMLImageElement>) => {
     dragRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
   const reset = () => {
