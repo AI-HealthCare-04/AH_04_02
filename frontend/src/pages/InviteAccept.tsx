@@ -18,6 +18,16 @@ const RELATION_LABEL: Record<string, string> = {
 /** "2025.07.09 오전 10:00" 형식 — Figma 목업(App.figma-export.tsx.bak) 참고.
  * [2026-07-22 추가] expires_at 컬럼이 생기기 전에 만들어진 pending 초대는 null일 수
  * 있다 — new Date(null)이 1970.01.01로 렌더링되는 오해를 막기 위해 그 경우 안내 문구로 대체. */
+/** [2026-07-27 버그수정] axios 에러에서 백엔드가 내려준 실제 사유(detail)를 뽑아 표시 —
+ * 예를 들어 다른 역할로 가입한 계정으로 로그인한 채 이 초대를 수락하려 하면 백엔드가
+ * "이 초대는 요양보호사로 가입한 계정만 수락할 수 있어요." 같은 구체적인 사유를 주는데,
+ * 지금까지는 그걸 버리고 "수락 처리에 실패했어요"로만 뭉개서 사용자가 왜 다음 단계로
+ * 못 넘어가는지 전혀 알 수 없었다(Schedule.tsx의 describeError와 동일한 패턴). */
+function describeError(e: unknown, fallback: string): string {
+  const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+  return typeof detail === "string" && detail ? detail : fallback;
+}
+
 function formatExpiry(iso: string | null): string {
   if (!iso) return "만료일 정보 없음";
   const d = new Date(iso);
@@ -91,8 +101,8 @@ export default function InviteAccept() {
         try {
           await acceptInvitation(token, { patient_id: ownPatient.id });
           setDecided("accepted");
-        } catch {
-          setError("수락 처리에 실패했어요.");
+        } catch (e) {
+          setError(describeError(e, "수락 처리에 실패했어요."));
         } finally {
           setSubmitting(false);
         }
@@ -111,8 +121,8 @@ export default function InviteAccept() {
         // 환자 본인 계정을 만든 것이므로 patient_id만 저장한다(보호자 계정 아님).
         localStorage.setItem("patient_id", String(result.patient_id));
         setDecided("accepted");
-      } catch {
-        setError("가입 처리에 실패했어요. 입력한 정보를 확인해 주세요.");
+      } catch (e) {
+        setError(describeError(e, "가입 처리에 실패했어요. 입력한 정보를 확인해 주세요."));
       } finally {
         setSubmitting(false);
       }
@@ -133,11 +143,14 @@ export default function InviteAccept() {
       localStorage.setItem("caregiver_id", String(result.caregiver_id));
       localStorage.setItem("patient_id", String(result.patient_id));
       setDecided("accepted");
-    } catch {
+    } catch (e) {
       setError(
-        invite?.phone_verification_required
-          ? "수락 처리에 실패했어요. 초대받은 전화번호를 정확히 입력했는지 확인해 주세요."
-          : "수락 처리에 실패했어요."
+        describeError(
+          e,
+          invite?.phone_verification_required
+            ? "수락 처리에 실패했어요. 초대받은 전화번호를 정확히 입력했는지 확인해 주세요."
+            : "수락 처리에 실패했어요."
+        )
       );
     } finally {
       setSubmitting(false);
@@ -150,8 +163,8 @@ export default function InviteAccept() {
     try {
       await rejectInvitation(token);
       setDecided("rejected");
-    } catch {
-      setError("거절 처리에 실패했어요.");
+    } catch (e) {
+      setError(describeError(e, "거절 처리에 실패했어요."));
     } finally {
       setSubmitting(false);
     }
