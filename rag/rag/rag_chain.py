@@ -553,9 +553,25 @@ def generate_guide(
 
 
 def _str_list(value: object) -> list[str]:
+    """[2026-07-27 버그수정] 생활습관 안내(diet/exercise/other)에 같은 내용이 중복 기재되는
+    문제 — 근거 문서(_lifestyle_context_items, KDCA k=3)가 같은 내용을 여러 청크로 나눠
+    갖고 있으면 LLM이 그중 일부를 각각 별개 항목인 것처럼 반복해서 적는 경우가 있었다.
+    공백 차이만 다른 사실상 동일한 문장도 같은 것으로 보고, 먼저 나온 순서를 유지하며
+    제거한다."""
     if not isinstance(value, list):
         return []
-    return [str(v).strip() for v in value if str(v).strip()]
+    seen: set[str] = set()
+    result: list[str] = []
+    for v in value:
+        text = str(v).strip()
+        if not text:
+            continue
+        normalized = " ".join(text.split())
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(text)
+    return result
 
 
 def _parse_lifestyle_category(raw: object) -> LifestyleCategoryGuide:

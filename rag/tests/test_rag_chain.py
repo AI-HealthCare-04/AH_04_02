@@ -492,6 +492,40 @@ def test_generate_lifestyle_guide_falls_back_to_context_when_llm_returns_empty_t
     assert "empty_lifestyle_fallback" in result.review_flags
 
 
+def test_generate_lifestyle_guide_dedupes_repeated_items_within_a_category():
+    """[2026-07-27 버그수정] KDCA 문서가 같은 내용을 여러 청크로 나눠 갖고 있으면 LLM이
+    사실상 같은 문장을 recommended/avoid에 중복으로 적는 경우가 있었다 — 공백 차이만
+    다른 것도 같은 항목으로 보고 먼저 나온 순서를 유지하며 제거해야 한다."""
+
+    class FakeResponse:
+        content = json.dumps(
+            {
+                "diet": {
+                    "recommended": ["나트륨 섭취를 하루 2,000mg 이하로 줄이세요.", "나트륨 섭취를 하루  2,000mg  이하로  줄이세요."],
+                    "avoid": [],
+                },
+                "exercise": {"recommended": [], "avoid": []},
+                "other": {"recommended": [], "avoid": []},
+                "source_refs": [1],
+            }
+        )
+
+    class FakeChat:
+        def invoke(self, _messages):
+            return FakeResponse()
+
+    with (
+        patch("rag.rag_chain.search_kdca_health_info", return_value=[FAKE_KDCA_DOC]),
+        patch("rag.rag_chain.search_by_disease", return_value=[]),
+        patch("rag.rag_chain.settings.OPENAI_API_KEY", "test-key"),
+        patch("rag.rag_chain.settings.SELF_CONSISTENCY_SAMPLES", 1),
+        patch("langchain_openai.ChatOpenAI", return_value=FakeChat()),
+    ):
+        result = generate_lifestyle_guide_for_diagnosis("고혈압")
+
+    assert result.diet.recommended == ["나트륨 섭취를 하루 2,000mg 이하로 줄이세요."]
+
+
 def test_generate_lifestyle_guide_for_diagnosis_has_no_drug_name_param():
     """[2026-07-21 회의 반영] 생활습관 안내는 의약품과 무관하게 진단명만으로 생성돼야
     한다 — 함수 시그니처 자체가 drug_name을 받지 않도록 구조적으로 고정한다."""
