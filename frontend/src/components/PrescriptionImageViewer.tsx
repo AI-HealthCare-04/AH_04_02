@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent, type PointerEvent, type WheelEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { Camera, X, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import { getRecordImageBlobUrl } from "../api/records";
 import { C } from "../theme";
@@ -13,6 +13,7 @@ function ZoomableImage({ url }: { url: string }) {
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const dragRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
 
@@ -24,10 +25,23 @@ function ZoomableImage({ url }: { url: string }) {
     });
   };
 
-  const handleWheel = (e: WheelEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    zoomBy(e.deltaY < 0 ? 0.3 : -0.3);
-  };
+  // [2026-07-27 버그수정] React의 onWheel(합성 이벤트)로 등록하면 리액트가 내부적으로
+  // 이 리스너를 passive로 붙여서 e.preventDefault()가 브라우저에 씹힐 수 있다 — 그러면
+  // 우리 JS가 사진의 scale을 바꾸는 것과 "동시에" 브라우저 자체의 트랙패드 핀치줌
+  // (ctrl+wheel)·페이지 스크롤도 함께 일어나서, 사진과 화면이 서로 다른 배율로 움직이며
+  // 확대/축소가 깜빡이는 것처럼 보였다(스크롤 잠금만으로는 해결 안 됨). ref로 DOM에
+  // 직접 { passive: false } 리스너를 붙여야 preventDefault가 확실히 먹는다.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      zoomBy(e.deltaY < 0 ? 0.3 : -0.3);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handlePointerDown = (e: PointerEvent<HTMLImageElement>) => {
     if (scale === MIN_SCALE) return;
@@ -53,9 +67,9 @@ function ZoomableImage({ url }: { url: string }) {
   return (
     <div className="flex flex-col h-full">
       <div
+        ref={containerRef}
         className="relative flex-1 overflow-hidden rounded-xl"
         style={{ background: "rgba(30,26,23,0.03)", touchAction: "none" }}
-        onWheel={handleWheel}
       >
         <img
           src={url}

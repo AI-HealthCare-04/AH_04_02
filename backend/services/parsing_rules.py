@@ -72,7 +72,11 @@ DRUG_NAME_RE = re.compile(
     # (?<![가-힣\d]): 한글·숫자 바로 뒤 부분 매칭 방지 (예: '이지엔6프로연질캡슐'에서 '프로'만 잡히는 것 차단)
     # (?:\d+(?!연질)[가-힣A-Za-z]{2,})?: 숫자 삽입 복합 약품명 처리 (예: '이지엔6프로')
     #   — '연질' 앞 lookahead로 '오메가3연질캡슐'에서 3이 연질을 삼키는 것을 방지
-    r"(?<![가-힣\d])([가-힣A-Za-z]{2,}(?:\d+(?!연질)[가-힣A-Za-z]{2,})?(?:\d+)?(?:연질)?(?:정|캡슐|주|산|시럽|액|크림|연고|로션|겔|패취)"
+    # [2026-07-27 버그수정] 정제/캡슐 위주로만 목록이 자라 있어 패치("패취"만 인식되고
+    # 훨씬 흔한 표기인 "패치"는 누락)/점안액·점이액(안약/귀약)/환(알약)이 처방전에 있으면
+    # 이 매칭 자체가 실패해 그 약이 통째로 인식 결과에서 사라졌다 — drug_matcher._DOSAGE_RE가
+    # 이미 커버하던 제형 목록과 맞춰 추가한다.
+    r"(?<![가-힣\d])([가-힣A-Za-z]{2,}(?:\d+(?!연질)[가-힣A-Za-z]{2,})?(?:\d+)?(?:연질)?(?:정|캡슐|주|산|시럽|액|크림|연고|로션|겔|패취|패치|점안|점이|환)"
     r"|(?-i:[A-Z][a-zA-Z]{4,})(?=\s+\d))"  # 영문 PascalCase 5자+, 바로 뒤에 숫자(용량/횟수) 필수
     # [2026-07-18] "정 5mg"처럼 띄어쓴 용량도 이름에 붙게 허용
     # [2026-07-19] "50/1000mg"같은 복합제 용량(성분 두 개를 슬래시로 묶고 단위는 한 번만
@@ -93,9 +97,16 @@ DOSAGE_RE       = re.compile(r"(\d+(?:\.\d+)?(?:\s*/\s*\d+(?:\.\d+)?)?)\s*(mg|g|
 DOSE_QTY_UNITS = "정|캡슐|캅셀|포|병|환"
 DOSE_QTY_UNIT_RE   = re.compile(rf"(\d+(?:\.\d+)?)\s*({DOSE_QTY_UNITS})")
 DOSE_QTY_ABBREV_RE = re.compile(r"(?<![A-Za-z])(\d+(?:\.\d+)?)\s*(T|C)\b")  # 1T(정)/1C(캡슐) 약식 표기
+# [2026-07-27 추가] 시럽/점안액처럼 개수(정/캡슐 등)가 아니라 부피·방울 수로 1회
+# 복용량을 표현하는 제형 — 이 단위들은 약품명의 제형 접미사로 나올 일이 없으므로
+# DOSE_QTY_UNITS(DRUG_FORM_RE와 공유)와는 분리해서 관리한다. 이게 없으면 "1방울"의
+# "1"이 단위 없는 숫자로 오인되어 (3) 폴백에서 약품명 제형("액" 등)이 엉뚱하게 붙어
+# "1액" 같은 말이 안 되는 값이 만들어졌다.
+DOSE_QTY_VOLUME_UNITS = "ml|mL|방울"
+DOSE_QTY_VOLUME_UNIT_RE = re.compile(rf"(\d+(?:\.\d+)?)\s*({DOSE_QTY_VOLUME_UNITS})", re.IGNORECASE)
 # 약품명(DRUG_NAME_RE group 1)이 실제로 끝나는 제형 — (3) 케이스에서 단위 없는 숫자 컬럼에
 # 이 제형을 붙여 "1.00" + "정" → "1정"을 완성한다.
-DRUG_FORM_RE = re.compile(rf"({DOSE_QTY_UNITS}|주|산|시럽|액|크림|연고|로션|겔|패취)$")
+DRUG_FORM_RE = re.compile(rf"({DOSE_QTY_UNITS}|주|산|시럽|액|크림|연고|로션|겔|패취|패치|점안|점이)$")
 # 단위 없는 순수 숫자 컬럼용 — 날짜/시각(-,:,.) 및 mg류/일/회/분/시/초 단위에 이미 붙은
 # 숫자는 제외한다(그런 숫자는 함량·횟수·일수지 복용량이 아니다).
 _BARE_QTY_RE = re.compile(
@@ -150,11 +161,15 @@ def extract_dose_quantity(text: str, form: str = "") -> str:
     """1회 복용량 — "1정", "0.5정", "2캡슐"처럼 환자가 한 번에 먹는 개수/단위.
 
     1) "1회 1정"/"1정"처럼 텍스트에 단위가 그대로 있으면 그걸 쓴다.
-    2) "1T"/"1C" 같은 약식 표기(T=정, C=캡슐)를 본다.
-    3) 그래도 없으면 단위 없이 숫자만 있는 컬럼(예: "1.00")을 찾아, 약품명의 제형(form,
+    2) "10ml"/"1방울"처럼 부피·방울 단위(시럽/점안액 등)가 있으면 그걸 쓴다.
+    3) "1T"/"1C" 같은 약식 표기(T=정, C=캡슐)를 본다.
+    4) 그래도 없으면 단위 없이 숫자만 있는 컬럼(예: "1.00")을 찾아, 약품명의 제형(form,
        예: "정"/"캡슐")을 붙여 완성한다 — form이 없으면 조합할 수 없어 빈 문자열을 반환한다.
     """
     m = DOSE_QTY_UNIT_RE.search(text)
+    if m:
+        return f"{m.group(1)}{m.group(2)}"
+    m = DOSE_QTY_VOLUME_UNIT_RE.search(text)
     if m:
         return f"{m.group(1)}{m.group(2)}"
     m = DOSE_QTY_ABBREV_RE.search(text)
@@ -366,7 +381,10 @@ def _detect_format(text: str) -> str:
         return "official"
     if re.search(r"\b(?:bid|qd|tid|qid)\b", text, re.IGNORECASE):
         return "abbrev"
-    if re.search(r"\d+[.)]\s+[가-힣A-Za-z]+(?:\d+)?(?:연질)?(?:정|캡슐|시럽|액|주|산)", text):
+    # [2026-07-27 버그수정] DRUG_NAME_RE가 이미 커버하는 제형 목록보다 좁아서, 크림/연고/
+    # 로션/겔/패치류 처방전이 리스트 포맷인데도 (더 약한 파싱을 쓰는) table로 빠졌다 —
+    # DRUG_NAME_RE와 동일한 제형 목록으로 맞춘다.
+    if re.search(r"\d+[.)]\s+[가-힣A-Za-z]+(?:\d+)?(?:연질)?(?:정|캡슐|시럽|액|주|산|크림|연고|로션|겔|패취|패치|점안|점이|환)", text):
         return "list"
     return "table"
 
@@ -557,6 +575,11 @@ def _parse_table_format(text: str) -> list:
         qty_entries.append((m.start(), f"{m.group(1)}{m.group(2)}"))
     for m in DOSE_QTY_ABBREV_RE.finditer(text):
         qty_entries.append((m.start(), f"{m.group(1)}{'정' if m.group(2).upper() == 'T' else '캡슐'}"))
+    # [2026-07-27 추가] 시럽/점안액처럼 부피·방울 단위로 복용량을 쓰는 제형도 다른 단위와
+    # 동일하게 위치 순으로 모은다 — 이게 없으면 정/캡슐 처방과 섞인 테이블에서 시럽/점안액
+    # 항목의 복용량만 항상 빈 값이 된다.
+    for m in DOSE_QTY_VOLUME_UNIT_RE.finditer(text):
+        qty_entries.append((m.start(), f"{m.group(1)}{m.group(2)}"))
     qty_entries.sort()
     dose_quantities = [qty for _, qty in qty_entries]
 

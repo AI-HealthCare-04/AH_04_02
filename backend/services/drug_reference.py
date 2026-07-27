@@ -172,7 +172,10 @@ def _lookup_hira_by_code(drug_code: str) -> str:
     return _hira_code_map.get(drug_code.strip(), "")
 
 
-_FORM_STARTERS = set("정캡주산시액이수분과좌크겔연")
+# [2026-07-27 버그수정] 패(패치/패취)·점(점안/점이)·로(로션)가 빠져 있어서 이 제형들은
+# HIRA 이름 매칭에서 "직접 일치"(_is_direct)로 인정받지 못하고 항상 더 약한
+# 부분일치(contains)+최단이름 휴리스틱으로만 처리됐다.
+_FORM_STARTERS = set("정캡주산시액이수분과좌크겔연패점로")
 
 
 def _lookup_hira_by_name(drug_name: str) -> str:
@@ -280,7 +283,7 @@ _drug_table: list[dict] | None = None
 
 _STRIP_RE = re.compile(
     r"\d+(?:\.\d+)?(?:mg|g|ml|밀리그램|그램)"
-    r"|(?:정|캡슐|주사|주|산|시럽|액|환|겔|크림|연고|패취|패치)\d*(?:\.\d+)?(?:mg|g|ml)?"
+    r"|(?:정|캡슐|주사|주|산|시럽|액|환|겔|크림|연고|로션|패취|패치|점안|점이)\d*(?:\.\d+)?(?:mg|g|ml)?"
     r"|\([^)]+\)",
     re.IGNORECASE,
 )

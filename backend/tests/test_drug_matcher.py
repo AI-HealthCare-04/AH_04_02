@@ -146,6 +146,20 @@ def test_normalize_strips_korean_gram_unit_variants():
     assert _normalize("리피토정10밀리그램") == "리피토정"
 
 
+# ── [2026-07-27 버그수정] 주사제 농도 표기("5mg/ml") 정규화 ────────────────────
+
+def test_normalize_strips_injection_concentration_notation():
+    """[재현] 슬래시 뒤에 단위만 오고 숫자가 없는 주사제 농도 표기("5mg/ml")는
+    예전엔 분자(5mg)만 지워지고 "/ml"이 그대로 남아 정규화된 이름이 지저분해졌다
+    (유사도 매칭 점수가 떨어져 실제로는 맞는 약인데 검토 필요로 잘못 넘어감)."""
+    assert _normalize("에피네프린주 5mg/ml") == "에피네프린주"
+
+
+def test_normalize_still_strips_combo_drug_slash_dosage():
+    """복합제("50/1000mg", 숫자+단위) 정규화는 회귀 없이 그대로 동작해야 한다."""
+    assert _normalize("글루코파지 500mg/5mg") == "글루코파지"
+
+
 def test_match_drug_prefers_exact_dosage_over_similar_length_wrong_dose():
     """[실사용 재현] "노바스크정5밀리그램"(OCR 원문)이 정답("노바스크정5밀리그람",
     표기만 다름)이 아니라 우연히 전체 문자열 유사도가 근소하게 더 높은 다른 용량
