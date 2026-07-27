@@ -27,13 +27,14 @@ from services.parsing_rules import parse_prescription
 @dataclass
 class MedicationItem:
     drug_name: str
-    dosage: str            # 예: "1정" (1회 복용량 — 환자가 한 번에 먹는 개수/단위. mg 등 성분 함량은 drug_name에 있음)
+    dosage: str            # 예: "1정" (1회 사용량 — 환자가 한 번에 먹는 개수/단위)
     frequency: str         # 예: "3회" (1일 투약횟수 — "1일"은 라벨에 있어 값엔 안 넣음)
     diagnosis: str          # 예: "고혈압"
     drug_class: str = ""    # 약효분류, 예: "이뇨제"
     drug_code: str = ""     # [급여/비급여][코드] 패턴에서 추출한 코드
     total_days: str = ""    # [2026-07-18 추가] 총 투약일수, 예: "30일"
     confidence: float = 0.0  # 0.0 ~ 1.0
+    dose_amount: str = ""  # [2026-07-25 추가] 1회 투여량 — 예: "5mg" (mg/ml 등 질량·부피 단위)
 
 
 @dataclass
@@ -73,6 +74,7 @@ def _build_medications(raw_text: str, confidence: float) -> list:
             drug_code=m.get("drug_code", ""),
             total_days=m.get("total_days", ""),
             confidence=confidence,
+            dose_amount=m.get("dose_amount", ""),
         )
         for m in meds
     ]

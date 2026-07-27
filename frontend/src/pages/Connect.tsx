@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { User, AlertCircle, RotateCw, Trash2 } from "lucide-react";
 import NavBar from "../components/NavBar";
+import LoadingDots from "../components/LoadingDots";
 import InvitePatientPanel from "../components/InvitePatientPanel";
 import {
   acceptInvitationAsCaregiver,
@@ -737,7 +738,7 @@ export default function Connect() {
               <h2 className="text-[15px] font-black text-[#1E1A17]">연결된 사람 ({caregivers.length}명)</h2>
             </div>
             {loading ? (
-              <p className="px-6 py-8 text-center text-[14px] text-[#8A7E75]">불러오는 중이에요...</p>
+              <p className="px-6 py-8 text-center text-[14px] text-[#8A7E75]"><LoadingDots /></p>
             ) : caregivers.length === 0 ? (
               <div className="py-14 text-center">
                 <User className="w-9 h-9 mx-auto mb-3 text-[#8A7E75] opacity-30" />

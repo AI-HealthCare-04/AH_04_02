@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { AlertTriangle, CheckCircle2, Users } from "lucide-react";
 import NavBar from "../components/NavBar";
+import LoadingDots from "../components/LoadingDots";
 import {
   getCaregiverPatients,
   getLogs,
@@ -9,7 +11,7 @@ import {
   type Patient,
   type Schedule,
 } from "../api/monitoring";
-import { getCurrentCaregiverId, getCurrentPatientId, getCurrentUserName } from "../lib/session";
+import { getCurrentCaregiverId, getCurrentUserName } from "../lib/session";
 import { C } from "../theme";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
@@ -18,12 +20,98 @@ function dateKey(iso: string) {
   return iso.slice(0, 10); // YYYY-MM-DD (checked_at은 ISO 문자열)
 }
 
+// [2026-07-24 추가] 여러 환자를 관리하는 보호자·기관 입장에서 특정 환자 한 명을 골라야만
+// 뭔가 볼 수 있던 게 불편하다는 요청 — patient_id 쿼리파라미터가 없으면 전체 환자를
+// 오늘 상태(today_status, 환자 관리 목록의 빨강/초록 점과 동일한 값이라 추가 API 호출
+// 없이 바로 재사용 가능) 기준으로 요약해서 보여주고, 특정 환자를 고르면(카드 클릭 또는
+// PatientManagement.tsx의 "모니터링" 버튼) 그 환자의 상세 화면(기존 UI 그대로)으로 전환된다.
+function MonitoringSummary({ patients, onSelect }: { patients: Patient[]; onSelect: (id: number) => void }) {
+  const missed = patients.filter((p) => p.today_status === "missed");
+  const ok = patients.filter((p) => p.today_status === "ok");
+  // 놓친 환자를 먼저 보여줘야 바로 조치할 수 있다.
+  const sorted = [...missed, ...ok];
+
+  return (
+    <>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+        <div className="rounded-2xl p-5 flex items-center gap-3" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${C.terracotta}15` }}>
+            <Users className="w-5 h-5" style={{ color: C.terracotta }} />
+          </div>
+          <div>
+            <p className="text-[22px] font-black" style={{ color: C.dark }}>{patients.length}</p>
+            <p className="text-[12px] font-bold" style={{ color: C.muted }}>전체 환자</p>
+          </div>
+        </div>
+        <div className="rounded-2xl p-5 flex items-center gap-3" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "rgba(217,79,79,0.12)" }}>
+            <AlertTriangle className="w-5 h-5" style={{ color: "#D94F4F" }} />
+          </div>
+          <div>
+            <p className="text-[22px] font-black" style={{ color: missed.length > 0 ? "#D94F4F" : C.dark }}>{missed.length}</p>
+            <p className="text-[12px] font-bold" style={{ color: C.muted }}>오늘 놓침</p>
+          </div>
+        </div>
+        <div className="rounded-2xl p-5 flex items-center gap-3" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${C.success}20` }}>
+            <CheckCircle2 className="w-5 h-5" style={{ color: "#4A7A47" }} />
+          </div>
+          <div>
+            <p className="text-[22px] font-black" style={{ color: C.dark }}>{ok.length}</p>
+            <p className="text-[12px] font-bold" style={{ color: C.muted }}>오늘 정상</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-2xl overflow-hidden mb-6" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
+        <div className="px-6 py-4 border-b" style={{ borderColor: "rgba(30,26,23,0.08)" }}>
+          <h2 className="text-[16px] font-black" style={{ color: C.dark }}>환자별 현황</h2>
+        </div>
+        {sorted.length === 0 ? (
+          <p className="px-6 py-8 text-center text-[14px]" style={{ color: C.muted }}>연결된 환자가 없어요.</p>
+        ) : (
+          sorted.map((p, i) => (
+            <button
+              key={p.id}
+              onClick={() => onSelect(p.id)}
+              className="w-full flex items-center justify-between px-6 py-4 text-left transition-colors hover:bg-black/[0.02]"
+              style={{ borderBottom: i < sorted.length - 1 ? "1px solid rgba(30,26,23,0.06)" : undefined }}
+            >
+              <div className="flex items-center gap-3">
+                <div
+                  className="w-2.5 h-2.5 rounded-full shrink-0"
+                  style={{ background: p.today_status === "missed" ? "#D94F4F" : C.success }}
+                />
+                <span className="font-bold text-[15px]" style={{ color: C.dark }}>{p.name}</span>
+              </div>
+              <span
+                className="px-3 py-1 rounded-full text-[12px] font-bold"
+                style={{
+                  background: p.today_status === "missed" ? "rgba(217,79,79,0.12)" : `${C.success}20`,
+                  color: p.today_status === "missed" ? "#D94F4F" : "#4A7A47",
+                }}
+              >
+                {p.today_status === "missed" ? "오늘 놓침" : "오늘 정상"}
+              </span>
+            </button>
+          ))
+        )}
+      </div>
+    </>
+  );
+}
+
 export default function MonitoringDashboard() {
   const navigate = useNavigate();
   const caregiverId = getCurrentCaregiverId();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // [2026-07-24 수정] localStorage의 "마지막으로 본 환자"에 암묵적으로 의존하던 걸
+  // patient_id 쿼리파라미터로 바꿨다 — 없으면 요약 화면, 있으면 그 환자의 상세 화면이라는
+  // 게 URL만 보고도 명확해지고, 새로고침·공유해도 같은 화면이 뜬다.
+  const patientIdParam = searchParams.get("patient_id");
+  const patientId = patientIdParam ? Number(patientIdParam) : null;
 
   const [patients, setPatients] = useState<Patient[]>([]);
-  const [patientId, setPatientId] = useState<number | null>(getCurrentPatientId());
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [logs, setLogs] = useState<MedicationLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,17 +121,19 @@ export default function MonitoringDashboard() {
     return { year: now.getFullYear(), month: now.getMonth() + 1 };
   });
 
+  const selectPatient = (id: number) => {
+    localStorage.setItem("patient_id", String(id));
+    setSearchParams({ patient_id: String(id) });
+  };
+
   useEffect(() => {
     if (!caregiverId) return;
     getCaregiverPatients(caregiverId)
-      .then((list) => {
-        setPatients(list);
-        if (list.length > 0 && !list.some((p) => p.id === patientId)) {
-          localStorage.setItem("patient_id", String(list[0].id));
-          setPatientId(list[0].id);
-        }
-      })
-      .catch(() => {});
+      .then(setPatients)
+      .catch(() => {})
+      .finally(() => {
+        if (patientId == null) setLoading(false);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caregiverId]);
 
@@ -107,24 +197,46 @@ export default function MonitoringDashboard() {
     [logs]
   );
 
+  if (patientId == null) {
+    return (
+      <div className="min-h-screen" style={{ background: C.ivory }}>
+        <NavBar isLoggedIn userName={getCurrentUserName()} />
+        <main className="max-w-4xl mx-auto px-6 sm:px-8 py-10">
+          <h1 className="text-[24px] font-black mb-1" style={{ color: C.dark }}>모니터링 대시보드</h1>
+          <p className="text-[14px] mb-7" style={{ color: C.muted }}>연결된 환자들의 오늘 복약 현황을 한눈에 확인하세요.</p>
+          {loading ? (
+            <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
+          ) : (
+            <MonitoringSummary patients={patients} onSelect={selectPatient} />
+          )}
+        </main>
+      </div>
+    );
+  }
+
+  const selectedPatient = patients.find((p) => p.id === patientId);
+
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
       <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-4xl mx-auto px-6 sm:px-8 py-10">
-        <h1 className="text-[24px] font-black mb-6" style={{ color: C.dark }}>모니터링 대시보드</h1>
+        <button
+          onClick={() => setSearchParams({})}
+          className="text-[13px] font-bold mb-3 inline-block"
+          style={{ color: C.muted }}
+        >
+          ← 전체 요약
+        </button>
+        <h1 className="text-[24px] font-black mb-6" style={{ color: C.dark }}>
+          {selectedPatient ? `${selectedPatient.name}님 모니터링` : "모니터링 대시보드"}
+        </h1>
 
         {patients.length > 0 && (
           <div className="flex items-center gap-3 mb-7">
             <label className="text-[14px] font-bold" style={{ color: C.muted }}>대상자 선택</label>
             <select
               value={patientId ?? ""}
-              onChange={(e) => {
-                const next = Number(e.target.value);
-                // [7/14] 다른 화면(Dashboard/Schedule/Notification/Connect/Check)도
-                // 이 선택을 이어받도록 localStorage에도 반영
-                localStorage.setItem("patient_id", String(next));
-                setPatientId(next);
-              }}
+              onChange={(e) => selectPatient(Number(e.target.value))}
               className="px-4 py-2.5 rounded-xl border text-[14px] outline-none bg-white"
               style={{ borderColor: "rgba(30,26,23,0.15)", minWidth: 200 }}
             >
@@ -138,7 +250,7 @@ export default function MonitoringDashboard() {
         {error && <p className="text-[13px] mb-4" style={{ color: "#D94F4F" }}>{error}</p>}
 
         {loading ? (
-          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>
+          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
         ) : (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">

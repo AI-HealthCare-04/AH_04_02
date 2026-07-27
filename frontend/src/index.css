@@ -77,3 +77,13 @@ input, textarea {
 .wheel-scroll::-webkit-scrollbar {
   display: none;
 }
+
+/* [2026-07-25 추가] LoadingDots.tsx — Tailwind 기본 animate-bounce는 점이 작아서
+   튀는 폭이 잘 안 보인다는 피드백. 위아래 이동 폭을 직접 키운 전용 애니메이션. */
+@keyframes loading-dot-bounce {
+  0%, 80%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-10px); }
+}
+.loading-dot {
+  animation: loading-dot-bounce 1s infinite;
+}

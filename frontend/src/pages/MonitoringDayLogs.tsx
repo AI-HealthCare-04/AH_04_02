@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ChevronLeft, Clock, FileText, Heart } from "lucide-react";
 import NavBar from "../components/NavBar";
+import LoadingDots from "../components/LoadingDots";
 import PatientContextBanner from "../components/PatientContextBanner";
 import { getLogs, type MedicationLogEntry } from "../api/monitoring";
 import { listRecords, type RecordSummary } from "../api/records";
@@ -11,6 +12,13 @@ import { C } from "../theme";
 function dateKey(iso: string) {
   return iso.slice(0, 10);
 }
+
+// [2026-07-25 추가] 보호자·기관 시점의 검토 상태 뱃지 — "none"(대상 아님)은 안 보여준다.
+const REVIEW_STATUS_LABEL: Record<string, { text: string; bg: string; color: string }> = {
+  pending: { text: "검토해 주세요", bg: `${C.terracotta}15`, color: C.terracotta },
+  needs_correction: { text: "환자 수정 대기 중", bg: "#F5E6C8", color: "#8A6D1F" },
+  reviewed: { text: "검토 완료", bg: `${C.success}20`, color: "#4A7A47" },
+};
 
 // ponytail: 특정 날짜 하나만 콕 집어 조회하는 백엔드 엔드포인트가 따로 없어서,
 // 넉넉한 기간(1년치) 로그를 받아 프론트에서 그 날짜만 걸러냅니다 — 데이터량이
@@ -74,7 +82,7 @@ export default function MonitoringDayLogs() {
         {error && <p className="text-[13px] mb-4" style={{ color: "#D94F4F" }}>{error}</p>}
 
         {loading ? (
-          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>불러오는 중이에요...</p>
+          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
         ) : (
           <>
             <div className="rounded-2xl overflow-hidden mb-8" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
@@ -172,7 +180,7 @@ export default function MonitoringDayLogs() {
                         <FileText className="w-5 h-5" style={{ color: C.terracotta }} />
                       </div>
                     </div>
-                    <div className="px-6 pb-5">
+                    <div className="px-6 pb-5 flex items-center gap-2 flex-wrap">
                       <button
                         onClick={() => navigate(`/records/${r.record_id}`)}
                         className="px-4 py-2 rounded-full text-[13px] font-bold"
@@ -180,6 +188,18 @@ export default function MonitoringDayLogs() {
                       >
                         자세히 보기 ›
                       </button>
+                      {r.caregiver_review_status !== "none" && (
+                        <button
+                          onClick={() => navigate(`/records/${r.record_id}/guide`)}
+                          className="px-4 py-2 rounded-full text-[13px] font-bold"
+                          style={{
+                            background: REVIEW_STATUS_LABEL[r.caregiver_review_status].bg,
+                            color: REVIEW_STATUS_LABEL[r.caregiver_review_status].color,
+                          }}
+                        >
+                          {REVIEW_STATUS_LABEL[r.caregiver_review_status].text}
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))

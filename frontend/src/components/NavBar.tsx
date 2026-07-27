@@ -46,6 +46,10 @@ const PATIENT_NAV_ITEMS: NavItem[] = [
 
 const CAREGIVER_NAV_ITEMS: NavItem[] = [
   { label: "환자 관리", to: "/patients" },
+  // [2026-07-24 추가] 지금까지 환자 관리 목록의 "모니터링" 버튼으로만 들어갈 수 있어서
+  // 여러 환자를 관리하는 보호자·기관 입장에서 진입점이 너무 깊었다 — 다중 환자 요약형으로
+  // 바뀐 대시보드를 내비바 최상위 메뉴로 승격.
+  { label: "모니터링", to: "/monitoring" },
   { label: "알림함", to: "/notifications" },
   { label: "연결관리", to: "/connect" },
   { label: "설정", to: "/settings" },

@@ -179,6 +179,56 @@ def _dm_dosage(dm: "re.Match") -> str:
     return dm.group(2).replace(" ", "")
 
 
+# [2026-07-25 추가] "1회 투여량"(mg/ml 등 질량·부피 단위) — "1회 사용량"(정/캡슐 등
+# 개수 단위)과 별개 필드. 처방전 문구에 따로 적혀 있으면(예: "1회 10mg 경구 투여") 그걸
+# 쓰고, 없으면 약품명에 붙어 나오는 단위당 함량(예: "암로핀정5밀리그람"의 5mg)을 그대로
+# 쓴다 — 대부분의 정제 처방전은 후자뿐이라, 이 폴백이 없으면 이 필드가 거의 항상
+# 비어 있게 된다.
+def extract_dose_amount(post_text: str, dm_dosage: str = "") -> str:
+    return extract_dosage(post_text) or dm_dosage
+
+
+# [2026-07-25 추가] 1회 사용량(dosage)과 1회 투여량(dose_amount)의 인식 결과를 조합한다.
+# reconcile_dose_fields 자체는 "사용량이 비었을 때 채우는" 역할만 한다 — dose_amount는
+# 이미 파싱 단계에서 결정된 값을 그대로 받는다.
+#
+#   사용량 O                    → 그대로 둔다(투여량 유무 무관, 이미 충분).
+#   사용량 X, 투여량 O          → 약품명에 포함된 단위당 함량으로 나눠서 개수를 역산한다.
+#                                  단위가 다르거나(mg vs ml), 복합제(성분 2개)거나, 약품명에서
+#                                  함량을 못 찾으면 억지로 지어내지 않고 빈 문자열로 남긴다.
+#   사용량 X, 투여량 X          → 빈 문자열(호출부가 review_required로 잡아냄).
+def reconcile_dose_fields(dosage: str, dose_amount: str, drug_name: str) -> str:
+    if dosage or not dose_amount:
+        return dosage
+
+    amount_m = DOSAGE_RE.fullmatch(dose_amount.strip())
+    strength_m = DOSAGE_RE.search(drug_name)
+    if not amount_m or not strength_m:
+        return ""
+    # drug_name은 "약품명(제형으로 끝) + ' ' + 함량(mg 등)" 구조라(_dm_dosage 조합 규칙),
+    # 제형은 함량이 시작되기 직전 부분에서 찾아야 한다 — 함량이 붙으면 제형이 더 이상
+    # 문자열 끝(DRUG_FORM_RE의 $ 앵커)이 아니게 되기 때문.
+    form_m = DRUG_FORM_RE.search(drug_name[:strength_m.start()].rstrip())
+    if not form_m:
+        return ""
+    # 복합제(예: "50/1000mg", 성분 2개)는 단순 나눗셈으로 개수를 정할 수 없다.
+    if "/" in amount_m.group(1) or "/" in strength_m.group(1):
+        return ""
+    if amount_m.group(2).lower() != strength_m.group(2).lower():
+        return ""  # mg vs ml처럼 단위가 다르면 나눌 수 없음
+
+    try:
+        strength_value = float(strength_m.group(1))
+        if strength_value == 0:
+            return ""
+        qty = float(amount_m.group(1)) / strength_value
+    except ValueError:
+        return ""
+
+    qty_str = str(int(qty)) if qty == int(qty) else f"{qty:.2f}".rstrip("0").rstrip(".")
+    return f"{qty_str}{form_m.group(1)}"
+
+
 def extract_frequency(text: str) -> str:
     """한국어 횟수 우선, 없으면 약어, 없으면 식사타이밍, 없으면 단독 N회 패턴.
 
@@ -356,6 +406,7 @@ def _parse_official_format(text: str) -> list:
         # 쓰지 않는다 — 그건 이미 drug_name에 그대로 남아있다.
         form_m = DRUG_FORM_RE.search(dm.group(1))
         dosage = extract_dose_quantity(post, form_m.group(1) if form_m else "")
+        dose_amount = extract_dose_amount(post, _dm_dosage(dm))
         # 날짜(2026-07-09)·시각(10:00) 앞뒤 숫자를 col_nums에서 제외하기 위해
         # 기존 패턴에 '-' ':' 추가
         col_nums = re.findall(
@@ -385,12 +436,13 @@ def _parse_official_format(text: str) -> list:
         drug_code = all_codes[drug_idx] if drug_idx < len(all_codes) else ""
 
         results.append({
-            "drug_name":  drug_name,
-            "drug_code":  drug_code,
-            "dosage":     dosage,
-            "frequency":  freq,
-            "total_days": days,
-            "drug_class": lookup_drug_class(drug_name),
+            "drug_name":   drug_name,
+            "drug_code":   drug_code,
+            "dosage":      dosage,
+            "dose_amount": dose_amount,
+            "frequency":   freq,
+            "total_days":  days,
+            "drug_class":  lookup_drug_class(drug_name),
         })
         drug_idx += 1
     return results
@@ -408,13 +460,15 @@ def _parse_abbrev_format(text: str) -> list:
             continue
         drug_name = dm.group(1) + (f" {_dm_dosage(dm)}" if dm.group(2) else "")
         form_m = DRUG_FORM_RE.search(dm.group(1))
+        post = item[dm.end():]
         results.append({
-            "drug_name":  drug_name,
-            "drug_code":  "",
-            "dosage":     extract_dose_quantity(item[dm.end():], form_m.group(1) if form_m else ""),
-            "frequency":  extract_frequency(item),
-            "total_days": extract_days(item),
-            "drug_class": lookup_drug_class(drug_name),
+            "drug_name":   drug_name,
+            "drug_code":   "",
+            "dosage":      extract_dose_quantity(post, form_m.group(1) if form_m else ""),
+            "dose_amount": extract_dose_amount(post, _dm_dosage(dm)),
+            "frequency":   extract_frequency(item),
+            "total_days":  extract_days(item),
+            "drug_class":  lookup_drug_class(drug_name),
         })
     return results
 
@@ -428,13 +482,15 @@ def _parse_list_format(text: str) -> list:
             continue
         drug_name = dm.group(1) + (f" {_dm_dosage(dm)}" if dm.group(2) else "")
         form_m = DRUG_FORM_RE.search(dm.group(1))
+        post = item[dm.end():]
         results.append({
-            "drug_name":  drug_name,
-            "drug_code":  "",
-            "dosage":     extract_dose_quantity(item[dm.end():], form_m.group(1) if form_m else ""),
-            "frequency":  extract_frequency(item),
-            "total_days": extract_days(item),
-            "drug_class": lookup_drug_class(drug_name),
+            "drug_name":   drug_name,
+            "drug_code":   "",
+            "dosage":      extract_dose_quantity(post, form_m.group(1) if form_m else ""),
+            "dose_amount": extract_dose_amount(post, _dm_dosage(dm)),
+            "frequency":   extract_frequency(item),
+            "total_days":  extract_days(item),
+            "drug_class":  lookup_drug_class(drug_name),
         })
     return results
 
@@ -455,12 +511,13 @@ def _parse_oriental_format(text: str) -> list:
         weight = m.group(2)
         in_ref = name in herb_names
         results.append({
-            "drug_name":  name,
-            "drug_code":  "",
-            "dosage":     f"{weight}g",
-            "frequency":  freq,
-            "total_days": days,
-            "drug_class": "한방 첩약" if in_ref else "한방 첩약(미확인)",
+            "drug_name":   name,
+            "drug_code":   "",
+            "dosage":      f"{weight}g",
+            "dose_amount": "",
+            "frequency":   freq,
+            "total_days":  days,
+            "drug_class":  "한방 첩약" if in_ref else "한방 첩약(미확인)",
         })
     return results
 
@@ -507,12 +564,16 @@ def _parse_table_format(text: str) -> list:
     for i, dm in enumerate(drug_matches):
         drug_name = dm.group(1) + (f" {_dm_dosage(dm)}" if dm.group(2) else "")
         results.append({
-            "drug_name":  drug_name,
-            "drug_code":  "",
-            "dosage":     dose_quantities[i] if i < len(dose_quantities) else "",
-            "frequency":  frequencies[i] if i < len(frequencies) else "",
-            "total_days": f"{day_nums[i]}일" if i < len(day_nums) else "",
-            "drug_class": lookup_drug_class(drug_name),
+            "drug_name":   drug_name,
+            "drug_code":   "",
+            "dosage":      dose_quantities[i] if i < len(dose_quantities) else "",
+            # [2026-07-25 추가] 테이블 포맷은 컬럼 그룹 출력이라 사용량처럼 위치 기반으로
+            # 신뢰도 있게 "1회 투여량" 문구를 찾기 어렵다 — 약품명에 붙어 나오는 단위당
+            # 함량(_dm_dosage)만 폴백으로 쓴다.
+            "dose_amount": _dm_dosage(dm),
+            "frequency":   frequencies[i] if i < len(frequencies) else "",
+            "total_days":  f"{day_nums[i]}일" if i < len(day_nums) else "",
+            "drug_class":  lookup_drug_class(drug_name),
         })
     return results
 
@@ -534,6 +595,8 @@ def parse_prescription(raw_text: str) -> tuple:
         meds = _parse_list_format(raw_text)
     else:
         meds = _parse_table_format(raw_text)
+    for m in meds:
+        m["dosage"] = reconcile_dose_fields(m["dosage"], m.get("dose_amount", ""), m["drug_name"])
     return meds, extract_diagnosis(raw_text)
 
 
