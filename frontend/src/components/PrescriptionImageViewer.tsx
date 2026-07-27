@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent, type PointerEvent, type WheelEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { Camera, X, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import { getRecordImageBlobUrl } from "../api/records";
 import { C } from "../theme";
@@ -12,6 +12,7 @@ const MAX_SCALE = 4;
 function ZoomableImage({ url }: { url: string }) {
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
 
   const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
@@ -24,10 +25,20 @@ function ZoomableImage({ url }: { url: string }) {
     });
   };
 
-  const handleWheel = (e: WheelEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    zoomBy(e.deltaY < 0 ? 0.3 : -0.3);
-  };
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e: globalThis.WheelEvent) => {
+      e.preventDefault();
+      setScale((prev) => {
+        const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, prev + (e.deltaY < 0 ? 0.3 : -0.3)));
+        if (next === MIN_SCALE) setPan({ x: 0, y: 0 });
+        return next;
+      });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []); // setScale/setPan은 useState가 보장하는 안정적인 참조
 
   const handlePointerDown = (e: PointerEvent<HTMLImageElement>) => {
     if (scale === MIN_SCALE) return;
@@ -53,9 +64,9 @@ function ZoomableImage({ url }: { url: string }) {
   return (
     <div className="flex flex-col h-full">
       <div
+        ref={containerRef}
         className="relative flex-1 overflow-hidden rounded-xl"
         style={{ background: "rgba(30,26,23,0.03)", touchAction: "none" }}
-        onWheel={handleWheel}
       >
         <img
           src={url}
