@@ -314,6 +314,23 @@ git push -u origin feature/ocr-day1-setup_soonhyun
 
 ---
 
+| 날짜 | 2026.07.27 |
+|---|---|
+| **작성자** | 권순현 |
+| **이슈** | Duck DNS 도메인(`yakcong.duckdns.org`) + nginx + HTTPS 적용 후, 기존 IP:포트(`http://52.200.250.115:5173`) 접속에서 잘 되던 로그인이 새 도메인(`https://yakcong.duckdns.org`)에서 네트워크 에러/CORS 에러로 실패함 |
+| **발생 위치** | EC2 서버의 `backend/.env` (`CORS_ALLOWED_ORIGINS`), `frontend/.env` (`VITE_MONITORING_API_URL`) |
+| **원인** | ① `backend/.env`의 `CORS_ALLOWED_ORIGINS`가 예전 IP 기준(`http://52.200.250.115:5173`)으로 남아있어, 새 도메인에서 오는 요청을 CORS가 차단함. ② `frontend/.env`의 `VITE_MONITORING_API_URL`도 예전 IP:포트(`http://52.200.250.115:8000`)를 그대로 가리켜, HTTPS 페이지에서 HTTP로 요청이 나가면서 Mixed Content로 차단되거나 CORS 에러가 발생함 |
+| **해결** | 도메인/HTTPS로 배포 방식이 바뀔 때마다 아래 두 값을 함께 갱신한다. EC2에서 실행: |
+| **재발 방지** | 배포 환경(IP/포트 → 도메인/HTTPS)이 바뀌면 `CORS_ALLOWED_ORIGINS`·`VITE_MONITORING_API_URL` 두 값을 반드시 함께 갱신한다. 회원가입/로그인 데이터는 DB(Aiven MySQL)에 그대로 남아있으므로 데이터 손실 걱정 없음. `backend/.env`·`frontend/.env`는 `.gitignore`로 git에 올라가지 않는 EC2 인스턴스 로컬 파일이라, 인스턴스를 새로 만들거나 재설정할 경우 이 항목을 참고해 다시 세팅해야 함 |
+
+```bash
+sed -i 's|CORS_ALLOWED_ORIGINS=.*|CORS_ALLOWED_ORIGINS=https://yakcong.duckdns.org|' backend/.env
+echo 'VITE_MONITORING_API_URL=https://yakcong.duckdns.org/api' > frontend/.env
+docker compose restart backend frontend
+```
+
+---
+
 | 날짜 | 2026.07.20 |
 |---|---|
 | **작성자** | 권순현 |
