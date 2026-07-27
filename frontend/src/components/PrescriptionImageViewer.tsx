@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent, type PointerEvent, type WheelEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { Camera, X, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import { getRecordImageBlobUrl } from "../api/records";
@@ -14,6 +14,7 @@ function ZoomableImage({ url }: { url: string }) {
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const dragRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
 
@@ -25,10 +26,23 @@ function ZoomableImage({ url }: { url: string }) {
     });
   };
 
-  const handleWheel = (e: WheelEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    zoomBy(e.deltaY < 0 ? 0.3 : -0.3);
-  };
+  // [2026-07-27 버그수정] React의 onWheel(합성 이벤트)로 등록하면 리액트가 내부적으로
+  // 이 리스너를 passive로 붙여서 e.preventDefault()가 브라우저에 씹힐 수 있다 — 그러면
+  // 우리 JS가 사진의 scale을 바꾸는 것과 "동시에" 브라우저 자체의 트랙패드 핀치줌
+  // (ctrl+wheel)·페이지 스크롤도 함께 일어나서, 사진과 화면이 서로 다른 배율로 움직이며
+  // 확대/축소가 깜빡이는 것처럼 보였다(스크롤 잠금만으로는 해결 안 됨). ref로 DOM에
+  // 직접 { passive: false } 리스너를 붙여야 preventDefault가 확실히 먹는다.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      zoomBy(e.deltaY < 0 ? 0.3 : -0.3);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handlePointerDown = (e: PointerEvent<HTMLImageElement>) => {
     if (scale === MIN_SCALE) return;
@@ -60,9 +74,9 @@ function ZoomableImage({ url }: { url: string }) {
   return (
     <div className="flex flex-col h-full">
       <div
+        ref={containerRef}
         className="relative flex-1 overflow-hidden rounded-xl"
         style={{ background: "rgba(30,26,23,0.03)", touchAction: "none" }}
-        onWheel={handleWheel}
       >
         <img
           src={url}
@@ -134,6 +148,36 @@ export default function PrescriptionImageViewer({
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // [2026-07-27 버그수정] 전체화면 모달(floating=false)이 열려 있는 동안 뒤 페이지의
+  // 스크롤을 잠그지 않고 있었다 — 사진 영역 밖(반투명 배경)에서 휠을 스크롤하면 화면에
+  // 보이지 않는 뒤 페이지가 스크롤되면서 스크롤바가 나타났다 사라졌다 해 레이아웃이 흔들리고
+  // (화면이 커졌다 작아졌다 하는 것처럼 보임), 그 와중에 닫기(X) 버튼의 실제 화면 위치도
+  // 같이 흔들려 클릭이 빗나갔다. NavBar.tsx의 모바일 드로어와 동일한 패턴으로 잠근다.
+  useEffect(() => {
+    if (floating || !open) return;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [floating, open]);
+
+  // [2026-07-27 버그수정] 스크롤 잠금(위)과 ZoomableImage 내부의 { passive: false } 휠
+  // 리스너 두 가지를 고쳤는데도 확대/축소 깜빡임이 재현됐다 — 진짜 원인은 트랙패드
+  // 핀치줌(ctrl+wheel로 브라우저에 전달됨)이었다. 이 제스처는 커서가 사진 위(ZoomableImage
+  // 내부 리스너가 있는 곳)를 벗어나 팝업의 다른 부분(제목줄·여백·닫기 버튼 등) 위에 있을
+  // 때는 아무도 막지 않아서 브라우저 자체의 페이지 확대/축소가 그대로 일어났다 —
+  // overflow:hidden은 "스크롤"만 막지 "페이지 줌"은 막지 못한다(서로 다른 브라우저
+  // 기능). 팝업이 열려 있는 동안은 document 전체에서 ctrlKey가 있는 휠 이벤트(핀치줌)만
+  // 콕 집어 막는다 — 일반 스크롤(ctrlKey 없음)은 그대로 둬도 body가 이미 잠겨 있어 안전하다.
+  useEffect(() => {
+    if (!open) return;
+    const blockPinchZoom = (e: WheelEvent) => {
+      if (e.ctrlKey) e.preventDefault();
+    };
+    document.addEventListener("wheel", blockPinchZoom, { passive: false });
+    return () => document.removeEventListener("wheel", blockPinchZoom);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
