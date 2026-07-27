@@ -236,6 +236,38 @@ class TestSourceRefs:
             {"item_name": "타이레놀정500밀리그람(아세트아미노펜)", "field": "주의사항"}
         ]
 
+    def test_dur_only_question_surfaces_dur_source_ref(self, client: TestClient, session: Session, monkeypatch):
+        """[2026-07-24 추가] DUR 전용 질문(_should_answer_from_dur_only)은 ChromaDB를
+        건너뛰므로 위 두 테스트(ChromaDB 문서 기반)와 겹치지 않는 별도 경로다 — 이 경로도
+        source_refs가 채워지는지(예전엔 프롬프트 텍스트로만 쓰이고 프론트엔 전혀 안
+        내려가서 "출처: AI 실시간 답변"만 보였다) 확인한다."""
+        pt = _make_patient(session)
+        headers = {"Authorization": f"Bearer {create_access_token(pt.id, 'patient')}"}
+        _mock_llm(monkeypatch)
+        monkeypatch.setattr("rag.mfds_client.search_by_name", lambda *a, **k: [])
+        monkeypatch.setattr("rag.mfds_client.search_permit_info", lambda *a, **k: [])
+        # "임부금기 있어?"는 병용금기가 아니라 주의정보(cautions) 조회 의도라
+        # (_dur_lookup_modes) 병용금기(taboo) mock은 이 질문에서 쓰이지 않는다 — 실제로
+        # 호출되는 쪽(caution)에 데이터를 넣는다.
+        caution = SimpleNamespace(category="임부금기", extra="1등급", detail="태아 위해 가능성")
+        monkeypatch.setattr(chat_router, "_search_dur_taboo", lambda _name: [])
+        monkeypatch.setattr(chat_router, "_search_dur_cautions", lambda _name: [caution])
+
+        r = client.post(
+            "/chat/ask", json={"patient_id": pt.id, "question": "타이레놀 임부금기 있어?"}, headers=headers
+        )
+
+        assert r.status_code == 200
+        # _extract_dur_candidate_drug_names가 "임부금기"도 후보로 같이 뽑아 캐션 mock이
+        # 두 번 불려서(기존 test_chat_router_context.py 테스트들도 이 노이즈 때문에 정확한
+        # 리스트 대신 any()로 확인한다) 목록 전체가 아니라 원하는 항목이 있는지만 확인한다.
+        assert {
+            "item_name": "타이레놀",
+            "dur_category": "임부금기",
+            "dur_extra": "1등급",
+            "dur_detail": "태아 위해 가능성",
+        } in r.json()["source_refs"]
+
     def test_ask_stream_done_event_includes_source_refs(self, client: TestClient, session: Session, monkeypatch):
         pt = _make_patient(session)
         headers = {"Authorization": f"Bearer {create_access_token(pt.id, 'patient')}"}

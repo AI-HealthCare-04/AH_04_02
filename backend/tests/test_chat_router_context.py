@@ -185,11 +185,12 @@ def test_on_demand_dur_context_queries_drug_mentioned_in_question():
             {"_search_dur_taboo": lambda _name: [], "_search_dur_cautions": lambda _name: []},
         ),
     ):
-        lines = _build_on_demand_dur_context("타이레놀 임부금기 있어?", [])
+        lines, refs = _build_on_demand_dur_context("타이레놀 임부금기 있어?", [])
 
     assert lines
     assert "타이레놀" in lines[0]
     assert "안전 판단으로 확정하지 마세요" in lines[0]
+    assert refs == []  # 아무것도 못 찾았으니 프론트에 실어줄 인용도 없음
 
 
 def test_on_demand_dur_context_skips_caution_lookup_for_taboo_question():
@@ -206,9 +207,10 @@ def test_on_demand_dur_context_skips_caution_lookup_for_taboo_question():
             },
         ),
     ):
-        lines = _build_on_demand_dur_context("노바스크정5밀리그람과 타이레놀 병용 가능해?", [])
+        lines, refs = _build_on_demand_dur_context("노바스크정5밀리그람과 타이레놀 병용 가능해?", [])
 
     assert any("타이레놀" in line and "병용금기" in line for line in lines)
+    assert refs == [{"mixture_item_name": "타이레놀정500밀리그람", "prohbt_content": "상호작용 주의"}]
 
 
 def test_on_demand_dur_context_resolves_drug_name_then_returns_taboo_list():
@@ -223,9 +225,10 @@ def test_on_demand_dur_context_resolves_drug_name_then_returns_taboo_list():
             {"_search_dur_taboo": lambda _name: [taboo], "_search_dur_cautions": lambda _name: []},
         ),
     ):
-        lines = _build_on_demand_dur_context("심바스타틴이랑 먹으면 안되는 의약품 정보 알려줘", [])
+        lines, refs = _build_on_demand_dur_context("심바스타틴이랑 먹으면 안되는 의약품 정보 알려줘", [])
 
     assert any("이트라코나졸" in line and "병용금기" in line for line in lines), lines
+    assert any(ref.get("mixture_item_name") == "이트라코나졸캡슐" for ref in refs), refs
 
 
 def test_is_lifestyle_question_detects_food_exercise_keywords():
@@ -324,7 +327,7 @@ def test_on_demand_dur_context_creates_langfuse_retriever_span():
         ),
         patch("routers.chat_router.optional_observation") as mock_observation,
     ):
-        _build_on_demand_dur_context("타이레놀 임부금기 있어?", [])
+        _build_on_demand_dur_context("타이레놀 임부금기 있어?", [])  # 반환값(lines, refs) 자체는 이 테스트 관심사 아님
 
     assert any(
         call.kwargs.get("name") == "retrieve-dur-lookup" and call.kwargs.get("as_type") == "retriever"

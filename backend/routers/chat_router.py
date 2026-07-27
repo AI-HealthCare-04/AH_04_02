@@ -726,9 +726,20 @@ def _matches_drug_name(left: str, right: str) -> bool:
     return bool(left_norm and right_norm and (left_norm in right_norm or right_norm in left_norm))
 
 
-def _build_on_demand_dur_context(question_text: str, registered_drug_names: list[str]) -> list[str]:
+def _build_on_demand_dur_context(
+    question_text: str, registered_drug_names: list[str]
+) -> tuple[list[str], list[dict]]:
+    """(LLM 프롬프트용 문자열 목록, 프론트 source_refs용 인용 데이터) 튜플을 반환한다.
+
+    [2026-07-24 추가] 예전엔 lines만 반환해서 DUR 기반 답변도 프론트 "참고 자료" 줄이
+    항상 비어 있었다(_retrieve_chat_rag_docs/_rag_docs_to_source_refs는 ChromaDB 문서만
+    다루고, DUR API 조회 결과는 프롬프트 텍스트로만 쓰이고 구조화된 인용으로는 안
+    내려갔음) — 챗봇이 실제로는 DUR API를 근거로 답했는데도 사용자에게는 "AI 실시간
+    답변 (gpt-4o-mini)"라는, 생성 "방법" 라벨만 보였다. records.ts의 SourceRef가 이미
+    dur_category/dur_extra/dur_detail(주의)·mixture_item_name/prohbt_content(병용금기)
+    필드를 지원하므로(처방전 확인 화면에서 이미 씀) 새 타입을 만들지 않고 그대로 재사용한다."""
     if not _should_answer_from_dur_only(question_text):
-        return []
+        return [], []
 
     # [2026-07-21 추가] 이 경로(DUR 전용 질문)는 _retrieve_chat_rag_docs가 ChromaDB를
     # 아예 건너뛰므로(DUR 데이터는 Chroma에 없음) Langfuse에 retriever 스팬이 하나도 안
@@ -761,7 +772,7 @@ def _build_on_demand_dur_context(question_text: str, registered_drug_names: list
                 output={"lookup_names": [], "retrieved_line_count": len(lines), "status": "missing-drug-name"},
             )
             flush_langfuse()
-            return lines
+            return lines, []
 
         with optional_observation(
             as_type="span",
@@ -811,6 +822,7 @@ def _build_on_demand_dur_context(question_text: str, registered_drug_names: list
             )
 
         lines: list[str] = []
+        refs: list[dict] = []
         for drug_name, taboos, cautions, lookup_error in lookup_results:
             if lookup_error is not None:
                 lines.append(f"[DUR 보강조회] {drug_name}: DUR API 조회에 실패했습니다. 약사나 의사에게 확인이 필요합니다.")
@@ -821,6 +833,18 @@ def _build_on_demand_dur_context(question_text: str, registered_drug_names: list
                 detail = f": {caution.detail}" if caution.detail else ""
                 extra = f" ({caution.extra})" if caution.extra else ""
                 lines.append(f"[DUR 보강조회] {display_name} - {caution.category}{extra}{detail}")
+                refs.append(
+                    {
+                        k: v
+                        for k, v in {
+                            "item_name": display_name,
+                            "dur_category": caution.category,
+                            "dur_extra": caution.extra,
+                            "dur_detail": caution.detail,
+                        }.items()
+                        if v
+                    }
+                )
 
             partner_names = [name for name in [*registered_drug_names, *lookup_names] if name != drug_name]
             if _asks_for_taboo_list(question_text):
@@ -834,6 +858,16 @@ def _build_on_demand_dur_context(question_text: str, registered_drug_names: list
             for taboo in matched_taboos[:5]:
                 content = f": {taboo.prohbt_content}" if taboo.prohbt_content else ""
                 lines.append(f"[DUR 보강조회] {display_name} - {taboo.mixture_item_name} 병용금기{content}")
+                refs.append(
+                    {
+                        k: v
+                        for k, v in {
+                            "mixture_item_name": taboo.mixture_item_name,
+                            "prohbt_content": taboo.prohbt_content,
+                        }.items()
+                        if v
+                    }
+                )
 
         update_observation(
             observation,
@@ -843,8 +877,10 @@ def _build_on_demand_dur_context(question_text: str, registered_drug_names: list
 
     if not lines:
         joined = ", ".join(raw_candidate_names)
-        return [f"[DUR 보강조회] {joined}: DUR API에서 확인된 노인주의/연령금기/임부금기 또는 질문 내 약물 간 병용금기 항목을 찾지 못했습니다. 미등재·검색어 불일치 가능성이 있어 안전 판단으로 확정하지 마세요."]
-    return lines
+        return [
+            f"[DUR 보강조회] {joined}: DUR API에서 확인된 노인주의/연령금기/임부금기 또는 질문 내 약물 간 병용금기 항목을 찾지 못했습니다. 미등재·검색어 불일치 가능성이 있어 안전 판단으로 확정하지 마세요."
+        ], []
+    return lines, refs
 
 
 _LIFESTYLE_KEYWORDS = (
@@ -1056,13 +1092,16 @@ def _gather_llm_inputs(
             [*_patient_registered_drug_names(patient_id, session), *_latest_ocr_drug_names(patient_id, session)]
         )
     )
-    dur_context_lines = _build_on_demand_dur_context(question_text, registered_drug_names)
+    dur_context_lines, dur_refs = _build_on_demand_dur_context(question_text, registered_drug_names)
     rag_docs = _retrieve_chat_rag_docs(question_text)
     rag_context_lines = _rag_docs_to_prompt_lines(rag_docs)
     rag_refs = _rag_docs_to_source_refs(rag_docs)
     setting = session.get(NotificationSetting, patient_id)
     bot_name = setting.chatbot_name if setting else "약콩이"
-    return context_text, dur_context_lines, rag_context_lines, bot_name, rag_refs
+    # [2026-07-24 추가] DUR 전용 질문과 RAG(ChromaDB) 질문은 _should_answer_from_dur_only로
+    # 갈리는 서로 배타적인 경로라 실제로 둘 다 채워지는 경우는 없지만, 합쳐서 반환해두면
+    # 호출부가 "DUR인지 RAG인지" 신경 쓰지 않고 그대로 source_refs에 실어 보낼 수 있다.
+    return context_text, dur_context_lines, rag_context_lines, bot_name, [*dur_refs, *rag_refs]
 
 
 def _sse_event(data: dict) -> str:
