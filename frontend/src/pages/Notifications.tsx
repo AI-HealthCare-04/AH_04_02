@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bell, AlertTriangle, FileEdit, CheckCircle2, Link2, Unlink } from "lucide-react";
 import NavBar from "../components/NavBar";
-import LoadingDots from "../components/LoadingDots";
+import Skeleton from "../components/Skeleton";
+import EmptyState from "../components/EmptyState";
 import { getNotifications, type NotificationLogEntry } from "../api/monitoring";
 import { listCorrectionNotices, markCorrectionNoticeRead, type RecordCorrectionNotice } from "../api/records";
 import { listRelationNotices, markRelationNoticeRead, type RelationNotice } from "../api/care";
@@ -95,12 +96,19 @@ export default function Notifications() {
         {error && <p className="text-[13px] mb-4" style={{ color: "#D94F4F" }}>{error}</p>}
 
         {loading ? (
-          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
-        ) : entries.length === 0 ? (
-          <div className="rounded-2xl p-10 text-center" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
-            <Bell className="w-8 h-8 mx-auto mb-3 opacity-30" style={{ color: C.muted }} />
-            <p className="text-[14px]" style={{ color: C.muted }}>아직 온 알림이 없어요.</p>
+          <div className="rounded-2xl overflow-hidden" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="flex items-start gap-3 px-5 py-4" style={{ borderBottom: i < 3 ? "1px solid rgba(30,26,23,0.06)" : undefined }}>
+                <Skeleton className="w-9 h-9 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <Skeleton className="h-4 w-32 mb-2" />
+                  <Skeleton className="h-3 w-48" />
+                </div>
+              </div>
+            ))}
           </div>
+        ) : entries.length === 0 ? (
+          <EmptyState icon={Bell} title="아직 온 알림이 없어요" />
         ) : (
           <div className="rounded-2xl overflow-hidden" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
             {entries.map((entry, i) => {

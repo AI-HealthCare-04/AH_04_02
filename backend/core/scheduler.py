@@ -14,7 +14,10 @@ NotificationLog의 (schedule_id, due_date, time_slot, kind) UniqueConstraint다 
 두 서버가 같은 틱에 같은 알림을 동시에 처리하려 해도 DB가 한쪽만 통과시킨다.
 
 알려진 한계(팀 공유 필요, 코멘트에도 명시):
-- 서버 로컬 시간대만 가정한다(Patient/MedicationSchedule의 timezone 필드는 아직 안 씀).
+- [2026-07-28 수정] 예전엔 서버 프로세스의 OS 로컬 시간대에 의존했는데(Patient/
+  MedicationSchedule의 timezone 필드는 여전히 안 씀), Docker 컨테이너가 기본 UTC로
+  뜨는 경우 실제로 9시간 어긋나는 게 발견돼 _now_kst()로 한국 시간을 명시적으로
+  고정했다 — 여러 시간대의 환자를 지원해야 할 때는 이 가정을 재검토해야 한다.
 - [2026-07-24 수정] 배달 채널은 core/email.py(mock/smtp) + core/push.py(Web Push)다.
   단, push는 백엔드/DB만 준비된 상태 — 프론트에 서비스워커 구독 흐름이 아직 없어
   PushSubscription이 항상 0건이라 core/push.py가 조용히 no-op한다(HTTPS 배포 이후
@@ -29,6 +32,7 @@ import json
 import logging
 import os
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from models import (
     Caregiver,
@@ -59,6 +63,18 @@ CATCH_UP_MINUTES = 10
 MISSED_AFTER_MINUTES = 60
 
 _WEEKDAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+_KST = ZoneInfo("Asia/Seoul")
+
+
+def _now_kst() -> datetime:
+    """[2026-07-28 추가, 실제 발견된 버그 수정] time_slot("16:00" 등)은 항상 사용자가
+    보는 한국 시간 기준인데, datetime.now()는 프로세스가 도는 OS의 로컬 시간대를 그대로
+    쓴다 — Docker 컨테이너 기본 시간대(UTC)에서 돌면 due_at 비교가 9시간 어긋나서 정시
+    알림이 실제로는 그날 새벽에 발송 처리되고 있었다(재현: 로컬 docker backend가 UTC로
+    떠서 오후 4시 일정이 다음날 새벽 1시로 계산됨). OS 시간대와 무관하게 항상 한국
+    시간으로 계산하도록 명시적으로 고정한다."""
+    return datetime.now(_KST).replace(tzinfo=None)
 
 
 def _schedule_runs_today(schedule: MedicationSchedule, today: date) -> bool:
@@ -217,8 +233,12 @@ def _deliver(session: Session, schedule: MedicationSchedule, patient: Patient, k
         for role, recipient_id in _push_targets(session, patient, schedule):
             if recipient_id is None:
                 continue
+            # [2026-07-28] "/schedule"은 일정 관리 화면이라 "먹었어요" 체크를 할 수 없다 —
+            # 실제로 체크할 수 있는 대시보드로 보내고, 어떤 카드 때문에 알림이 왔는지
+            # 강조 표시할 수 있게 schedule.id를 쿼리로 같이 넘긴다.
             attempted = send_push_to_recipient(
-                session, role, recipient_id, title=subject, body=body, url="/schedule"
+                session, role, recipient_id, title=subject, body=body,
+                url=f"/dashboard?highlight={schedule.id}",
             )
             # [2026-07-24] 구독이 없거나 VAPID 키가 없으면 아무 일도 안 했다는 뜻이라
             # channels에 남기지 않는다 — "발송했다"는 로그가 실제로 아무것도 안 보낸
@@ -337,7 +357,7 @@ def _mark_missed(session: Session, now: datetime) -> None:
 
 
 def _tick() -> None:
-    now = datetime.now()
+    now = _now_kst()
     with Session(engine) as session:
         _fire_due_reminders(session, now)
         _mark_missed(session, now)

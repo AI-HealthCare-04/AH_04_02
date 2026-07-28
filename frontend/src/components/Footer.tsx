@@ -1,3 +1,5 @@
+import { Heart, Mail, Pill } from "lucide-react";
+
 // [7/14] 기존에 여기 있던 "복약 안내/생활 습관/알림 설정" 3개 카테고리 메뉴는
 // 상단 NavBar의 "전체메뉴" 드롭다운으로 옮겼다 — 매 페이지 하단까지 스크롤해야
 // 닿던 메뉴를 상단에서 바로 쓰게 하기 위함. 풋터는 브랜드 소개 + 저작권 표시만 남긴다.
@@ -6,7 +8,7 @@ export default function Footer() {
     <footer style={styles.footer}>
       <div style={styles.footerBrand}>
         <div style={styles.footerLogo}>
-          <span style={styles.logoIconSmall}>♥</span>
+          <span style={styles.logoIconSmall}><Pill className="w-3.5 h-3.5" strokeWidth={2.4} /></span>
           <span style={styles.footerLogoText}>건강동행</span>
         </div>
         <p style={styles.footerDesc}>
@@ -17,8 +19,8 @@ export default function Footer() {
       <div style={styles.footerBottom}>
         <span>© 2026 건강동행 | 개인정보처리방침 | 이용약관</span>
         <div style={styles.footerIcons}>
-          <span>✉</span>
-          <span>♥</span>
+          <Mail className="w-4 h-4" />
+          <Heart className="w-4 h-4" />
         </div>
       </div>
     </footer>

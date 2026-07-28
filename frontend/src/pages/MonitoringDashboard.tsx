@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AlertTriangle, CheckCircle2, Users } from "lucide-react";
 import NavBar from "../components/NavBar";
-import LoadingDots from "../components/LoadingDots";
+import Skeleton from "../components/Skeleton";
 import {
   getCaregiverPatients,
   getLogs,
@@ -220,7 +220,27 @@ export default function MonitoringDashboard() {
           {error ? (
             <p className="text-center py-16 text-[14px]" style={{ color: "#D94F4F" }}>{error}</p>
           ) : loading ? (
-            <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="rounded-2xl p-5 flex items-center gap-3" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
+                    <Skeleton className="w-10 h-10 shrink-0" />
+                    <div>
+                      <Skeleton className="h-6 w-8 mb-1.5" />
+                      <Skeleton className="h-3 w-14" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-2xl overflow-hidden" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
+                {[1, 2].map((i) => (
+                  <div key={i} className="flex items-center justify-between px-6 py-4" style={{ borderBottom: i === 1 ? "1px solid rgba(30,26,23,0.06)" : undefined }}>
+                    <Skeleton className="h-4 w-28" />
+                    <Skeleton className="h-6 w-16 rounded-full" />
+                  </div>
+                ))}
+              </div>
+            </>
           ) : (
             <MonitoringSummary patients={patients} onSelect={selectPatient} />
           )}
@@ -269,7 +289,17 @@ export default function MonitoringDashboard() {
         {error && <p className="text-[13px] mb-4" style={{ color: "#D94F4F" }}>{error}</p>}
 
         {loading ? (
-          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
+              {[1, 2].map((i) => (
+                <div key={i} className="rounded-2xl p-5" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
+                  <Skeleton className="h-3 w-32 mb-3" />
+                  <Skeleton className="h-8 w-16" />
+                </div>
+              ))}
+            </div>
+            <Skeleton className="h-40 w-full" />
+          </>
         ) : (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">

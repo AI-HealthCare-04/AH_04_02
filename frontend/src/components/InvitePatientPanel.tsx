@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Phone, RotateCw } from "lucide-react";
+import { Link2, MessageSquare, Phone, QrCode, RotateCw } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { createInvitation, deleteInvitation } from "../api/care";
 import { copyTextToClipboard } from "../lib/clipboard";
@@ -101,7 +101,7 @@ export default function InvitePatientPanel({
   return (
     <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl p-6">
       <h2 className="text-[16px] font-black text-[#1E1A17] mb-1">환자 연결하기</h2>
-      <p className="text-[13px] text-[#8A7E75] mb-4">
+      <p className="text-[13px] text-[#6E6259] mb-4">
         환자에게 초대 링크를 보내면, 환자가 직접 계정을 만들어 연결돼요.
       </p>
 
@@ -109,18 +109,18 @@ export default function InvitePatientPanel({
 
       <div className="flex gap-2 mb-4 p-1 rounded-xl bg-[#F4F0EA]">
         {[
-          { key: "sms" as const, label: "💬 문자" },
-          { key: "url" as const, label: "🔗 URL" },
-          { key: "qr" as const, label: "📷 QR" },
-        ].map(({ key, label }) => (
+          { key: "sms" as const, icon: MessageSquare, label: "문자" },
+          { key: "url" as const, icon: Link2, label: "URL" },
+          { key: "qr" as const, icon: QrCode, label: "QR" },
+        ].map(({ key, icon: Icon, label }) => (
           <button
             key={key}
             onClick={() => setMethod(key)}
-            className={`flex-1 py-2.5 rounded-lg text-[13px] font-bold transition-all ${
-              method === key ? "bg-white text-[#1E1A17] shadow-sm" : "text-[#8A7E75]"
+            className={`flex-1 py-2.5 rounded-lg text-[13px] font-bold transition-all flex items-center justify-center gap-1.5 ${
+              method === key ? "bg-white text-[#1E1A17] shadow-sm" : "text-[#6E6259]"
             }`}
           >
-            {label}
+            <Icon className="w-3.5 h-3.5" strokeWidth={2.2} /> {label}
           </button>
         ))}
       </div>
@@ -128,7 +128,7 @@ export default function InvitePatientPanel({
       {method === "sms" && (
         <div className="space-y-3">
           <div className="relative">
-            <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8A7E75]" />
+            <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6E6259]" />
             <input
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
@@ -148,7 +148,7 @@ export default function InvitePatientPanel({
             <>
               <div className="rounded-xl px-4 py-3 bg-[#F2E8D8] border border-[rgba(30,26,23,0.08)]">
                 <div className="flex items-center justify-between mb-1">
-                  <p className="text-[12px] font-bold text-[#8A7E75]">생성된 초대 링크</p>
+                  <p className="text-[12px] font-bold text-[#6E6259]">생성된 초대 링크</p>
                   <button
                     onClick={handleRegenerate}
                     disabled={sending}
@@ -174,7 +174,7 @@ export default function InvitePatientPanel({
 
       {method === "url" && (
         <div className="space-y-3">
-          <p className="text-[13px] text-[#8A7E75]">초대 링크를 만들고 복사해서 전달하세요.</p>
+          <p className="text-[13px] text-[#6E6259]">초대 링크를 만들고 복사해서 전달하세요.</p>
           {!inviteUrl ? (
             <button
               onClick={handleInvite}
@@ -219,7 +219,7 @@ export default function InvitePatientPanel({
             </button>
           ) : (
             <>
-              <p className="text-[13px] text-center text-[#8A7E75]">
+              <p className="text-[13px] text-center text-[#6E6259]">
                 환자가 이 QR을 스캔하면 초대 링크로 이동해요.
               </p>
               <div className="p-4 rounded-2xl bg-[#F9F4EB] border-2 border-[rgba(30,26,23,0.08)]">

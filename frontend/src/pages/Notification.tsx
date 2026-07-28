@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
+import { BellRing } from "lucide-react";
 import NavBar from "../components/NavBar";
-import LoadingDots from "../components/LoadingDots";
+import Skeleton from "../components/Skeleton";
 import PatientContextBanner from "../components/PatientContextBanner";
 import { getNotificationSettings, updateNotificationSettings, type NotificationSettings } from "../api/care";
+import { getDevicePushSubscription, isPushSupported, subscribeDevicePush, unsubscribeDevicePush } from "../api/push";
 import { getCurrentUserName, isLoggedIn, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
 
@@ -28,6 +30,12 @@ export default function Notification() {
   const [error, setError] = useState("");
   const [savingKey, setSavingKey] = useState<string | null>(null);
 
+  // [2026-07-28 추가] 이 기기(브라우저)가 실제 브라우저 알림을 받게 할지 — 위 세 토글은
+  // "어떤 알림을 보낼지"에 대한 서버 설정이고, 이건 "이 기기로도 보낼지"에 대한 별개 개념이다.
+  const [pushSubscribed, setPushSubscribed] = useState<boolean | null>(null);
+  const [pushWorking, setPushWorking] = useState(false);
+  const [pushError, setPushError] = useState("");
+
   useEffect(() => {
     if (patientId == null) return;
     getNotificationSettings(patientId)
@@ -35,6 +43,34 @@ export default function Notification() {
       .catch(() => setError("설정을 불러오지 못했어요."))
       .finally(() => setLoading(false));
   }, [patientId]);
+
+  useEffect(() => {
+    if (!isPushSupported()) {
+      setPushSubscribed(false);
+      return;
+    }
+    getDevicePushSubscription()
+      .then((sub) => setPushSubscribed(!!sub))
+      .catch(() => setPushSubscribed(false));
+  }, []);
+
+  const togglePush = async () => {
+    setPushWorking(true);
+    setPushError("");
+    try {
+      if (pushSubscribed) {
+        await unsubscribeDevicePush();
+        setPushSubscribed(false);
+      } else {
+        await subscribeDevicePush();
+        setPushSubscribed(true);
+      }
+    } catch (e) {
+      setPushError(e instanceof Error ? e.message : "처리하지 못했어요.");
+    } finally {
+      setPushWorking(false);
+    }
+  };
 
   const toggle = async (key: keyof Pick<NotificationSettings, "medication_reminder_enabled" | "care_alert_enabled" | "all_push_enabled">) => {
     if (!settings || patientId == null) return;
@@ -64,9 +100,56 @@ export default function Notification() {
       <main className="max-w-xl mx-auto px-6 sm:px-8 py-10">
         <PatientContextBanner />
         <h1 className="text-[26px] font-black text-[#1E1A17] mb-1">알림 설정</h1>
-        <p className="text-[14px] text-[#8A7E75] mb-7">받고 싶은 알림을 선택하세요.</p>
+        <p className="text-[14px] text-[#6E6259] mb-7">받고 싶은 알림을 선택하세요.</p>
 
-        {loading && <p className="text-[14px] text-[#8A7E75]"><LoadingDots /></p>}
+        <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-5 flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-start gap-3 min-w-[200px]">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${C.terracotta}18` }}>
+              <BellRing className="w-4.5 h-4.5" style={{ color: C.terracotta }} />
+            </div>
+            <div>
+              <p className="text-[16px] font-bold text-[#1E1A17] mb-1">이 기기로 알림 받기</p>
+              <p className="text-[14px] text-[#6E6259]">
+                {pushSubscribed === null
+                  ? "확인 중..."
+                  : !isPushSupported()
+                    ? "이 브라우저는 지원하지 않아요."
+                    : pushSubscribed
+                      ? "지금 이 기기로 알림을 받고 있어요."
+                      : "복약 시간, 놓친 약, 연결 소식을 이 기기로 바로 받아보세요."}
+              </p>
+              {pushError && <p className="text-[13px] mt-1" style={{ color: C.danger }}>{pushError}</p>}
+            </div>
+          </div>
+          {isPushSupported() && (
+            <button
+              onClick={togglePush}
+              disabled={pushSubscribed === null || pushWorking}
+              className="px-5 py-2.5 rounded-full font-bold text-[13px] shrink-0 disabled:opacity-50"
+              style={
+                pushSubscribed
+                  ? { background: "transparent", border: "1.5px solid rgba(30,26,23,0.15)", color: C.muted }
+                  : { background: C.terracotta, color: C.white }
+              }
+            >
+              {pushWorking ? "처리 중..." : pushSubscribed ? "끄기" : "알림 받기"}
+            </button>
+          )}
+        </div>
+
+        {loading && (
+          <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl p-6">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center justify-between py-5 border-b border-[#F4F0EA] last:border-0">
+                <div className="flex-1 pr-4">
+                  <Skeleton className="h-4 w-24 mb-2" />
+                  <Skeleton className="h-3 w-48" />
+                </div>
+                <Skeleton className="w-12 h-6 rounded-full shrink-0" />
+              </div>
+            ))}
+          </div>
+        )}
         {error && <p className="text-[13px] text-[#D94F4F] mb-4">{error}</p>}
 
         {settings && (
@@ -75,7 +158,7 @@ export default function Notification() {
               <div key={key} className="flex items-start justify-between py-5 border-b border-[#F4F0EA] last:border-0">
                 <div className="flex-1 pr-4">
                   <p className="text-[16px] font-bold text-[#1E1A17] mb-1">{label}</p>
-                  <p className="text-[14px] text-[#8A7E75]">{desc}</p>
+                  <p className="text-[14px] text-[#6E6259]">{desc}</p>
                 </div>
                 <Toggle on={settings[key]} onChange={() => toggle(key)} disabled={savingKey === key} />
               </div>

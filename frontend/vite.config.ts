@@ -10,9 +10,23 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      // skipWaiting/clientsClaim 없으면 새 배포분이 서비스워커 "waiting" 상태로 멈춰서
-      // 탭을 전부 닫기 전까진 캐시된 옛날 빌드가 계속 보인다 — 새로고침만으로 최신 반영되게 함.
-      workbox: { skipWaiting: true, clientsClaim: true },
+      // [2026-07-28 추가] Web Push(알림 클릭 시 특정 화면 열기)를 받으려면 서비스워커에
+      // push/notificationclick 핸들러가 있어야 하는데, 기본 generateSW 전략은 캐싱 코드만
+      // 자동 생성하고 커스텀 이벤트 리스너를 못 끼워넣는다 — src/sw.ts를 직접 작성하고
+      // injectManifest 전략으로 그 프리캐시 목록만 주입받는 방식으로 바꿨다.
+      // skipWaiting/clientsClaim은 이제 sw.ts 안에서 직접 처리한다(이 옵션은 generateSW 전용).
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
+      injectManifest: {
+        // 알림 아이콘 등 정적 파일까지 프리캐시 목록에 다 넣을 필요는 없다 — 기본값이면 충분.
+      },
+      devOptions: {
+        // 개발 서버(vite dev)에서도 실제 서비스워커가 등록돼야 로컬에서 push 구독/수신을
+        // 테스트할 수 있다 — 기본값(false)이면 dev 모드에서 서비스워커 자체가 안 뜬다.
+        enabled: true,
+        type: 'module',
+      },
       manifest: {
         name: '건강동행',
         short_name: '건강동행',

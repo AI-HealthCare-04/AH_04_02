@@ -57,3 +57,10 @@
   (2026-07-16, DEV-05)
 - 공유 DB에 스키마 변경을 실제로 적용하기 전 로컬 실행 환경 동기화 여부를 확인하는
   절차는 `docs/shared-dev-db-setup.md` 참고 (2026-07-16, DEV-06)
+
+## 13. 환경변수 변경
+
+- 배포는 `git pull + docker compose up -d --build`만 하고 `.env`는 절대 안 건드린다 —
+  `CORS_ALLOWED_ORIGINS`/`VITE_MONITORING_API_URL` 같은 값이 바뀌면 EC2 서버의 `.env`도
+  직접 갱신해야 한다. 체크리스트는 `docs/env-var-checklist.md` 참고
+  (2026-07-28, 도메인 변경 후 로그인 불가 사고)

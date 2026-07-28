@@ -30,7 +30,7 @@ from core.dependencies import (
     get_current_patient_optional,
     require_actor_patient_access,
 )
-from core.push import vapid_public_key
+from core.push import send_push_to_recipient, vapid_public_key
 from core.relation_notices import create_relation_notice
 from core.security import hash_phone, hash_token, normalize_phone
 from fastapi import APIRouter, Depends, HTTPException
@@ -346,6 +346,12 @@ def _link_caregiver_to_invitation(session: Session, invitation: Invitation, care
             counterpart_name=caregiver.name,
             event="linked",
         )
+        send_push_to_recipient(
+            session, "patient", patient.id,
+            title=f"{caregiver.name}님과 연결됐어요",
+            body="이제 복약 현황을 함께 확인할 수 있어요",
+            url="/connect",
+        )
 
     invitation.status = "accepted"
     invitation.accepted_at = datetime.now()
@@ -368,6 +374,12 @@ def _notify_caregiver_linked(session: Session, caregiver_id: int, patient: Patie
         patient_name=patient.name,
         counterpart_name=patient.name,
         event="linked",
+    )
+    send_push_to_recipient(
+        session, "caregiver", caregiver.id,
+        title=f"{patient.name}님과 연결됐어요",
+        body="이제 복약 현황을 함께 확인할 수 있어요",
+        url="/connect",
     )
 
 

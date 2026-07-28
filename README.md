@@ -87,7 +87,7 @@
 ### 협업 도구
 `Git / GitHub` `Notion` `Discord`
 
-> 3인 소규모 팀 체제로, 별도 배포 인프라(AWS/Docker/Nginx) 없이 로컬 SQLite 기반 동기 처리로 단순화해 운영 중입니다. 배포는 추후 검토 예정입니다.
+> 3인 소규모 팀 체제로, SQLModel 기반 동기 처리로 단순화해 운영 중입니다. 배포(AWS EC2 + GitHub Actions 자동 배포)는 [☁️ 배포](#-배포) 참고.
 
 ---
 
@@ -362,24 +362,16 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 
 ## ☁️ 배포
 
-- **현재 상태**: 로컬 Docker Compose(`docker-compose.yml`)로 backend(8000)/frontend(5173) 컨테이너 기동 확인 완료. **실제 클라우드 배포는 아직 안 함.**
-- **구성**: FastAPI(SQLite, 동기) + React(Vite) 2개 컨테이너뿐 — Redis/PostgreSQL/S3/Nginx 없음
-- **배포 링크**: _아직 없음_
+> [2026-07-28 갱신] 아래 "후보 배포 방식 미검토" 내용은 실제 배포 전에 작성된 초안이 그대로 남아있던 것입니다 — 현재는 EC2 + GitHub Actions로 실제 배포되어 있습니다.
 
-### 배포 시 로컬 개발과 달라지는 점
+- **현재 상태**: `dev` 브랜치에 push되면 `.github/workflows/ci.yml`의 `deploy` job이 SSH로 EC2에 접속해 `git pull origin dev && docker compose up -d --build`를 실행 — **자동 배포됨.**
+- **구성**: FastAPI + React(Vite) 컨테이너 2개(`docker-compose.yml`), DB는 팀 공용 Aiven MySQL(`DATABASE_URL`) — 로컬 개발과 동일한 구성을 그대로 씀
 
-`docker-compose.yml`은 소스를 바인드 마운트하고 `backend/.env`/`rag/.env` 파일을 그대로 읽는 로컬 개발용 구성입니다. 실제 서버(EC2/Render/Railway 등)에 올릴 땐 아래를 반드시 바꿔야 합니다.
+### 배포 시 로컬 개발과 다른 점 — 특히 `.env`
 
-1. **환경변수 주입 방식** — 바인드 마운트된 `.env` 파일 대신, 배포 플랫폼의 환경변수/시크릿 기능으로 `SECRET_KEY`, `PII_ENCRYPTION_KEY`, `PII_HASH_SECRET`, (필요시) `OPENAI_API_KEY`, `DATA_GO_KR_SERVICE_KEY`, `CLOVA_OCR_*`를 주입
-2. **`VITE_MONITORING_API_URL`** — 프론트 빌드 시 `http://localhost:8000` 대신 실제 배포된 백엔드 도메인으로 설정 (`frontend/src/api/monitoringClient.ts` 참고)
-3. **CORS `allow_origins`** — `backend/main.py`에 배포된 프론트 도메인 추가
-4. **`--reload` 제거** — 개발용 Dockerfile은 `uvicorn --reload`를 쓰는데, 운영에서는 빼는 게 안전(코드 변경 시 불필요한 재시작 방지)
-5. **SQLite 파일 영속성** — `backend/app.db`가 컨테이너 안에만 있으면 재배포 시 데이터가 날아감 — 볼륨 마운트 필요
+배포 스텝은 코드만 `git pull`하고 **`.env`는 절대 건드리지 않습니다** (`.gitignore`돼 있어 git에 없음). 즉 EC2의 `backend/.env`는 로컬 `.env`와 별개로, 필요할 때 **직접 SSH로 들어가 손으로** 갱신해야 합니다 — 특히 `CORS_ALLOWED_ORIGINS`(프론트 도메인 추가)나 `VITE_MONITORING_API_URL`(백엔드 도메인) 같은 값이 바뀌었는데 EC2 쪽을 안 고치면 로그인부터 막힙니다. 체크리스트는 [`docs/env-var-checklist.md`](./docs/env-var-checklist.md) 참고.
 
-### 후보 배포 방식 (아직 미결정)
-
-- **가장 간단**: Render/Railway 같은 PaaS에 backend/frontend 각각 서비스로 올리기 (Dockerfile 이미 있어서 바로 사용 가능)
-- **직접 제어**: EC2 1대 + `docker compose up -d` (지금 로컬 구성과 거의 동일하게 유지 가능)
+`VITE_*` 값처럼 프론트 **빌드 시점**에 박히는 값을 바꿨다면, 컨테이너 재시작(`restart`)만으로는 반영되지 않고 재빌드(`up -d --build`)가 필요합니다.
 
 ---
 

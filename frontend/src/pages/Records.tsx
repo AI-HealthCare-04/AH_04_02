@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Search, FileText, ChevronRight, Trash2, Star, CheckSquare, Square } from "lucide-react";
 import NavBar from "../components/NavBar";
-import LoadingDots from "../components/LoadingDots";
+import Skeleton from "../components/Skeleton";
+import EmptyState from "../components/EmptyState";
 import PatientContextBanner from "../components/PatientContextBanner";
 import PrescriptionImageViewer from "../components/PrescriptionImageViewer";
 import { deleteRecord, listRecords, pinRecord, type RecordSummary } from "../api/records";
@@ -211,13 +212,31 @@ export default function Records() {
         {error && <p className="text-[13px] mb-4" style={{ color: "#D94F4F" }}>{error}</p>}
 
         {loading ? (
-          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
-        ) : filtered.length === 0 ? (
-          <div className="rounded-2xl p-10 text-center" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
-            <p className="text-[14px]" style={{ color: C.muted }}>
-              {records.length === 0 ? "아직 업로드한 처방전이 없어요." : "검색 결과가 없어요."}
-            </p>
+          <div className="space-y-4">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="rounded-2xl p-5" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
+                <Skeleton className="h-3 w-20 mb-2" />
+                <Skeleton className="h-5 w-40 mb-4" />
+                <Skeleton className="h-3 w-full mb-4" />
+                <div className="flex gap-2">
+                  <Skeleton className="h-6 w-16 rounded-full" />
+                  <Skeleton className="h-6 w-24 rounded-full" />
+                </div>
+              </div>
+            ))}
           </div>
+        ) : filtered.length === 0 ? (
+          records.length === 0 ? (
+            <EmptyState
+              icon={FileText}
+              title="아직 등록한 처방전이 없어요"
+              description="처방전 사진을 올리면 여기 모아서 볼 수 있어요"
+              actionLabel="+ 처방전 등록하기"
+              onAction={() => navigate("/upload")}
+            />
+          ) : (
+            <EmptyState icon={Search} title="검색 결과가 없어요" description="다른 검색어나 날짜로 찾아보세요" />
+          )
         ) : (
           <div className="space-y-4">
             {filtered.map((r) => {

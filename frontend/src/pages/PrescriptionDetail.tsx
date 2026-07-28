@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, FileText, Pill, TriangleAlert } from "lucide-react";
 import NavBar from "../components/NavBar";
-import LoadingDots from "../components/LoadingDots";
+import Skeleton from "../components/Skeleton";
 import PrescriptionImageViewer from "../components/PrescriptionImageViewer";
 import { getRecord, type RecordResult } from "../api/records";
 import { C } from "../theme";
@@ -57,7 +57,27 @@ export default function PrescriptionDetail() {
         )}
 
         {loading ? (
-          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
+          <>
+            <div className="rounded-3xl p-7 mb-5" style={{ background: "#2C2318" }}>
+              <Skeleton className="h-3 w-24 mb-3" style={{ background: "rgba(255,255,255,0.15)" }} />
+              <Skeleton className="h-6 w-48 mb-4" style={{ background: "rgba(255,255,255,0.15)" }} />
+              <div className="flex gap-2">
+                <Skeleton className="h-6 w-20 rounded-full" style={{ background: "rgba(255,255,255,0.15)" }} />
+                <Skeleton className="h-6 w-20 rounded-full" style={{ background: "rgba(255,255,255,0.15)" }} />
+              </div>
+            </div>
+            <div className="space-y-3 mb-8">
+              {[1, 2].map((i) => (
+                <div key={i} className="rounded-2xl p-5 flex items-start gap-4" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
+                  <Skeleton className="w-11 h-11 shrink-0" />
+                  <div className="flex-1">
+                    <Skeleton className="h-4 w-32 mb-2" />
+                    <Skeleton className="h-3 w-20" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
         ) : error || !result ? (
           <div className="rounded-2xl p-10 text-center" style={{ background: C.surface }}>
             <p className="text-[14px]" style={{ color: "#D94F4F" }}>{error || "기록을 찾을 수 없어요."}</p>
@@ -115,11 +135,15 @@ export default function PrescriptionDetail() {
               className="rounded-xl px-4 py-3 mb-6"
               style={{ background: "#FFF8F4", border: "1px solid #F0E5D8" }}
             >
-              <p className="text-[13px]" style={{ color: C.terracotta }}>⚠️ {STATIC_DISCLAIMER}</p>
+              <p className="flex items-start gap-1.5 text-[13px]" style={{ color: C.terracotta }}>
+                <TriangleAlert className="w-4 h-4 shrink-0 mt-0.5" strokeWidth={2.2} /> {STATIC_DISCLAIMER}
+              </p>
             </div>
 
             {/* 처방 약물 정보 */}
-            <h2 className="text-[16px] font-black mb-4" style={{ color: C.dark }}>📄 처방 약물 정보</h2>
+            <h2 className="flex items-center gap-1.5 text-[16px] font-black mb-4" style={{ color: C.dark }}>
+              <FileText className="w-[18px] h-[18px]" style={{ color: C.terracotta }} strokeWidth={2.2} /> 처방 약물 정보
+            </h2>
             <div className="space-y-3 mb-8">
               {result.medications.map((m) => (
                 <button
@@ -128,7 +152,9 @@ export default function PrescriptionDetail() {
                   className="w-full text-left rounded-2xl p-5 flex items-start gap-4 transition-all hover:shadow-md"
                   style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)", border: "1.5px solid rgba(30,26,23,0.07)" }}
                 >
-                  <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 text-[20px]" style={{ background: `${C.terracotta}12` }}>💊</div>
+                  <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0" style={{ background: C.terracotta }}>
+                    <Pill className="w-5 h-5" style={{ color: C.white }} strokeWidth={2.2} />
+                  </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-1">
                       <p className="font-black text-[15px]" style={{ color: C.dark }}>{m.drug_name}</p>

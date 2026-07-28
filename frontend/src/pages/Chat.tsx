@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { TriangleAlert } from "lucide-react";
 import NavBar from "../components/NavBar";
+import YakkongAvatar from "../components/YakkongAvatar";
 import PatientContextBanner from "../components/PatientContextBanner";
 import { askChatFreeformStream, askChatStream, getChatQuestions, type ChatQuestion } from "../api/chat";
 import { getNotificationSettings } from "../api/care";
@@ -164,12 +166,7 @@ export default function Chat() {
                 <div key={i} className={`flex items-end gap-3 ${m.role === "user" ? "flex-row-reverse" : ""}`}>
                   {m.role === "bot" && (
                     <div className="flex flex-col items-center gap-0.5 shrink-0">
-                      <div
-                        className="w-9 h-9 rounded-full flex items-center justify-center text-[18px]"
-                        style={{ background: `${C.terracotta}12` }}
-                      >
-                        💊
-                      </div>
+                      <YakkongAvatar />
                       <span className="text-[9px] font-bold" style={{ color: C.muted }}>{chatbotName}</span>
                     </div>
                   )}
@@ -247,7 +244,7 @@ export default function Chat() {
         </div>
 
         <div className="shrink-0 rounded-2xl px-5 py-4 flex items-start gap-2.5" style={{ background: C.warningBg, border: `1px solid ${C.warningBorder}` }}>
-          <span className="text-[15px] shrink-0">⚠️</span>
+          <TriangleAlert className="w-[18px] h-[18px] shrink-0" style={{ color: C.warningText }} strokeWidth={2.2} />
           <span className="text-[13px] leading-relaxed" style={{ color: C.warningText }}>
             챗봇 답변은 AI가 생성한 참고용 정보입니다. 정확한 복약 지도는 담당 의사 또는 약사에게 확인하세요.
           </span>

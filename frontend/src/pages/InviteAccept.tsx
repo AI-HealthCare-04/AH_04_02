@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Heart, Check, X } from "lucide-react";
+import { AlertTriangle, Check, Clock, FileText, Heart, X } from "lucide-react";
 import NavBar from "../components/NavBar";
-import LoadingDots from "../components/LoadingDots";
+import Skeleton from "../components/Skeleton";
 import { acceptInvitation, getInvitation, rejectInvitation, type InvitationInfo } from "../api/care";
 import { getPatients, type Patient } from "../api/monitoring";
 import { getCurrentCaregiverId, getCurrentUserName, isLoggedIn } from "../lib/session";
@@ -178,7 +178,12 @@ export default function InviteAccept() {
       <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <div className="flex-1 flex items-center justify-center px-6 py-16">
         {loading ? (
-          <p className="text-[14px] text-[#8A7E75]"><LoadingDots /></p>
+          <div className="rounded-3xl p-8 sm:p-10 w-full max-w-md bg-[#F9F4EB] shadow-lg text-center">
+            <Skeleton className="w-16 h-16 rounded-2xl mx-auto mb-6" />
+            <Skeleton className="h-6 w-40 mx-auto mb-2" />
+            <Skeleton className="h-7 w-56 mx-auto mb-7" />
+            <Skeleton className="h-24 w-full" />
+          </div>
         ) : error && !invite ? (
           <div className="rounded-3xl p-10 w-full max-w-md text-center bg-[#F9F4EB] shadow-lg">
             <p className="text-[15px] text-[#D94F4F]">{error}</p>
@@ -209,12 +214,31 @@ export default function InviteAccept() {
                 : "언제든지 다시 초대받을 수 있어요."}
             </p>
             {decided === "accepted" && (
-              <button
-                onClick={() => navigate("/dashboard")}
-                className="w-full py-3.5 rounded-full text-white font-bold text-[15px] bg-[#C1653D]"
-              >
-                대시보드로 이동
-              </button>
+              <>
+                <div className="rounded-2xl p-5 mb-6 bg-[#F4F0EA] text-left">
+                  <p className="text-[12px] font-bold text-[#8A7E75] mb-3">공유되는 정보</p>
+                  <div className="space-y-2.5">
+                    <div className="flex items-center gap-2.5">
+                      <Clock className="w-4 h-4 text-[#C1653D]" />
+                      <span className="text-[13.5px] text-[#1E1A17]">오늘의 복약 현황</span>
+                    </div>
+                    <div className="flex items-center gap-2.5">
+                      <FileText className="w-4 h-4 text-[#C1653D]" />
+                      <span className="text-[13.5px] text-[#1E1A17]">복용 기록·통계</span>
+                    </div>
+                    <div className="flex items-center gap-2.5">
+                      <AlertTriangle className="w-4 h-4 text-[#D94F4F]" />
+                      <span className="text-[13.5px] text-[#1E1A17]">놓친 약 알림</span>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => navigate("/dashboard")}
+                  className="w-full py-3.5 rounded-full text-white font-bold text-[15px] bg-[#C1653D]"
+                >
+                  대시보드로 이동
+                </button>
+              </>
             )}
           </div>
         ) : (
@@ -277,7 +301,10 @@ export default function InviteAccept() {
                 useExistingPatient ? (
                   <div className="rounded-2xl p-5 mb-5 bg-[#F4F0EA] text-left space-y-2.5">
                     {!ownPatient ? (
-                      <p className="text-[13px] text-[#8A7E75]"><LoadingDots label="내 계정 정보를 불러오는 중이에요" /></p>
+                      <>
+                        <div className="flex justify-between"><Skeleton className="h-4 w-10" /><Skeleton className="h-4 w-20" /></div>
+                        <div className="flex justify-between"><Skeleton className="h-4 w-10" /><Skeleton className="h-4 w-24" /></div>
+                      </>
                     ) : (
                       <>
                         <div className="flex justify-between text-[13px]">

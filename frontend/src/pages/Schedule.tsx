@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CheckSquare, Plus, Square, X } from "lucide-react";
 import NavBar from "../components/NavBar";
-import LoadingDots from "../components/LoadingDots";
+import Skeleton from "../components/Skeleton";
 import PatientContextBanner from "../components/PatientContextBanner";
 import {
   createSchedule,
@@ -299,7 +299,7 @@ export default function SchedulePage() {
         <div className="flex items-center justify-between mb-7 flex-wrap gap-3">
           <div>
             <h1 className="text-[26px] font-black text-[#1E1A17]">복약 일정</h1>
-            <p className="text-[14px] text-[#8A7E75] mt-1">복용 시간대를 등록하고 관리하세요.</p>
+            <p className="text-[14px] text-[#6E6259] mt-1">복용 시간대를 등록하고 관리하세요.</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {groups.length > 0 && (
@@ -342,7 +342,7 @@ export default function SchedulePage() {
         {!loading && !patientValid && (
           <div className="mb-5 p-4 rounded-xl" style={{ background: `${C.danger}12`, border: `1px solid ${C.danger}35` }}>
             <p className="text-[14px] font-bold text-[#D94F4F] mb-1">환자 정보를 찾을 수 없어요</p>
-            <p className="text-[13px] text-[#8A7E75] mb-3">
+            <p className="text-[13px] text-[#6E6259] mb-3">
               기존 로그인 정보가 만료되었을 수 있어요 (예: 서버 데이터가 초기화됨). 다시 로그인하면 해결돼요.
             </p>
             <button
@@ -356,9 +356,17 @@ export default function SchedulePage() {
 
         <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden">
           {loading ? (
-            <p className="px-6 py-8 text-center text-[14px] text-[#8A7E75]"><LoadingDots /></p>
+            <div className="p-6 space-y-5">
+              {[1, 2].map((i) => (
+                <div key={i}>
+                  <Skeleton className="h-5 w-40 mb-2" />
+                  <Skeleton className="h-4 w-20 mb-3" />
+                  <Skeleton className="h-10 w-full" />
+                </div>
+              ))}
+            </div>
           ) : groups.length === 0 ? (
-            <p className="px-6 py-10 text-center text-[14px] text-[#8A7E75]">등록된 일정이 없어요.</p>
+            <p className="px-6 py-10 text-center text-[14px] text-[#6E6259]">등록된 일정이 없어요.</p>
           ) : (
             groups.map((g) => {
               const selected = selectedDrugs.has(g.drugName);
@@ -407,7 +415,7 @@ export default function SchedulePage() {
                         </span>
                       ))}
                     </div>
-                    <p className="text-[13px] text-[#8A7E75] mt-1">
+                    <p className="text-[13px] text-[#6E6259] mt-1">
                       {Array.from(new Set(g.entries.map((e) => e.doseTiming).filter(Boolean))).join(" · ") || "-"}
                     </p>
                   </div>
@@ -415,7 +423,7 @@ export default function SchedulePage() {
                 {!selectMode && (
                   <div className="flex items-center gap-5 shrink-0">
                     <div className="text-center max-w-[140px]">
-                      <p className="text-[11px] text-[#8A7E75] mb-1">알림 받을 사람</p>
+                      <p className="text-[11px] text-[#6E6259] mb-1">알림 받을 사람</p>
                       <button
                         type="button"
                         onClick={() => openEditModal(g)}
@@ -432,7 +440,7 @@ export default function SchedulePage() {
                       </button>
                     </div>
                     <div className="text-center">
-                      <p className="text-[11px] text-[#8A7E75] mb-1">사용 여부</p>
+                      <p className="text-[11px] text-[#6E6259] mb-1">사용 여부</p>
                       <Toggle on={g.active} onClick={() => toggleGroupActive(g)} />
                     </div>
                     <button
@@ -443,7 +451,7 @@ export default function SchedulePage() {
                     </button>
                     <button
                       onClick={() => removeGroup(g)}
-                      className="w-8 h-8 rounded-full flex items-center justify-center text-[#8A7E75] hover:bg-[rgba(30,26,23,0.05)]"
+                      className="w-8 h-8 rounded-full flex items-center justify-center text-[#6E6259] hover:bg-[rgba(30,26,23,0.05)]"
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -470,7 +478,7 @@ export default function SchedulePage() {
               {editingDrug ? "일정 수정" : "새 일정 추가"}
             </h3>
 
-            <label className="block text-[12px] font-bold text-[#8A7E75] uppercase tracking-wide mb-2">
+            <label className="block text-[12px] font-bold text-[#6E6259] uppercase tracking-wide mb-2">
               약물 선택
             </label>
             {drugMode === "select" ? (
@@ -519,7 +527,7 @@ export default function SchedulePage() {
               </>
             )}
 
-            <label className="block text-[12px] font-bold text-[#8A7E75] uppercase tracking-wide mb-2">
+            <label className="block text-[12px] font-bold text-[#6E6259] uppercase tracking-wide mb-2">
               복용 시간
             </label>
             <div className="space-y-3 mb-2">
@@ -540,7 +548,7 @@ export default function SchedulePage() {
                           value={t12.hour}
                           onChange={(v) => updateEntry(entry.key, { time: from12(t12.period, v, t12.minute) })}
                         />
-                        <span className="text-[15px] font-bold text-[#8A7E75] px-0.5">:</span>
+                        <span className="text-[15px] font-bold text-[#6E6259] px-0.5">:</span>
                         <WheelColumn
                           options={MINUTES_5}
                           value={t12.minute}
@@ -551,7 +559,7 @@ export default function SchedulePage() {
                         <button
                           type="button"
                           onClick={() => removeTimeEntry(entry.key)}
-                          className="w-8 h-8 shrink-0 rounded-full flex items-center justify-center text-[#8A7E75] hover:bg-[rgba(30,26,23,0.05)]"
+                          className="w-8 h-8 shrink-0 rounded-full flex items-center justify-center text-[#6E6259] hover:bg-[rgba(30,26,23,0.05)]"
                         >
                           <X className="w-4 h-4" />
                         </button>
@@ -586,9 +594,9 @@ export default function SchedulePage() {
                 누구에게 보낼지 이름으로 직접 여러 명 고를 수 있다. */}
             <div className="mb-6 p-4 rounded-xl bg-[#F2E8D8]">
               <p className="text-[14px] font-bold text-[#1E1A17] mb-1">알림 받을 사람</p>
-              <p className="text-[12px] text-[#8A7E75] mb-3">복약 시간에 체크한 사람에게도 알림을 보내요.</p>
+              <p className="text-[12px] text-[#6E6259] mb-3">복약 시간에 체크한 사람에게도 알림을 보내요.</p>
               {caregivers.length === 0 ? (
-                <p className="text-[13px] text-[#8A7E75]">아직 연결된 보호자가 없어요.</p>
+                <p className="text-[13px] text-[#6E6259]">아직 연결된 보호자가 없어요.</p>
               ) : (
                 <div className="space-y-2">
                   {caregivers.map((c) => (

@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Clock, FileText } from "lucide-react";
 import NavBar from "../components/NavBar";
-import LoadingDots from "../components/LoadingDots";
+import Skeleton from "../components/Skeleton";
 import PatientContextBanner from "../components/PatientContextBanner";
 import {
   getPatientCaregivers,
@@ -18,6 +19,11 @@ import { C } from "../theme";
 export default function Dashboard() {
   const navigate = useNavigate();
   const patientId = useGuardedPatientId();
+  // [2026-07-28 추가] 복약 시간/놓침 푸시 알림이 이 화면을 "?highlight=<scheduleId>"로 열어서
+  // 어떤 약 때문에 알림이 왔는지 카드를 강조 표시한다 (core/scheduler.py의 push url 참고).
+  const [searchParams] = useSearchParams();
+  const highlightId = searchParams.get("highlight");
+  const highlightRef = useRef<HTMLDivElement | null>(null);
   const [meds, setMeds] = useState<Medication[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -79,6 +85,12 @@ export default function Dashboard() {
   const today = new Date();
   const dateLabel = `${today.getFullYear()}년 ${today.getMonth() + 1}월 ${today.getDate()}일 (${"일월화수목금토"[today.getDay()]})`;
 
+  useEffect(() => {
+    if (highlightId && highlightRef.current) {
+      highlightRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [highlightId, meds]);
+
   // [2026-07-21 추가] 시간대별로 묶어서 보여줌 — "이 시간에 뭘 먹어야 하는지" 한눈에 보이게.
   // 백엔드(/monitoring/today)가 이미 time_slot 순으로 정렬해서 내려주므로 그 순서 그대로 묶기만 함.
   const medGroups: [string, Medication[]][] = [];
@@ -129,7 +141,26 @@ export default function Dashboard() {
 
         <h2 className="text-lg font-extrabold mb-4" style={{ color: C.dark }}>오늘의 복약</h2>
 
-        {loading && <p className="text-sm mb-4" style={{ color: C.muted }}><LoadingDots /></p>}
+        {loading && (
+          <div className="flex flex-col gap-4 mb-8">
+            {[1, 2].map((i) => (
+              <div key={i} className="rounded-2xl px-5 sm:px-6 py-5 border" style={{ background: C.surface, borderColor: "rgba(30,26,23,0.12)" }}>
+                <div className="flex justify-between mb-4">
+                  <div>
+                    <Skeleton className="h-4 w-32 mb-2" />
+                    <Skeleton className="h-3 w-20" />
+                  </div>
+                  <Skeleton className="h-5 w-14" />
+                </div>
+                <div className="flex gap-2">
+                  <Skeleton className="h-10 flex-1" />
+                  <Skeleton className="h-10 flex-1" />
+                  <Skeleton className="h-10 flex-1" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
         {!loading && error && <p className="text-sm mb-4" style={{ color: C.danger }}>{error}</p>}
         {!loading && !error && meds.length === 0 && (
           <p className="text-sm mb-4" style={{ color: C.muted }}>등록된 복약 일정이 없어요.</p>
@@ -140,8 +171,27 @@ export default function Dashboard() {
             <div key={time}>
               <p className="text-[13px] font-bold mb-2.5" style={{ color: C.terracotta }}>{time}</p>
               <div className="flex flex-col gap-4">
-                {group.map((med) => (
-            <div key={med.id} className="rounded-2xl px-5 sm:px-6 py-5 border" style={{ background: C.surface, borderColor: "rgba(30,26,23,0.12)" }}>
+                {group.map((med) => {
+                  const highlighted = med.id === highlightId;
+                  return (
+            <div
+              key={med.id}
+              ref={highlighted ? highlightRef : undefined}
+              className="rounded-2xl px-5 sm:px-6 py-5 border"
+              style={{
+                background: C.surface,
+                borderColor: highlighted ? C.terracottaLight : "rgba(30,26,23,0.12)",
+                boxShadow: highlighted ? `0 0 0 2.5px ${C.terracottaLight}` : undefined,
+              }}
+            >
+              {highlighted && (
+                <span
+                  className="inline-flex items-center gap-1 text-[11px] font-bold rounded-full px-2.5 py-1 mb-3"
+                  style={{ background: `${C.terracotta}14`, color: C.terracotta }}
+                >
+                  <Clock className="w-3 h-3" /> 방금 알림 온 약
+                </span>
+              )}
               <div className="flex justify-between mb-4">
                 <div>
                   <p className="text-[17px] font-bold mb-1" style={{ color: C.dark }}>{med.name}</p>
@@ -190,7 +240,8 @@ export default function Dashboard() {
                 })}
               </div>
             </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ))}
@@ -212,7 +263,9 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
             {recentRecords.map((r) => (
               <div key={r.record_id} className="rounded-2xl p-5 border" style={{ background: C.surface, borderColor: "rgba(30,26,23,0.12)" }}>
-                <div className="text-xl mb-3">📄</div>
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center mb-3" style={{ background: C.terracotta }}>
+                  <FileText className="w-4 h-4" style={{ color: C.white }} strokeWidth={2.2} />
+                </div>
                 <p className="text-sm font-bold mb-5 min-h-10" style={{ color: C.dark }}>{r.diagnosis || "복약 가이드"}</p>
                 <div className="flex justify-between items-center">
                   <span className="text-xs" style={{ color: C.muted }}>생성일 {new Date(r.created_at).toLocaleDateString("ko-KR")}</span>

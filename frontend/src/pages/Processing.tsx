@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { TriangleAlert } from "lucide-react";
 import NavBar from "../components/NavBar";
+import yakkongMascot from "../assets/yakkong-mascot.png";
 import { createRecord } from "../api/records";
 import { C } from "../theme";
 import { getCurrentUserName, isLoggedIn } from "../lib/session";
@@ -71,7 +73,7 @@ export default function Processing() {
           className="w-full border rounded-[20px] p-7 sm:px-10 sm:py-12 text-center"
           style={{ background: C.white, borderColor: "rgba(30,26,23,0.12)" }}
         >
-          <div className="text-4xl sm:text-5xl mb-4 sm:mb-5">⏳</div>
+          <img src={yakkongMascot} alt="" className="w-16 h-16 sm:w-20 sm:h-20 mx-auto mb-4 sm:mb-5" />
           <h1 className="text-[22px] sm:text-[26px] font-bold mb-2 sm:mb-2.5" style={{ color: C.dark }}>분석을 시작할게요</h1>
           <p className="text-[14px] sm:text-[15px] mb-8 sm:mb-10" style={{ color: C.muted }}>잠시만 기다려 주세요. 보통 10초 이내에 완료돼요.</p>
 
@@ -118,8 +120,8 @@ export default function Processing() {
           </div>
 
           <div className="rounded-[10px] px-4 py-3" style={{ background: `${C.terracotta}10`, border: `1px solid ${C.terracotta}25` }}>
-            <p className="text-[13px] leading-relaxed" style={{ color: C.terracotta }}>
-              ⚠️ 이 정보는 AI가 생성한 참고용 안내입니다. 정확한 복약 지도는 담당 의사 또는 약사에게 확인하세요.
+            <p className="flex items-start gap-1.5 text-[13px] leading-relaxed" style={{ color: C.terracotta }}>
+              <TriangleAlert className="w-4 h-4 shrink-0 mt-0.5" strokeWidth={2.2} /> 이 정보는 AI가 생성한 참고용 안내입니다. 정확한 복약 지도는 담당 의사 또는 약사에게 확인하세요.
             </p>
           </div>
         </div>
