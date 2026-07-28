@@ -49,6 +49,9 @@ def _no_real_dur_lookups():
         patch("rag.rag_chain.search_age_taboo", return_value=[]),
         patch("rag.rag_chain.search_pregnancy_taboo", return_value=[]),
         patch("rag.rag_chain.search_kdca_health_info", return_value=[]),
+        # [2026-07-28 추가] _lifestyle_context_items가 title 정확매칭을 먼저 시도하도록
+        # 바뀌면서 이 함수도 실수로 실제 벡터DB를 조회하지 않도록 기본값을 고정해야 한다.
+        patch("rag.rag_chain.search_kdca_health_info_by_title", return_value=[]),
         # [2026-07-14 추가] search_permit_info도 같은 이유로 기본값을 빈 리스트로 고정 —
         # 실제 API를 실수로 호출하지 않도록(HIRA 조회와 동일하게 기존 다수 테스트가
         # search_hira_by_product_name만 mock하고 있어 이것까지 막아둬야 안전함).
