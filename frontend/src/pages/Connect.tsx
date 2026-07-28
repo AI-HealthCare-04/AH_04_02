@@ -73,6 +73,16 @@ function describeRelationNotice(notice: RelationNotice): string {
   }
 }
 
+/** [2026-07-28 버그수정] axios 에러에서 백엔드가 내려준 실제 사유(detail)를 뽑아 표시 —
+ * "지원인력"(organization) 계정처럼 특정 역할 불일치로 초대 수락이 막힐 때 백엔드는
+ * 구체적인 사유("이 초대는 요양보호사로 가입한 계정만 수락할 수 있어요." 등)를 이미
+ * 내려주는데, 지금까지는 그걸 버리고 "초대 수락에 실패했어요"로만 뭉갰다
+ * (Schedule.tsx/InviteAccept.tsx의 describeError와 동일한 패턴). */
+function describeError(e: unknown, fallback: string): string {
+  const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+  return typeof detail === "string" && detail ? detail : fallback;
+}
+
 function extractInviteToken(input: string): string | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
@@ -101,6 +111,11 @@ export default function Connect() {
   const [copied, setCopied] = useState(false);
   const [deletingInvitationId, setDeletingInvitationId] = useState<number | null>(null);
   const [actingInvitationId, setActingInvitationId] = useState<number | null>(null);
+  // [2026-07-28 버그수정] "받은 초대" 수락/거절 실패를 화면 최상단의 공용 error 배너로
+  // 보여주고 있었다 — 목록이 길면 방금 누른 항목과 멀리 떨어져 있어 사용자가 어떤
+  // 항목이 실패했는지 알아채기 어려웠다. 이 항목 근처(클릭한 자리)에 바로 보이도록
+  // invitationId별로 별도 상태를 둔다.
+  const [receivedInviteError, setReceivedInviteError] = useState<{ id: number; message: string } | null>(null);
   const [inviteUrlInput, setInviteUrlInput] = useState("");
   const [inviteUrlError, setInviteUrlError] = useState("");
   // [2026-07-23 추가] "받은 해제 요청" — 기관이 사유를 남기고 연결 해제를 요청하면, 환자
@@ -348,12 +363,12 @@ export default function Connect() {
   const handleAcceptReceived = async (invitationId: number) => {
     if (actingInvitationId !== null) return;
     setActingInvitationId(invitationId);
-    setError("");
+    setReceivedInviteError(null);
     try {
       await acceptInvitationAsCaregiver(invitationId);
       setReceivedInvitations((prev) => prev.filter((inv) => inv.id !== invitationId));
-    } catch {
-      setError("초대 수락에 실패했어요.");
+    } catch (e) {
+      setReceivedInviteError({ id: invitationId, message: describeError(e, "초대 수락에 실패했어요.") });
     } finally {
       setActingInvitationId(null);
     }
@@ -362,12 +377,12 @@ export default function Connect() {
   const handleRejectReceived = async (invitationId: number) => {
     if (actingInvitationId !== null) return;
     setActingInvitationId(invitationId);
-    setError("");
+    setReceivedInviteError(null);
     try {
       await rejectInvitationAsCaregiver(invitationId);
       setReceivedInvitations((prev) => prev.filter((inv) => inv.id !== invitationId));
-    } catch {
-      setError("초대 거절에 실패했어요.");
+    } catch (e) {
+      setReceivedInviteError({ id: invitationId, message: describeError(e, "초대 거절에 실패했어요.") });
     } finally {
       setActingInvitationId(null);
     }
@@ -492,36 +507,43 @@ export default function Connect() {
             {receivedInvitations.length > 0 ? (
               <div className="space-y-2 mb-4">
                 {receivedInvitations.map((inv) => (
-                  <div
-                    key={inv.id}
-                    className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-[#F2E8D8] flex-wrap"
-                  >
-                    <div>
-                      <p className="text-[14px] font-bold text-[#1E1A17]">
-                        {inv.patient_name}님이 {RELATION_LABEL[inv.relation_type as RelationType] ?? inv.relation_type}로 초대했어요
-                      </p>
-                      {inv.expires_at && (
-                        <p className="text-[12px] text-[#8A7E75]">
-                          {new Date(inv.expires_at).toLocaleDateString("ko-KR")}까지 유효
+                  <div key={inv.id} className="rounded-xl bg-[#F2E8D8]">
+                    <div className="flex items-center justify-between gap-3 px-4 py-3 flex-wrap">
+                      <div>
+                        <p className="text-[14px] font-bold text-[#1E1A17]">
+                          {inv.patient_name}님이 {RELATION_LABEL[inv.relation_type as RelationType] ?? inv.relation_type}로 초대했어요
                         </p>
-                      )}
+                        {inv.expires_at && (
+                          <p className="text-[12px] text-[#8A7E75]">
+                            {new Date(inv.expires_at).toLocaleDateString("ko-KR")}까지 유효
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        <button
+                          onClick={() => handleRejectReceived(inv.id)}
+                          disabled={actingInvitationId === inv.id}
+                          className="px-4 py-2 rounded-full text-[13px] font-bold border border-[rgba(30,26,23,0.15)] text-[#1E1A17] disabled:opacity-50"
+                        >
+                          거절
+                        </button>
+                        <button
+                          onClick={() => handleAcceptReceived(inv.id)}
+                          disabled={actingInvitationId === inv.id}
+                          className="px-4 py-2 rounded-full text-[13px] font-bold text-white bg-[#C1653D] disabled:opacity-50"
+                        >
+                          수락
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex gap-2 shrink-0">
-                      <button
-                        onClick={() => handleRejectReceived(inv.id)}
-                        disabled={actingInvitationId === inv.id}
-                        className="px-4 py-2 rounded-full text-[13px] font-bold border border-[rgba(30,26,23,0.15)] text-[#1E1A17] disabled:opacity-50"
-                      >
-                        거절
-                      </button>
-                      <button
-                        onClick={() => handleAcceptReceived(inv.id)}
-                        disabled={actingInvitationId === inv.id}
-                        className="px-4 py-2 rounded-full text-[13px] font-bold text-white bg-[#C1653D] disabled:opacity-50"
-                      >
-                        수락
-                      </button>
-                    </div>
+                    {/* [2026-07-28 버그수정] 화면 최상단 공용 배너 대신, 방금 누른 이 항목
+                        바로 아래에 실패 사유를 보여준다. */}
+                    {receivedInviteError?.id === inv.id && (
+                      <div className="flex items-center gap-2 px-4 pb-3 -mt-1">
+                        <AlertCircle className="w-3.5 h-3.5 text-[#D94F4F] shrink-0" />
+                        <p className="text-[12px] text-[#D94F4F]">{receivedInviteError.message}</p>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

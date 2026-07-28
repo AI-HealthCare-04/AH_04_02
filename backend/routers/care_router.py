@@ -305,6 +305,14 @@ def _reactivate_or_create_link(session: Session, caregiver_id: int, patient_id: 
         session.add(existing_link)
 
 
+# [2026-07-28 버그수정] "지원인력"(organization) 계정은 요양보호사/생활지원사/사회복지사를
+# 두는 기관·단체 계정이라(SignUp.tsx 가입 안내: "요양보호사, 협회, 보건소 등 기관 소속") —
+# 이 셋 중 하나로 온 초대는 대신 수락할 수 있어야 한다. InvitationCreate.relation_type에는
+# 애초에 "organization" 자체가 옵션으로 없어서(개인 관계만 초대 대상), organization 계정은
+# 아래 엄격한 등호 비교만으로는 어떤 초대도 영원히 수락할 수 없는 구조적 결함이 있었다.
+_ORGANIZATION_ACCEPTABLE_RELATION_TYPES = {"caregiver", "life_support_worker", "social_worker"}
+
+
 def _link_caregiver_to_invitation(session: Session, invitation: Invitation, caregiver: Caregiver) -> None:
     """환자→보호자 초대 수락 공통 로직 — 토큰 기반 accept_invitation과 로그인 기반
     accept_invitation_as_caregiver(아래) 양쪽에서 재사용한다.
@@ -314,8 +322,16 @@ def _link_caregiver_to_invitation(session: Session, invitation: Invitation, care
     계정이 "사회복지사" 초대를 그대로 수락해서, 실제 가입한 역할과 다른 자격으로 연결될
     수 있었다. 신규 계정 생성 경로(accept_invitation의 caregiver_id 없는 분기)는 애초에
     invitation.relation_type 그대로 계정을 만들어서 항상 일치하므로 이 체크에 영향받지
-    않는다 — 이미 계정이 있는 사람이 다른 역할의 초대를 그 계정으로 수락하려는 경우만 막는다."""
-    if caregiver.relation_type != invitation.relation_type:
+    않는다 — 이미 계정이 있는 사람이 다른 역할의 초대를 그 계정으로 수락하려는 경우만 막는다.
+
+    [2026-07-28 추가] organization 계정은 위 등호 비교 예외로 둔다 — 개인 역할(요양보호사/
+    생활지원사/사회복지사) 초대까지는 기관 소속으로서 수락할 수 있어야 하지만, "보호자"
+    (가족 관계) 초대는 여전히 막는다(기관이 가족 행세를 할 수는 없음)."""
+    is_compatible = caregiver.relation_type == invitation.relation_type or (
+        caregiver.relation_type == "organization"
+        and invitation.relation_type in _ORGANIZATION_ACCEPTABLE_RELATION_TYPES
+    )
+    if not is_compatible:
         expected = RELATION_TYPE_LABELS.get(invitation.relation_type, invitation.relation_type)
         raise HTTPException(403, f"이 초대는 {expected}로 가입한 계정만 수락할 수 있어요.")
     _reactivate_or_create_link(session, caregiver.id, invitation.patient_id)
