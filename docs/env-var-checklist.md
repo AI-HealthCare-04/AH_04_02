@@ -35,6 +35,10 @@
 - [ ] **DB 관련 값(`DATABASE_URL`, `DATABASE_SSL_REQUIRED`, `DATABASE_SSL_CA`)** — 팀
       공용 Aiven MySQL 자격 정보가 바뀌면 로컬 각자 `.env` + EC2 `.env` 전부 갱신 필요
       (`docs/shared-dev-db-setup.md` 참고).
+- [ ] **⚠️ `PII_ENCRYPTION_KEY` / `PII_HASH_SECRET`** — 절대 임의로 재발급(로테이션)하면
+      안 됩니다. 이 값이 바뀌면 기존에 암호화되어 저장된 개인정보(이름, 전화번호 등)를
+      영영 복호화할 수 없게 됩니다. 서버 인스턴스를 새로 만들거나 재설정할 때는 반드시
+      기존 값을 그대로 가져와서 사용하세요.
 
 ## 반영 후 확인
 
