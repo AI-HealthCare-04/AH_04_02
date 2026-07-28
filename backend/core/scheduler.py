@@ -217,8 +217,12 @@ def _deliver(session: Session, schedule: MedicationSchedule, patient: Patient, k
         for role, recipient_id in _push_targets(session, patient, schedule):
             if recipient_id is None:
                 continue
+            # [2026-07-28] "/schedule"은 일정 관리 화면이라 "먹었어요" 체크를 할 수 없다 —
+            # 실제로 체크할 수 있는 대시보드로 보내고, 어떤 카드 때문에 알림이 왔는지
+            # 강조 표시할 수 있게 schedule.id를 쿼리로 같이 넘긴다.
             attempted = send_push_to_recipient(
-                session, role, recipient_id, title=subject, body=body, url="/schedule"
+                session, role, recipient_id, title=subject, body=body,
+                url=f"/dashboard?highlight={schedule.id}",
             )
             # [2026-07-24] 구독이 없거나 VAPID 키가 없으면 아무 일도 안 했다는 뜻이라
             # channels에 남기지 않는다 — "발송했다"는 로그가 실제로 아무것도 안 보낸

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Heart, Check, X } from "lucide-react";
+import { AlertTriangle, Check, Clock, FileText, Heart, X } from "lucide-react";
 import NavBar from "../components/NavBar";
 import Skeleton from "../components/Skeleton";
 import { acceptInvitation, getInvitation, rejectInvitation, type InvitationInfo } from "../api/care";
@@ -214,12 +214,31 @@ export default function InviteAccept() {
                 : "언제든지 다시 초대받을 수 있어요."}
             </p>
             {decided === "accepted" && (
-              <button
-                onClick={() => navigate("/dashboard")}
-                className="w-full py-3.5 rounded-full text-white font-bold text-[15px] bg-[#C1653D]"
-              >
-                대시보드로 이동
-              </button>
+              <>
+                <div className="rounded-2xl p-5 mb-6 bg-[#F4F0EA] text-left">
+                  <p className="text-[12px] font-bold text-[#8A7E75] mb-3">공유되는 정보</p>
+                  <div className="space-y-2.5">
+                    <div className="flex items-center gap-2.5">
+                      <Clock className="w-4 h-4 text-[#C1653D]" />
+                      <span className="text-[13.5px] text-[#1E1A17]">오늘의 복약 현황</span>
+                    </div>
+                    <div className="flex items-center gap-2.5">
+                      <FileText className="w-4 h-4 text-[#C1653D]" />
+                      <span className="text-[13.5px] text-[#1E1A17]">복용 기록·통계</span>
+                    </div>
+                    <div className="flex items-center gap-2.5">
+                      <AlertTriangle className="w-4 h-4 text-[#D94F4F]" />
+                      <span className="text-[13.5px] text-[#1E1A17]">놓친 약 알림</span>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => navigate("/dashboard")}
+                  className="w-full py-3.5 rounded-full text-white font-bold text-[15px] bg-[#C1653D]"
+                >
+                  대시보드로 이동
+                </button>
+              </>
             )}
           </div>
         ) : (
