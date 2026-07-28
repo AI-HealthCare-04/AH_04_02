@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { AlertCircle, Check, Plus, X } from "lucide-react";
+import { AlertCircle, Check, MessageCircle, Pill, Plus, X } from "lucide-react";
 import NavBar from "../components/NavBar";
-import LoadingDots from "../components/LoadingDots";
+import Skeleton from "../components/Skeleton";
 import PrescriptionImageViewer from "../components/PrescriptionImageViewer";
+import yakkongMascot from "../assets/yakkong-mascot.png";
 import {
   addMedicationItem,
   confirmMedications,
@@ -417,21 +418,14 @@ export default function PrescriptionReview() {
               width: 100,
               height: 100,
               borderRadius: "50%",
-              background: C.ivory,
+              background: C.white,
+              boxShadow: "0 6px 20px rgba(30,26,23,0.12)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
             }}
           >
-            <div
-              className="w-16 h-16 rounded-2xl flex items-center justify-center text-[30px]"
-              style={{
-                background: `linear-gradient(135deg, ${C.terracotta} 0%, #A5522F 100%)`,
-                boxShadow: "0 6px 20px rgba(193,101,61,0.35)",
-              }}
-            >
-              📋
-            </div>
+            <img src={yakkongMascot} alt="" className="w-16 h-16" />
           </div>
         </div>
         <h2 className="text-[22px] font-black mb-2 text-center" style={{ color: C.dark }}>
@@ -493,9 +487,27 @@ export default function PrescriptionReview() {
       <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         {loading ? (
-          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}>
-            <LoadingDots label="처방전 정보를 불러오는 중이에요" />
-          </p>
+          <>
+            <Skeleton className="h-3 w-24 mb-2" />
+            <Skeleton className="h-7 w-48 mb-6" />
+            <div className="space-y-4">
+              {[1, 2].map((i) => (
+                <div key={i} className="rounded-2xl overflow-hidden" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
+                  <div className="px-6 py-4" style={{ background: C.surface }}>
+                    <Skeleton className="h-4 w-32" />
+                  </div>
+                  <div className="p-6 grid grid-cols-2 gap-4">
+                    {[1, 2, 3, 4].map((j) => (
+                      <div key={j}>
+                        <Skeleton className="h-3 w-12 mb-1.5" />
+                        <Skeleton className="h-9 w-full" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
         ) : !record ? (
           <p className="text-center py-16 text-[14px]" style={{ color: "#D94F4F" }}>{error || "기록을 찾을 수 없어요."}</p>
         ) : record.status === "completed" && record.medications.some((m) => m.field_flags.length > 0) ? (
@@ -533,7 +545,9 @@ export default function PrescriptionReview() {
                   {record.medications.map((m) => (
                     <div key={m.id} className="rounded-2xl overflow-hidden" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
                       <div className="px-6 py-4" style={{ background: C.surface }}>
-                        <p className="font-black text-[15px]" style={{ color: C.dark }}>💊 {m.drug_name}</p>
+                        <p className="flex items-center gap-1.5 font-black text-[15px]" style={{ color: C.dark }}>
+                          <Pill className="w-4 h-4" style={{ color: C.terracotta }} strokeWidth={2.2} /> {m.drug_name}
+                        </p>
                       </div>
                       <div className="p-6 grid grid-cols-2 gap-4">
                         {FIELDS.map(({ key, label }) => {
@@ -958,10 +972,10 @@ export default function PrescriptionReview() {
                         {record.guide && (
                           <button
                             onClick={() => navigate("/chat", { state: { diagnosis: record.guide!.lifestyle_guide.diagnosis } })}
-                            className="shrink-0 px-4 py-2.5 rounded-full text-white font-bold text-[13px] hover:opacity-88 transition-all whitespace-nowrap"
+                            className="shrink-0 px-4 py-2.5 rounded-full text-white font-bold text-[13px] hover:opacity-88 transition-all whitespace-nowrap flex items-center gap-1.5"
                             style={{ background: C.terracotta }}
                           >
-                            챗봇에게 물어보기 💬
+                            <MessageCircle className="w-4 h-4" strokeWidth={2.2} /> 챗봇에게 물어보기
                           </button>
                         )}
                       </div>
@@ -1019,10 +1033,10 @@ export default function PrescriptionReview() {
         >
           <div className="rounded-3xl p-8 w-full max-w-md" style={{ background: C.surface }} onClick={(e) => e.stopPropagation()}>
             <div
-              className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-5 text-[28px]"
-              style={{ background: `${C.success}15` }}
+              className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-5"
+              style={{ background: C.success }}
             >
-              ✅
+              <Check className="w-7 h-7 text-white" strokeWidth={3} />
             </div>
             <h3 className="text-[20px] font-black text-center mb-2" style={{ color: C.dark }}>한 번 더 확인해주세요</h3>
             <p className="text-[14px] text-center mb-6" style={{ color: C.muted }}>

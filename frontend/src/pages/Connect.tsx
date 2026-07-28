@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { User, AlertCircle, RotateCw, Trash2 } from "lucide-react";
 import NavBar from "../components/NavBar";
-import LoadingDots from "../components/LoadingDots";
+import Skeleton from "../components/Skeleton";
 import InvitePatientPanel from "../components/InvitePatientPanel";
 import {
   acceptInvitationAsCaregiver,
@@ -121,6 +121,10 @@ export default function Connect() {
   const [myCaregiver, setMyCaregiver] = useState<Caregiver | null>(null);
   const [deletingSentInvitationId, setDeletingSentInvitationId] = useState<number | null>(null);
   const [unlinkingPatientId, setUnlinkingPatientId] = useState<number | null>(null);
+  // [2026-07-27 추가] 초대수락/초대하기/대기중/연결됨이 전부 세로로 이어져 스크롤이
+  // 길어지던 문제 — 배치만 탭 3개로 나눈다. 데이터·API 호출 로직은 그대로.
+  const [activeTab, setActiveTab] = useState<"invite" | "pending" | "connected">("invite");
+  const emptyIconClipId = useId();
 
   const loadCaregiverSideData = async () => {
     if (caregiverId == null) return;
@@ -387,7 +391,7 @@ export default function Connect() {
       <NavBar isLoggedIn userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <h1 className="text-[26px] font-black text-[#1E1A17] mb-1">연결관리</h1>
-        <p className="text-[14px] text-[#8A7E75] mb-7">복약 관리를 함께할 사람을 초대하고 관리하세요.</p>
+        <p className="text-[14px] text-[#6E6259] mb-7">복약 관리를 함께할 사람을 초대하고 관리하세요.</p>
 
         {error && (
           <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-[#D94F4F]/8 border border-[#D94F4F]/20 mb-5">
@@ -408,7 +412,7 @@ export default function Connect() {
                     <p className="text-[14px] font-bold text-[#1E1A17]">
                       {describeRelationNotice(notice)}
                     </p>
-                    <p className="text-[12px] text-[#8A7E75] mt-1">
+                    <p className="text-[12px] text-[#6E6259] mt-1">
                       {new Date(notice.created_at).toLocaleDateString("ko-KR")}
                     </p>
                   </div>
@@ -430,7 +434,7 @@ export default function Connect() {
         {pendingRevocations.length > 0 && (
           <div className="bg-[#F9F4EB] border border-[#D94F4F]/25 rounded-2xl p-6 mb-6">
             <h2 className="text-[16px] font-black text-[#1E1A17] mb-1">받은 해제 요청</h2>
-            <p className="text-[13px] text-[#8A7E75] mb-4">
+            <p className="text-[13px] text-[#6E6259] mb-4">
               연결을 끊으려는 사유를 확인하고 승인하거나 거부하세요. 2주 안에 응답하지 않으면 요청자가 직접 확정할 수 있어요.
             </p>
             <div className="space-y-3">
@@ -440,10 +444,10 @@ export default function Connect() {
                     {rev.caregiver_name}님이 {rev.patient_name}님과의 연결을 끊으려고 해요
                   </p>
                   {rev.reason && (
-                    <p className="text-[13px] text-[#8A7E75] mt-1">사유: {rev.reason}</p>
+                    <p className="text-[13px] text-[#6E6259] mt-1">사유: {rev.reason}</p>
                   )}
                   {rev.deadline && (
-                    <p className="text-[12px] text-[#8A7E75] mt-1">
+                    <p className="text-[12px] text-[#6E6259] mt-1">
                       {new Date(rev.deadline).toLocaleDateString("ko-KR")}까지 응답하지 않으면 자동으로 처리돼요.
                     </p>
                   )}
@@ -469,8 +473,34 @@ export default function Connect() {
           </div>
         )}
 
+        {/* [2026-07-27 추가] 세그먼트 탭 — 아래 섹션들은 이 탭 값에 따라 나눠서 보인다 */}
+        <div className="flex gap-1.5 p-1.5 rounded-full bg-[#F9F4EB] mb-6">
+          {(caregiverId != null
+            ? [
+                { key: "invite" as const, label: "환자 초대" },
+                { key: "pending" as const, label: `초대중 · ${sentInvitations.length}` },
+                { key: "connected" as const, label: `연결됨 · ${connectedPatients.length}` },
+              ]
+            : [
+                { key: "invite" as const, label: "초대하기" },
+                { key: "pending" as const, label: `대기중 · ${invitations.length}` },
+                { key: "connected" as const, label: `연결됨 · ${caregivers.length}` },
+              ]
+          ).map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex-1 py-2.5 rounded-full text-[13px] font-bold transition-colors ${
+                activeTab === tab.key ? "bg-[#C1653D] text-white" : "text-[#6E6259]"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
         {/* 환자 연결하기 (보호자류 로그인일 때만) */}
-        {caregiverId != null && (
+        {caregiverId != null && activeTab === "invite" && (
           <div className="mb-6">
             <InvitePatientPanel
               caregiverId={caregiverId}
@@ -482,10 +512,10 @@ export default function Connect() {
           </div>
         )}
 
-        {caregiverId != null && (
+        {caregiverId != null && activeTab === "invite" && (
           <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
             <h2 className="text-[16px] font-black text-[#1E1A17] mb-1">받은 초대</h2>
-            <p className="text-[13px] text-[#8A7E75] mb-4">
+            <p className="text-[13px] text-[#6E6259] mb-4">
               환자가 전화번호로 보낸 초대는 여기에서 바로 수락하거나 거절할 수 있어요.
             </p>
 
@@ -501,7 +531,7 @@ export default function Connect() {
                         {inv.patient_name}님이 {RELATION_LABEL[inv.relation_type as RelationType] ?? inv.relation_type}로 초대했어요
                       </p>
                       {inv.expires_at && (
-                        <p className="text-[12px] text-[#8A7E75]">
+                        <p className="text-[12px] text-[#6E6259]">
                           {new Date(inv.expires_at).toLocaleDateString("ko-KR")}까지 유효
                         </p>
                       )}
@@ -526,7 +556,7 @@ export default function Connect() {
                 ))}
               </div>
             ) : (
-              <p className="px-4 py-4 rounded-xl bg-[#F2E8D8] text-[14px] text-[#8A7E75] mb-4">
+              <p className="px-4 py-4 rounded-xl bg-[#F2E8D8] text-[14px] text-[#6E6259] mb-4">
                 아직 받은 초대가 없어요.
               </p>
             )}
@@ -555,18 +585,21 @@ export default function Connect() {
         )}
 
         {/* [2026-07-23 추가] 초대중인 내역 — 내가(보호자/기관) 보낸 환자 초대 중 대기중인 것 */}
-        {caregiverId != null && sentInvitations.length > 0 && (
+        {caregiverId != null && activeTab === "pending" && (
           <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden mb-6">
             <div className="px-6 py-4 border-b border-[rgba(30,26,23,0.06)]">
               <h2 className="text-[15px] font-black text-[#1E1A17]">초대중인 내역 ({sentInvitations.length}건)</h2>
             </div>
+            {sentInvitations.length === 0 && (
+              <p className="px-6 py-8 text-center text-[14px] text-[#6E6259]">대기중인 초대가 없어요.</p>
+            )}
             {sentInvitations.map((inv) => (
               <div key={inv.id} className="flex items-center justify-between px-6 py-3.5 border-b border-[#F4F0EA] last:border-0">
                 <span className="text-[14px] text-[#1E1A17]">
                   환자 초대{inv.invited_phone ? ` · ${inv.invited_phone}` : ""}
                 </span>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="px-3 py-1 rounded-full text-[12px] font-bold bg-[#F4F0EA] text-[#8A7E75]">대기중</span>
+                  <span className="px-3 py-1 rounded-full text-[12px] font-bold bg-[#F4F0EA] text-[#6E6259]">대기중</span>
                   <button
                     onClick={() => handleDeleteSentInvitation(inv.id)}
                     disabled={deletingSentInvitationId === inv.id}
@@ -583,15 +616,28 @@ export default function Connect() {
         )}
 
         {/* [2026-07-23 추가] 연결된 환자 리스트 — 이 계정이 케어하는 환자 전체 */}
-        {caregiverId != null && (
+        {caregiverId != null && activeTab === "connected" && (
           <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden mb-6">
             <div className="px-6 py-4 border-b border-[rgba(30,26,23,0.06)]">
               <h2 className="text-[15px] font-black text-[#1E1A17]">연결된 환자 ({connectedPatients.length}명)</h2>
             </div>
             {connectedPatients.length === 0 ? (
               <div className="py-14 text-center">
-                <User className="w-9 h-9 mx-auto mb-3 text-[#8A7E75] opacity-30" />
-                <p className="text-[14px] text-[#8A7E75]">아직 연결된 환자가 없어요</p>
+                <div className="w-12 h-12 mx-auto mb-3 relative flex items-center justify-center">
+                  <svg viewBox="0 0 48 48" className="absolute inset-0 w-full h-full">
+                    <defs>
+                      <clipPath id={`${emptyIconClipId}-patients`}>
+                        <circle cx="24" cy="24" r="23" />
+                      </clipPath>
+                    </defs>
+                    <circle cx="24" cy="24" r="23" fill="#8FAE5C" stroke="#1E1A17" strokeWidth="1.4" />
+                    <g clipPath={`url(#${emptyIconClipId}-patients)`}>
+                      <rect x="0" y="0" width="30" height="48" fill="#C8DA6F" transform="rotate(-36 17 24)" />
+                    </g>
+                  </svg>
+                  <User className="w-6 h-6 relative text-white" strokeWidth={2.2} />
+                </div>
+                <p className="text-[14px] text-[#6E6259]">아직 연결된 환자가 없어요</p>
               </div>
             ) : (
               connectedPatients.map((p) => (
@@ -611,11 +657,11 @@ export default function Connect() {
         )}
 
         {/* 보호자·지원인력 초대하기 (환자 로그인일 때만) */}
-        {caregiverId == null && patientId != null && (
+        {caregiverId == null && patientId != null && activeTab === "invite" && (
           <>
             <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
               <h2 className="text-[16px] font-black text-[#1E1A17] mb-1">받은 초대 수락하기</h2>
-              <p className="text-[13px] text-[#8A7E75] mb-4">
+              <p className="text-[13px] text-[#6E6259] mb-4">
                 보호자나 지원인력에게 받은 초대 링크 또는 코드를 입력하세요.
               </p>
               <div className="flex gap-2 flex-wrap">
@@ -642,7 +688,7 @@ export default function Connect() {
 
             <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
               <h2 className="text-[16px] font-black text-[#1E1A17] mb-1">보호자·지원인력 초대하기</h2>
-              <p className="text-[13px] text-[#8A7E75] mb-4">
+              <p className="text-[13px] text-[#6E6259] mb-4">
                 함께 복약을 확인할 사람에게 초대 링크를 보내세요.
               </p>
 
@@ -654,7 +700,7 @@ export default function Connect() {
                     className={`py-2.5 rounded-xl text-[13px] font-bold border transition-all ${
                       relationType === type
                         ? "border-[#C1653D] bg-[#C1653D]/10 text-[#C1653D]"
-                        : "border-[rgba(30,26,23,0.12)] bg-[#F2E8D8] text-[#8A7E75]"
+                        : "border-[rgba(30,26,23,0.12)] bg-[#F2E8D8] text-[#6E6259]"
                     }`}
                   >
                     {RELATION_LABEL[type]}
@@ -703,11 +749,14 @@ export default function Connect() {
         )}
 
         {/* 대기중인 초대 */}
-        {caregiverId == null && invitations.length > 0 && (
+        {caregiverId == null && activeTab === "pending" && (
           <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden mb-6">
             <div className="px-6 py-4 border-b border-[rgba(30,26,23,0.06)]">
               <h2 className="text-[15px] font-black text-[#1E1A17]">대기중인 초대 ({invitations.length}건)</h2>
             </div>
+            {invitations.length === 0 && (
+              <p className="px-6 py-8 text-center text-[14px] text-[#6E6259]">대기중인 초대가 없어요.</p>
+            )}
             {invitations.map((inv) => (
               <div key={inv.id} className="flex items-center justify-between px-6 py-3.5 border-b border-[#F4F0EA] last:border-0">
                 <span className="text-[14px] text-[#1E1A17]">
@@ -715,7 +764,7 @@ export default function Connect() {
                   {inv.invited_phone ? ` · ${inv.invited_phone}` : ""}
                 </span>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="px-3 py-1 rounded-full text-[12px] font-bold bg-[#F4F0EA] text-[#8A7E75]">대기중</span>
+                  <span className="px-3 py-1 rounded-full text-[12px] font-bold bg-[#F4F0EA] text-[#6E6259]">대기중</span>
                   <button
                     onClick={() => handleDeleteInvitation(inv.id)}
                     disabled={deletingInvitationId === inv.id}
@@ -732,24 +781,44 @@ export default function Connect() {
         )}
 
         {/* 연결된 사람 */}
-        {caregiverId == null && (
+        {caregiverId == null && activeTab === "connected" && (
           <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl overflow-hidden">
             <div className="px-6 py-4 border-b border-[rgba(30,26,23,0.06)]">
               <h2 className="text-[15px] font-black text-[#1E1A17]">연결된 사람 ({caregivers.length}명)</h2>
             </div>
             {loading ? (
-              <p className="px-6 py-8 text-center text-[14px] text-[#8A7E75]"><LoadingDots /></p>
+              <div className="p-6 space-y-3">
+                {[1, 2].map((i) => (
+                  <div key={i} className="flex items-center justify-between px-0 py-2">
+                    <Skeleton className="h-4 w-28" />
+                    <Skeleton className="h-8 w-20 rounded-full" />
+                  </div>
+                ))}
+              </div>
             ) : caregivers.length === 0 ? (
               <div className="py-14 text-center">
-                <User className="w-9 h-9 mx-auto mb-3 text-[#8A7E75] opacity-30" />
-                <p className="text-[14px] text-[#8A7E75]">아직 연결된 사람이 없어요</p>
+                <div className="w-12 h-12 mx-auto mb-3 relative flex items-center justify-center">
+                  <svg viewBox="0 0 48 48" className="absolute inset-0 w-full h-full">
+                    <defs>
+                      <clipPath id={`${emptyIconClipId}-caregivers`}>
+                        <circle cx="24" cy="24" r="23" />
+                      </clipPath>
+                    </defs>
+                    <circle cx="24" cy="24" r="23" fill="#8FAE5C" stroke="#1E1A17" strokeWidth="1.4" />
+                    <g clipPath={`url(#${emptyIconClipId}-caregivers)`}>
+                      <rect x="0" y="0" width="30" height="48" fill="#C8DA6F" transform="rotate(-36 17 24)" />
+                    </g>
+                  </svg>
+                  <User className="w-6 h-6 relative text-white" strokeWidth={2.2} />
+                </div>
+                <p className="text-[14px] text-[#6E6259]">아직 연결된 사람이 없어요</p>
               </div>
             ) : (
               caregivers.map((c) => (
                 <div key={c.id} className="flex items-center justify-between px-6 py-4 border-b border-[#F4F0EA] last:border-0">
                   <div>
                     <p className="text-[14px] font-bold text-[#1E1A17]">{c.name}</p>
-                    <p className="text-[13px] text-[#8A7E75]">{formatCaregiverRelation(c)}</p>
+                    <p className="text-[13px] text-[#6E6259]">{formatCaregiverRelation(c)}</p>
                   </div>
                   <button
                     onClick={() => handleUnlink(c.id)}

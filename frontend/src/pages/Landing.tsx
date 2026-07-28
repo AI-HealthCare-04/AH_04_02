@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Activity, Bell, Bookmark, Check, ChevronRight, Heart, Pill } from "lucide-react";
+import { Activity, Bell, Bookmark, Check, ChevronRight, Heart, Mail, Pill } from "lucide-react";
 import NavBar from "../components/NavBar";
 import { checkIntake, getLogs, getTodayMedications, type Medication, type MedicationLogEntry } from "../api/monitoring";
 import { getNotificationSettings, type NotificationSettings } from "../api/care";
@@ -332,7 +332,9 @@ export default function Landing() {
       </div>
 
       <div className="px-5 py-16 md:px-10 md:py-[100px] text-center" style={{ background: "#F5EDE4" }}>
-        <div className="w-16 h-16 rounded-2xl text-[26px] flex items-center justify-center mx-auto mb-6" style={{ background: "#F0DDCB", color: "#C16A45" }}>✉</div>
+        <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6" style={{ background: "#C16A45" }}>
+          <Mail className="w-7 h-7 text-white" strokeWidth={2.2} />
+        </div>
         <h3 className="text-[24px] md:text-[28px] font-extrabold mb-4" style={{ color: "#2A2A2A" }}>건강 정보 뉴스레터 구독</h3>
         <p className="text-[14px] mb-8 leading-[1.6]" style={{ color: "#8A7A6A" }}>
           매주 새로운 건강 팁과 복약 관리 정보를 이메일로 받아보세요.<br />

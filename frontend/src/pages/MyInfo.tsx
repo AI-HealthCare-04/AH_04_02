@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Check, Lock } from "lucide-react";
+import { Bell, Check, Lock, Mail, MessageSquare } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import NavBar from "../components/NavBar";
-import LoadingDots from "../components/LoadingDots";
+import Skeleton from "../components/Skeleton";
 import { verifyPassword } from "../api/auth";
 import {
   getCaregivers,
@@ -38,7 +39,7 @@ function Field({
   );
 }
 
-function PrefToggle({ label, checked, onClick }: { label: string; checked: boolean; onClick: () => void }) {
+function PrefToggle({ icon: Icon, label, checked, onClick }: { icon: LucideIcon; label: string; checked: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -55,6 +56,7 @@ function PrefToggle({ label, checked, onClick }: { label: string; checked: boole
       >
         {checked && <Check className="w-3 h-3 text-white" />}
       </div>
+      <Icon className="w-4 h-4 shrink-0" style={{ color: checked ? "#4A7A47" : C.muted }} strokeWidth={2.2} />
       <span className="text-[14px] font-semibold" style={{ color: C.dark }}>{label}</span>
     </button>
   );
@@ -256,7 +258,16 @@ export default function MyInfo() {
         <p className="text-[14px] mb-7" style={{ color: C.muted }}>회원가입 때 입력한 정보를 확인하고 수정할 수 있어요.</p>
 
         {loading ? (
-          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
+          <div className="rounded-2xl p-6" style={{ background: C.surface, boxShadow: "0 2px 20px rgba(30,26,23,0.07)" }}>
+            <div className="space-y-4">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i}>
+                  <Skeleton className="h-3 w-16 mb-2" />
+                  <Skeleton className="h-12 w-full" />
+                </div>
+              ))}
+            </div>
+          </div>
         ) : (
           <div className="rounded-2xl p-6" style={{ background: C.surface, boxShadow: "0 2px 20px rgba(30,26,23,0.07)" }}>
             <div className="space-y-4">
@@ -308,9 +319,9 @@ export default function MyInfo() {
               <div className="pt-2">
                 <p className="text-[13px] font-bold mb-2" style={{ color: C.dark }}>알림 수신 설정</p>
                 <div className="space-y-2">
-                  <PrefToggle label="🔔 Push 알림 허용" checked={pushEnabled} onClick={() => setPushEnabled((v) => !v)} />
-                  <PrefToggle label="💬 문자(SMS) 수신 허용" checked={smsEnabled} onClick={() => setSmsEnabled((v) => !v)} />
-                  <PrefToggle label="📧 이메일 수신 허용" checked={emailOptIn} onClick={() => setEmailOptIn((v) => !v)} />
+                  <PrefToggle icon={Bell} label="Push 알림 허용" checked={pushEnabled} onClick={() => setPushEnabled((v) => !v)} />
+                  <PrefToggle icon={MessageSquare} label="문자(SMS) 수신 허용" checked={smsEnabled} onClick={() => setSmsEnabled((v) => !v)} />
+                  <PrefToggle icon={Mail} label="이메일 수신 허용" checked={emailOptIn} onClick={() => setEmailOptIn((v) => !v)} />
                 </div>
               </div>
 

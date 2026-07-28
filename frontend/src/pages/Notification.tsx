@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import NavBar from "../components/NavBar";
-import LoadingDots from "../components/LoadingDots";
+import Skeleton from "../components/Skeleton";
 import PatientContextBanner from "../components/PatientContextBanner";
 import { getNotificationSettings, updateNotificationSettings, type NotificationSettings } from "../api/care";
 import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
@@ -64,9 +64,21 @@ export default function Notification() {
       <main className="max-w-xl mx-auto px-6 sm:px-8 py-10">
         <PatientContextBanner />
         <h1 className="text-[26px] font-black text-[#1E1A17] mb-1">알림 설정</h1>
-        <p className="text-[14px] text-[#8A7E75] mb-7">받고 싶은 알림을 선택하세요.</p>
+        <p className="text-[14px] text-[#6E6259] mb-7">받고 싶은 알림을 선택하세요.</p>
 
-        {loading && <p className="text-[14px] text-[#8A7E75]"><LoadingDots /></p>}
+        {loading && (
+          <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl p-6">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center justify-between py-5 border-b border-[#F4F0EA] last:border-0">
+                <div className="flex-1 pr-4">
+                  <Skeleton className="h-4 w-24 mb-2" />
+                  <Skeleton className="h-3 w-48" />
+                </div>
+                <Skeleton className="w-12 h-6 rounded-full shrink-0" />
+              </div>
+            ))}
+          </div>
+        )}
         {error && <p className="text-[13px] text-[#D94F4F] mb-4">{error}</p>}
 
         {settings && (
@@ -75,7 +87,7 @@ export default function Notification() {
               <div key={key} className="flex items-start justify-between py-5 border-b border-[#F4F0EA] last:border-0">
                 <div className="flex-1 pr-4">
                   <p className="text-[16px] font-bold text-[#1E1A17] mb-1">{label}</p>
-                  <p className="text-[14px] text-[#8A7E75]">{desc}</p>
+                  <p className="text-[14px] text-[#6E6259]">{desc}</p>
                 </div>
                 <Toggle on={settings[key]} onChange={() => toggle(key)} disabled={savingKey === key} />
               </div>

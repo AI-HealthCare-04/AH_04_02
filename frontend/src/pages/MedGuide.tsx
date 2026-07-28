@@ -1,8 +1,20 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Dumbbell,
+  Eye,
+  Leaf,
+  MessageCircle,
+  Pill,
+  Pin,
+  TriangleAlert,
+  Utensils,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import NavBar from "../components/NavBar";
-import LoadingDots from "../components/LoadingDots";
+import Skeleton from "../components/Skeleton";
 import PrescriptionImageViewer from "../components/PrescriptionImageViewer";
 import {
   formatUniqueSourceRefs,
@@ -47,11 +59,13 @@ function isCategoryEmpty(category: LifestyleCategory): boolean {
   return category.recommended.length === 0 && category.avoid.length === 0;
 }
 
-function LifestyleCategorySection({ icon, label, category }: { icon: string; label: string; category: LifestyleCategory }) {
+function LifestyleCategorySection({ icon: Icon, label, category }: { icon: LucideIcon; label: string; category: LifestyleCategory }) {
   if (isCategoryEmpty(category)) return null;
   return (
     <div className="mt-3 first:mt-0">
-      <p className="text-[13px] font-black mb-1.5" style={{ color: C.dark }}>{icon} {label}</p>
+      <p className="flex items-center gap-1.5 text-[13px] font-black mb-1.5" style={{ color: C.dark }}>
+        <Icon className="w-[15px] h-[15px]" style={{ color: C.terracotta }} strokeWidth={2.2} /> {label}
+      </p>
       {category.recommended.length > 0 && (
         <ul className="space-y-1 mb-2">
           {category.recommended.map((item, i) => (
@@ -159,7 +173,19 @@ export default function MedGuide() {
     return (
       <div className="min-h-screen" style={{ background: C.ivory }}>
         <NavBar isLoggedIn userName={getCurrentUserName()} />
-        <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
+        <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
+          <Skeleton className="h-3 w-24 mb-2" />
+          <Skeleton className="h-7 w-40 mb-6" />
+          <div className="flex gap-2 mb-6">
+            <Skeleton className="h-10 w-24 rounded-full" />
+            <Skeleton className="h-10 w-24 rounded-full" />
+          </div>
+          <div className="space-y-3">
+            {[1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-20 w-full" />
+            ))}
+          </div>
+        </main>
       </div>
     );
   }
@@ -201,7 +227,9 @@ export default function MedGuide() {
         {isCaregiver && result.caregiver_review_status !== "none" && (
           <div className="rounded-2xl p-5 mb-6" style={{ background: C.surface, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
             <div className="flex items-center justify-between gap-3 mb-1">
-              <p className="text-[14px] font-black" style={{ color: C.dark }}>👀 보호자·기관 검토</p>
+              <p className="flex items-center gap-1.5 text-[14px] font-black" style={{ color: C.dark }}>
+                <Eye className="w-4 h-4" style={{ color: C.terracotta }} strokeWidth={2.2} /> 보호자·기관 검토
+              </p>
               <span
                 className="px-2.5 py-1 rounded-full text-[11px] font-bold"
                 style={{
@@ -249,7 +277,9 @@ export default function MedGuide() {
                   {result.medications.map((m) => (
                     <div key={m.id} className="rounded-2xl overflow-hidden" style={{ background: C.white, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
                       <div className="px-6 py-4" style={{ background: C.surface }}>
-                        <p className="font-black text-[15px]" style={{ color: C.dark }}>💊 {m.drug_name}</p>
+                        <p className="flex items-center gap-1.5 font-black text-[15px]" style={{ color: C.dark }}>
+                          <Pill className="w-4 h-4" style={{ color: C.terracotta }} strokeWidth={2.2} /> {m.drug_name}
+                        </p>
                       </div>
                       <div className="p-6 grid grid-cols-2 gap-4">
                         {FIELDS.filter(({ key }) => key !== "drug_name").map(({ key, label }) => {
@@ -365,8 +395,9 @@ export default function MedGuide() {
             className="w-full text-left rounded-2xl p-4 mb-6 flex items-center justify-between gap-3"
             style={{ background: "#FFF4E0", border: "1px solid #F0D9A8" }}
           >
-            <span className="text-[13px] font-bold" style={{ color: "#8A6D1F" }}>
-              ⚠️ 보호자·기관이 수정을 요청했어요 — 확인하고 수정하기
+            <span className="flex items-center gap-1.5 text-[13px] font-bold" style={{ color: "#8A6D1F" }}>
+              <TriangleAlert className="w-4 h-4 shrink-0" style={{ color: "#8A6D1F" }} strokeWidth={2.2} />
+              보호자·기관이 수정을 요청했어요 — 확인하고 수정하기
             </span>
             <ChevronRight className="w-4 h-4 shrink-0" style={{ color: "#8A6D1F" }} />
           </button>
@@ -398,7 +429,9 @@ export default function MedGuide() {
               const content = (
                 <>
                   <div className="flex items-center justify-between gap-3 mb-1.5">
-                    <p className="text-[15px] font-black" style={{ color: C.dark }}>💊 {d.drug_name}</p>
+                    <p className="flex items-center gap-1.5 text-[15px] font-black" style={{ color: C.dark }}>
+                      <Pill className="w-4 h-4" style={{ color: C.terracotta }} strokeWidth={2.2} /> {d.drug_name}
+                    </p>
                     <div className="flex items-center gap-2 shrink-0">
                       {med?.drug_class && (
                         <span
@@ -443,10 +476,12 @@ export default function MedGuide() {
                   isCategoryEmpty(entry.diet) && isCategoryEmpty(entry.exercise) && isCategoryEmpty(entry.other);
                 return (
                   <div key={i} className="rounded-2xl p-5" style={{ background: C.surface, boxShadow: "0 2px 12px rgba(30,26,23,0.07)" }}>
-                    <p className="text-[15px] font-black mb-3" style={{ color: C.dark }}>🌿 {entry.diagnosis || "생활습관 안내"}</p>
-                    <LifestyleCategorySection icon="🥗" label="식사" category={entry.diet} />
-                    <LifestyleCategorySection icon="🏃" label="운동" category={entry.exercise} />
-                    <LifestyleCategorySection icon="📌" label="그 외" category={entry.other} />
+                    <p className="flex items-center gap-1.5 text-[15px] font-black mb-3" style={{ color: C.dark }}>
+                      <Leaf className="w-4 h-4" style={{ color: C.success }} strokeWidth={2.2} /> {entry.diagnosis || "생활습관 안내"}
+                    </p>
+                    <LifestyleCategorySection icon={Utensils} label="식사" category={entry.diet} />
+                    <LifestyleCategorySection icon={Dumbbell} label="운동" category={entry.exercise} />
+                    <LifestyleCategorySection icon={Pin} label="그 외" category={entry.other} />
                     {isEmpty && (
                       <p className="text-[14px]" style={{ color: C.muted }}>안내할 내용이 없어요.</p>
                     )}
@@ -483,10 +518,10 @@ export default function MedGuide() {
 
         <button
           onClick={() => navigate("/chat", { state: { diagnosis: guide.lifestyle_guide.diagnosis } })}
-          className="w-full mt-8 py-4 rounded-xl font-bold text-[15px] text-white"
+          className="w-full mt-8 py-4 rounded-xl font-bold text-[15px] text-white flex items-center justify-center gap-2"
           style={{ background: C.terracotta }}
         >
-          💬 더 궁금한 점이 있으신가요? 챗봇에게 물어보기
+          <MessageCircle className="w-[18px] h-[18px]" strokeWidth={2.2} /> 더 궁금한 점이 있으신가요? 챗봇에게 물어보기
         </button>
       </main>
     </div>

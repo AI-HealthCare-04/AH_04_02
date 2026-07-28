@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Check, Phone } from "lucide-react";
+import { Bell, Building2, Check, Mail, MessageSquare, Phone, User } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import NavBar from "../components/NavBar";
 import { checkCaregiverDuplicate, checkPatientDuplicate, createCaregiver, createPatient } from "../api/monitoring";
 import { login } from "../api/auth";
@@ -100,10 +101,10 @@ function Field({
 interface NotifPrefs { push: boolean; sms: boolean; email: boolean; }
 
 function NotificationSettings({ prefs, setPrefs, pushError }: { prefs: NotifPrefs; setPrefs: (p: NotifPrefs) => void; pushError?: boolean }) {
-  const items: { key: keyof NotifPrefs; icon: string; label: string; desc: string; required: boolean }[] = [
-    { key: "push", icon: "🔔", label: "Push 알림 허용", desc: "복약 시간, 건강 정보 앱 푸시 알림", required: true },
-    { key: "sms", icon: "💬", label: "문자(SMS) 수신 허용", desc: "복약 안내·보호자 알림 문자 수신", required: false },
-    { key: "email", icon: "📧", label: "이메일 수신 허용", desc: "건강 뉴스레터, 서비스 공지 이메일", required: false },
+  const items: { key: keyof NotifPrefs; icon: LucideIcon; label: string; desc: string; required: boolean }[] = [
+    { key: "push", icon: Bell, label: "Push 알림 허용", desc: "복약 시간, 건강 정보 앱 푸시 알림", required: true },
+    { key: "sms", icon: MessageSquare, label: "문자(SMS) 수신 허용", desc: "복약 안내·보호자 알림 문자 수신", required: false },
+    { key: "email", icon: Mail, label: "이메일 수신 허용", desc: "건강 뉴스레터, 서비스 공지 이메일", required: false },
   ];
   return (
     <div className="mt-5 pt-5 border-t" style={{ borderColor: "rgba(30,26,23,0.10)" }}>
@@ -112,7 +113,7 @@ function NotificationSettings({ prefs, setPrefs, pushError }: { prefs: NotifPref
         <span className="px-2 py-0.5 rounded text-[10px] font-black" style={{ background: `${C.terracotta}15`, color: C.terracotta }}>Push 필수</span>
       </div>
       <div className="space-y-2">
-        {items.map(({ key, icon, label, desc, required }) => {
+        {items.map(({ key, icon: Icon, label, desc, required }) => {
           const checked = prefs[key];
           const showError = key === "push" && pushError && !checked;
           return (
@@ -131,7 +132,11 @@ function NotificationSettings({ prefs, setPrefs, pushError }: { prefs: NotifPref
               >
                 {checked && <Check className="w-3 h-3 text-white" />}
               </div>
-              <span className="text-[15px] shrink-0">{icon}</span>
+              <Icon
+                className="w-[15px] h-[15px] shrink-0"
+                style={{ color: checked ? (required ? C.terracotta : "#4A7A47") : C.muted }}
+                strokeWidth={2.2}
+              />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
                   <p className="text-[13px] font-bold" style={{ color: checked ? (required ? C.terracotta : "#4A7A47") : C.dark }}>{label}</p>
@@ -481,10 +486,10 @@ export default function SignUp() {
                 <div className="grid grid-cols-2 gap-4 mb-6">
                   {(
                     [
-                      { key: "personal" as const, icon: "👤", title: "개인", desc: "환자 본인 또는 보호자(가족)", tags: ["환자 본인", "보호자"] },
-                      { key: "organization" as const, icon: "🏢", title: "단체·기관", desc: "요양보호사, 협회, 보건소 등 기관 소속", tags: ["요양보호사", "협회", "보건소"] },
+                      { key: "personal" as const, icon: User, title: "개인", desc: "환자 본인 또는 보호자(가족)", tags: ["환자 본인", "보호자"] },
+                      { key: "organization" as const, icon: Building2, title: "단체·기관", desc: "요양보호사, 협회, 보건소 등 기관 소속", tags: ["요양보호사", "협회", "보건소"] },
                     ]
-                  ).map(({ key, icon, title, desc, tags }) => {
+                  ).map(({ key, icon: Icon, title, desc, tags }) => {
                     const sel = memberType === key;
                     return (
                       <button
@@ -493,7 +498,12 @@ export default function SignUp() {
                         className="flex flex-col items-start text-left p-5 rounded-2xl transition-all w-full"
                         style={{ background: sel ? `${C.terracotta}06` : C.white, border: `2px solid ${sel ? C.terracotta : "rgba(30,26,23,0.10)"}` }}
                       >
-                        <span className="text-[34px] mb-3 leading-none">{icon}</span>
+                        <div
+                          className="w-12 h-12 rounded-2xl flex items-center justify-center mb-3"
+                          style={{ background: sel ? C.terracotta : C.ivory }}
+                        >
+                          <Icon className="w-6 h-6" style={{ color: sel ? C.white : C.terracotta }} strokeWidth={2} />
+                        </div>
                         <p className="text-[16px] font-black mb-1" style={{ color: sel ? C.terracotta : C.dark }}>{title}</p>
                         <p className="text-[12px] leading-relaxed mb-3" style={{ color: C.muted }}>{desc}</p>
                         <div className="flex flex-wrap gap-1.5">

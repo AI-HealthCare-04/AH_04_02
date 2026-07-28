@@ -10,7 +10,6 @@ import Connect from "./pages/Connect";
 import Upload from "./pages/Upload";
 import Processing from "./pages/Processing";
 import OcrError from "./pages/OcrError";
-import Result from "./pages/Result";
 import Chat from "./pages/Chat";
 import Dashboard from "./pages/Dashboard";
 import InviteAccept from "./pages/InviteAccept";
@@ -57,7 +56,6 @@ function App() {
           <Route path="/upload" element={<Upload />} />
           <Route path="/processing" element={<Processing />} />
           <Route path="/ocr-error" element={<OcrError />} />
-          <Route path="/result" element={<Result />} />
           <Route path="/chat" element={<Chat />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/invite/:token" element={<InviteAccept />} />

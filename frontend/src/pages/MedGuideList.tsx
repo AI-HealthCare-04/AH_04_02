@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FileText, ChevronRight, Trash2, CheckSquare, Square } from "lucide-react";
+import { FileText, Pill, ChevronRight, Trash2, CheckSquare, Square } from "lucide-react";
 import NavBar from "../components/NavBar";
-import LoadingDots from "../components/LoadingDots";
+import Skeleton from "../components/Skeleton";
+import EmptyState from "../components/EmptyState";
 import PatientContextBanner from "../components/PatientContextBanner";
 import PrescriptionImageViewer from "../components/PrescriptionImageViewer";
 import { deleteRecord, listRecords, type RecordSummary } from "../api/records";
@@ -132,18 +133,26 @@ export default function MedGuideList() {
         )}
 
         {loading ? (
-          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
-        ) : records.length === 0 ? (
-          <div className="rounded-2xl p-10 text-center" style={{ background: C.surface, boxShadow: C.shadowCard }}>
-            <p className="text-[14px] mb-4" style={{ color: C.muted }}>아직 완성된 복약 가이드가 없어요.</p>
-            <button
-              onClick={() => navigate("/upload")}
-              className="px-6 py-3 rounded-full font-bold text-[14px] text-white"
-              style={{ background: C.terracotta }}
-            >
-              처방전 등록하러 가기
-            </button>
+          <div className="space-y-4">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="rounded-2xl p-5" style={{ background: C.white, boxShadow: C.shadowCard }}>
+                <Skeleton className="h-3 w-20 mb-2" />
+                <Skeleton className="h-5 w-40 mb-4" />
+                <Skeleton className="h-3 w-full mb-4" />
+                <div className="border-t pt-3" style={{ borderColor: "rgba(30,26,23,0.08)" }}>
+                  <Skeleton className="h-4 w-24" />
+                </div>
+              </div>
+            ))}
           </div>
+        ) : records.length === 0 ? (
+          <EmptyState
+            icon={Pill}
+            title="아직 완성된 복약 가이드가 없어요"
+            description="처방전을 등록하면 여기서 확인할 수 있어요"
+            actionLabel="처방전 등록하러 가기"
+            onAction={() => navigate("/upload")}
+          />
         ) : (
           <div className="space-y-4">
             {records.map((r) => {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import NavBar from "../components/NavBar";
-import LoadingDots from "../components/LoadingDots";
+import Skeleton from "../components/Skeleton";
 import PatientContextBanner from "../components/PatientContextBanner";
 import { getNotificationSettings, updateNotificationSettings, type NotificationSettings } from "../api/care";
 import { applyFontScale, getCurrentUserName, getFontScale, type FontScale, useGuardedPatientId } from "../lib/session";
@@ -67,15 +67,20 @@ export default function Settings() {
       <main className="max-w-xl mx-auto px-6 sm:px-8 py-10">
         <PatientContextBanner />
         <h1 className="text-[26px] font-black text-[#1E1A17] mb-1">화면·챗봇 설정</h1>
-        <p className="text-[14px] text-[#8A7E75] mb-7">챗봇 이름과 글자 크기를 원하는 대로 바꿀 수 있어요.</p>
+        <p className="text-[14px] text-[#6E6259] mb-7">챗봇 이름과 글자 크기를 원하는 대로 바꿀 수 있어요.</p>
 
-        {loading && <p className="text-[14px] text-[#8A7E75]"><LoadingDots /></p>}
+        {loading && (
+          <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
+            <Skeleton className="h-3 w-16 mb-2" />
+            <Skeleton className="h-12 w-full" />
+          </div>
+        )}
         {error && <p className="text-[13px] text-[#D94F4F] mb-4">{error}</p>}
 
         {settings && (
           <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
             <p className="text-[16px] font-bold text-[#1E1A17] mb-1">챗봇 이름</p>
-            <p className="text-[14px] text-[#8A7E75] mb-4">기본값은 "{DEFAULT_CHATBOT_NAME}"예요. 원하는 이름으로 바꿔보세요.</p>
+            <p className="text-[14px] text-[#6E6259] mb-4">기본값은 "{DEFAULT_CHATBOT_NAME}"예요. 원하는 이름으로 바꿔보세요.</p>
             <div className="flex gap-2">
               <input
                 value={chatbotName}
@@ -99,7 +104,7 @@ export default function Settings() {
 
         <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl p-6">
           <p className="text-[16px] font-bold text-[#1E1A17] mb-1">글자 크기</p>
-          <p className="text-[14px] text-[#8A7E75] mb-4">화면 전체의 글자와 여백 크기가 함께 조절돼요.</p>
+          <p className="text-[14px] text-[#6E6259] mb-4">화면 전체의 글자와 여백 크기가 함께 조절돼요.</p>
           <div className="flex gap-2">
             {FONT_SCALE_OPTIONS.map(({ value, label }) => (
               <button
@@ -117,6 +122,20 @@ export default function Settings() {
             ))}
           </div>
         </div>
+
+        {/* [2026-07-28 추가] 약콩이 아이콘(Flaticon, Magnific 제작) 출처 표기 —
+            Flaticon 무료 라이선스는 저작자 표시가 필수라서 앱 어딘가에 문구를 남겨야 한다. */}
+        <p className="text-[12px] text-[#6E6259] mt-6 text-center">
+          약콩이 아이콘 —{" "}
+          <a
+            href="https://www.flaticon.com/kr/free-icon/pea_5520709"
+            target="_blank"
+            rel="noreferrer"
+            className="underline"
+          >
+            완두콩 아이콘 제작자: Magnific - Flaticon
+          </a>
+        </p>
       </main>
     </div>
   );

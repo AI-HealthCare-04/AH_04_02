@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { FileText } from "lucide-react";
 import NavBar from "../components/NavBar";
-import LoadingDots from "../components/LoadingDots";
+import Skeleton from "../components/Skeleton";
 import PatientContextBanner from "../components/PatientContextBanner";
 import {
   getPatientCaregivers,
@@ -129,7 +130,26 @@ export default function Dashboard() {
 
         <h2 className="text-lg font-extrabold mb-4" style={{ color: C.dark }}>오늘의 복약</h2>
 
-        {loading && <p className="text-sm mb-4" style={{ color: C.muted }}><LoadingDots /></p>}
+        {loading && (
+          <div className="flex flex-col gap-4 mb-8">
+            {[1, 2].map((i) => (
+              <div key={i} className="rounded-2xl px-5 sm:px-6 py-5 border" style={{ background: C.surface, borderColor: "rgba(30,26,23,0.12)" }}>
+                <div className="flex justify-between mb-4">
+                  <div>
+                    <Skeleton className="h-4 w-32 mb-2" />
+                    <Skeleton className="h-3 w-20" />
+                  </div>
+                  <Skeleton className="h-5 w-14" />
+                </div>
+                <div className="flex gap-2">
+                  <Skeleton className="h-10 flex-1" />
+                  <Skeleton className="h-10 flex-1" />
+                  <Skeleton className="h-10 flex-1" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
         {!loading && error && <p className="text-sm mb-4" style={{ color: C.danger }}>{error}</p>}
         {!loading && !error && meds.length === 0 && (
           <p className="text-sm mb-4" style={{ color: C.muted }}>등록된 복약 일정이 없어요.</p>
@@ -212,7 +232,9 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
             {recentRecords.map((r) => (
               <div key={r.record_id} className="rounded-2xl p-5 border" style={{ background: C.surface, borderColor: "rgba(30,26,23,0.12)" }}>
-                <div className="text-xl mb-3">📄</div>
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center mb-3" style={{ background: C.terracotta }}>
+                  <FileText className="w-4 h-4" style={{ color: C.white }} strokeWidth={2.2} />
+                </div>
                 <p className="text-sm font-bold mb-5 min-h-10" style={{ color: C.dark }}>{r.diagnosis || "복약 가이드"}</p>
                 <div className="flex justify-between items-center">
                   <span className="text-xs" style={{ color: C.muted }}>생성일 {new Date(r.created_at).toLocaleDateString("ko-KR")}</span>

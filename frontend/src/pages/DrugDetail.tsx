@@ -1,8 +1,21 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { ChevronLeft } from "lucide-react";
+import {
+  Archive,
+  Ban,
+  ChevronLeft,
+  Frown,
+  Info,
+  Loader2,
+  MessageCircle,
+  Pill,
+  ShieldAlert,
+  Shuffle,
+  Stethoscope,
+  TriangleAlert,
+} from "lucide-react";
 import NavBar from "../components/NavBar";
-import LoadingDots from "../components/LoadingDots";
+import Skeleton from "../components/Skeleton";
 import PatientContextBanner from "../components/PatientContextBanner";
 import { checkIntake, getLogs, getSchedules, type MedicationLogEntry, type Schedule } from "../api/monitoring";
 import { getDrugIndication, type DrugIndicationInfo } from "../api/records";
@@ -90,7 +103,30 @@ export default function DrugDetail() {
         </button>
 
         {loading ? (
-          <p className="text-center py-16 text-[14px]" style={{ color: C.muted }}><LoadingDots /></p>
+          <>
+            <div className="rounded-3xl p-7 mb-5" style={{ background: "rgba(193,101,61,0.15)" }}>
+              <div className="flex items-start gap-5">
+                <Skeleton className="w-16 h-16 shrink-0" style={{ background: "rgba(193,101,61,0.25)" }} />
+                <div className="flex-1">
+                  <Skeleton className="h-3 w-20 mb-3" style={{ background: "rgba(193,101,61,0.25)" }} />
+                  <Skeleton className="h-6 w-40 mb-2" style={{ background: "rgba(193,101,61,0.25)" }} />
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-3 mb-5">
+              <Skeleton className="h-[52px] flex-1" />
+              <Skeleton className="h-[52px] flex-1" />
+            </div>
+            <div className="space-y-4">
+              {[1, 2].map((i) => (
+                <div key={i} className="rounded-2xl p-6" style={{ background: C.surface, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
+                  <Skeleton className="h-4 w-28 mb-3" />
+                  <Skeleton className="h-3 w-full mb-2" />
+                  <Skeleton className="h-3 w-3/4" />
+                </div>
+              ))}
+            </div>
+          </>
         ) : !schedule ? (
           <p className="text-center py-16 text-[14px]" style={{ color: "#D94F4F" }}>{error || "약품 정보를 찾을 수 없어요."}</p>
         ) : (
@@ -100,7 +136,9 @@ export default function DrugDetail() {
               style={{ background: `linear-gradient(135deg, ${C.terracotta} 0%, #A5522F 100%)`, boxShadow: "0 8px 32px rgba(193,101,61,0.30)" }}
             >
               <div className="flex items-start gap-5">
-                <div className="w-16 h-16 rounded-2xl flex items-center justify-center shrink-0 text-[32px]" style={{ background: "rgba(255,255,255,0.18)" }}>💊</div>
+                <div className="w-16 h-16 rounded-2xl flex items-center justify-center shrink-0" style={{ background: "rgba(255,255,255,0.22)" }}>
+                  <Pill className="w-8 h-8" style={{ color: C.white }} strokeWidth={2.2} />
+                </div>
                 <div className="flex-1">
                   <p className="text-[13px] font-bold mb-1" style={{ color: "rgba(255,255,255,0.65)" }}>
                     {schedule.active ? "사용 중" : "중지됨"}
@@ -145,7 +183,7 @@ export default function DrugDetail() {
             </div>
 
             <div className="flex items-start gap-2.5 px-4 py-3.5 rounded-2xl mb-5" style={{ background: C.warningBg, border: `1px solid ${C.warningBorder}` }}>
-              <span className="text-[14px] shrink-0">ℹ️</span>
+              <Info className="w-[14px] h-[14px] shrink-0" style={{ color: C.warningText }} strokeWidth={2.2} />
               <p className="text-[12px] leading-relaxed" style={{ color: C.warningText }}>
                 아래 정보는 일반적인 복약 안내입니다. 정확한 복약 지도는 담당 의사·약사에게 확인하세요.
               </p>
@@ -154,7 +192,7 @@ export default function DrugDetail() {
             {drugInfo?.indication && (
               <div className="rounded-2xl p-6 mb-5" style={{ background: C.surface, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
                 <div className="flex items-center gap-2.5 mb-3">
-                  <span className="text-[18px]">🩺</span>
+                  <Stethoscope className="w-[18px] h-[18px]" style={{ color: C.terracotta }} strokeWidth={2.2} />
                   <h2 className="text-[15px] font-black" style={{ color: C.dark }}>적응증</h2>
                 </div>
                 <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>{drugInfo.indication}</p>
@@ -172,7 +210,7 @@ export default function DrugDetail() {
             {drugInfoLoading ? (
               <div className="rounded-2xl p-6 mb-5" style={{ background: C.surface, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
                 <div className="flex items-center gap-2.5">
-                  <span className="text-[18px] animate-pulse">⏳</span>
+                  <Loader2 className="w-[18px] h-[18px] animate-spin" style={{ color: C.terracotta }} strokeWidth={2.2} />
                   <p className="text-[13px]" style={{ color: C.muted }}>
                     주의사항·부작용·약물 상호작용·보관 방법을 조회하는 중이에요...
                   </p>
@@ -183,7 +221,7 @@ export default function DrugDetail() {
                 {!!drugInfo?.patient_summary?.must_check.length && (
                   <div className="rounded-2xl p-6 mb-5" style={{ background: C.surface, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
                     <div className="flex items-center gap-2.5 mb-3">
-                      <span className="text-[18px]">⚠️</span>
+                      <TriangleAlert className="w-[18px] h-[18px]" style={{ color: C.terracotta }} strokeWidth={2.2} />
                       <h2 className="text-[15px] font-black" style={{ color: C.dark }}>꼭 확인하세요</h2>
                     </div>
                     {drugInfo.patient_summary.must_check.map((line, i) => (
@@ -195,7 +233,7 @@ export default function DrugDetail() {
                 {!!drugInfo?.patient_summary?.tell_doctor.length && (
                   <div className="rounded-2xl p-6 mb-5" style={{ background: C.surface, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
                     <div className="flex items-center gap-2.5 mb-3">
-                      <span className="text-[18px]">💬</span>
+                      <MessageCircle className="w-[18px] h-[18px]" style={{ color: C.terracotta }} strokeWidth={2.2} />
                       <h2 className="text-[15px] font-black" style={{ color: C.dark }}>의사·약사에게 알려주세요</h2>
                     </div>
                     {drugInfo.patient_summary.tell_doctor.map((line, i) => (
@@ -207,7 +245,7 @@ export default function DrugDetail() {
                 {!!drugInfo?.patient_summary?.avoid_together.length && (
                   <div className="rounded-2xl p-6 mb-5" style={{ background: C.surface, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
                     <div className="flex items-center gap-2.5 mb-3">
-                      <span className="text-[18px]">🚫</span>
+                      <Ban className="w-[18px] h-[18px]" style={{ color: C.terracotta }} strokeWidth={2.2} />
                       <h2 className="text-[15px] font-black" style={{ color: C.dark }}>함께 조심하세요</h2>
                     </div>
                     {drugInfo.patient_summary.avoid_together.map((line, i) => (
@@ -221,7 +259,7 @@ export default function DrugDetail() {
                 {drugInfo?.precautions && (
                   <div className="rounded-2xl p-6 mb-5" style={{ background: C.surface, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
                     <div className="flex items-center gap-2.5 mb-3">
-                      <span className="text-[18px]">⚠️</span>
+                      <TriangleAlert className="w-[18px] h-[18px]" style={{ color: C.terracotta }} strokeWidth={2.2} />
                       <h2 className="text-[15px] font-black" style={{ color: C.dark }}>주의사항</h2>
                     </div>
                     <p className="text-[14px] leading-relaxed whitespace-pre-line" style={{ color: C.dark }}>{drugInfo.precautions}</p>
@@ -231,7 +269,7 @@ export default function DrugDetail() {
                 {drugInfo?.side_effects && (
                   <div className="rounded-2xl p-6 mb-5" style={{ background: C.surface, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
                     <div className="flex items-center gap-2.5 mb-3">
-                      <span className="text-[18px]">🤕</span>
+                      <Frown className="w-[18px] h-[18px]" style={{ color: C.terracotta }} strokeWidth={2.2} />
                       <h2 className="text-[15px] font-black" style={{ color: C.dark }}>부작용</h2>
                     </div>
                     <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>{drugInfo.side_effects}</p>
@@ -241,7 +279,7 @@ export default function DrugDetail() {
                 {drugInfo?.interactions && (
                   <div className="rounded-2xl p-6 mb-5" style={{ background: C.surface, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
                     <div className="flex items-center gap-2.5 mb-3">
-                      <span className="text-[18px]">🔀</span>
+                      <Shuffle className="w-[18px] h-[18px]" style={{ color: C.terracotta }} strokeWidth={2.2} />
                       <h2 className="text-[15px] font-black" style={{ color: C.dark }}>약물 상호작용</h2>
                     </div>
                     <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>{drugInfo.interactions}</p>
@@ -253,7 +291,7 @@ export default function DrugDetail() {
             {drugInfo?.storage && (
               <div className="rounded-2xl p-6 mb-5" style={{ background: C.surface, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
                 <div className="flex items-center gap-2.5 mb-3">
-                  <span className="text-[18px]">🗄️</span>
+                  <Archive className="w-[18px] h-[18px]" style={{ color: C.terracotta }} strokeWidth={2.2} />
                   <h2 className="text-[15px] font-black" style={{ color: C.dark }}>보관 방법</h2>
                 </div>
                 <p className="text-[14px] leading-relaxed" style={{ color: C.dark }}>{drugInfo.storage}</p>
@@ -263,7 +301,7 @@ export default function DrugDetail() {
             {!!drugInfo?.dur_cautions?.length && (
               <div className="rounded-2xl p-6 mb-5" style={{ background: C.surface, boxShadow: "0 2px 12px rgba(30,26,23,0.06)" }}>
                 <div className="flex items-center gap-2.5 mb-3">
-                  <span className="text-[18px]">🚸</span>
+                  <ShieldAlert className="w-[18px] h-[18px]" style={{ color: C.terracotta }} strokeWidth={2.2} />
                   <h2 className="text-[15px] font-black" style={{ color: C.dark }}>복용 시 유의(DUR)</h2>
                 </div>
                 {drugInfo.dur_cautions.map((c, i) => (
@@ -324,10 +362,10 @@ export default function DrugDetail() {
             <div className="mt-6 flex gap-3">
               <button
                 onClick={() => navigate("/chat", { state: { drugName: schedule.drug_name } })}
-                className="flex-1 py-4 rounded-full font-bold text-[15px] border-2 transition-all"
+                className="flex-1 py-4 rounded-full font-bold text-[15px] border-2 transition-all flex items-center justify-center gap-2"
                 style={{ borderColor: C.terracotta, color: C.terracotta }}
               >
-                챗봇에게 질문하기 💬
+                <MessageCircle className="w-[18px] h-[18px]" strokeWidth={2.2} /> 챗봇에게 질문하기
               </button>
               <button
                 onClick={() => navigate("/monitoring")}

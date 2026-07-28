@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, IdCard, Pill, Bell, Inbox, ClipboardList, BarChart3, Users, Settings, Stethoscope } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import NavBar from "../components/NavBar";
 import { getCaregivers, getPatients, type Caregiver, type Patient } from "../api/monitoring";
 import { computeAge, GENDER_LABEL } from "../lib/age";
@@ -9,7 +10,7 @@ import { C } from "../theme";
 
 interface MenuItem {
   label: string;
-  icon: string;
+  icon: LucideIcon;
   to: string;
 }
 
@@ -54,21 +55,21 @@ export default function MyPage() {
     : "";
 
   const patientMenu: MenuItem[] = [
-    { label: "내 정보", icon: "🪪", to: "/mypage/info" },
-    { label: "복약 일정", icon: "💊", to: "/schedule" },
-    { label: "알림 설정", icon: "🔔", to: "/notification" },
-    { label: "알림함", icon: "📥", to: "/notifications" },
-    { label: "등록내역", icon: "📋", to: "/records" },
-    { label: "모니터링 대시보드", icon: "📊", to: "/monitoring" },
-    { label: "연결관리", icon: "👥", to: "/connect" },
-    { label: "화면·챗봇 설정", icon: "⚙️", to: "/settings" },
+    { label: "내 정보", icon: IdCard, to: "/mypage/info" },
+    { label: "복약 일정", icon: Pill, to: "/schedule" },
+    { label: "알림 설정", icon: Bell, to: "/notification" },
+    { label: "알림함", icon: Inbox, to: "/notifications" },
+    { label: "등록내역", icon: ClipboardList, to: "/records" },
+    { label: "모니터링 대시보드", icon: BarChart3, to: "/monitoring" },
+    { label: "연결관리", icon: Users, to: "/connect" },
+    { label: "화면·챗봇 설정", icon: Settings, to: "/settings" },
   ];
   const caregiverMenu: MenuItem[] = [
-    { label: "내 정보", icon: "🪪", to: "/mypage/info" },
-    { label: "환자 관리", icon: "🏥", to: "/patients" },
-    { label: "알림함", icon: "📥", to: "/notifications" },
-    { label: "연결관리", icon: "👥", to: "/connect" },
-    { label: "화면·챗봇 설정", icon: "⚙️", to: "/settings" },
+    { label: "내 정보", icon: IdCard, to: "/mypage/info" },
+    { label: "환자 관리", icon: Stethoscope, to: "/patients" },
+    { label: "알림함", icon: Inbox, to: "/notifications" },
+    { label: "연결관리", icon: Users, to: "/connect" },
+    { label: "화면·챗봇 설정", icon: Settings, to: "/settings" },
   ];
   const menu = caregiverId ? caregiverMenu : patientMenu;
 
@@ -127,7 +128,7 @@ export default function MyPage() {
         </div>
 
         <div className="rounded-2xl overflow-hidden mb-8" style={{ background: C.surface, boxShadow: "0 2px 20px rgba(30,26,23,0.07)" }}>
-          {menu.map(({ label, icon, to }) => (
+          {menu.map(({ label, icon: Icon, to }) => (
             <button
               key={label}
               onClick={() => navigate(to)}
@@ -135,8 +136,10 @@ export default function MyPage() {
               style={{ borderColor: "rgba(30,26,23,0.08)" }}
             >
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl flex items-center justify-center text-[16px]" style={{ background: `${C.terracotta}12` }}>
-                  {icon}
+                {/* [2026-07-27 변경] 색깔 이모지 → lucide 아이콘. 고령 사용자 기준 대비를
+                    높이기 위해 옅은 톤 배경 대신 브랜드색(터라코타) 배경 + 흰 아이콘으로 통일. */}
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: C.terracotta }}>
+                  <Icon className="w-[18px] h-[18px]" style={{ color: C.white }} strokeWidth={2.2} />
                 </div>
                 <span className="text-[15px] font-semibold" style={{ color: C.dark }}>{label}</span>
               </div>
