@@ -10,7 +10,13 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from services.drug_matcher import MATCH_THRESHOLD, _match_normalized, _normalize, match_drug
+from services.drug_matcher import (
+    MATCH_THRESHOLD,
+    _fuzzy_fallback,
+    _match_normalized,
+    _normalize,
+    match_drug,
+)
 
 # ── _normalize 단위 테스트 ───────────────────────────────────────────────────
 
@@ -170,4 +176,41 @@ def test_match_drug_prefers_exact_dosage_over_similar_length_wrong_dose():
         with patch("services.drug_matcher._norm_names", return_value=[_normalize(n) for n in pool]):
             name, score = match_drug("노바스크정5밀리그램")
     assert name == "노바스크정5밀리그람", f"expected 5mg(그람 표기), got {name!r}"
+    assert score == 1.0
+
+
+# ── [2026-07-28 추가] rapidfuzz 부분 유사도 폴백 ────────────────────────────
+
+def test_fuzzy_fallback_empty_pool_returns_zero():
+    assert _fuzzy_fallback("암로디핀정5mg", []) == ("", 0.0)
+
+
+def test_fuzzy_fallback_finds_substring_match():
+    """OCR이 약품명을 조각내 인식해도(뒤에 잡음 텍스트 포함) 부분 유사도로 잡아낸다."""
+    pool = ["글루코파지XR정500mg", "암로디핀정5mg", "리피토정10mg"]
+    name, score = _fuzzy_fallback("글루코파지XR정500mg 1일2회", pool)
+    assert name == "글루코파지XR정500mg"
+    assert score > 0.0
+
+
+def test_match_drug_fuzzy_fallback_rescues_low_difflib_score():
+    """[재현] 분리 인식으로 difflib 점수가 임계값 미만이 되어도, 부분 문자열이
+    충분히 일치하면 rapidfuzz 폴백이 정답을 찾아 needs_review 오탐을 줄인다."""
+    pool = ["글루코파지XR정500mg"]
+    ocr_text = "관련없는잡음텍스트 글루코파지XR정500mg"
+    with patch("services.drug_matcher._names", return_value=pool):
+        with patch("services.drug_matcher._norm_names", return_value=[_normalize(n) for n in pool]):
+            name, score = match_drug(ocr_text)
+    assert name == "글루코파지XR정500mg"
+    assert score >= MATCH_THRESHOLD
+
+
+def test_match_drug_fuzzy_fallback_not_used_when_difflib_already_confident():
+    """difflib 매칭이 이미 MATCH_THRESHOLD 이상이면(정확 매칭 등) 폴백이 끼어들어
+    기존 스코어(1.0)를 바꾸지 않는다 — 기존 회귀 테스트들의 정확 스코어 보존."""
+    pool = ["메트포르민정500mg"]
+    with patch("services.drug_matcher._names", return_value=pool):
+        with patch("services.drug_matcher._norm_names", return_value=[_normalize(n) for n in pool]):
+            name, score = match_drug("메트포르민정500mg")
+    assert name == "메트포르민정500mg"
     assert score == 1.0
