@@ -386,4 +386,5 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 ## 📄 참고 문서
 
 - [팀 협업 규칙 (team-rules.md)](./docs/team-rules.md)
+- [배포 환경 변경 체크리스트 (deployment-env-checklist.md)](./docs/deployment-env-checklist.md) — 도메인/IP/DB/외부 서비스 키가 바뀔 때 확인할 것
 - [요구사항 정의서](./요구사항_정의서/) / [ERD](./ERD/) / [API 명세서](./API명세서/) — 버전별 문서, 변경 이력은 [`docs/revision_logs/`](./docs/revision_logs/) 참고

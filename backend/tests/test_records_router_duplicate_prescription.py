@@ -9,16 +9,15 @@ test_records_router_duplicate_prescription.py — _create_schedules_from_ocr()�
 근거가 없으니 기존처럼 이름만으로 중복 처리한다(회귀 방지).
 """
 import pytest
+from conftest import make_test_engine
 from models import MedicalRecord, MedicationSchedule, OcrResult, Patient
 from routers.records_router import _create_schedules_from_ocr
-from sqlmodel import Session, SQLModel, create_engine, select
-from sqlmodel.pool import StaticPool
+from sqlmodel import Session, select
 
 
 @pytest.fixture(name="session")
 def session_fixture():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         yield session
 

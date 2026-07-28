@@ -8,14 +8,14 @@
 """
 import models
 import pytest
+from conftest import make_test_engine
 from fastapi import HTTPException
 from routers.monitoring_router import link_caregiver_to_patient
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, select
 
 
 def _make_session():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     return Session(engine)
 
 

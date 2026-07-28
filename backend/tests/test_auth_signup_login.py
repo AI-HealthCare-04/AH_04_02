@@ -5,18 +5,17 @@ test_auth_signup_login.py — 회원가입→로그인 흐름, 중복가입, 잘
 핵심 요구사항이었다 — 이 테스트들이 그 계약을 명시적으로 고정한다.
 """
 import pytest
+from conftest import make_test_engine
 from core.database import get_session
 from fastapi.testclient import TestClient
 from main import app
 from routers.auth_router import MAX_FAILED_LOGIN_ATTEMPTS
-from sqlmodel import Session, SQLModel, create_engine
-from sqlmodel.pool import StaticPool
+from sqlmodel import Session
 
 
 @pytest.fixture(name="session")
 def session_fixture():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         yield session
 

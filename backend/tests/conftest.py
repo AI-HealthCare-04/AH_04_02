@@ -14,6 +14,9 @@ import sys
 from pathlib import Path
 
 import pytest
+from sqlalchemy.engine import make_url
+from sqlmodel import SQLModel, create_engine
+from sqlmodel.pool import StaticPool
 
 os.environ.setdefault("PII_ENCRYPTION_KEY", "c7Ka8_mp2rYGAesszwMtAXutMT8rq2SqDyVnhjU6H_8=")  # 테스트 전용 더미 키
 os.environ.setdefault("PII_HASH_SECRET", "test-only-hash-secret-do-not-use-in-prod")
@@ -36,6 +39,28 @@ os.environ.setdefault("DATABASE_SSL_REQUIRED", "")
 os.environ.setdefault("DATABASE_SSL_CA", "")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+
+def make_test_engine():
+    """[2026-07-28 추가] 각 테스트 파일이 저마다 `create_engine("sqlite://", ...)`를
+    하드코딩해 왔다 — 실제 운영 DB(MySQL)와 테스트 DB(SQLite)가 달라서, "테스트는
+    통과했는데 서버에서만 FK 에러가 난다" 같은 문제(예: MedicationLog 삭제 이슈)가
+    반복됐다. CI에서 DATABASE_URL을 MySQL 서비스 컨테이너로 지정하면 이 함수가 그
+    값을 그대로 써서 실제 MySQL 기준으로 같은 테스트를 돌릴 수 있고, 로컬에서 그냥
+    `pytest`만 돌리면(DATABASE_URL 미지정) 지금까지처럼 빠른 in-memory SQLite를 쓴다.
+
+    SQLite가 아닌 백엔드는 여러 테스트 모듈이 같은 DB(서비스 컨테이너 하나)를 공유하게
+    되므로, 매번 drop_all 후 create_all로 스키마를 초기화해 테스트 간 데이터가 섞이지
+    않게 한다(in-memory SQLite는 매 호출마다 완전히 새 DB라 이 문제가 원래 없었다).
+    """
+    database_url = os.environ.get("DATABASE_URL") or "sqlite://"
+    if make_url(database_url).get_backend_name() == "sqlite":
+        engine = create_engine(database_url, connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    else:
+        engine = create_engine(database_url, pool_pre_ping=True)
+        SQLModel.metadata.drop_all(engine)
+    SQLModel.metadata.create_all(engine)
+    return engine
 
 
 @pytest.fixture(autouse=True)

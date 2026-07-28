@@ -45,6 +45,11 @@
   (2026-07-16, `docs/deviation-log-2026-07-16.md` DEV-01)
 - 인증/계정 상태 변경 기능(로그인, 비밀번호 재설정, 탈퇴, 계정 잠금 등)을 구현하면 코드
   리뷰 전에 `docs/security-checklist.md`로 자체 점검한다 (2026-07-16, DEV-03)
+- 배포 환경(도메인/IP/HTTPS, 팀 공통 DB, 외부 서비스 키)을 바꾸거나 EC2 인스턴스를
+  새로 만들 때는 `docs/deployment-env-checklist.md`로 어떤 `.env` 값을 같이 갱신해야
+  하는지 먼저 확인한다 — 도메인 전환 때 CORS/API URL을 안 맞춰서 로그인이 안 됐던
+  사고, 그 직후 Langfuse 키를 안 챙겨서 추적이 안 됐던 사고 둘 다 이 체크가 없어서
+  반복됐다 (2026-07-28, DEV-07)
 
 ## 12. Alembic 마이그레이션
 - 신규 마이그레이션은 병합 전 반드시 `upgrade head → downgrade -1 → upgrade head` 왕복

@@ -13,6 +13,7 @@ from datetime import datetime
 from unittest.mock import patch
 
 import pytest
+from conftest import make_test_engine
 from core import scheduler
 from models import (
     Caregiver,
@@ -24,14 +25,12 @@ from models import (
     Patient,
     ScheduleCaregiverAlert,
 )
-from sqlmodel import Session, SQLModel, create_engine, select
-from sqlmodel.pool import StaticPool
+from sqlmodel import Session, select
 
 
 @pytest.fixture(name="session")
 def session_fixture():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         yield session
 

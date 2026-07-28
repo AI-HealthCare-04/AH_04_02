@@ -7,19 +7,18 @@ id 목록으로 직접 고를 수 있고, 명시적으로 고른 적 없으면 A
 전원을 그대로 채워서 돌려준다(실제 발송 대상과 항상 일치 — core/schedule_alerts.py 참고).
 """
 import pytest
+from conftest import make_test_engine
 from core.auth import create_access_token
 from core.database import get_session
 from fastapi.testclient import TestClient
 from main import app
 from models import Caregiver, CaregiverPatient, Patient, ScheduleCaregiverAlert
-from sqlmodel import Session, SQLModel, create_engine, select
-from sqlmodel.pool import StaticPool
+from sqlmodel import Session, select
 
 
 @pytest.fixture(name="session")
 def session_fixture():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         yield session
 

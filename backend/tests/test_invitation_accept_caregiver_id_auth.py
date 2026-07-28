@@ -8,19 +8,18 @@ get_current_caregiver_optional로 payload.caregiver_id가 실제 로그인된 �
 검증한다.
 """
 import pytest
+from conftest import make_test_engine
 from core.database import get_session
 from core.security import hash_token
 from fastapi.testclient import TestClient
 from main import app
 from models import Invitation
-from sqlmodel import Session, SQLModel, create_engine
-from sqlmodel.pool import StaticPool
+from sqlmodel import Session
 
 
 @pytest.fixture(name="session")
 def session_fixture():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         yield session
 

@@ -16,6 +16,25 @@ jobs:
   ci:
     runs-on: ubuntu-latest
 
+    # [2026-07-28 추가] 실제 서버는 MySQL인데 CI는 계속 SQLite로 돌아서 "테스트는
+    # 통과했는데 서버에서만 FK 에러가 난다"(예: MedicationLog 삭제 이슈) 같은 문제가
+    # 반복됐다 — CI도 실제 운영과 같은 MySQL로 돌린다. backend/tests/conftest.py의
+    # make_test_engine()이 이 DATABASE_URL을 그대로 써서 각 테스트가 이 MySQL을
+    # 쓰게 된다(로컬에서 DATABASE_URL 없이 그냥 pytest를 돌리면 지금처럼 SQLite).
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: yes
+          MYSQL_DATABASE: ah0402_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -42,7 +61,7 @@ jobs:
         run: uv run pytest backend/tests/ -q
         env:
           APP_ENV: test
-          DATABASE_URL: sqlite://
+          DATABASE_URL: mysql+pymysql://root@127.0.0.1:3306/ah0402_ci
 
   deploy:
     needs: ci

@@ -9,19 +9,18 @@ updates["email"] 조건이 빈 문자열일 때 그대로 falsy라 스킵되면�
 (표준 SQL에서 UNIQUE는 NULL끼리는 충돌하지 않는다).
 """
 import pytest
+from conftest import make_test_engine
 from core.auth import create_access_token
 from core.database import get_session
 from fastapi.testclient import TestClient
 from main import app
 from models import Caregiver, Patient
-from sqlmodel import Session, SQLModel, create_engine
-from sqlmodel.pool import StaticPool
+from sqlmodel import Session
 
 
 @pytest.fixture(name="session")
 def session_fixture():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         yield session
 

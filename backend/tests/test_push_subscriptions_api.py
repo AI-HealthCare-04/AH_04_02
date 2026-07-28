@@ -4,19 +4,18 @@
 같은 endpoint로 다시 POST하면 새 행이 아니라 기존 행이 갱신되는지 검증한다.
 """
 import pytest
+from conftest import make_test_engine
 from core.auth import create_access_token
 from core.database import get_session
 from fastapi.testclient import TestClient
 from main import app
 from models import Caregiver, Patient, PushSubscription
-from sqlmodel import Session, SQLModel, create_engine, select
-from sqlmodel.pool import StaticPool
+from sqlmodel import Session, select
 
 
 @pytest.fixture(name="session")
 def session_fixture():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         yield session
 

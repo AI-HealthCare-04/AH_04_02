@@ -7,17 +7,16 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from conftest import make_test_engine
 from core import push
 from models import PushSubscription
 from pywebpush import WebPushException
-from sqlmodel import Session, SQLModel, create_engine, select
-from sqlmodel.pool import StaticPool
+from sqlmodel import Session, select
 
 
 @pytest.fixture(name="session")
 def session_fixture():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         yield session
 

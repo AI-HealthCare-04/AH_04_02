@@ -10,11 +10,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
-from sqlmodel import Session, SQLModel, create_engine, select
-from sqlmodel.pool import StaticPool
+from sqlmodel import Session, select
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import purge_expired_accounts as purge  # noqa: E402
+from conftest import make_test_engine
 from core import database
 from core.auth import hash_password
 from models import Patient, PrivacyPurgeAudit
@@ -22,8 +22,7 @@ from models import Patient, PrivacyPurgeAudit
 
 @pytest.fixture(name="engine")
 def engine_fixture(monkeypatch):
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     monkeypatch.setattr(database, "engine", engine)
     return engine
 

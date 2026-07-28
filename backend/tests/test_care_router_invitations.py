@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import models
 import pytest
+from conftest import make_test_engine
 from core.security import hash_token
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -21,15 +22,14 @@ from routers.care_router import (
     delete_pending_invitation,
     list_sent_patient_invitations,
 )
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, select
 
 RAW_TOKEN = "tok123"
 
 
 @pytest.fixture
 def session():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as s:
         yield s
 
@@ -58,8 +58,7 @@ def _make_pending_invitation(
 
 
 def test_accept_invitation_commits_caregiver_and_link_together():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         _make_pending_invitation(session)
 
@@ -82,8 +81,7 @@ def test_create_guardian_invitation_from_patient_account():
 
     보호자→환자 초대(relation_type="patient")와 함께 쓰는 양방향 연결 흐름이다.
     """
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         patient = models.Patient()
         patient.name = "테스트 환자"
@@ -110,8 +108,7 @@ def test_create_guardian_invitation_from_patient_account():
 
 
 def test_delete_pending_guardian_invitation_cancels_token():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         patient = models.Patient()
         patient.name = "테스트 환자"
@@ -134,8 +131,7 @@ def test_delete_pending_guardian_invitation_cancels_token():
 
 
 def test_delete_pending_patient_invitation_requires_inviter_caregiver():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         owner = _make_caregiver(session, "초대한 보호자")
         other = _make_caregiver(session, "다른 보호자")
@@ -149,8 +145,7 @@ def test_delete_pending_patient_invitation_requires_inviter_caregiver():
 
 def test_delete_invitation_hides_status_from_non_owner():
     """권한 없는 사용자가 초대 ID를 찍어도 accepted/cancelled 같은 상태를 알 수 없어야 한다."""
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         owner = _make_caregiver(session, "초대한 보호자")
         other = _make_caregiver(session, "다른 보호자")
@@ -166,8 +161,7 @@ def test_delete_invitation_hides_status_from_non_owner():
 
 
 def test_accept_invitation_preserves_invitation_relation_type():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         _make_pending_invitation(session, relation_type="life_support_worker")
 
@@ -191,8 +185,7 @@ def _make_caregiver(
 
 def test_accept_matching_invitation_hides_status_from_wrong_caregiver():
     """받은 초대 처리도 소유권 확인이 먼저라, 다른 보호자는 초대 상태를 유추할 수 없어야 한다."""
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         invitation = _make_pending_invitation(session, invited_phone="010-1111-2222")
         owner = _make_caregiver(session, "초대받은 보호자", phone="010-1111-2222")
@@ -216,8 +209,7 @@ def test_accept_matching_invitation_hides_status_from_wrong_caregiver():
 # "사회복지사"로 온 초대를 "보호자"로 가입한 계정이 그대로 수락해버리던 버그.
 
 def test_accept_as_caregiver_rejects_mismatched_relation_type():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         invitation = _make_pending_invitation(
             session, relation_type="social_worker", invited_phone="010-1111-2222"
@@ -235,8 +227,7 @@ def test_accept_as_caregiver_rejects_mismatched_relation_type():
 
 
 def test_accept_as_caregiver_succeeds_with_matching_relation_type():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         invitation = _make_pending_invitation(
             session, relation_type="social_worker", invited_phone="010-1111-2222"
@@ -266,8 +257,7 @@ def test_accept_as_caregiver_succeeds_with_matching_relation_type():
 
 def test_accept_as_caregiver_organization_can_accept_caregiver_invitation():
     """[재현] organization 계정은 이 예외가 없으면 요양보호사 초대조차 영원히 403이었다."""
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         invitation = _make_pending_invitation(
             session, relation_type="caregiver", invited_phone="010-1111-2222"
@@ -284,8 +274,7 @@ def test_accept_as_caregiver_organization_can_accept_caregiver_invitation():
 
 
 def test_accept_as_caregiver_organization_can_accept_life_support_worker_invitation():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         invitation = _make_pending_invitation(
             session, relation_type="life_support_worker", invited_phone="010-1111-2222"
@@ -300,8 +289,7 @@ def test_accept_as_caregiver_organization_can_accept_life_support_worker_invitat
 
 
 def test_accept_as_caregiver_organization_can_accept_social_worker_invitation():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         invitation = _make_pending_invitation(
             session, relation_type="social_worker", invited_phone="010-1111-2222"
@@ -317,8 +305,7 @@ def test_accept_as_caregiver_organization_can_accept_social_worker_invitation():
 
 def test_accept_as_caregiver_organization_still_rejects_guardian_invitation():
     """기관이 "가족(보호자)" 관계 초대까지 수락할 수는 없다."""
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         invitation = _make_pending_invitation(
             session, relation_type="guardian", invited_phone="010-1111-2222"
@@ -337,8 +324,7 @@ def test_accept_as_caregiver_organization_still_rejects_guardian_invitation():
 
 def test_accept_invitation_by_token_rejects_mismatched_relation_type_for_existing_account():
     """토큰 기반 accept_invitation()도 caregiver_id로 기존 계정을 재사용할 때 같은 검증을 받는다."""
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         _make_pending_invitation(session, relation_type="life_support_worker")
         wrong_role_caregiver = _make_caregiver(session, "보호자로가입", relation_type="guardian")
@@ -375,8 +361,7 @@ def _make_pending_patient_invitation(
 
 def test_create_patient_invitation_needs_no_patient_id():
     """(a) relation_type="patient" 초대는 patient_id 없이 생성돼야 한다."""
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         caregiver = _make_caregiver(session)
 
@@ -395,8 +380,7 @@ def test_create_patient_invitation_needs_no_patient_id():
 
 def test_create_patient_invitation_requires_own_caregiver_id():
     """다른 보호자 id를 inviter로 넣어 초대하려 하면 403."""
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         me = _make_caregiver(session, "나")
         other = _make_caregiver(session, "남")
@@ -413,8 +397,7 @@ def test_create_patient_invitation_requires_own_caregiver_id():
 def test_accept_patient_invitation_creates_real_patient_and_link():
     """(b) 보호자→환자 초대를 수락하면 로그인 가능한(hashed_password 있는) Patient가 생기고
     inviter 보호자와의 CaregiverPatient 연결도 함께 생성된다."""
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         caregiver = _make_caregiver(session)
         _make_pending_patient_invitation(session, caregiver)
@@ -453,8 +436,7 @@ def test_accept_patient_invitation_creates_real_patient_and_link():
 
 
 def test_accept_patient_invitation_requires_patient_name():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         caregiver = _make_caregiver(session)
         _make_pending_patient_invitation(session, caregiver)
@@ -468,8 +450,7 @@ def test_accept_patient_invitation_requires_matching_phone_when_invited_phone_se
     """[2026-07-20 보안수정] relation_type="patient" 분기가 REQ-003 전화번호 검증보다
     먼저 return해서, invited_phone이 지정된 초대인데도 아무 번호로나(혹은 번호 없이)
     수락해 계정을 만들 수 있었다 — 링크만 탈취하면 본인 인증 없이 통과되던 문제."""
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         caregiver = _make_caregiver(session)
         _make_pending_patient_invitation(session, caregiver, invited_phone="010-1234-5678")
@@ -485,8 +466,7 @@ def test_accept_patient_invitation_requires_matching_phone_when_invited_phone_se
 
 
 def test_accept_patient_invitation_succeeds_with_matching_phone():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         caregiver = _make_caregiver(session)
         _make_pending_patient_invitation(session, caregiver, invited_phone="010-1234-5678")
@@ -507,8 +487,7 @@ def test_accept_invitation_rolls_back_caregiver_when_failure_happens_after_creat
     영구 저장된 상태라, 여기서 예외가 나도 Caregiver만 롤백 없이 남는다 — 이 테스트는 그걸
     재현하지 않는지(= flush로 바꾼 수정이 실제로 적용됐는지) 확인한다.
     """
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         _make_pending_invitation(session)
 
@@ -534,8 +513,7 @@ def test_accept_invitation_rolls_back_caregiver_when_failure_happens_after_creat
 # ── GET /caregivers/{id}/invitations — "초대중인 내역" (2026-07-23 추가) ──────────
 
 def test_list_sent_patient_invitations_returns_only_pending():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         caregiver = _make_caregiver(session)
         pending = _make_pending_patient_invitation(session, caregiver)
@@ -548,8 +526,7 @@ def test_list_sent_patient_invitations_returns_only_pending():
 
 
 def test_list_sent_patient_invitations_excludes_accepted():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         caregiver = _make_caregiver(session)
         accepted = _make_pending_patient_invitation(session, caregiver)
@@ -563,8 +540,7 @@ def test_list_sent_patient_invitations_excludes_accepted():
 
 
 def test_list_sent_patient_invitations_forbidden_for_other_caregiver():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         owner = _make_caregiver(session, "주인")
         outsider = _make_caregiver(session, "무관자")
@@ -576,8 +552,7 @@ def test_list_sent_patient_invitations_forbidden_for_other_caregiver():
 
 
 def test_list_sent_patient_invitations_marks_expired_and_excludes():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         caregiver = _make_caregiver(session)
         expired = _make_pending_patient_invitation(session, caregiver)

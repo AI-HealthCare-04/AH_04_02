@@ -10,19 +10,18 @@
 실제로 프론트가 호출하는 "연결 해제" 경로이자, 승인 필요 여부까지 판단한다.
 """
 import pytest
+from conftest import make_test_engine
 from core.auth import create_access_token
 from core.database import get_session
 from fastapi.testclient import TestClient
 from main import app
 from models import Caregiver, CaregiverPatient, Patient
-from sqlmodel import Session, SQLModel, create_engine, select
-from sqlmodel.pool import StaticPool
+from sqlmodel import Session, select
 
 
 @pytest.fixture(name="session")
 def session_fixture():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         yield session
 

@@ -4,25 +4,24 @@
 1. dismiss 호출 → caregiver_alert_dismissed_at이 DB에 저장됨
 2. dismiss 후 _should_alert_now(patient)가 False를 반환함 (30일 이내)
 """
-import pytest
 from datetime import datetime, timedelta
 
+import pytest
+from conftest import make_test_engine
 from core.auth import create_access_token
 from core.database import get_session
 from fastapi.testclient import TestClient
 from main import app
 from models import Caregiver, CaregiverPatient, Patient
 from routers.care_router import _should_alert_now
-from sqlmodel import Session, SQLModel, create_engine
-from sqlmodel.pool import StaticPool
+from sqlmodel import Session
 
 URL = "/trust/relations/{}/dismiss-alert"
 
 
 @pytest.fixture(name="session")
 def session_fixture():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         yield session
 

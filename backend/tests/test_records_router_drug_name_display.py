@@ -10,19 +10,18 @@ OCR 파싱(services/parsing_rules.py의 _drug_name_only)이 매칭용으로 "암
 직접 확인/수정해야 하므로 원본 파싱값을 그대로 보여줘야 한다.
 """
 import pytest
+from conftest import make_test_engine
 from core.auth import create_access_token
 from core.database import get_session
 from fastapi.testclient import TestClient
 from main import app
 from models import Caregiver, CaregiverPatient, MedicalRecord, OcrResult, Patient
-from sqlmodel import Session, SQLModel, create_engine
-from sqlmodel.pool import StaticPool
+from sqlmodel import Session
 
 
 @pytest.fixture(name="session")
 def session_fixture():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as session:
         yield session
 
