@@ -91,3 +91,33 @@ def hash_token(token: str) -> str:
     """[2026-07-15 추가] 무작위 토큰(초대 링크 등)을 HMAC-SHA256으로 해시 — 원문은 저장하지
     않고, 조회 시 넘어온 토큰을 같은 방식으로 해시해 DB의 해시값과 대조한다."""
     return hmac.new(_HASH_SECRET_BYTES, token.encode(), hashlib.sha256).hexdigest()
+
+
+def verify_pii_key_against_db(engine) -> None:
+    """[2026-07-28 추가] 기동 시 현재 PII_ENCRYPTION_KEY가 DB의 실제 암호화 데이터와
+    일치하는지 검증한다.
+
+    위의 Fernet 형식 검사는 "형식은 유효하지만 기존 DB와 맞지 않는 다른 키"를 통과시켜
+    버린다 — 실제 사고 원인이 이것이었고, 그 경우 기동 후 로그인 실패로만 드러났다.
+    이 함수를 lifespan에서 호출해 그 케이스도 기동 시점(fail-fast)에 잡는다.
+
+    patients 테이블에서 name_encrypted가 있는 레코드 1건을 조회해 복호화를 시도하고,
+    InvalidToken이 나오면 즉시 RuntimeError로 앱 기동을 중단한다. DB에 암호화된
+    레코드가 없으면(최초 배포·빈 DB) 검증할 대상이 없으므로 스킵한다.
+    """
+    from cryptography.fernet import InvalidToken
+    from sqlalchemy import text
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT name_encrypted FROM patients WHERE name_encrypted != '' LIMIT 1")
+        ).fetchone()
+    if row is None:
+        return
+    try:
+        _fernet.decrypt(row[0].encode())
+    except InvalidToken as exc:
+        raise RuntimeError(
+            "PII_ENCRYPTION_KEY가 기존 데이터와 일치하지 않는 것 같습니다 — "
+            "docs/env-var-checklist.md 참고"
+        ) from exc
