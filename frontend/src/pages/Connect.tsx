@@ -1,8 +1,9 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { User, AlertCircle, RotateCw, Trash2 } from "lucide-react";
 import NavBar from "../components/NavBar";
 import Skeleton from "../components/Skeleton";
+import EmptyState from "../components/EmptyState";
 import InvitePatientPanel from "../components/InvitePatientPanel";
 import {
   acceptInvitationAsCaregiver,
@@ -139,7 +140,6 @@ export default function Connect() {
   // [2026-07-27 추가] 초대수락/초대하기/대기중/연결됨이 전부 세로로 이어져 스크롤이
   // 길어지던 문제 — 배치만 탭 3개로 나눈다. 데이터·API 호출 로직은 그대로.
   const [activeTab, setActiveTab] = useState<"invite" | "pending" | "connected">("invite");
-  const emptyIconClipId = useId();
 
   const loadCaregiverSideData = async () => {
     if (caregiverId == null) return;
@@ -489,7 +489,7 @@ export default function Connect() {
         )}
 
         {/* [2026-07-27 추가] 세그먼트 탭 — 아래 섹션들은 이 탭 값에 따라 나눠서 보인다 */}
-        <div className="flex gap-1.5 p-1.5 rounded-full bg-[#F9F4EB] mb-6">
+        <div className="flex gap-1.5 p-1.5 rounded-full bg-[#F9F4EB] mb-6" role="tablist">
           {(caregiverId != null
             ? [
                 { key: "invite" as const, label: "환자 초대" },
@@ -504,6 +504,8 @@ export default function Connect() {
           ).map((tab) => (
             <button
               key={tab.key}
+              role="tab"
+              aria-selected={activeTab === tab.key}
               onClick={() => setActiveTab(tab.key)}
               className={`flex-1 py-2.5 rounded-full text-[13px] font-bold transition-colors ${
                 activeTab === tab.key ? "bg-[#C1653D] text-white" : "text-[#6E6259]"
@@ -644,23 +646,7 @@ export default function Connect() {
               <h2 className="text-[15px] font-black text-[#1E1A17]">연결된 환자 ({connectedPatients.length}명)</h2>
             </div>
             {connectedPatients.length === 0 ? (
-              <div className="py-14 text-center">
-                <div className="w-12 h-12 mx-auto mb-3 relative flex items-center justify-center">
-                  <svg viewBox="0 0 48 48" className="absolute inset-0 w-full h-full">
-                    <defs>
-                      <clipPath id={`${emptyIconClipId}-patients`}>
-                        <circle cx="24" cy="24" r="23" />
-                      </clipPath>
-                    </defs>
-                    <circle cx="24" cy="24" r="23" fill="#8FAE5C" stroke="#1E1A17" strokeWidth="1.4" />
-                    <g clipPath={`url(#${emptyIconClipId}-patients)`}>
-                      <rect x="0" y="0" width="30" height="48" fill="#C8DA6F" transform="rotate(-36 17 24)" />
-                    </g>
-                  </svg>
-                  <User className="w-6 h-6 relative text-white" strokeWidth={2.2} />
-                </div>
-                <p className="text-[14px] text-[#6E6259]">아직 연결된 환자가 없어요</p>
-              </div>
+              <EmptyState icon={User} title="아직 연결된 환자가 없어요" />
             ) : (
               connectedPatients.map((p) => (
                 <div key={p.id} className="flex items-center justify-between px-6 py-4 border-b border-[#F4F0EA] last:border-0">
@@ -818,23 +804,7 @@ export default function Connect() {
                 ))}
               </div>
             ) : caregivers.length === 0 ? (
-              <div className="py-14 text-center">
-                <div className="w-12 h-12 mx-auto mb-3 relative flex items-center justify-center">
-                  <svg viewBox="0 0 48 48" className="absolute inset-0 w-full h-full">
-                    <defs>
-                      <clipPath id={`${emptyIconClipId}-caregivers`}>
-                        <circle cx="24" cy="24" r="23" />
-                      </clipPath>
-                    </defs>
-                    <circle cx="24" cy="24" r="23" fill="#8FAE5C" stroke="#1E1A17" strokeWidth="1.4" />
-                    <g clipPath={`url(#${emptyIconClipId}-caregivers)`}>
-                      <rect x="0" y="0" width="30" height="48" fill="#C8DA6F" transform="rotate(-36 17 24)" />
-                    </g>
-                  </svg>
-                  <User className="w-6 h-6 relative text-white" strokeWidth={2.2} />
-                </div>
-                <p className="text-[14px] text-[#6E6259]">아직 연결된 사람이 없어요</p>
-              </div>
+              <EmptyState icon={User} title="아직 연결된 사람이 없어요" />
             ) : (
               caregivers.map((c) => (
                 <div key={c.id} className="flex items-center justify-between px-6 py-4 border-b border-[#F4F0EA] last:border-0">
