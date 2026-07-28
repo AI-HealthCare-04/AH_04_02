@@ -14,6 +14,8 @@ import sys
 from pathlib import Path
 
 import pytest
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 
 os.environ.setdefault("PII_ENCRYPTION_KEY", "c7Ka8_mp2rYGAesszwMtAXutMT8rq2SqDyVnhjU6H_8=")  # 테스트 전용 더미 키
 os.environ.setdefault("PII_HASH_SECRET", "test-only-hash-secret-do-not-use-in-prod")
@@ -36,6 +38,20 @@ os.environ.setdefault("DATABASE_SSL_REQUIRED", "")
 os.environ.setdefault("DATABASE_SSL_CA", "")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+
+# [2026-07-28 추가] SQLite는 기본적으로 외래키 제약을 강제하지 않는다(PRAGMA로 켜야 함) —
+# 반면 실서버(MySQL/InnoDB)는 항상 강제한다. 그래서 "삭제 순서를 안 지켜 FK 위반이 나는"
+# 버그가 SQLite로 도는 테스트는 통과하고 실서버에서만 500이 나는 일이 반복됐다(실제 사례:
+# 9dc7e8e — delete_schedule()이 레거시 MedicationLog를 안 지우고 스케줄을 지워도 SQLite
+# 테스트는 통과했음). 각 테스트 파일이 개별적으로 `create_engine("sqlite://", ...)`를
+# 부르므로, 엔진 인스턴스가 아니라 Engine 클래스 자체에 이벤트를 걸어 전부 한 번에 적용한다.
+@event.listens_for(Engine, "connect")
+def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
+    if type(dbapi_connection).__module__.startswith("sqlite3"):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 
 @pytest.fixture(autouse=True)
