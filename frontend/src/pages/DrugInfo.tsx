@@ -4,7 +4,7 @@ import NavBar from "../components/NavBar";
 import LoadingDots from "../components/LoadingDots";
 import { getDrugIndication, getRecord, type DrugIndicationInfo, type RecordResult } from "../api/records";
 import { C } from "../theme";
-import { getCurrentUserName } from "../lib/session";
+import { getCurrentUserName, isLoggedIn } from "../lib/session";
 
 export default function DrugInfo() {
   const navigate = useNavigate();
@@ -64,7 +64,7 @@ export default function DrugInfo() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <button
           onClick={() => navigate(`/records/${recordId}`)}

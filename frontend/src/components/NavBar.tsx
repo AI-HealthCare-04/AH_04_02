@@ -6,6 +6,13 @@ import { getCurrentCaregiverId } from "../lib/session";
 import { C } from "../theme";
 
 interface NavBarProps {
+  // [2026-07-28 버그수정] 대부분의 호출부가 `<NavBar isLoggedIn ... />` JSX shorthand로
+  // 이 prop을 넘겼는데, 이게 lib/session의 실제 isLoggedIn() 함수를 부르는 게 아니라
+  // 그냥 리터럴 true를 넘기는 것이었다 — 이름이 같아서 함수를 호출한 것처럼 착각하기
+  // 쉽다. 그 결과 access_token이 없어도(=실제 로그인 상태가 아니어도) 로그인된 것처럼
+  // 표시되고, localStorage에 남은 이전 세션의 user_name이 그대로 노출됐다(실제 사고:
+  // 다른 계정으로 로그인해도 예전 사용자 이름이 보임). 반드시 `isLoggedIn={isLoggedIn()}`
+  // 처럼 명시적으로 함수를 호출해서 넘길 것 — `isLoggedIn` shorthand는 쓰지 말 것.
   isLoggedIn?: boolean;
   userName?: string;
   variant?: "light" | "dark";

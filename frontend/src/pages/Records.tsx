@@ -6,7 +6,7 @@ import LoadingDots from "../components/LoadingDots";
 import PatientContextBanner from "../components/PatientContextBanner";
 import PrescriptionImageViewer from "../components/PrescriptionImageViewer";
 import { deleteRecord, listRecords, pinRecord, type RecordSummary } from "../api/records";
-import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
+import { getCurrentUserName, isLoggedIn, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
 
 const STATUS_LABEL: Record<RecordSummary["status"], { text: string; bg: string; color: string }> = {
@@ -143,7 +143,7 @@ export default function Records() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <PatientContextBanner />
         <div className="flex items-start justify-between mb-1">

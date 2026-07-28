@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "r
 import { useNavigate } from "react-router-dom";
 import { Camera, Check, FileText, Image as ImageIcon, X } from "lucide-react";
 import NavBar from "../components/NavBar";
-import { getCurrentCaregiverId, getCurrentPatientId, getCurrentUserName } from "../lib/session";
+import { getCurrentCaregiverId, getCurrentPatientId, getCurrentUserName, isLoggedIn } from "../lib/session";
 import { C } from "../theme";
 
 const TIPS = [
@@ -70,7 +70,7 @@ export default function Upload() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <p className="text-[13px] font-bold mb-1" style={{ color: C.terracotta }}>복약 안내 만들기</p>
         <h1 className="text-[26px] font-black mb-1" style={{ color: C.dark }}>처방전 또는 약봉투를 올려주세요</h1>

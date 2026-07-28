@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { FileText } from "lucide-react";
 import NavBar from "../components/NavBar";
 import { createManualRecord } from "../api/records";
-import { getCurrentCaregiverId, getCurrentPatientId, getCurrentUserName } from "../lib/session";
+import { getCurrentCaregiverId, getCurrentPatientId, getCurrentUserName, isLoggedIn } from "../lib/session";
 import { C } from "../theme";
 
 const REASONS = [
@@ -39,7 +39,7 @@ export default function OcrError() {
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <div className="flex-1 flex flex-col items-center justify-center px-8 py-16">
       <div className="w-full max-w-md text-center">
         <div

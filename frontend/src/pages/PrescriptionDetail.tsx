@@ -6,7 +6,7 @@ import LoadingDots from "../components/LoadingDots";
 import PrescriptionImageViewer from "../components/PrescriptionImageViewer";
 import { getRecord, type RecordResult } from "../api/records";
 import { C } from "../theme";
-import { getCurrentUserName } from "../lib/session";
+import { getCurrentUserName, isLoggedIn } from "../lib/session";
 
 const STATIC_DISCLAIMER =
   "이 정보는 AI가 생성한 참고용 안내입니다. 정확한 복약 지도는 담당 의사 또는 약사에게 확인하세요.";
@@ -32,7 +32,7 @@ export default function PrescriptionDetail() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <button
           onClick={() => navigate("/records")}

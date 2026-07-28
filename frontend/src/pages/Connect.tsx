@@ -31,7 +31,7 @@ import {
   type Patient,
 } from "../api/monitoring";
 import { copyTextToClipboard } from "../lib/clipboard";
-import { getCurrentCaregiverId, getCurrentPatientId, getCurrentUserName } from "../lib/session";
+import { getCurrentCaregiverId, getCurrentPatientId, getCurrentUserName, isLoggedIn } from "../lib/session";
 
 type RelationType = "guardian" | "caregiver" | "life_support_worker" | "social_worker";
 
@@ -399,7 +399,7 @@ export default function Connect() {
 
   return (
     <div className="min-h-screen bg-[#F2E8D8]">
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <h1 className="text-[26px] font-black text-[#1E1A17] mb-1">연결관리</h1>
         <p className="text-[14px] text-[#8A7E75] mb-7">복약 관리를 함께할 사람을 초대하고 관리하세요.</p>

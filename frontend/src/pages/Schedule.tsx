@@ -15,7 +15,7 @@ import {
   type Caregiver,
   type Schedule,
 } from "../api/monitoring";
-import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
+import { getCurrentUserName, isLoggedIn, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
 import { formatTime12, from12, HOURS_12, MINUTES_5, PERIODS, to12, WheelColumn } from "../components/WheelTimePicker";
 
@@ -293,7 +293,7 @@ export default function SchedulePage() {
 
   return (
     <div className="min-h-screen bg-[#F2E8D8]">
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-3xl mx-auto px-6 sm:px-8 py-10">
         <PatientContextBanner />
         <div className="flex items-center justify-between mb-7 flex-wrap gap-3">

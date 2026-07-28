@@ -6,7 +6,7 @@ import LoadingDots from "../components/LoadingDots";
 import PatientContextBanner from "../components/PatientContextBanner";
 import { getLogs, type MedicationLogEntry } from "../api/monitoring";
 import { listRecords, type RecordSummary } from "../api/records";
-import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
+import { getCurrentUserName, isLoggedIn, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
 
 function dateKey(iso: string) {
@@ -55,7 +55,7 @@ export default function MonitoringDayLogs() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <PatientContextBanner afterSwitchPath="/monitoring" />
         <button

@@ -3,7 +3,7 @@ import NavBar from "../components/NavBar";
 import LoadingDots from "../components/LoadingDots";
 import PatientContextBanner from "../components/PatientContextBanner";
 import { getNotificationSettings, updateNotificationSettings, type NotificationSettings } from "../api/care";
-import { applyFontScale, getCurrentUserName, getFontScale, type FontScale, useGuardedPatientId } from "../lib/session";
+import { type FontScale, applyFontScale, getCurrentUserName, getFontScale, isLoggedIn, useGuardedPatientId } from "../lib/session";
 
 const DEFAULT_CHATBOT_NAME = "약콩이";
 
@@ -63,7 +63,7 @@ export default function Settings() {
 
   return (
     <div className="min-h-screen bg-[#F2E8D8]">
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-xl mx-auto px-6 sm:px-8 py-10">
         <PatientContextBanner />
         <h1 className="text-[26px] font-black text-[#1E1A17] mb-1">화면·챗봇 설정</h1>
