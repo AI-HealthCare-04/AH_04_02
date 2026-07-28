@@ -259,6 +259,82 @@ def test_accept_as_caregiver_succeeds_with_matching_relation_type():
         assert notices[0].counterpart_name == "사회복지사로가입"
 
 
+# [2026-07-28 버그수정] "지원인력"(organization) 계정은 InvitationCreate.relation_type에
+# "organization" 자체가 옵션으로 없어서, 위 엄격한 등호 비교만으로는 어떤 초대도 영원히
+# 수락할 수 없었다(caregiver.relation_type == "organization"과 정확히 같은 초대는 존재할
+# 수 없으므로) — 요양보호사/생활지원사/사회복지사 초대는 기관 소속으로서 수락할 수 있어야 한다.
+
+def test_accept_as_caregiver_organization_can_accept_caregiver_invitation():
+    """[재현] organization 계정은 이 예외가 없으면 요양보호사 초대조차 영원히 403이었다."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        invitation = _make_pending_invitation(
+            session, relation_type="caregiver", invited_phone="010-1111-2222"
+        )
+        org_caregiver = _make_caregiver(
+            session, "행복요양원", phone="010-1111-2222", relation_type="organization"
+        )
+
+        result = accept_invitation_as_caregiver(invitation.id, org_caregiver, session)
+
+        assert result["status"] == "accepted"
+        session.refresh(invitation)
+        assert invitation.status == "accepted"
+
+
+def test_accept_as_caregiver_organization_can_accept_life_support_worker_invitation():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        invitation = _make_pending_invitation(
+            session, relation_type="life_support_worker", invited_phone="010-1111-2222"
+        )
+        org_caregiver = _make_caregiver(
+            session, "행복요양원", phone="010-1111-2222", relation_type="organization"
+        )
+
+        result = accept_invitation_as_caregiver(invitation.id, org_caregiver, session)
+
+        assert result["status"] == "accepted"
+
+
+def test_accept_as_caregiver_organization_can_accept_social_worker_invitation():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        invitation = _make_pending_invitation(
+            session, relation_type="social_worker", invited_phone="010-1111-2222"
+        )
+        org_caregiver = _make_caregiver(
+            session, "행복요양원", phone="010-1111-2222", relation_type="organization"
+        )
+
+        result = accept_invitation_as_caregiver(invitation.id, org_caregiver, session)
+
+        assert result["status"] == "accepted"
+
+
+def test_accept_as_caregiver_organization_still_rejects_guardian_invitation():
+    """기관이 "가족(보호자)" 관계 초대까지 수락할 수는 없다."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        invitation = _make_pending_invitation(
+            session, relation_type="guardian", invited_phone="010-1111-2222"
+        )
+        org_caregiver = _make_caregiver(
+            session, "행복요양원", phone="010-1111-2222", relation_type="organization"
+        )
+
+        with pytest.raises(HTTPException) as exc:
+            accept_invitation_as_caregiver(invitation.id, org_caregiver, session)
+
+        assert exc.value.status_code == 403
+        session.refresh(invitation)
+        assert invitation.status == "pending"
+
+
 def test_accept_invitation_by_token_rejects_mismatched_relation_type_for_existing_account():
     """토큰 기반 accept_invitation()도 caregiver_id로 기존 계정을 재사용할 때 같은 검증을 받는다."""
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})

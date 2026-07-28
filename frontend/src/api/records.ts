@@ -279,8 +279,16 @@ export interface RecordSummary {
  * 바로 못 쓴다(브라우저가 직접 요청하면 Authorization 헤더가 안 붙음). Blob으로 받아서
  * object URL을 만들어 반환 — 다 쓰면 호출부가 URL.revokeObjectURL()로 정리해야 한다.
  * record_id로만 조회해서 이 처방전에 연결된 사진만 불러온다(다른 기록의 사진이 섞일 수 없음). */
+// [2026-07-28 버그수정] 휴대폰으로 찍은 처방전 원본 사진은 용량이 몇 MB씩 될 수 있는데,
+// 공용 axios 클라이언트의 전역 10초 타임아웃(monitoringClient.ts)을 그대로 썼다 —
+// askChat/getDrugIndication이 이미 겪은 것과 같은 문제(TROUBLESHOOTING.md 2026-07-09
+// 항목 참고)로, 로컬(loopback)에서는 안 걸리다가 실제 배포 환경(휴대폰 네트워크 → nginx
+// → 백엔드)에서는 10초를 넘겨 실패할 수 있다. LLM 호출만큼 오래 걸리진 않지만 넉넉하게 잡는다.
 export async function getRecordImageBlobUrl(recordId: number): Promise<string> {
-  const { data } = await monitoringClient.get(`/records/${recordId}/image`, { responseType: "blob" });
+  const { data } = await monitoringClient.get(`/records/${recordId}/image`, {
+    responseType: "blob",
+    timeout: 30000,
+  });
   return URL.createObjectURL(data);
 }
 
