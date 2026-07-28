@@ -11,7 +11,7 @@ import {
   type Patient,
   type Schedule,
 } from "../api/monitoring";
-import { getCurrentCaregiverId, getCurrentPatientId, getCurrentUserName } from "../lib/session";
+import { getCurrentCaregiverId, getCurrentPatientId, getCurrentUserName, isLoggedIn } from "../lib/session";
 import { C } from "../theme";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
@@ -213,7 +213,7 @@ export default function MonitoringDashboard() {
   if (patientId == null) {
     return (
       <div className="min-h-screen" style={{ background: C.ivory }}>
-        <NavBar isLoggedIn userName={getCurrentUserName()} />
+        <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
         <main className="max-w-4xl mx-auto px-6 sm:px-8 py-10">
           <h1 className="text-[24px] font-black mb-1" style={{ color: C.dark }}>모니터링 대시보드</h1>
           <p className="text-[14px] mb-7" style={{ color: C.muted }}>연결된 환자들의 오늘 복약 현황을 한눈에 확인하세요.</p>
@@ -233,7 +233,7 @@ export default function MonitoringDashboard() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-4xl mx-auto px-6 sm:px-8 py-10">
         {/* [2026-07-27 수정] "전체 요약"은 여러 환자를 관리하는 보호자·기관 전용 화면이라
             환자 본인 계정에는 돌아갈 곳이 없다 — caregiverId가 있을 때만 보여준다. */}

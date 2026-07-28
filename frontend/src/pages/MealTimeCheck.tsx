@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import NavBar from "../components/NavBar";
 import PatientContextBanner from "../components/PatientContextBanner";
 import { getPatients, updateMealTimes } from "../api/monitoring";
-import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
+import { getCurrentUserName, isLoggedIn, useGuardedPatientId } from "../lib/session";
 import { from12, HOURS_12, MINUTES_5, PERIODS, to12, WheelColumn } from "../components/WheelTimePicker";
 
 type MealKey = "breakfast" | "lunch" | "dinner";
@@ -82,7 +82,7 @@ export default function MealTimeCheck() {
 
   return (
     <div className="min-h-screen bg-[#F2E8D8]">
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <PatientContextBanner />
         <h1 className="text-[26px] font-black text-[#1E1A17] mb-2">식사 시간 체크리스트</h1>

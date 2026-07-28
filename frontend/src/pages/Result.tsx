@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import NavBar from "../components/NavBar";
 import { formatUniqueSourceRefs, type LifestyleCategory, type RecordResult } from "../api/records";
 import { C } from "../theme";
-import { getCurrentUserName } from "../lib/session";
+import { getCurrentUserName, isLoggedIn } from "../lib/session";
 
 const STATIC_DISCLAIMER =
   "이 정보는 AI가 생성한 참고용 안내입니다. 정확한 복약 지도는 담당 의사 또는 약사에게 확인하세요.";
@@ -44,7 +44,7 @@ export default function Result() {
   if (result.status === "review_required") {
     return (
       <div className="min-h-screen" style={pageStyle}>
-        <NavBar isLoggedIn userName={getCurrentUserName()} />
+        <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
         <main className="max-w-[1100px] mx-auto text-center px-4 py-20 sm:px-6 sm:py-[120px]">
           <p className="text-[15px] mb-5" style={{ color: C.warningText }}>
             일부 항목의 인식 정확도가 낮아 확인이 필요해요.
@@ -60,7 +60,7 @@ export default function Result() {
   if (result.status === "failed" || !result.guide) {
     return (
       <div className="min-h-screen" style={pageStyle}>
-        <NavBar isLoggedIn userName={getCurrentUserName()} />
+        <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
         <main className="max-w-[1100px] mx-auto text-center px-4 py-20 sm:px-6 sm:py-[120px]">
           <p className="text-[15px] mb-5" style={{ color: C.danger }}>
             {result.failure_reason || "결과를 생성하지 못했어요."}
@@ -77,7 +77,7 @@ export default function Result() {
 
   return (
     <div className="min-h-screen" style={pageStyle}>
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
 
       <main className="max-w-[1100px] mx-auto px-4 pt-6 pb-16 sm:px-6 sm:pt-10 sm:pb-20">
         {/* 헤더 */}

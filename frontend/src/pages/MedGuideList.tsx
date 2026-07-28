@@ -6,7 +6,7 @@ import LoadingDots from "../components/LoadingDots";
 import PatientContextBanner from "../components/PatientContextBanner";
 import PrescriptionImageViewer from "../components/PrescriptionImageViewer";
 import { deleteRecord, listRecords, type RecordSummary } from "../api/records";
-import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
+import { getCurrentUserName, isLoggedIn, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
 
 // [2026-07-20] 등록내역(모든 상태)과 달리, 여기는 실제로 완성된 복약 가이드만 모아 보여준다 —
@@ -93,7 +93,7 @@ export default function MedGuideList() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <PatientContextBanner />
         <div className="flex items-start justify-between mb-1">
