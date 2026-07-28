@@ -8,6 +8,7 @@ MedicalRecord.caregiver_review_status 상태 전이를 검증한다.
 from __future__ import annotations
 
 import pytest
+import sqlalchemy
 from core.auth import create_access_token
 from core.database import get_session
 from fastapi.testclient import TestClient
@@ -381,6 +382,97 @@ class TestInitialReviewStatusOnConfirm:
         assert r.status_code == 200
         session.refresh(rec)
         assert rec.status == "completed"
+        assert rec.caregiver_review_status == "none"
+
+
+# ── [2026-07-28 버그수정] 43be3b2a7ff4 마이그레이션이 caregiver_review_status를
+# server_default='none'으로 추가해서, 그 시점에 이미 completed + 보호자 연결이 있던
+# 기존 처방전들은 "pending"이어야 정상인데도 "none"으로 남았다 — 이 값을 바로잡는
+# 백필 마이그레이션(48230e8ff2b4)의 SQL 로직을 검증한다. alembic을 직접 돌리는 대신
+# 이 파일의 다른 테스트처럼 SQLModel.metadata.create_all로 만든 스키마에 같은 SQL을
+# 그대로 실행해 검증한다(alembic 마이그레이션 자체를 CI에서 도는 것과 동일한 결과를
+# 내는지 확인하는 목적).
+_BACKFILL_REVIEW_STATUS_SQL = """
+    UPDATE medical_records
+    SET caregiver_review_status = 'pending'
+    WHERE status = 'completed'
+      AND deleted_at IS NULL
+      AND caregiver_review_status = 'none'
+      AND EXISTS (
+          SELECT 1 FROM caregiver_patients
+          WHERE caregiver_patients.patient_id = medical_records.patient_id
+            AND caregiver_patients.status != 'revoked'
+      )
+"""
+
+
+class TestBackfillCaregiverReviewStatusMigration:
+    def test_backfills_completed_record_with_active_caregiver_link(self, session: Session):
+        cg = _make_caregiver(session)
+        pt = _make_patient(session)
+        _link(session, cg, pt)
+        rec, _ = _make_completed_record(session, pt.id, review_status="none")
+
+        session.exec(sqlalchemy.text(_BACKFILL_REVIEW_STATUS_SQL))
+        session.commit()
+        session.refresh(rec)
+
+        assert rec.caregiver_review_status == "pending"
+
+    def test_does_not_touch_already_reviewed_record(self, session: Session):
+        """이미 "reviewed"/"needs_correction"으로 정상 전이된 행은 건드리면 안 된다."""
+        cg = _make_caregiver(session)
+        pt = _make_patient(session)
+        _link(session, cg, pt)
+        rec, _ = _make_completed_record(session, pt.id, review_status="reviewed")
+
+        session.exec(sqlalchemy.text(_BACKFILL_REVIEW_STATUS_SQL))
+        session.commit()
+        session.refresh(rec)
+
+        assert rec.caregiver_review_status == "reviewed"
+
+    def test_leaves_record_without_caregiver_link_as_none(self, session: Session):
+        pt = _make_patient(session)
+        rec, _ = _make_completed_record(session, pt.id, review_status="none")
+
+        session.exec(sqlalchemy.text(_BACKFILL_REVIEW_STATUS_SQL))
+        session.commit()
+        session.refresh(rec)
+
+        assert rec.caregiver_review_status == "none"
+
+    def test_ignores_revoked_caregiver_link(self, session: Session):
+        cg = _make_caregiver(session)
+        pt = _make_patient(session)
+        _link(session, cg, pt)
+        link = session.exec(
+            select(CaregiverPatient).where(CaregiverPatient.patient_id == pt.id)
+        ).one()
+        link.status = "revoked"
+        session.add(link)
+        session.commit()
+        rec, _ = _make_completed_record(session, pt.id, review_status="none")
+
+        session.exec(sqlalchemy.text(_BACKFILL_REVIEW_STATUS_SQL))
+        session.commit()
+        session.refresh(rec)
+
+        assert rec.caregiver_review_status == "none"
+
+    def test_ignores_non_completed_record(self, session: Session):
+        cg = _make_caregiver(session)
+        pt = _make_patient(session)
+        _link(session, cg, pt)
+        rec = MedicalRecord(patient_id=pt.id, image_path="t.jpg", status="processing", caregiver_review_status="none")
+        session.add(rec)
+        session.commit()
+        session.refresh(rec)
+
+        session.exec(sqlalchemy.text(_BACKFILL_REVIEW_STATUS_SQL))
+        session.commit()
+        session.refresh(rec)
+
         assert rec.caregiver_review_status == "none"
 
 

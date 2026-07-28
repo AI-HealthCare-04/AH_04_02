@@ -194,8 +194,18 @@ export default function PrescriptionImageViewer({
         objectUrl = u;
         setUrl(u);
       })
-      .catch(() => {
-        if (!cancelled) setError("처방전 사진을 불러오지 못했어요.");
+      .catch((e) => {
+        if (cancelled) return;
+        // [2026-07-28 버그수정] 지금까지는 원인과 무관하게 항상 같은 문구였다 — 실제
+        // 배포 환경에서 이 요청이 실패하는 흔한 원인 두 가지(사진 파일이 서버 디스크에
+        // 없음 vs 그 외 네트워크/타임아웃)를 구분해서 보여주면, 재현 시 원인 파악이
+        // 훨씬 쉬워진다.
+        const status = (e as { response?: { status?: number } })?.response?.status;
+        setError(
+          status === 404
+            ? "저장된 처방전 사진을 찾을 수 없어요. 다시 문의해 주세요."
+            : "처방전 사진을 불러오지 못했어요."
+        );
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
