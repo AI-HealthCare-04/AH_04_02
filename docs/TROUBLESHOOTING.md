@@ -455,3 +455,15 @@ for raw, norm in zip(raw_pool, norm_pool):
 | **해결** | (1) 4개 파일의 제형 키워드 목록을 팀 정리 제형군 표 기준으로 통일·확장(과립/세립/엘릭서/드링크/앰플/바이알/시린지/패치/점안/점이/스프레이/좌제/필름/트로키/껌 등), 1회 복용량 단위도 함께 확장(ml/방울/분무/분사/퍼프/g/단위/매/개/스틱). 나잘스프레이처럼 "1회씩 분사"/"1회 분무"처럼 숫자가 분무/분사가 아니라 "회"에 붙는 표기도 분무 수량으로 인식하도록 `SPRAY_COUNT_RE`를 추가했다. (2) 부작용·보관법이 둘 다 채워진 히트를 찾을 때까지 남은 후보를 계속 시도하고, 끝까지 못 찾으면 첫 히트로 폴백하도록 수정. (3) `_str_list`가 공백 차이만 다른 문장도 같은 것으로 보고, 먼저 나온 순서를 유지하며 제거하도록 수정. (4) `PRN_RE`(한글 "필요시" 또는 영문 "prn")만 hs/ac/pc와 분리해 예외로 두고 그 값 자체를 반환하도록 수정. (5) `describeError()` 헬퍼(`Schedule.tsx`에 이미 있던 패턴 재사용)로 `err.response.data.detail`을 그대로 보여주도록 수정. |
 | **테스트/검증** | 신규 `test_parsing_rules_dosage_forms.py`(34개), `test_parsing_rules_prn.py`(9개), `test_drug_matcher.py`/`test_drug_reference.py`/`test_ocr_router_drug_info.py`/`rag/tests/test_rag_chain.py` 추가분 포함 — 백엔드 전체 486개 통과. 프론트엔드 타입체크(`tsc --noEmit`) 통과. |
 | **핵심 패턴** | 같은 분류 기준(제형)을 여러 파일에 독립적으로 하드코딩하면, 각자 필요할 때만 늘어나서 서로 다른 부분집합을 갖게 되고 그 차이 자체가 버그가 된다 — 정규식 키워드 목록은 공유 상수로 묶거나, 최소한 "이 목록들은 항상 같이 늘려야 한다"는 주석으로 서로를 가리키게 해야 한다. axios 에러의 `catch` 블록에서 에러 객체를 아예 버리고 고정 문자열만 보여주면, 백엔드가 이미 구체적인 사유를 내려줘도 사용자에게는 "이유 없이 실패"로만 보인다 — `describeError` 패턴처럼 최소한 `detail`은 항상 꺼내 보여줄 것. |
+
+---
+
+| 날짜 | 2026.07.28 |
+|---|---|
+| **작성자** | 김영혜 |
+| **이슈** | duckdns 도메인(`yakcong.duckdns.org`)으로 서버를 띄웠을 때 Langfuse로 챗봇 호출이 추적되지 않음 |
+| **발생 위치** | `backend/services/langfuse_tracing.py`, EC2 서버의 `backend/.env` (`LANGFUSE_SECRET_KEY`/`LANGFUSE_PUBLIC_KEY`/`LANGFUSE_BASE_URL`) |
+| **원인** | Langfuse 연동은 "추적 실패가 챗봇 자체를 절대 깨면 안 된다"는 설계 때문에, 키 누락이든 SDK 오류든 네트워크 문제든 모든 예외를 `except Exception: return None`으로 조용히 삼키고 **로그를 전혀 남기지 않았다** — 그래서 추적이 안 될 때 서버 로그 어디를 봐도 원인을 알 수 없었다. 7/27 도메인 전환 시 EC2 인스턴스를 재설정하면서 그때 문서화된 재발방지 체크리스트(`CORS_ALLOWED_ORIGINS`/`VITE_MONITORING_API_URL`)에는 `LANGFUSE_*` 세 값이 포함돼 있지 않았다 — 인스턴스를 새로 만들거나 `.env`를 재작성하는 과정에서 이 세 값 중 하나가 누락/오타났을 가능성이 가장 유력하다(langfuse 추적은 프론트→백엔드 요청과 무관한 백엔드→Langfuse Cloud 아웃바운드 호출이라, CORS/Mixed-Content 문제와는 무관함). |
+| **해결** | `langfuse_tracing.py`의 모든 `except Exception` 블록에 `logger.warning(..., exc_info=True)`를 추가했다(챗봇 동작은 여전히 막지 않음 — 로그만 남김). 키 자체가 없는 경우(`_enabled() == False`)는 흔한 정상 상황(로컬 개발 등)일 수 있어 요청마다 남기지 않고 프로세스당 한 번만 info 레벨로 남긴다. 이 로그로 "키 누락"과 "키는 있는데 SDK/네트워크 문제"를 서버 로그만 보고 구분할 수 있다. **EC2 서버의 실제 `backend/.env`에 `LANGFUSE_SECRET_KEY`/`LANGFUSE_PUBLIC_KEY`/`LANGFUSE_BASE_URL` 세 값이 전부 정확히 들어있는지는 직접 확인이 필요함(로컬 코드만으로는 확인 불가) — 서버 로그에 "Langfuse tracing disabled" 메시지가 있는지 먼저 확인해보면 바로 알 수 있다.** |
+| **테스트/검증** | `backend/tests/test_langfuse_tracing.py`에 disabled 상태 1회만 로그하는지, 자격증명 없을 때 예외 없이 None을 반환하는지 검증하는 테스트 3개 추가 — 통과 확인. |
+| **재발 방지** | 배포 환경(EC2 인스턴스)이 바뀌면 `CORS_ALLOWED_ORIGINS`/`VITE_MONITORING_API_URL`뿐 아니라 `LANGFUSE_SECRET_KEY`/`LANGFUSE_PUBLIC_KEY`/`LANGFUSE_BASE_URL`도 함께 다시 세팅해야 한다. "실패해도 절대 죽지 않아야 하는" 선택적(optional) 연동이라도, 최소한 로그 한 줄은 남겨야 한다 — 안 그러면 "이게 꺼진 건지, 설정이 잘못된 건지, 코드가 고장난 건지"조차 알 수 없다. |
