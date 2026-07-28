@@ -299,12 +299,12 @@ def test_build_context_includes_lifestyle_guidelines_when_diagnosis_matches():
 
 
 FAKE_KDCA_DOC = Document(
-    page_content="[관절염 - 개요정의] 관절염은 관절에 염증이 생기는 질환입니다.",
+    page_content="[고혈압 - 생활습관 관리] 저염식을 실천하고 규칙적으로 운동합니다.",
     metadata={
         "doc_type": "kdca_health_info",
         "cntnts_sn": "1234",
-        "title": "관절염",
-        "section_name": "개요정의",
+        "title": "고혈압",
+        "section_name": "생활습관 관리",
         "section_sn": "10",
         "index": 0,
         "source": "질병관리청 국가건강정보포털",
@@ -312,22 +312,110 @@ FAKE_KDCA_DOC = Document(
     },
 )
 
+# [2026-07-28 버그수정] 질병관리청 검색 결과가 "생활습관과 무관한 섹션"(개요/증상 등)이어도
+# 무조건 찾은 것으로 처리해 curated fallback으로 넘어가지 못하던 버그를 재현하는 픽스처.
+FAKE_KDCA_NON_LIFESTYLE_DOC = Document(
+    page_content="[고혈압 - 개요정의] 고혈압은 혈압이 정상 범위보다 높은 상태입니다.",
+    metadata={
+        "doc_type": "kdca_health_info",
+        "cntnts_sn": "1234",
+        "title": "고혈압",
+        "section_name": "개요정의",
+        "section_sn": "1",
+        "index": 0,
+        "source": "질병관리청 국가건강정보포털",
+        "source_url": "https://health.kdca.go.kr/example",
+    },
+)
 
-def test_build_context_uses_kdca_as_primary_lifestyle_source():
-    """[2026-07-21] 질병관리청 건강정보(실제 수집분)를 생활습관 안내의 최우선 소스로 조회한다."""
+
+def test_build_context_uses_kdca_title_match_as_primary_lifestyle_source():
+    """[2026-07-28] 진단명이 질병관리청 title과 정확히 일치하면(title exact match) 그
+    생활습관 섹션을 최우선으로 쓰고, 의미기반 검색이나 curated 학회 요약은 조회하지 않는다."""
     with (
         patch("rag.rag_chain.search_by_item_name", return_value=[FAKE_DOC]),
-        patch("rag.rag_chain.search_by_disease", return_value=[]),
+        patch("rag.rag_chain.search_by_disease") as mock_search_disease,
+        patch("rag.rag_chain.search_kdca_health_info_by_title", return_value=[FAKE_KDCA_DOC]) as mock_title_search,
+        patch("rag.rag_chain.search_kdca_health_info") as mock_kdca_search,
+        patch("rag.rag_chain.search_hira_by_product_name", return_value=[]),
+    ):
+        context_items = _build_context("암로디핀정5밀리그램", situation=None, diagnosis="고혈압")
+
+    mock_title_search.assert_called_once_with("고혈압")
+    mock_kdca_search.assert_not_called()
+    mock_search_disease.assert_not_called()
+    lifestyle_item = next(item for item in context_items if item["kind"] == "lifestyle")
+    assert lifestyle_item["source_ref"].disease == "고혈압"
+    assert lifestyle_item["source_ref"].category == "생활습관 관리"
+    assert "kdca-1234-10-0" == lifestyle_item["source_ref"].guideline_id
+
+
+def test_build_context_ignores_non_lifestyle_kdca_title_sections():
+    """[2026-07-28 버그수정] title 정확매칭으로 뭔가 찾아도, 그게 생활습관과 무관한
+    섹션(개요/증상 등)뿐이면 못 찾은 것으로 보고 의미기반 검색으로 넘어가야 한다."""
+    with (
+        patch("rag.rag_chain.search_by_item_name", return_value=[FAKE_DOC]),
+        patch("rag.rag_chain.search_by_disease") as mock_search_disease,
+        patch("rag.rag_chain.search_kdca_health_info_by_title", return_value=[FAKE_KDCA_NON_LIFESTYLE_DOC]),
         patch("rag.rag_chain.search_kdca_health_info", return_value=[FAKE_KDCA_DOC]) as mock_kdca_search,
         patch("rag.rag_chain.search_hira_by_product_name", return_value=[]),
     ):
-        context_items = _build_context("암로디핀정5밀리그램", situation=None, diagnosis="관절염")
+        context_items = _build_context("암로디핀정5밀리그램", situation=None, diagnosis="고혈압")
 
-    mock_kdca_search.assert_called_once_with("관절염", k=3)
+    mock_kdca_search.assert_called_once_with("고혈압", k=30)
+    mock_search_disease.assert_not_called()
     lifestyle_item = next(item for item in context_items if item["kind"] == "lifestyle")
-    assert lifestyle_item["source_ref"].disease == "관절염"
-    assert lifestyle_item["source_ref"].category == "개요정의"
-    assert "kdca-1234-10-0" == lifestyle_item["source_ref"].guideline_id
+    assert lifestyle_item["source_ref"].category == "생활습관 관리"
+
+
+def test_build_context_falls_back_to_kdca_semantic_search_when_title_not_exact():
+    """[2026-07-28] 진단명이 title과 정확히 일치하지 않으면(예: '고혈압 있음') title
+    조회는 빈 결과가 나오고, 의미기반 검색 결과 중 실제 진단명과 관련된 title의 생활습관
+    섹션만 채택한다."""
+    with (
+        patch("rag.rag_chain.search_by_item_name", return_value=[FAKE_DOC]),
+        patch("rag.rag_chain.search_by_disease") as mock_search_disease,
+        patch("rag.rag_chain.search_kdca_health_info_by_title", return_value=[]),
+        patch("rag.rag_chain.search_kdca_health_info", return_value=[FAKE_KDCA_DOC]) as mock_kdca_search,
+        patch("rag.rag_chain.search_hira_by_product_name", return_value=[]),
+    ):
+        context_items = _build_context("암로디핀정5밀리그램", situation=None, diagnosis="고혈압 있음")
+
+    mock_kdca_search.assert_called_once_with("고혈압 있음", k=30)
+    mock_search_disease.assert_not_called()
+    lifestyle_item = next(item for item in context_items if item["kind"] == "lifestyle")
+    assert lifestyle_item["source_ref"].disease == "고혈압"
+    assert lifestyle_item["source_ref"].category == "생활습관 관리"
+
+
+def test_build_context_ignores_kdca_semantic_hits_from_unrelated_disease_title():
+    """[2026-07-28 버그수정] 의미기반 검색이 진단명과 무관한 다른 질환의 생활습관 섹션을
+    가져오면(예: '이상지질혈증' 질의에 '치통' 관련 문서가 섞여 들어오는 경우) 채택하지
+    않아야 한다 — title이 diagnosis와 실제로 관련 있는지까지 확인한다."""
+    unrelated_doc = Document(
+        page_content="[치통 및 만성 통증 - 생활습관 관리] 규칙적인 구강 관리가 중요합니다.",
+        metadata={
+            "doc_type": "kdca_health_info",
+            "cntnts_sn": "9999",
+            "title": "치통 및 만성 통증",
+            "section_name": "생활습관 관리",
+            "section_sn": "5",
+            "index": 0,
+            "source": "질병관리청 국가건강정보포털",
+            "source_url": "https://health.kdca.go.kr/example-unrelated",
+        },
+    )
+    with (
+        patch("rag.rag_chain.search_by_item_name", return_value=[FAKE_DOC]),
+        patch("rag.rag_chain.search_by_disease", return_value=[]) as mock_search_disease,
+        patch("rag.rag_chain.search_kdca_health_info_by_title", return_value=[]),
+        patch("rag.rag_chain.search_kdca_health_info", return_value=[unrelated_doc]),
+        patch("rag.rag_chain.search_hira_by_product_name", return_value=[]),
+    ):
+        context_items = _build_context("암로디핀정5밀리그램", situation=None, diagnosis="이상지질혈증")
+
+    mock_search_disease.assert_called_once_with("dyslipidemia")
+    assert not any(item["kind"] == "lifestyle" and item["source_ref"].disease == "치통 및 만성 통증" for item in context_items)
 
 
 FAKE_OSTEOPOROSIS_KDCA_DOC = Document(
@@ -352,13 +440,14 @@ def test_build_context_falls_back_to_kdca_for_osteoporosis_not_in_curated_alias_
     with (
         patch("rag.rag_chain.search_by_item_name", return_value=[FAKE_DOC]),
         patch("rag.rag_chain.search_by_disease", return_value=[]) as mock_curated,
+        patch("rag.rag_chain.search_kdca_health_info_by_title", return_value=[]),
         patch("rag.rag_chain.search_kdca_health_info", return_value=[FAKE_OSTEOPOROSIS_KDCA_DOC]) as mock_kdca_search,
         patch("rag.rag_chain.search_hira_by_product_name", return_value=[]),
     ):
         context_items = _build_context("암로디핀정5밀리그램", situation=None, diagnosis="골다공증")
 
     mock_curated.assert_not_called()  # "골다공증"은 별칭에 없으므로 disease_code 자체가 안 나옴
-    mock_kdca_search.assert_called_once_with("골다공증", k=3)
+    mock_kdca_search.assert_called_once_with("골다공증", k=30)
     lifestyle_item = next(item for item in context_items if item["kind"] == "lifestyle")
     assert lifestyle_item["source_ref"].disease == "골다공증"
     assert lifestyle_item["source_ref"].category == "운동요법"
@@ -367,16 +456,17 @@ def test_build_context_falls_back_to_kdca_for_osteoporosis_not_in_curated_alias_
 
 def test_build_context_prefers_kdca_over_curated_lifestyle_when_both_match():
     """[2026-07-21] curated(학회 요약, 미검증 2차 가공 데이터)에도 매칭이 있어도, 질병관리청
-    검색에서 이미 찾았으면 그걸 쓰고 curated 조회는 아예 하지 않는다."""
+    검색에서 이미 (생활습관 관련 내용으로) 찾았으면 그걸 쓰고 curated 조회는 아예 하지 않는다."""
     with (
         patch("rag.rag_chain.search_by_item_name", return_value=[FAKE_DOC]),
+        patch("rag.rag_chain.search_kdca_health_info_by_title", return_value=[]),
         patch("rag.rag_chain.search_kdca_health_info", return_value=[FAKE_KDCA_DOC]) as mock_kdca_search,
         patch("rag.rag_chain.search_by_disease") as mock_search_disease,
         patch("rag.rag_chain.search_hira_by_product_name", return_value=[]),
     ):
         context_items = _build_context("암로디핀정5밀리그램", situation=None, diagnosis="고혈압 있음")
 
-    mock_kdca_search.assert_called_once_with("고혈압 있음", k=3)
+    mock_kdca_search.assert_called_once_with("고혈압 있음", k=30)
     mock_search_disease.assert_not_called()
     lifestyle_item = next(item for item in context_items if item["kind"] == "lifestyle")
     assert lifestyle_item["source_ref"].source == "질병관리청 국가건강정보포털"
@@ -386,13 +476,14 @@ def test_build_context_falls_back_to_curated_lifestyle_when_kdca_has_no_match():
     """등록된 4개 질환이어도, 질병관리청 검색에서 못 찾을 때만 curated 학회 요약으로 보강한다."""
     with (
         patch("rag.rag_chain.search_by_item_name", return_value=[FAKE_DOC]),
+        patch("rag.rag_chain.search_kdca_health_info_by_title", return_value=[]),
         patch("rag.rag_chain.search_kdca_health_info", return_value=[]) as mock_kdca_search,
         patch("rag.rag_chain.search_by_disease", return_value=[FAKE_LIFESTYLE_DOC]) as mock_search_disease,
         patch("rag.rag_chain.search_hira_by_product_name", return_value=[]),
     ):
         context_items = _build_context("암로디핀정5밀리그램", situation=None, diagnosis="고혈압 있음")
 
-    mock_kdca_search.assert_called_once_with("고혈압 있음", k=3)
+    mock_kdca_search.assert_called_once_with("고혈압 있음", k=30)
     mock_search_disease.assert_called_once_with("hypertension")
     lifestyle_item = next(item for item in context_items if item["kind"] == "lifestyle")
     assert lifestyle_item["source_ref"].guideline_id == "htn-diet-1"
@@ -448,6 +539,7 @@ def test_generate_guide_does_not_search_lifestyle_context():
 def test_generate_lifestyle_guide_for_diagnosis_dry_run_uses_context_text():
     """OPENAI_API_KEY가 없는 dry-run 모드에서도 생활지침 인용·본문이 그대로 채워진다."""
     with (
+        patch("rag.rag_chain.search_kdca_health_info_by_title", return_value=[]),
         patch("rag.rag_chain.search_kdca_health_info", return_value=[]),
         patch("rag.rag_chain.search_by_disease", return_value=[FAKE_LIFESTYLE_DOC]),
         patch("rag.rag_chain.settings.OPENAI_API_KEY", None),
@@ -479,7 +571,7 @@ def test_generate_lifestyle_guide_falls_back_to_context_when_llm_returns_empty_t
             return FakeResponse()
 
     with (
-        patch("rag.rag_chain.search_kdca_health_info", return_value=[FAKE_KDCA_DOC]),
+        patch("rag.rag_chain.search_kdca_health_info_by_title", return_value=[FAKE_KDCA_DOC]),
         patch("rag.rag_chain.search_by_disease", return_value=[]),
         patch("rag.rag_chain.settings.OPENAI_API_KEY", "test-key"),
         patch("rag.rag_chain.settings.SELF_CONSISTENCY_SAMPLES", 1),
@@ -487,7 +579,7 @@ def test_generate_lifestyle_guide_falls_back_to_context_when_llm_returns_empty_t
     ):
         result = generate_lifestyle_guide_for_diagnosis("고혈압")
 
-    assert "관절염은 관절에 염증이 생기는 질환입니다." in " ".join(result.other.recommended)
+    assert "저염식을 실천하고 규칙적으로 운동합니다." in " ".join(result.other.recommended)
     assert result.source_refs[0].source == "질병관리청 국가건강정보포털"
     assert "empty_lifestyle_fallback" in result.review_flags
 
@@ -515,7 +607,7 @@ def test_generate_lifestyle_guide_dedupes_repeated_items_within_a_category():
             return FakeResponse()
 
     with (
-        patch("rag.rag_chain.search_kdca_health_info", return_value=[FAKE_KDCA_DOC]),
+        patch("rag.rag_chain.search_kdca_health_info_by_title", return_value=[FAKE_KDCA_DOC]),
         patch("rag.rag_chain.search_by_disease", return_value=[]),
         patch("rag.rag_chain.settings.OPENAI_API_KEY", "test-key"),
         patch("rag.rag_chain.settings.SELF_CONSISTENCY_SAMPLES", 1),
@@ -552,6 +644,7 @@ def test_generate_lifestyle_guide_for_diagnosis_falls_back_safely_without_diagno
 def test_generate_lifestyle_guide_for_diagnosis_falls_back_safely_when_no_context_found():
     """진단명은 있지만 매칭되는 생활지침이 하나도 없으면, 지어내지 않고 안전한 안내로 대체한다."""
     with (
+        patch("rag.rag_chain.search_kdca_health_info_by_title", return_value=[]),
         patch("rag.rag_chain.search_kdca_health_info", return_value=[]),
         patch("rag.rag_chain.search_by_disease", return_value=[]),
     ):

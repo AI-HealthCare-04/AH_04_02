@@ -36,6 +36,7 @@ from rag.vectorstore import (
     search_by_disease,
     search_by_item_name,
     search_kdca_health_info,
+    search_kdca_health_info_by_title,
     similarity_search,
 )
 
@@ -114,6 +115,33 @@ def _resolve_disease_codes(diagnosis: str | None) -> list[str]:
         if alias in diagnosis and code not in codes:
             codes.append(code)
     return codes
+
+
+# [2026-07-28 버그수정] 질병관리청 원문에는 "이상지질혈증"/"협심증"처럼 흔한 만성질환도
+# 생활습관 관련 섹션(생활습관 관리/위험요인 및 예방 등)이 실제로 있는데, k=3 의미기반 검색
+# 상위권이 "개요정의/증상/요약문" 같은 질환 설명 섹션에 밀려 한 번도 안 걸리는 경우가 많았다.
+# 그 결과 _lifestyle_context_items가 "뭐라도 찾았으니 됐다"고 판단해(생활습관과 무관한 내용을
+# 생활습관으로 표시하고) curated fallback으로도 안 넘어가는 버그가 있었다 — 아래 두 헬퍼로
+# "진짜 생활습관 섹션인지"를 검사해 필터링한다.
+_LIFESTYLE_SECTION_KEYWORDS = (
+    "생활습관",
+    "자가 관리",
+    "위험요인",
+    "예방",
+    "치료비약물",
+    "실천",
+    "식이",
+    "식사",
+    "운동",
+)
+
+
+def _is_lifestyle_kdca_section(section_name: str | None) -> bool:
+    return any(keyword in (section_name or "") for keyword in _LIFESTYLE_SECTION_KEYWORDS)
+
+
+def _title_matches_diagnosis(title: str, diagnosis: str) -> bool:
+    return bool(title) and (title in diagnosis or diagnosis in title)
 
 
 class NoContextFoundError(RuntimeError):
@@ -248,7 +276,23 @@ def _lifestyle_context_items(diagnosis: str | None) -> list[dict]:
     items: list[dict] = []
     lifestyle_found = False
     if diagnosis:
-        for doc in search_kdca_health_info(diagnosis, k=3):
+        kdca_docs = [
+            doc
+            for doc in search_kdca_health_info_by_title(diagnosis)
+            if _is_lifestyle_kdca_section(doc.metadata.get("section_name"))
+        ]
+        if not kdca_docs:
+            # 진단명이 질병관리청 title과 정확히 일치하지 않을 수 있어(예: "고혈압 있음")
+            # 의미기반 검색으로 보강한다 — 다만 다른 질환의 생활습관 섹션이 섞여 들어오는 걸
+            # 막기 위해 title이 diagnosis와 실제로 관련 있는 문서만 남긴다.
+            kdca_docs = [
+                doc
+                for doc in search_kdca_health_info(diagnosis, k=30)
+                if _is_lifestyle_kdca_section(doc.metadata.get("section_name"))
+                and _title_matches_diagnosis(doc.metadata.get("title", ""), diagnosis)
+            ]
+
+        for doc in kdca_docs[:3]:
             lifestyle_found = True
             items.append(
                 {
