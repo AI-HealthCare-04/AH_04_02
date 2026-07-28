@@ -19,7 +19,7 @@ import Skeleton from "../components/Skeleton";
 import PatientContextBanner from "../components/PatientContextBanner";
 import { checkIntake, getLogs, getSchedules, type MedicationLogEntry, type Schedule } from "../api/monitoring";
 import { getDrugIndication, type DrugIndicationInfo } from "../api/records";
-import { getCurrentCaregiverId, getCurrentUserName, useGuardedPatientId } from "../lib/session";
+import { getCurrentCaregiverId, getCurrentUserName, isLoggedIn, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
 
 export default function DrugDetail() {
@@ -91,7 +91,7 @@ export default function DrugDetail() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <PatientContextBanner afterSwitchPath="/monitoring" />
         <button

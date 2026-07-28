@@ -13,7 +13,7 @@ import {
   type IntakeStatus,
 } from "../api/monitoring";
 import { listRecords, type RecordSummary } from "../api/records";
-import { getCurrentCaregiverId, getCurrentUserName, useGuardedPatientId } from "../lib/session";
+import { getCurrentCaregiverId, getCurrentUserName, isLoggedIn, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
 
 export default function Dashboard() {
@@ -102,7 +102,7 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory, fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" }}>
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-[700px] mx-auto px-4 sm:px-5 pt-6 sm:pt-8 pb-12 sm:pb-[60px]">
         <PatientContextBanner />
         <div className="flex justify-between items-start mb-5">

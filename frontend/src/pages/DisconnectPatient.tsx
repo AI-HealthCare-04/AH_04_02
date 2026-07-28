@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { AlertTriangle, Check } from "lucide-react";
 import NavBar from "../components/NavBar";
 import { getCaregiverPatients, unlinkCaregiverPatient, type Patient } from "../api/monitoring";
-import { getCurrentCaregiverId, getCurrentUserName } from "../lib/session";
+import { getCurrentCaregiverId, getCurrentUserName, isLoggedIn } from "../lib/session";
 import { C } from "../theme";
 
 /**
@@ -52,7 +52,7 @@ export default function DisconnectPatient() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-lg mx-auto px-6 sm:px-8 py-10">
         {done ? (
           <div className="rounded-2xl p-8 text-center" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>

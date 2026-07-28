@@ -7,7 +7,7 @@ import EmptyState from "../components/EmptyState";
 import { getNotifications, type NotificationLogEntry } from "../api/monitoring";
 import { listCorrectionNotices, markCorrectionNoticeRead, type RecordCorrectionNotice } from "../api/records";
 import { listRelationNotices, markRelationNoticeRead, type RelationNotice } from "../api/care";
-import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
+import { getCurrentUserName, isLoggedIn, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
 
 const KIND_META: Record<NotificationLogEntry["kind"], { label: string; bg: string; color: string }> = {
@@ -86,7 +86,7 @@ export default function Notifications() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <h1 className="text-[26px] font-black mb-1" style={{ color: C.dark }}>알림함</h1>
         <p className="text-[14px] mb-7" style={{ color: C.muted }}>

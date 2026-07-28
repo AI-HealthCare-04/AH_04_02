@@ -5,7 +5,7 @@ import NavBar from "../components/NavBar";
 import yakkongMascot from "../assets/yakkong-mascot.png";
 import { createRecord } from "../api/records";
 import { C } from "../theme";
-import { getCurrentUserName } from "../lib/session";
+import { getCurrentUserName, isLoggedIn } from "../lib/session";
 
 const steps = [
   { id: 1, label: "OCR 인식 중", desc: "처방전에서 약품 정보를 읽고 있어요" },
@@ -67,7 +67,7 @@ export default function Processing() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory, fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" }}>
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-[600px] mx-auto flex flex-col items-center px-5 py-14 sm:px-6 sm:py-20">
         <div
           className="w-full border rounded-[20px] p-7 sm:px-10 sm:py-12 text-center"

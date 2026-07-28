@@ -26,7 +26,7 @@ import {
   type RecordResult,
 } from "../api/records";
 import { C } from "../theme";
-import { getCurrentCaregiverId, getCurrentUserName } from "../lib/session";
+import { getCurrentCaregiverId, getCurrentUserName, isLoggedIn } from "../lib/session";
 import { FIELDS } from "../lib/prescriptionFields";
 
 // [2026-07-25 추가] caregiver_review_status 뱃지 표시.
@@ -172,7 +172,7 @@ export default function MedGuide() {
   if (loading) {
     return (
       <div className="min-h-screen" style={{ background: C.ivory }}>
-        <NavBar isLoggedIn userName={getCurrentUserName()} />
+        <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
         <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
           <Skeleton className="h-3 w-24 mb-2" />
           <Skeleton className="h-7 w-40 mb-6" />
@@ -193,7 +193,7 @@ export default function MedGuide() {
   if (error || !result?.guide) {
     return (
       <div className="min-h-screen" style={{ background: C.ivory }}>
-        <NavBar isLoggedIn userName={getCurrentUserName()} />
+        <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
         <div className="rounded-2xl p-10 m-8 text-center" style={{ background: C.surface }}>
           <p className="text-[14px]" style={{ color: "#D94F4F" }}>{error || "가이드를 찾을 수 없어요."}</p>
         </div>
@@ -205,7 +205,7 @@ export default function MedGuide() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <button
           onClick={() => navigate(`/records/${result.record_id}`)}

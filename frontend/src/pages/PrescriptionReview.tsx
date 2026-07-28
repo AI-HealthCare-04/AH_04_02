@@ -16,7 +16,7 @@ import {
   type RecordResult,
 } from "../api/records";
 import { C } from "../theme";
-import { getCurrentUserName } from "../lib/session";
+import { getCurrentUserName, isLoggedIn } from "../lib/session";
 import { FIELDS } from "../lib/prescriptionFields";
 import { DOSE_TIMINGS } from "./Schedule";
 
@@ -398,7 +398,7 @@ export default function PrescriptionReview() {
   if (generating) {
     return (
       <div className="fixed inset-0 z-50 flex flex-col" style={{ background: C.ivory }}>
-        <NavBar isLoggedIn userName={getCurrentUserName()} />
+        <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
         <div className="flex-1 flex flex-col items-center justify-center px-8">
         <div className="relative mb-8 flex items-center justify-center">
           {/* 진행률이 90%에서 API 응답까지(최대 1분) 멈춰있어도 계속 도는 링 —
@@ -484,7 +484,7 @@ export default function PrescriptionReview() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         {loading ? (
           <>

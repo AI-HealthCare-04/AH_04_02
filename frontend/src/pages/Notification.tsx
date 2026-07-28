@@ -5,7 +5,7 @@ import Skeleton from "../components/Skeleton";
 import PatientContextBanner from "../components/PatientContextBanner";
 import { getNotificationSettings, updateNotificationSettings, type NotificationSettings } from "../api/care";
 import { getDevicePushSubscription, isPushSupported, subscribeDevicePush, unsubscribeDevicePush } from "../api/push";
-import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
+import { getCurrentUserName, isLoggedIn, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
 
 function Toggle({ on, onChange, disabled = false }: { on: boolean; onChange: () => void; disabled?: boolean }) {
@@ -96,7 +96,7 @@ export default function Notification() {
 
   return (
     <div className="min-h-screen bg-[#F2E8D8]">
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-xl mx-auto px-6 sm:px-8 py-10">
         <PatientContextBanner />
         <h1 className="text-[26px] font-black text-[#1E1A17] mb-1">알림 설정</h1>

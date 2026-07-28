@@ -5,7 +5,7 @@ import NavBar from "../components/NavBar";
 import Skeleton from "../components/Skeleton";
 import { getCaregiverPatients, getCaregivers, unlinkCaregiverPatient, type Caregiver, type Patient } from "../api/monitoring";
 import { computeAge, GENDER_LABEL } from "../lib/age";
-import { getCurrentCaregiverId, getCurrentUserName } from "../lib/session";
+import { getCurrentCaregiverId, getCurrentUserName, isLoggedIn } from "../lib/session";
 import { C } from "../theme";
 
 const STATUS_META: Record<Patient["medication_status"], { label: string; bg: string; color: string }> = {
@@ -105,7 +105,7 @@ export default function PatientManagement() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-6xl mx-auto px-6 sm:px-8 py-10">
         <button
           onClick={() => navigate("/mypage")}

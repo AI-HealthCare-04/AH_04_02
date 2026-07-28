@@ -7,7 +7,7 @@ import PatientContextBanner from "../components/PatientContextBanner";
 import { askChatFreeformStream, askChatStream, getChatQuestions, type ChatQuestion } from "../api/chat";
 import { getNotificationSettings } from "../api/care";
 import { formatUniqueSourceRefs, type SourceRef } from "../api/records";
-import { getCurrentUserName, useGuardedPatientId } from "../lib/session";
+import { getCurrentUserName, isLoggedIn, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
 
 type Message = { role: "user" | "bot"; text: string; source?: string; sourceRefs?: SourceRef[] };
@@ -143,7 +143,7 @@ export default function Chat() {
 
   return (
     <div className="h-screen flex flex-col" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-2xl lg:max-w-4xl mx-auto w-full px-4 py-6 flex flex-col flex-1 min-h-0">
         <div className="shrink-0">
           <PatientContextBanner />

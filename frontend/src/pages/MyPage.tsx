@@ -5,7 +5,7 @@ import type { LucideIcon } from "lucide-react";
 import NavBar from "../components/NavBar";
 import { getCaregivers, getPatients, type Caregiver, type Patient } from "../api/monitoring";
 import { computeAge, GENDER_LABEL } from "../lib/age";
-import { getCurrentCaregiverId, getCurrentPatientId } from "../lib/session";
+import { getCurrentCaregiverId, getCurrentPatientId, isLoggedIn } from "../lib/session";
 import { C } from "../theme";
 
 interface MenuItem {
@@ -91,7 +91,7 @@ export default function MyPage() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName={displayName} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={displayName} />
       <main className="max-w-xl mx-auto px-6 sm:px-8 py-10">
         <h1 className="text-[26px] font-black mb-7" style={{ color: C.dark }}>마이페이지</h1>
 

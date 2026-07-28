@@ -13,7 +13,7 @@ import {
   type Caregiver,
   type Patient,
 } from "../api/monitoring";
-import { getCurrentCaregiverId, getCurrentPatientId, getCurrentUserName } from "../lib/session";
+import { getCurrentCaregiverId, getCurrentPatientId, getCurrentUserName, isLoggedIn } from "../lib/session";
 import { C } from "../theme";
 
 const ORG_TYPE_OPTIONS = ["요양원", "정부기관", "협회", "보건소", "기타"];
@@ -212,7 +212,7 @@ export default function MyInfo() {
   if (!verified) {
     return (
       <div className="min-h-screen" style={{ background: C.ivory }}>
-        <NavBar isLoggedIn userName={getCurrentUserName()} />
+        <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
         <main className="max-w-md mx-auto px-6 sm:px-8 py-16">
           <div className="rounded-2xl p-8 text-center" style={{ background: C.surface, boxShadow: "0 2px 20px rgba(30,26,23,0.07)" }}>
             <div
@@ -252,7 +252,7 @@ export default function MyInfo() {
 
   return (
     <div className="min-h-screen" style={{ background: C.ivory }}>
-      <NavBar isLoggedIn userName={getCurrentUserName()} />
+      <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-xl mx-auto px-6 sm:px-8 py-10">
         <h1 className="text-[26px] font-black mb-1" style={{ color: C.dark }}>내 정보</h1>
         <p className="text-[14px] mb-7" style={{ color: C.muted }}>회원가입 때 입력한 정보를 확인하고 수정할 수 있어요.</p>
