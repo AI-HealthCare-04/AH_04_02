@@ -85,6 +85,20 @@ shasum -a 256 rag/data/kdca_healthinfo_cntntsSn.csv  # 재크롤링 시에만 �
 shasum -a 256 rag/chroma_db/chroma.sqlite3
 ```
 
+> **⚠️ `chroma.sqlite3` 해시 비교 주의:** ChromaDB는 내부 HNSW 벡터 인덱스를 빌드 순서에
+> 따라 구성하므로, 같은 문서로 각자 재빌드하면 내용이 동일해도 파일 바이트가 달라집니다
+> (팀원 두 명이 동일 데이터로 빌드했는데 해시가 다르게 나온 사례 확인).
+>
+> - **한 사람 파일을 그대로 복사해서 배포하는 경우** → 해시 비교 유효
+> - **각자 `rag cli ingest-*`로 재빌드하는 경우** → 해시 대신 문서 수로 비교:
+>   ```bash
+>   uv run python -c "
+>   from rag.rag.vectorstore import get_collection
+>   c = get_collection()
+>   print('총 문서 수:', c.count())
+>   "
+>   ```
+
 ## 한 번에 점검하는 방법
 
 프로젝트 루트에서 아래 스크립트를 실행하면 현재 커밋, Python/Node 버전, `.env` 누락 키,
