@@ -805,9 +805,9 @@ def _check_dur_taboo(drug_name: str, other_drug_names: list[str]) -> list[DurWar
     중 하나가 DUR이 알려주는 금기 상대(mixture_item_name)와 일치할 때만 경고를 만든다 —
     단순히 "이 약에 금기 상대가 존재한다"만으로는 이 환자에게 실제로 해당하는지 알 수 없다.
 
-    [2026-07-13] DUR API는 활용신청 승인 대기라 dur_master.py의 로컬 CSV 조회를 쓴다.
-    CSV 파일 부재(FileNotFoundError) 등 어떤 이유로든 조회가 실패해도 가이드 생성 자체를
-    막으면 안 되므로 조용히 빈 리스트로 넘어간다 (_lookup_hira_entry와 동일한 fail-safe 원칙).
+    [2026-07-14] 식약처 Open API 활용신청 승인 후 dur_master.py가 API 직접 연동으로 전환됐다.
+    어떤 이유로든 조회가 실패해도 가이드 생성 자체를 막으면 안 되므로 조용히 빈 리스트로
+    넘어간다 (_lookup_hira_entry와 동일한 fail-safe 원칙).
     """
     if not other_drug_names:
         return []
@@ -820,9 +820,9 @@ def _check_dur_taboo(drug_name: str, other_drug_names: list[str]) -> list[DurWar
         if taboo_entries:
             break
 
-    # DUR CSV는 브랜드(제품) 단위라, 같은 성분의 약이 여러 제조사 제품으로 등재돼 있으면
+    # DUR API 응답은 브랜드(제품) 단위라, 같은 성분의 약이 여러 제조사 제품으로 등재돼 있으면
     # 같은 경고가 수십~수천 건 중복될 수 있다(예: "메토트렉세이트" 주사제만 제조사별로 여러 종).
-    # 그래서 CSV의 브랜드명이 아니라 "이 처방전에 실제로 적힌 약 이름"으로 경고를 표시하고,
+    # 그래서 API 응답의 브랜드명이 아니라 "이 처방전에 실제로 적힌 약 이름"으로 경고를 표시하고,
     # (그 약, 사유) 조합 기준으로 한 번만 보여준다.
     seen: set[tuple[str, str]] = set()
     warnings: list[DurWarning] = []
