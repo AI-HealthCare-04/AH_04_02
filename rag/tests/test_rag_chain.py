@@ -860,9 +860,11 @@ def test_generate_guides_from_medications_passes_sibling_drug_names():
         )
 
     calls = mock_generate.call_args_list
-    assert calls[0].kwargs["other_drug_names"] == ["아스피린", "로자탄"]
-    assert calls[1].kwargs["other_drug_names"] == ["와파린", "로자탄"]
-    assert calls[2].kwargs["other_drug_names"] == ["와파린", "아스피린"]
+    # 병렬 실행으로 호출 순서가 비결정적이므로 drug_name 키로 조회한다.
+    call_by_drug = {c.args[0]["drug_name"]: c for c in calls}
+    assert call_by_drug["와파린"].kwargs["other_drug_names"] == ["아스피린", "로자탄"]
+    assert call_by_drug["아스피린"].kwargs["other_drug_names"] == ["와파린", "로자탄"]
+    assert call_by_drug["로자탄"].kwargs["other_drug_names"] == ["와파린", "아스피린"]
 
 
 def test_generate_guides_from_medications_generates_lifestyle_once_per_unique_diagnosis():
@@ -889,8 +891,10 @@ def test_generate_guides_from_medications_generates_lifestyle_once_per_unique_di
 
     assert len(guides) == 3  # 의약품별 가이드는 여전히 3개(약 개수만큼)
     assert mock_generate_lifestyle.call_count == 2  # 생활습관은 고유 진단명(2개)만큼만 호출
-    called_diagnoses = [c.args[0] for c in mock_generate_lifestyle.call_args_list]
-    assert called_diagnoses == ["고혈압", "당뇨병"]  # 첫 등장 순서, 중복 없음
+    # 병렬 실행으로 호출 순서가 비결정적이므로 집합으로 비교 (중복 없이 2개인지만 검증).
+    called_diagnoses = {c.args[0] for c in mock_generate_lifestyle.call_args_list}
+    assert called_diagnoses == {"고혈압", "당뇨병"}  # 중복 없이 두 진단명 정확히 1회씩
+    # 반환 결과 순서는 seen_diagnoses 제출 순서를 보장한다 (diag_futs 수집 순서 = 입력 순서).
     assert [lg.diagnosis for lg in lifestyle_guides] == ["고혈압", "당뇨병"]
 
 

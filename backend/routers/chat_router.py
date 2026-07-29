@@ -1034,7 +1034,7 @@ def _generate_llm_answer(
     from langchain_openai import ChatOpenAI
     from rag.config import settings as rag_settings
 
-    chat = ChatOpenAI(model=rag_settings.OPENAI_MODEL, api_key=rag_settings.OPENAI_API_KEY, temperature=0.4)
+    chat = ChatOpenAI(model=rag_settings.OPENAI_MODEL, api_key=rag_settings.OPENAI_API_KEY, temperature=0.4, timeout=30)
     messages = _build_chat_messages(bot_name, context_text, question_text, rag_context_text, dur_context_text)
     callback_handler = get_langchain_callback_handler()
     invoke_config = {"callbacks": [callback_handler]} if callback_handler else None
@@ -1297,7 +1297,7 @@ async def ask_stream(
                         bot_name, context_text, question_text, "\n\n".join(rag_lines), "\n".join(dur_lines)
                     )
                     chat = ChatOpenAI(
-                        model=rag_settings.OPENAI_MODEL, api_key=rag_settings.OPENAI_API_KEY, temperature=0.4
+                        model=rag_settings.OPENAI_MODEL, api_key=rag_settings.OPENAI_API_KEY, temperature=0.4, timeout=30
                     )
                     callback_handler = get_langchain_callback_handler()
                     invoke_config = {"callbacks": [callback_handler]} if callback_handler else None
