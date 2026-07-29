@@ -54,6 +54,26 @@ def test_parse_prescription_falls_back_to_computed_quantity_when_only_mg_stated(
     assert meds[0]["dose_amount"] == "10mg"
 
 
+def test_parse_prescription_table_dose_amount_column_computes_usage():
+    # 테이블 헤더가 "1회 투여량"이면 해당 mg 값은 dose_amount로 먼저 저장하고,
+    # 약품명 함량과 나눠 환자가 볼 1회 사용량(dosage)을 도출한다.
+    raw = "약품명 1회투여량 1일횟수 투약일수 암로핀정5mg 10mg 1일 1회 30"
+    meds, _ = parse_prescription(raw)
+    assert len(meds) == 1
+    assert meds[0]["dosage"] == "2정"
+    assert meds[0]["dose_amount"] == "10mg"
+    assert meds[0]["total_days"] == "30일"
+
+
+def test_parse_prescription_dose_amount_label_does_not_become_total_days():
+    raw = "[급여][123] 오구멘틴듀오시럽228mg/5ml 1회 투여량 5mL 1일 3회 5일분"
+    meds, _ = parse_prescription(raw)
+    assert len(meds) == 1
+    assert meds[0]["dosage"] == "5mL"
+    assert meds[0]["dose_amount"] == "5mL"
+    assert meds[0]["total_days"] == "5일"
+
+
 def test_parse_prescription_reads_dose_amount_from_name_when_no_explicit_mg_in_text():
     # 텍스트 어디에도 mg가 따로 안 적혀 있으면 약품명에 붙어 나온 함량을
     # 1회 투여량으로 폴백한다(대부분의 정제 처방전 케이스).

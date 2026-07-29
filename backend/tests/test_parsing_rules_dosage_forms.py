@@ -144,6 +144,10 @@ def test_extract_dose_quantity_with_ml_unit():
     assert extract_dose_quantity("1회 10ml, 1일 3회 (식후) 복용", form="시럽") == "10ml"
 
 
+def test_extract_dose_quantity_with_uppercase_ml_unit():
+    assert extract_dose_quantity("1회 사용량 5mL, 1일 3회", form="시럽") == "5mL"
+
+
 def test_extract_dose_quantity_with_drop_unit():
     assert extract_dose_quantity("1회 1방울, 1일 3회 점안", form="액") == "1방울"
 
@@ -223,6 +227,39 @@ def test_parse_prescription_syrup_reads_ml_dose_quantity():
     meds, _ = parse_prescription(raw)
     assert len(meds) == 1
     assert meds[0]["dosage"] == "10ml"
+
+
+def test_parse_prescription_syrup_keeps_concentration_and_ignores_invalid_day_noise():
+    raw = (
+        "약품명 1회사용량 1일횟수 투약일수 "
+        "오구멘틴듀오시럽228mg/5ml 5mL 1일 3회 678901 5 "
+        "진단명: 급성 인두염"
+    )
+    meds, diagnosis = parse_prescription(raw)
+
+    assert diagnosis == "급성 인두염"
+    assert len(meds) == 1
+    assert meds[0]["drug_name"] == "오구멘틴듀오시럽 228mg/5ml"
+    assert meds[0]["dosage"] == "5ml"
+    assert meds[0]["frequency"] == "3회"
+    assert meds[0]["total_days"] == "5일"
+
+
+def test_parse_prescription_syrup_dose_amount_column_derives_usage():
+    raw = (
+        "약품명 1회투여량 1일횟수 투약일수 "
+        "오구멘틴듀오시럽228mg/5ml 5mL 1일 3회 5 "
+        "진단명: 급성 인두염"
+    )
+    meds, diagnosis = parse_prescription(raw)
+
+    assert diagnosis == "급성 인두염"
+    assert len(meds) == 1
+    assert meds[0]["drug_name"] == "오구멘틴듀오시럽 228mg/5ml"
+    assert meds[0]["dosage"] == "5ml"
+    assert meds[0]["dose_amount"] == "5mL"
+    assert meds[0]["frequency"] == "3회"
+    assert meds[0]["total_days"] == "5일"
 
 
 def test_parse_prescription_eye_drop_reads_drop_dose_quantity():
