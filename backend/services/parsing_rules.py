@@ -168,6 +168,35 @@ _MAX_DIAGNOSIS_LEN = 100  # ocr_results.diagnosis VARCHAR(255)보다 여유 있�
 DRUG_CODE_RE      = re.compile(r"\[(?:급여|비급여)\]\[(\w+)\]")
 DIAGNOSIS_EN_RE   = re.compile(r"Dx\s*[:：]\s*(.+?)(?=\s+Rx\b|\Z)", re.IGNORECASE)
 DIAGNOSIS_CODE_RE = re.compile(r"질병분류기호\s*[:：]\s*\S+\s*[（(]([^)）]+)[)）]")
+# [2026-07-29 추가] 실제 처방전/OCR 샘플은 "질병분류기호 I10, E11.9 처방구분"처럼
+# 괄호 안 한글 진단명이 없이 KCD/ICD 코드만 적히는 경우가 있다. 기존 정규식은
+# "I10 (고혈압)" 형태만 처리해서 diagnosis가 빈 값으로 저장됐고, 그 결과 진단명 기준
+# 생활습관 RAG가 이어지지 않았다. 코드만 있어도 주요 만성질환은 한글 진단명으로 매핑한다.
+DIAGNOSIS_CODE_LIST_RE = re.compile(
+    r"질병분류기호\s*[:：]?\s*([A-Z]\d{2}(?:\.\d+)?(?:\s*,\s*[A-Z]\d{2}(?:\.\d+)?)*)",
+    re.IGNORECASE,
+)
+DIAGNOSIS_CODE_MAP: dict[str, str] = {
+    "E11": "당뇨병",
+    "E55.9": "비타민D 결핍",
+    "E78.5": "이상지질혈증",
+    "G43.9": "편두통",
+    "H10.1": "알레르기 결막염",
+    "I10": "고혈압",
+    "I20.9": "협심증",
+    "I25.1": "허혈성 심장질환",
+    "J02.9": "급성 인두염",
+    "J30.9": "알레르기 비염",
+    "J45.9": "천식",
+    "K21.0": "위식도역류질환",
+    "K29.7": "위염",
+    "L30.9": "피부염",
+    "M54.5": "요통",
+    "M81.0": "골다공증",
+    "N18.3": "만성 신장병",
+    "R11": "오심 및 구토",
+    "R50.9": "발열",
+}
 # [2026-07-23 추가] 같은 처방인지 판단할 근거로 "처방번호"는 6개 mock 포맷 중 1개에만
 # 등장해 신뢰도가 낮다(별도로 팀원이 조사 중) — 대신 "조제일자/처방일자/진료일자/조제일"은
 # 6개 포맷 전부에 있고 "YYYY-MM-DD"/"YYYY.MM.DD" 두 형식만 확인됐다.
@@ -349,11 +378,28 @@ def extract_diagnosis(text: str) -> str:
         result = m.group(1).strip()
     elif m := DIAGNOSIS_CODE_RE.search(text):
         result = m.group(1).strip()
+    elif m := DIAGNOSIS_CODE_LIST_RE.search(text):
+        codes = [code.strip().upper() for code in m.group(1).split(",") if code.strip()]
+        parts = [_diagnosis_name_from_code(code) for code in codes]
+        seen: set = set()
+        deduped = [p for p in parts if p and not (p in seen or seen.add(p))]  # type: ignore[func-returns-value]
+        result = ", ".join(deduped)
     else:
         result = ""
     # [2026-07-20] 정지 조건을 다 못 거른 텍스트가 와도(예: 예상 못 한 OCR 포맷) DB
     # 컬럼(ocr_results.diagnosis VARCHAR(255)) 저장 자체가 실패하지 않도록 방어적으로 자른다.
     return result[:_MAX_DIAGNOSIS_LEN]
+
+
+def _diagnosis_name_from_code(code: str) -> str:
+    """KCD/ICD 코드 → 앱에서 생활습관 RAG 조회에 쓰는 한글 진단명."""
+    if code in DIAGNOSIS_CODE_MAP:
+        return DIAGNOSIS_CODE_MAP[code]
+    if "." in code:
+        base = code.split(".", 1)[0]
+        if base in DIAGNOSIS_CODE_MAP:
+            return DIAGNOSIS_CODE_MAP[base]
+    return ""
 
 
 def extract_prescription_date(text: str) -> str:
