@@ -147,6 +147,28 @@ else
 fi
 echo ""
 
+# ── 8. rag/.env 키 확인 ─────────────────────────
+echo "[ 8 ] rag/.env 키 확인"
+echo "$SEP"
+RAG_ENV="rag/.env"
+RAG_REQUIRED_KEYS=("OPENAI_API_KEY" "DATA_GO_KR_SERVICE_KEY")
+
+if [[ ! -f "$RAG_ENV" ]]; then
+  echo "ERROR: $RAG_ENV 없음 — RAG/챗봇(RAG_PROVIDER=real, CHAT_PROVIDER=real) 사용 시 필수"
+else
+  echo "OK — $RAG_ENV 존재"
+  for key in "${RAG_REQUIRED_KEYS[@]}"; do
+    if grep -qE "^${key}=.+" "$RAG_ENV" 2>/dev/null; then
+      echo "  $key: 설정됨 ✓"
+    elif grep -qE "^${key}=" "$RAG_ENV" 2>/dev/null; then
+      echo "  $key: 키는 있으나 값이 비어있음 ✗ (RAG/챗봇이 동작하지 않음)"
+    else
+      echo "  $key: 없음 ✗"
+    fi
+  done
+fi
+echo ""
+
 echo "=============================================="
 echo "  체크 완료 — 이 결과를 팀 채팅에 공유하세요"
 echo "=============================================="
