@@ -36,6 +36,14 @@ from core.dependencies import Actor, get_current_actor, require_actor_patient_ac
 from models import MedicalRecord, OcrResult
 from services.drug_matcher import MATCH_THRESHOLD, match_drug
 from services.drug_reference import get_drug_info
+from services.langfuse_scoring import score_drug_info_detail, score_ocr_extraction
+from services.langfuse_tracing import (
+    flush_langfuse,
+    get_langchain_callback_handler,
+    mask_for_langfuse,
+    optional_observation,
+    update_observation,
+)
 from services.ocr_interface import get_ocr_provider  # noqa: E402
 from services.parsing_rules import extract_prescription_date
 
@@ -234,43 +242,73 @@ def _summarize_precautions_for_patient(
     if not precautions and not side_effects and not interactions:
         return None
 
-    try:
-        from langchain_openai import ChatOpenAI
-        from rag.config import settings as rag_settings
+    raw_text = "\n\n".join(
+        part
+        for part in [
+            f"[사용상의 주의사항/경고]\n{precautions}" if precautions else None,
+            f"[부작용]\n{side_effects}" if side_effects else None,
+            f"[상호작용]\n{interactions}" if interactions else None,
+        ]
+        if part
+    )
+    with optional_observation(
+        as_type="generation",
+        name="drug-info-patient-summary",
+        input={
+            "drug_name": mask_for_langfuse(drug_name),
+            "has_precautions": bool(precautions),
+            "has_side_effects": bool(side_effects),
+            "has_interactions": bool(interactions),
+            "raw_text_length": len(raw_text),
+        },
+    ) as generation:
+        try:
+            from langchain_openai import ChatOpenAI
+            from rag.config import settings as rag_settings
 
-        if not rag_settings.OPENAI_API_KEY:
+            if not rag_settings.OPENAI_API_KEY:
+                update_observation(generation, output={"status": "skipped_no_openai_key"})
+                flush_langfuse()
+                return None
+            chat = ChatOpenAI(
+                model=rag_settings.OPENAI_MODEL,
+                api_key=rag_settings.OPENAI_API_KEY,
+                temperature=0.3,
+                model_kwargs={"response_format": {"type": "json_object"}},
+            )
+            callbacks = []
+            handler = get_langchain_callback_handler()
+            if handler is not None:
+                callbacks.append(handler)
+            response = chat.invoke(
+                [
+                    {"role": "system", "content": _PATIENT_SUMMARY_SYSTEM_PROMPT},
+                    {"role": "user", "content": f"약품명: {drug_name}\n\n[원문]\n{raw_text}"},
+                ],
+                config={"callbacks": callbacks} if callbacks else None,
+            )
+            content = response.content if isinstance(response.content, str) else str(response.content)
+            data = json.loads(content)
+            summary = {
+                "must_check": [str(x) for x in (data.get("must_check") or [])][:4],
+                "tell_doctor": [str(x) for x in (data.get("tell_doctor") or [])][:4],
+                "avoid_together": [str(x) for x in (data.get("avoid_together") or [])][:4],
+            }
+            update_observation(
+                generation,
+                output={
+                    "status": "ok",
+                    "must_check_count": len(summary["must_check"]),
+                    "tell_doctor_count": len(summary["tell_doctor"]),
+                    "avoid_together_count": len(summary["avoid_together"]),
+                },
+            )
+            flush_langfuse()
+            return summary
+        except Exception as exc:  # noqa: BLE001 — LLM 실패/키 미설정/JSON 파싱 실패 등 어떤 이유로든 원문 폴백
+            update_observation(generation, output={"status": "fallback", "error_type": type(exc).__name__})
+            flush_langfuse()
             return None
-
-        raw_text = "\n\n".join(
-            part
-            for part in [
-                f"[사용상의 주의사항/경고]\n{precautions}" if precautions else None,
-                f"[부작용]\n{side_effects}" if side_effects else None,
-                f"[상호작용]\n{interactions}" if interactions else None,
-            ]
-            if part
-        )
-        chat = ChatOpenAI(
-            model=rag_settings.OPENAI_MODEL,
-            api_key=rag_settings.OPENAI_API_KEY,
-            temperature=0.3,
-            model_kwargs={"response_format": {"type": "json_object"}},
-        )
-        response = chat.invoke(
-            [
-                {"role": "system", "content": _PATIENT_SUMMARY_SYSTEM_PROMPT},
-                {"role": "user", "content": f"약품명: {drug_name}\n\n[원문]\n{raw_text}"},
-            ]
-        )
-        content = response.content if isinstance(response.content, str) else str(response.content)
-        data = json.loads(content)
-        return {
-            "must_check": [str(x) for x in (data.get("must_check") or [])][:4],
-            "tell_doctor": [str(x) for x in (data.get("tell_doctor") or [])][:4],
-            "avoid_together": [str(x) for x in (data.get("avoid_together") or [])][:4],
-        }
-    except Exception:  # noqa: BLE001 — LLM 실패/키 미설정/JSON 파싱 실패 등 어떤 이유로든 원문 폴백
-        return None
 
 
 @router.get("/drug-info")
@@ -284,35 +322,60 @@ def drug_info(drug_name: str):
     등을 표시할 방법이 아예 없었던 문제 — rag/ 패키지 live API로 보강 조회한 필드들을
     함께 내려준다(_fetch_rag_drug_detail 참고).
     """
-    result = get_drug_info(drug_name)
-    efficacy = result["efficacy"]
-    # [2026-07-19 PR #52 기준 정렬] matched_name(PrescriptionReview.tsx가 "이 약품명이
-    # 실제로 맞는지" 판단하는 값)은 get_drug_info()의 matched_item이 아니라 match_drug()의
-    # 유사도 점수로 판정한다 — PR #52에서 이미 이렇게 바뀐 걸 그대로 따른다. get_drug_info()의
-    # atc_pattern/fallback 단계는 "이름에 특정 키워드가 포함되는가"만 보는 부분일치라
-    # "졸피뎀아무말"처럼 실제 이름 뒤에 엉뚱한 말을 붙여도 통과해버리는데, match_drug()은
-    # (용량 표기를 정규화한 뒤) 전체 문자열 유사도를 보므로 이런 입력을 실제로 걸러낸다
-    # (run_ocr()이 review_required를 정할 때 쓰는 것과 동일한 기준, MATCH_THRESHOLD).
-    #
-    # PR #52 이전엔 matched_item이 "hira_name 등에서 찾은 다른(더 정확한) 이름"일 수 있어서
-    # rag 조회어를 matched_item으로 바꿔치기했지만, 이 기준으로는 matched_name이 항상
-    # drug_name 그 자체(검증 통과) 또는 None(검증 실패)이라 그런 대체가 의미 없어졌다 —
-    # rag/DUR 조회는 검증 결과와 무관하게 원본 drug_name으로 그대로 시도한다(실패해도
-    # _fetch_rag_drug_detail이 이미 null/빈 값으로 조용히 폴백).
-    _, score = match_drug(drug_name)
-    matched_name = drug_name if score >= MATCH_THRESHOLD else None
-    rag_detail = _fetch_rag_drug_detail(drug_name)
-    patient_summary = _summarize_precautions_for_patient(
-        drug_name, rag_detail["precautions"], rag_detail["side_effects"], rag_detail["interactions"]
-    )
-    return {
-        "drug_name": drug_name,
-        "matched_name": matched_name,
-        "drug_class": result["drug_class"],
-        "indication": efficacy.strip() if efficacy else efficacy,
-        **rag_detail,
-        "patient_summary": patient_summary,
-    }
+    with optional_observation(
+        as_type="span",
+        name="drug-info-detail",
+        input={"drug_name": mask_for_langfuse(drug_name)},
+    ) as trace:
+        result = get_drug_info(drug_name)
+        efficacy = result["efficacy"]
+        # [2026-07-19 PR #52 기준 정렬] matched_name(PrescriptionReview.tsx가 "이 약품명이
+        # 실제로 맞는지" 판단하는 값)은 get_drug_info()의 matched_item이 아니라 match_drug()의
+        # 유사도 점수로 판정한다 — PR #52에서 이미 이렇게 바뀐 걸 그대로 따른다. get_drug_info()의
+        # atc_pattern/fallback 단계는 "이름에 특정 키워드가 포함되는가"만 보는 부분일치라
+        # "졸피뎀아무말"처럼 실제 이름 뒤에 엉뚱한 말을 붙여도 통과해버리는데, match_drug()은
+        # (용량 표기를 정규화한 뒤) 전체 문자열 유사도를 보므로 이런 입력을 실제로 걸러낸다
+        # (run_ocr()이 review_required를 정할 때 쓰는 것과 동일한 기준, MATCH_THRESHOLD).
+        #
+        # PR #52 이전엔 matched_item이 "hira_name 등에서 찾은 다른(더 정확한) 이름"일 수 있어서
+        # rag 조회어를 matched_item으로 바꿔치기했지만, 이 기준으로는 matched_name이 항상
+        # drug_name 그 자체(검증 통과) 또는 None(검증 실패)이라 그런 대체가 의미 없어졌다 —
+        # rag/DUR 조회는 검증 결과와 무관하게 원본 drug_name으로 그대로 시도한다(실패해도
+        # _fetch_rag_drug_detail이 이미 null/빈 값으로 조용히 폴백).
+        _, score = match_drug(drug_name)
+        matched_name = drug_name if score >= MATCH_THRESHOLD else None
+        rag_detail = _fetch_rag_drug_detail(drug_name)
+        patient_summary = _summarize_precautions_for_patient(
+            drug_name, rag_detail["precautions"], rag_detail["side_effects"], rag_detail["interactions"]
+        )
+        response = {
+            "drug_name": drug_name,
+            "matched_name": matched_name,
+            "drug_class": result["drug_class"],
+            "indication": efficacy.strip() if efficacy else efficacy,
+            **rag_detail,
+            "patient_summary": patient_summary,
+        }
+        update_observation(
+            trace,
+            output={
+                "matched": matched_name is not None,
+                "match_score": round(score, 4),
+                "has_precautions": bool(rag_detail.get("precautions")),
+                "has_side_effects": bool(rag_detail.get("side_effects")),
+                "has_interactions": bool(rag_detail.get("interactions")),
+                "has_patient_summary": patient_summary is not None,
+                "dur_caution_count": len(rag_detail.get("dur_cautions") or []),
+            },
+        )
+        score_drug_info_detail(
+            drug_name=drug_name,
+            rag_detail=rag_detail,
+            patient_summary=patient_summary,
+            match_score=score,
+        )
+        flush_langfuse()
+        return response
 
 
 async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> MedicalRecord:
@@ -495,6 +558,37 @@ async def test_ocr_upload(
             for m in session.exec(select(OcrResult).where(OcrResult.record_id == record.id)).all()
         ]
     )
+    with optional_observation(
+        as_type="span",
+        name="ocr-test-extraction",
+        input={"patient_id": patient_id, "record_id": record.id},
+    ) as trace:
+        diagnosis_count = len({m["diagnosis"] for m in medications if m["diagnosis"]})
+        low_confidence_count = sum(1 for m in medications if (m.get("confidence") or 0) < 0.8)
+        false_positive_hint_count = sum(
+            1
+            for m in medications
+            if any(hint in (m.get("drug_name") or "") for hint in ("샘플", "OCR", "테스트"))
+        )
+        update_observation(
+            trace,
+            output={
+                "record_id": record.id,
+                "status": record.status,
+                "medication_count": len(medications),
+                "diagnosis_count": diagnosis_count,
+                "low_confidence_count": low_confidence_count,
+                "false_positive_hint_count": false_positive_hint_count,
+            },
+        )
+        score_ocr_extraction(
+            medication_count=len(medications),
+            diagnosis_count=diagnosis_count,
+            low_confidence_count=low_confidence_count,
+            review_required=record.status == "review_required",
+            false_positive_hint_count=false_positive_hint_count,
+        )
+        flush_langfuse()
     return {
         "record_id": record.id,
         "status": record.status,

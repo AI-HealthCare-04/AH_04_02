@@ -36,3 +36,20 @@ def test_diagnosis_still_works_for_simple_bracketed_format():
     """기존 지원 포맷(개행/괄호로 명확히 끊기는 경우)은 그대로 동작해야 한다."""
     text = "진단: 고혈압\n[급여][A1234] 노바스크정5mg 1정 1일 1회 30일"
     assert extract_diagnosis(text) == "고혈압"
+
+
+def test_diagnosis_maps_kcd_codes_without_parenthesized_disease_names():
+    """실제 처방전처럼 질병분류기호만 있고 한글 진단명이 없어도 생활습관 RAG용 진단명을 채운다."""
+    text = (
+        "성명 김테스트 주민등록번호 650101-1****** 성별/나이 남 / 61세 "
+        "질병분류기호 I10, E11.9 처방구분 외래 2. 의료기관 및 처방의 정보 "
+        "의료기관 명칭 서울가상내과의원"
+    )
+
+    assert extract_diagnosis(text) == "고혈압, 당뇨병"
+
+
+def test_diagnosis_maps_multiple_chronic_disease_codes_from_ocr_samples():
+    text = "질병분류기호 E78.5, I20.9, N18.3 처방구분 외래"
+
+    assert extract_diagnosis(text) == "이상지질혈증, 협심증, 만성 신장병"

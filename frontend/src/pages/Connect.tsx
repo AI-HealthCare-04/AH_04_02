@@ -46,10 +46,17 @@ const RELATION_LABEL: Record<RelationType, string> = {
 // [2026-07-24 추가] "연결된 사람" 목록의 relation_type 표시 — Caregiver.relation_type은
 // 초대(Invitation.relation_type)와 달리 "organization"도 값으로 올 수 있는데(개인 가입
 // 화면에서 기관으로 가입한 경우), RELATION_LABEL엔 그 키가 없어서 지금까지 원문 그대로
-// "organization"이 화면에 노출되고 있었다. 기관 계정은 라벨 대신 실제 기관명을 보여준다.
+// "organization"이 화면에 노출되고 있었다. 기관 계정은 역할 라벨과 기관명을 함께 보조정보로 보여준다.
 function formatCaregiverRelation(c: Caregiver): string {
-  if (c.relation_type === "organization") return `기관명: ${c.org_name ?? "알 수 없음"}`;
+  if (c.relation_type === "organization") return c.org_name ? `지원인력 · ${c.org_name}` : "지원인력";
   return RELATION_LABEL[c.relation_type as RelationType] ?? c.relation_type;
+}
+
+function formatCaregiverName(c: Caregiver): string {
+  if (c.relation_type === "organization") {
+    return c.manager_name?.trim() || c.name;
+  }
+  return c.name;
 }
 
 // [2026-07-24 추가] event별로 다른 문구를 만든다 — patient_name과 counterpart_name이 같으면
@@ -809,7 +816,7 @@ export default function Connect() {
               caregivers.map((c) => (
                 <div key={c.id} className="flex items-center justify-between px-6 py-4 border-b border-[#F4F0EA] last:border-0">
                   <div>
-                    <p className="text-[14px] font-bold text-[#1E1A17]">{c.name}</p>
+                    <p className="text-[14px] font-bold text-[#1E1A17]">{formatCaregiverName(c)}</p>
                     <p className="text-[13px] text-[#6E6259]">{formatCaregiverRelation(c)}</p>
                   </div>
                   <button

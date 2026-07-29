@@ -42,7 +42,15 @@ interface DrugGroup {
 
 /** id → 이름 표시용 — 연결이 이미 끊긴 caregiver_id가 옛 일정에 남아있을 수 있어 폴백 문구를 둔다. */
 function caregiverName(caregivers: Caregiver[], id: number): string {
-  return caregivers.find((c) => c.id === id)?.name ?? "연결 해제된 보호자";
+  const caregiver = caregivers.find((c) => c.id === id);
+  return caregiver ? caregiverDisplayName(caregiver) : "연결 해제된 보호자";
+}
+
+function caregiverDisplayName(caregiver: Caregiver): string {
+  if (caregiver.relation_type === "organization") {
+    return caregiver.manager_name?.trim() || caregiver.name;
+  }
+  return caregiver.name;
 }
 
 /** axios 에러에서 백엔드가 내려준 실제 사유(detail)를 뽑아 표시 — "저장이 안 돼요"로만 뭉개지 않기 위함 */
@@ -427,16 +435,22 @@ export default function SchedulePage() {
                       <button
                         type="button"
                         onClick={() => openEditModal(g)}
-                        className="text-[12px] font-bold text-[#1E1A17] hover:underline truncate block"
+                        className="text-[12px] font-bold text-[#1E1A17] hover:underline block text-center leading-5"
                         title={
                           g.alertCaregiverIds.length > 0
                             ? g.alertCaregiverIds.map((id) => caregiverName(caregivers, id)).join(", ")
                             : "없음"
                         }
                       >
-                        {g.alertCaregiverIds.length > 0
-                          ? g.alertCaregiverIds.map((id) => caregiverName(caregivers, id)).join(", ")
-                          : "없음"}
+                        {g.alertCaregiverIds.length > 0 ? (
+                          g.alertCaregiverIds.map((id) => (
+                            <span key={id} className="block">
+                              {caregiverName(caregivers, id)}
+                            </span>
+                          ))
+                        ) : (
+                          "없음"
+                        )}
                       </button>
                     </div>
                     <div className="text-center">
@@ -610,7 +624,7 @@ export default function SchedulePage() {
                         onChange={() => toggleAlertCaregiver(c.id)}
                         className="w-4 h-4 accent-current"
                       />
-                      {c.name}
+                      {caregiverDisplayName(c)}
                     </label>
                   ))}
                 </div>
