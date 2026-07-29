@@ -101,8 +101,9 @@ def verify_pii_key_against_db(engine) -> None:
     버린다 — 실제 사고 원인이 이것이었고, 그 경우 기동 후 로그인 실패로만 드러났다.
     이 함수를 lifespan에서 호출해 그 케이스도 기동 시점(fail-fast)에 잡는다.
 
-    patients와 caregivers 양쪽을 모두 확인한다 — 한쪽만 확인하면 그쪽이 비어있을 때
-    오탐(통과)이 생길 수 있다(예: patients가 비어있고 caregivers에만 데이터가 있는 경우).
+    patients와 caregivers 양쪽을 모두 빠짐없이 확인한다 — 어느 한쪽이 비어있거나,
+    한쪽 키가 맞아도 나머지 테이블이 다른 키로 깨진 경우(예: patients는 정상이지만
+    caregivers만 다른 키로 암호화된 경우)도 모두 검출해야 한다.
     두 테이블 모두 암호화된 레코드가 없으면(최초 배포·빈 DB) 검증 대상이 없으므로 스킵한다.
     """
     from cryptography.fernet import InvalidToken
@@ -123,5 +124,4 @@ def verify_pii_key_against_db(engine) -> None:
                         "PII_ENCRYPTION_KEY가 기존 데이터와 일치하지 않는 것 같습니다 — "
                         "docs/env-var-checklist.md 참고"
                     ) from exc
-                return  # 한 테이블에서 복호화 성공 = 키 일치, 추가 검증 불필요
-    # patients/caregivers 모두 암호화된 레코드 없음 — 최초 배포/빈 DB이므로 스킵
+    # patients/caregivers 모두 복호화 성공(또는 암호화 레코드 없음) — 통과

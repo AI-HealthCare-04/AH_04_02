@@ -8,12 +8,11 @@ PR #112 리뷰 반영: patients만 확인하던 로직을 caregivers까지 검�
 해당 케이스(patients 비어있고 caregivers만 데이터 있는 경우)를 포함한 6가지 시나리오를
 모두 커버한다.
 """
-import pytest
-from cryptography.fernet import Fernet
-from sqlmodel import SQLModel, Session, create_engine
-
 import models  # noqa: F401 — patients/caregivers 테이블 메타데이터 등록용
+import pytest
 from core.security import encrypt_pii, verify_pii_key_against_db
+from cryptography.fernet import Fernet
+from sqlmodel import Session, SQLModel, create_engine
 
 
 @pytest.fixture()
@@ -74,6 +73,25 @@ def test_caregivers_only_wrong_key_raises(db_engine):
     with Session(db_engine) as session:
         caregiver = models.Caregiver()
         caregiver.name_encrypted = other_encrypted  # .name setter를 우회해 다른 키 암호문 직접 주입
+        session.add(caregiver)
+        session.commit()
+    with pytest.raises(RuntimeError, match="PII_ENCRYPTION_KEY가 기존 데이터와 일치하지 않는"):
+        verify_pii_key_against_db(db_engine)
+
+
+def test_patients_correct_caregivers_wrong_key_raises(db_engine):
+    """patients 키는 맞고 caregivers에만 다른 키 암호문이 있어도 RuntimeError를 낸다.
+
+    return을 유지하면 patients 통과 후 caregivers를 검사하지 않아 이 케이스를 놓친다 —
+    재리뷰 지적(fkmc10101-hub)에서 발견된 케이스로, 두 테이블 모두 끝까지 검사해야 잡힌다.
+    """
+    with Session(db_engine) as session:
+        session.add(models.Patient(name_encrypted=encrypt_pii("홍길동")))
+        session.commit()
+    other_encrypted = Fernet(Fernet.generate_key()).encrypt("보호자A".encode()).decode()
+    with Session(db_engine) as session:
+        caregiver = models.Caregiver()
+        caregiver.name_encrypted = other_encrypted
         session.add(caregiver)
         session.commit()
     with pytest.raises(RuntimeError, match="PII_ENCRYPTION_KEY가 기존 데이터와 일치하지 않는"):
