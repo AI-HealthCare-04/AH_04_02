@@ -93,9 +93,9 @@ shasum -a 256 rag/chroma_db/chroma.sqlite3
 > - **각자 `rag cli ingest-*`로 재빌드하는 경우** → 해시 대신 문서 수로 비교:
 >   ```bash
 >   uv run python -c "
->   from rag.rag.vectorstore import get_collection
->   c = get_collection()
->   print('총 문서 수:', c.count())
+>   import sys; sys.path.insert(0, 'rag')
+>   from rag.vectorstore import get_vectorstore
+>   print('총 문서 수:', get_vectorstore()._collection.count())
 >   "
 >   ```
 
