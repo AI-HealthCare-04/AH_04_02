@@ -39,8 +39,9 @@ from dotenv import load_dotenv
 # .env를 실제로 필요로 하는 core.database/core.scheduler/routers만 아래에 남겨둔다.)
 load_dotenv(Path(__file__).parent / ".env")
 
-from core.database import init_db, log_db_connection_info
+from core.database import engine, init_db, log_db_connection_info
 from core.scheduler import reminder_loop, scheduler_enabled
+from core.security import verify_pii_key_against_db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routers import (
@@ -70,6 +71,7 @@ async def lifespan(app: FastAPI):
     """
     log_db_connection_info()
     init_db()
+    verify_pii_key_against_db(engine)
 
     task: asyncio.Task | None = None
     if scheduler_enabled():
