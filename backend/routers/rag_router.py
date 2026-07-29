@@ -44,7 +44,7 @@ from sqlmodel import Session, select
 router = APIRouter(prefix="/rag", tags=["RAG"])
 
 # ── REQ-020 가이드 캐시 설정 ──
-# GUIDE_DATA_VERSION: 출처 데이터(e약은요/HIRA/DUR CSV) 버전 식별자.
+# GUIDE_DATA_VERSION: 출처 데이터(e약은요/HIRA/DUR API) 버전 식별자.
 # 이 값이 바뀌면 SHA-256 키가 달라져 기존 캐시가 자연스럽게 무효화된다.
 # [2026-07-22] v1.1 — 복약가이드 주의사항/생활습관 빈 응답 fallback 보강.
 # 기존 v1.0 캐시에 빈 precautions/guides가 저장돼 있으면 최신 생성 로직을 타지 않아
@@ -262,8 +262,8 @@ def _generate_via_rag(ocr_items: Sequence[OcrResult]) -> tuple[dict, dict, list]
         for ref in lr.source_refs
     ] + [
         # [7/10] DUR 병용금기 경고 — 같은 처방전의 다른 약과 실제로 금기 관계일 때만 존재.
-        # [7/13] API 대신 로컬 CSV 조회로 전환(dur_master.py) — backend/data/에 해당 CSV가
-        # 없으면 이 리스트는 조용히 빈 상태로 남는다(CONTRACT.md §7).
+        # [7/14] 식약처 Open API 연동으로 전환(dur_master.py) — API 조회 실패 시 이 리스트는
+        # 조용히 빈 상태로 남는다(CONTRACT.md §7).
         {
             "drug_name": g.drug_name,
             "mixture_item_name": w.mixture_item_name,
