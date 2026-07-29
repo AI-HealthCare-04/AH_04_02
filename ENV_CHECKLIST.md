@@ -6,13 +6,22 @@
 ## 포함 파일
 
 1. `backend/certs/aiven-ca.pem`
-2. `backend/data/dur_age_taboo_202606.csv`
-3. `backend/data/dur_elderly_caution_202606.csv`
-4. `backend/data/dur_elderly_caution_nsaid_202606.csv`
-5. `backend/data/dur_pregnancy_taboo_202606.csv`
-6. `backend/data/dur_usjnt_taboo_202606.csv`
+2. `backend/data/dur_age_taboo_202606.csv` ⚠️ 레거시
+3. `backend/data/dur_elderly_caution_202606.csv` ⚠️ 레거시
+4. `backend/data/dur_elderly_caution_nsaid_202606.csv` ⚠️ 레거시
+5. `backend/data/dur_pregnancy_taboo_202606.csv` ⚠️ 레거시
+6. `backend/data/dur_usjnt_taboo_202606.csv` ⚠️ 레거시
 7. `rag/data/kdca_healthinfo_cntntsSn.csv`
 8. `rag/chroma_db/`
+
+> **⚠️ 레거시 — DUR CSV (2~6번):** `rag/rag/dur_master.py`가 2026-07-14에 식약처 Open API
+> 직접 연동으로 전환되어 이 CSV 파일들은 더 이상 코드에서 읽히지 않습니다. 기존 팀원 환경과의
+> SHA256 대조 목적으로만 포함됩니다.
+>
+> **7번 `kdca_healthinfo_cntntsSn.csv`:** 질병관리청 KDCA 데이터 크롤링 파이프라인의 원본 입력
+> 파일입니다(`rag/scripts/kdca_crawl_list.py` 출력 → `kdca_crawl_content.py` 입력).
+> `rag/chroma_db/`(8번)가 이미 빌드되어 있으면 **런타임에는 불필요**합니다. KDCA 데이터를
+> 재크롤링하거나 ChromaDB를 처음부터 재빌드할 때만 필요합니다.
 
 ## 포함하지 않은 파일
 
@@ -62,8 +71,8 @@ OPENAI_API_KEY=각자 입력
 
 ```bash
 ls backend/certs/aiven-ca.pem
-ls backend/data/dur_*.csv
-ls rag/data/kdca_healthinfo_cntntsSn.csv
+ls backend/data/dur_*.csv          # 레거시 — 런타임 무관, 해시 대조용
+ls rag/data/kdca_healthinfo_cntntsSn.csv  # 재크롤링 시에만 필요
 ls rag/chroma_db/chroma.sqlite3
 ```
 
@@ -71,8 +80,8 @@ ls rag/chroma_db/chroma.sqlite3
 
 ```bash
 shasum -a 256 backend/certs/aiven-ca.pem
-shasum -a 256 backend/data/dur_*.csv
-shasum -a 256 rag/data/kdca_healthinfo_cntntsSn.csv
+shasum -a 256 backend/data/dur_*.csv          # 레거시 — 런타임 무관, 해시 대조용
+shasum -a 256 rag/data/kdca_healthinfo_cntntsSn.csv  # 재크롤링 시에만 필요
 shasum -a 256 rag/chroma_db/chroma.sqlite3
 ```
 
