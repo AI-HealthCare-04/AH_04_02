@@ -17,4 +17,4 @@ WORKDIR /workspace/backend
 
 EXPOSE 8000
 
-CMD ["uv", "run", "--project", "/workspace", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uv", "run", "--project", "/workspace", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
