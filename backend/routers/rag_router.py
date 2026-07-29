@@ -37,6 +37,8 @@ from core.database import get_session
 from core.dependencies import Actor, get_current_actor, require_actor_patient_access
 from fastapi import APIRouter, Depends, HTTPException
 from models import GuideCache, GuideResult, MedicalRecord, OcrResult
+from services.langfuse_scoring import score_prescription_guide
+from services.langfuse_tracing import flush_langfuse, mask_for_langfuse, optional_observation, update_observation
 from sqlmodel import Session, select
 
 router = APIRouter(prefix="/rag", tags=["RAG"])
@@ -185,7 +187,27 @@ def _generate_via_rag(ocr_items: Sequence[OcrResult]) -> tuple[dict, dict, list]
     ]
     # [2026-07-21 회의 반영] generate_guides_from_medications()가 이제 (약별 가이드, 진단명별
     # 생활습관 안내) 튜플을 돌려준다 — 생활습관 안내는 약 개수가 아니라 고유 진단명 개수만큼만 있다.
-    guides, lifestyle_results = _generate_guides(medications)  # 동기 함수(LLM/벡터DB 호출) — 반드시 스레드에서 실행할 것
+    with optional_observation(
+        as_type="span",
+        name="rag-generate-guides",
+        input={
+            "drug_count": len(medications),
+            "drug_names": [mask_for_langfuse(str(m["drug_name"])) for m in medications],
+            "diagnosis_count": len({str(m.get("diagnosis") or "") for m in medications if m.get("diagnosis")}),
+            "diagnoses": [mask_for_langfuse(str(m.get("diagnosis") or "")) for m in medications if m.get("diagnosis")],
+        },
+    ) as generation_span:
+        guides, lifestyle_results = _generate_guides(medications)  # 동기 함수(LLM/벡터DB 호출) — 반드시 스레드에서 실행할 것
+        update_observation(
+            generation_span,
+            output={
+                "guide_count": len(guides),
+                "lifestyle_guide_count": len(lifestyle_results),
+                "review_required_count": sum(1 for g in guides if g.review_required),
+                "source_ref_count": sum(len(g.source_refs) for g in guides)
+                + sum(len(lr.source_refs) for lr in lifestyle_results),
+            },
+        )
 
     medication_guide = {
         "drugs": [
@@ -275,55 +297,111 @@ async def run_rag(record_id: int, session: Session) -> tuple[GuideResult, bool, 
     (medication_guide/lifestyle_guide/source_refs는 SQLite에 JSON 타입이 없어서
      json.dumps()로 문자열로 저장 — 꺼낼 때는 json.loads() 사용)
     """
-    ocr_items = await asyncio.to_thread(
-        lambda: session.exec(select(OcrResult).where(OcrResult.record_id == record_id)).all()
-    )
-    if not ocr_items:
-        raise ValueError("해당 record_id의 OCR 결과가 없어요. 먼저 OCR이 실행되어야 합니다.")
+    with optional_observation(
+        as_type="span",
+        name="prescription-rag-guide",
+        input={
+            "record_id": record_id,
+            "rag_provider": _RAG_PROVIDER,
+            "rag_available": _RAG_AVAILABLE,
+            "guide_data_version": GUIDE_DATA_VERSION,
+        },
+    ) as trace:
+        ocr_items = await asyncio.to_thread(
+            lambda: session.exec(select(OcrResult).where(OcrResult.record_id == record_id)).all()
+        )
+        if not ocr_items:
+            update_observation(trace, output={"status": "no_ocr_results"})
+            flush_langfuse()
+            raise ValueError("해당 record_id의 OCR 결과가 없어요. 먼저 OCR이 실행되어야 합니다.")
 
-    # ── REQ-020: 캐시 조회 ──
-    cache_key = _make_cache_key(ocr_items, GUIDE_DATA_VERSION)
-    cached_entry = await asyncio.to_thread(_lookup_cache, cache_key, session)
+        update_observation(
+            trace,
+            input={
+                "record_id": record_id,
+                "rag_provider": _RAG_PROVIDER,
+                "rag_available": _RAG_AVAILABLE,
+                "guide_data_version": GUIDE_DATA_VERSION,
+                "ocr_item_count": len(ocr_items),
+                "drug_names": [mask_for_langfuse(item.display_name) for item in ocr_items],
+                "diagnoses": [mask_for_langfuse(item.diagnosis or "") for item in ocr_items if item.diagnosis],
+            },
+        )
 
-    if cached_entry is not None:
-        stored = json.loads(cached_entry.guide_result)
-        medication_guide = stored["medication_guide"]
-        lifestyle_guide = stored["lifestyle_guide"]
-        source_refs = stored["source_refs"]
-        from_cache = True
-        cache_expires_at: datetime | None = cached_entry.expires_at
-    else:
-        # 캐시 미스 — LLM/벡터DB 호출
-        result = None
-        if _RAG_AVAILABLE:
-            result = await asyncio.to_thread(_generate_via_rag, ocr_items)
-        medication_guide, lifestyle_guide, source_refs = result or _fake_guide_payload(ocr_items)
-        from_cache = False
-        # stub 모드(가짜 데이터)는 캐시에 저장하지 않는다 — RAG_PROVIDER=real 전환 후
-        # 같은 키로 히트돼 가짜 데이터가 실제 결과처럼 반환되는 문제를 방지한다.
-        # pecs0310 HIGH 리뷰 반영.
-        if _RAG_AVAILABLE:
-            cache_expires_at: datetime | None = await asyncio.to_thread(
-                _save_cache, cache_key, ocr_items, GUIDE_DATA_VERSION,
-                medication_guide, lifestyle_guide, source_refs, session,
-            )
+        # ── REQ-020: 캐시 조회 ──
+        cache_key = _make_cache_key(ocr_items, GUIDE_DATA_VERSION)
+        with optional_observation(
+            as_type="span",
+            name="rag-guide-cache-lookup",
+            input={"cache_key_prefix": cache_key[:12], "guide_data_version": GUIDE_DATA_VERSION},
+        ) as cache_span:
+            cached_entry = await asyncio.to_thread(_lookup_cache, cache_key, session)
+            update_observation(cache_span, output={"cache_hit": cached_entry is not None})
+
+        if cached_entry is not None:
+            stored = json.loads(cached_entry.guide_result)
+            medication_guide = stored["medication_guide"]
+            lifestyle_guide = stored["lifestyle_guide"]
+            source_refs = stored["source_refs"]
+            from_cache = True
+            cache_expires_at: datetime | None = cached_entry.expires_at
         else:
-            cache_expires_at = None
+            # 캐시 미스 — LLM/벡터DB 호출
+            result = None
+            if _RAG_AVAILABLE:
+                result = await asyncio.to_thread(_generate_via_rag, ocr_items)
+            medication_guide, lifestyle_guide, source_refs = result or _fake_guide_payload(ocr_items)
+            from_cache = False
+            # stub 모드(가짜 데이터)는 캐시에 저장하지 않는다 — RAG_PROVIDER=real 전환 후
+            # 같은 키로 히트돼 가짜 데이터가 실제 결과처럼 반환되는 문제를 방지한다.
+            # pecs0310 HIGH 리뷰 반영.
+            if _RAG_AVAILABLE:
+                with optional_observation(
+                    as_type="span",
+                    name="rag-guide-cache-save",
+                    input={"cache_key_prefix": cache_key[:12], "guide_data_version": GUIDE_DATA_VERSION},
+                ) as save_span:
+                    cache_expires_at: datetime | None = await asyncio.to_thread(
+                        _save_cache, cache_key, ocr_items, GUIDE_DATA_VERSION,
+                        medication_guide, lifestyle_guide, source_refs, session,
+                    )
+                    update_observation(save_span, output={"cache_expires_at": cache_expires_at.isoformat()})
+            else:
+                cache_expires_at = None
 
-    guide = GuideResult(
-        record_id=record_id,
-        medication_guide=json.dumps(medication_guide, ensure_ascii=False),
-        lifestyle_guide=json.dumps(lifestyle_guide, ensure_ascii=False),
-        source_refs=json.dumps(source_refs, ensure_ascii=False),
-    )
+        guide = GuideResult(
+            record_id=record_id,
+            medication_guide=json.dumps(medication_guide, ensure_ascii=False),
+            lifestyle_guide=json.dumps(lifestyle_guide, ensure_ascii=False),
+            source_refs=json.dumps(source_refs, ensure_ascii=False),
+        )
 
-    def _save_guide() -> None:
-        session.add(guide)
-        session.commit()
-        session.refresh(guide)
+        def _save_guide() -> None:
+            session.add(guide)
+            session.commit()
+            session.refresh(guide)
 
-    await asyncio.to_thread(_save_guide)
-    return guide, from_cache, cache_expires_at
+        await asyncio.to_thread(_save_guide)
+        update_observation(
+            trace,
+            output={
+                "status": "ok",
+                "from_cache": from_cache,
+                "medication_drug_count": len((medication_guide or {}).get("drugs") or []),
+                "lifestyle_guide_count": len((lifestyle_guide or {}).get("guides") or []),
+                "source_ref_count": len(source_refs or []),
+                "cache_expires_at": cache_expires_at.isoformat() if cache_expires_at else None,
+            },
+        )
+        score_prescription_guide(
+            medication_guide=medication_guide,
+            lifestyle_guide=lifestyle_guide,
+            source_refs=source_refs,
+            from_cache=from_cache,
+            rag_available=_RAG_AVAILABLE,
+        )
+        flush_langfuse()
+        return guide, from_cache, cache_expires_at
 
 
 @router.get("/ping")

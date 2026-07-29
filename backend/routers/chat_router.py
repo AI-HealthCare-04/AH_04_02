@@ -43,6 +43,7 @@ from models import (
     PatientMedication,
 )
 from pydantic import BaseModel
+from services.langfuse_scoring import score_chat_answer
 from services.langfuse_tracing import (
     flush_langfuse,
     get_langchain_callback_handler,
@@ -1210,6 +1211,14 @@ def ask(payload: ChatAsk, actor: Actor = Depends(get_current_actor), session: Se
                 "latency_ms": round(now_ms() - started_ms, 2),
             },
         )
+        score_chat_answer(
+            question=question_text,
+            answer=answer_text,
+            answer_source=answer_source,
+            source_refs=source_refs,
+            rag_context_count=rag_context_count,
+            dur_context_count=dur_context_count,
+        )
         flush_langfuse()
 
     msg = ChatMessage(
@@ -1259,6 +1268,8 @@ async def ask_stream(
         source_refs: list[dict] = []
         chunks: list[str] = []
         started_ms = now_ms()
+        rag_context_count = 0
+        dur_context_count = 0
 
         with optional_observation(
             as_type="span",
@@ -1330,8 +1341,18 @@ async def ask_stream(
                 output={
                     "answer": mask_for_langfuse(answer_text),
                     "answer_source": answer_source,
+                    "rag_context_count": rag_context_count,
+                    "dur_context_count": dur_context_count,
                     "latency_ms": round(now_ms() - started_ms, 2),
                 },
+            )
+            score_chat_answer(
+                question=question_text,
+                answer=answer_text,
+                answer_source=answer_source,
+                source_refs=source_refs,
+                rag_context_count=rag_context_count,
+                dur_context_count=dur_context_count,
             )
             flush_langfuse()
 
