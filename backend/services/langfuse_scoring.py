@@ -264,3 +264,51 @@ def score_drug_info_detail(
         comment="환자용 쉬운 말 요약 생성 여부를 기준으로 한 자동 점수입니다.",
         metadata=metadata,
     )
+
+
+def score_ocr_extraction(
+    *,
+    medication_count: int,
+    diagnosis_count: int,
+    low_confidence_count: int,
+    review_required: bool,
+    false_positive_hint_count: int = 0,
+) -> None:
+    """Score OCR extraction quality for prescription upload test traces."""
+    med_signal = _ratio(medication_count, 3)
+    diagnosis_signal = _ratio(diagnosis_count, 1)
+    confidence_penalty = _ratio(low_confidence_count, max(1, medication_count)) * 0.25
+    false_positive_penalty = _ratio(false_positive_hint_count, max(1, medication_count)) * 0.20
+
+    metadata = {
+        "medication_count": medication_count,
+        "diagnosis_count": diagnosis_count,
+        "low_confidence_count": low_confidence_count,
+        "review_required": review_required,
+        "false_positive_hint_count": false_positive_hint_count,
+        "scoring_method": "heuristic_v1_ocr_extraction",
+    }
+    _score_current_trace(
+        "source_relevance",
+        _clamp(0.25 + med_signal * 0.45 + diagnosis_signal * 0.25 - false_positive_penalty),
+        comment="OCR 결과에 약품명과 진단명이 실제로 추출됐는지 본 자동 점수입니다.",
+        metadata=metadata,
+    )
+    _score_current_trace(
+        "completeness",
+        _clamp(0.25 + med_signal * 0.40 + diagnosis_signal * 0.30 - confidence_penalty),
+        comment="약품 개수, 진단명 추출, 낮은 신뢰도 비율을 반영한 OCR 완성도 점수입니다.",
+        metadata=metadata,
+    )
+    _score_current_trace(
+        "groundedness",
+        _clamp(0.30 + med_signal * 0.35 + diagnosis_signal * 0.25 - false_positive_penalty),
+        comment="처방전에서 구조화된 약/진단 근거를 얼마나 확보했는지 본 자동 점수입니다.",
+        metadata=metadata,
+    )
+    _score_current_trace(
+        "medical_safety",
+        0.72 if review_required else 0.88,
+        comment="검토 필요 상태이면 OCR 결과를 그대로 신뢰하지 않도록 낮게 표시한 자동 점수입니다.",
+        metadata=metadata,
+    )

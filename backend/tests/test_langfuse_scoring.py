@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import services.langfuse_scoring as scoring
-from services.langfuse_scoring import score_chat_answer, score_drug_info_detail, score_prescription_guide
+from services.langfuse_scoring import (
+    score_chat_answer,
+    score_drug_info_detail,
+    score_ocr_extraction,
+    score_prescription_guide,
+)
 
 
 class FakeLangfuseClient:
@@ -127,3 +132,32 @@ def test_drug_info_detail_patient_summary_improves_clarity(monkeypatch):
     )
 
     assert _score_map(with_summary)["patient_clarity"] > _score_map(without_summary)["patient_clarity"]
+
+
+def test_ocr_extraction_scores_diagnosis_and_false_positive_hints(monkeypatch):
+    clean_client = FakeLangfuseClient()
+    monkeypatch.setattr(scoring, "get_langfuse_client", lambda: clean_client)
+
+    score_ocr_extraction(
+        medication_count=3,
+        diagnosis_count=2,
+        low_confidence_count=0,
+        review_required=False,
+        false_positive_hint_count=0,
+    )
+
+    noisy_client = FakeLangfuseClient()
+    monkeypatch.setattr(scoring, "get_langfuse_client", lambda: noisy_client)
+
+    score_ocr_extraction(
+        medication_count=3,
+        diagnosis_count=0,
+        low_confidence_count=1,
+        review_required=True,
+        false_positive_hint_count=1,
+    )
+
+    clean_scores = _score_map(clean_client)
+    noisy_scores = _score_map(noisy_client)
+    assert clean_scores["completeness"] > noisy_scores["completeness"]
+    assert clean_scores["source_relevance"] > noisy_scores["source_relevance"]

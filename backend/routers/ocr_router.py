@@ -36,7 +36,7 @@ from core.dependencies import Actor, get_current_actor, require_actor_patient_ac
 from models import MedicalRecord, OcrResult
 from services.drug_matcher import MATCH_THRESHOLD, match_drug
 from services.drug_reference import get_drug_info
-from services.langfuse_scoring import score_drug_info_detail
+from services.langfuse_scoring import score_drug_info_detail, score_ocr_extraction
 from services.langfuse_tracing import (
     flush_langfuse,
     get_langchain_callback_handler,
@@ -558,6 +558,37 @@ async def test_ocr_upload(
             for m in session.exec(select(OcrResult).where(OcrResult.record_id == record.id)).all()
         ]
     )
+    with optional_observation(
+        as_type="span",
+        name="ocr-test-extraction",
+        input={"patient_id": patient_id, "record_id": record.id},
+    ) as trace:
+        diagnosis_count = len({m["diagnosis"] for m in medications if m["diagnosis"]})
+        low_confidence_count = sum(1 for m in medications if (m.get("confidence") or 0) < 0.8)
+        false_positive_hint_count = sum(
+            1
+            for m in medications
+            if any(hint in (m.get("drug_name") or "") for hint in ("샘플", "OCR", "테스트"))
+        )
+        update_observation(
+            trace,
+            output={
+                "record_id": record.id,
+                "status": record.status,
+                "medication_count": len(medications),
+                "diagnosis_count": diagnosis_count,
+                "low_confidence_count": low_confidence_count,
+                "false_positive_hint_count": false_positive_hint_count,
+            },
+        )
+        score_ocr_extraction(
+            medication_count=len(medications),
+            diagnosis_count=diagnosis_count,
+            low_confidence_count=low_confidence_count,
+            review_required=record.status == "review_required",
+            false_positive_hint_count=false_positive_hint_count,
+        )
+        flush_langfuse()
     return {
         "record_id": record.id,
         "status": record.status,
