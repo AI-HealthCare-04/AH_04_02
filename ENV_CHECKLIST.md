@@ -75,3 +75,14 @@ shasum -a 256 backend/data/dur_*.csv
 shasum -a 256 rag/data/kdca_healthinfo_cntntsSn.csv
 shasum -a 256 rag/chroma_db/chroma.sqlite3
 ```
+
+## 한 번에 점검하는 방법
+
+프로젝트 루트에서 아래 스크립트를 실행하면 현재 커밋, Python/Node 버전, `.env` 누락 키,
+DB SSL 설정, 공유 파일 SHA256, Docker Compose 상태를 한 번에 출력합니다.
+
+```bash
+bash check_env_sync.sh
+```
+
+출력 결과 전체를 팀 채팅에 공유하면 서로 같은 환경을 바라보고 있는지 비교할 수 있습니다.
