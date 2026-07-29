@@ -10,11 +10,26 @@ from services.langfuse_scoring import (
 
 
 class FakeLangfuseClient:
-    def __init__(self):
+    def __init__(self, trace_id: str | None = None):
         self.scores: list[dict] = []
+        self.trace_id = trace_id
+
+    def get_current_trace_id(self):
+        return self.trace_id
 
     def score_current_trace(self, **kwargs):
         self.scores.append(kwargs)
+
+    def create_score(self, **kwargs):
+        self.scores.append(kwargs)
+
+
+class FakeObservation:
+    def __init__(self):
+        self.updates: list[dict] = []
+
+    def update(self, **kwargs):
+        self.updates.append(kwargs)
 
 
 def _score_map(client: FakeLangfuseClient) -> dict[str, float]:
@@ -55,6 +70,52 @@ def test_chat_answer_rag_retrieval_gets_higher_grounding_scores(monkeypatch):
     assert high_scores["groundedness"] > low_scores["groundedness"]
     assert high_scores["source_relevance"] > low_scores["source_relevance"]
     assert high_scores["source_relevance"] >= 0.8
+
+
+def test_chat_answer_records_auto_scores_in_trace_output(monkeypatch):
+    client = FakeLangfuseClient()
+    observation = FakeObservation()
+    monkeypatch.setattr(scoring, "get_langfuse_client", lambda: client)
+
+    score_chat_answer(
+        question="고혈압 생활습관 알려줘",
+        answer="근거에 따르면 싱겁게 먹고, 의사나 약사에게 문의하세요.",
+        answer_source="llm (gpt-4o-mini)",
+        source_refs=[{"disease": "고혈압", "source": "질병관리청 국가건강정보포털"}],
+        rag_context_count=2,
+        dur_context_count=0,
+        observation=observation,
+    )
+
+    assert observation.updates
+    output = observation.updates[-1]["output"]
+    assert output["auto_score_method"] == "heuristic_v1_rag_weighted"
+    assert set(output["auto_scores"]) >= {
+        "groundedness",
+        "source_relevance",
+        "completeness",
+        "medical_safety",
+        "patient_clarity",
+    }
+    assert _score_map(client)["groundedness"] == output["auto_scores"]["groundedness"]
+
+
+def test_chat_answer_creates_scores_with_current_trace_id(monkeypatch):
+    client = FakeLangfuseClient(trace_id="trace-123")
+    monkeypatch.setattr(scoring, "get_langfuse_client", lambda: client)
+
+    score_chat_answer(
+        question="노바스크 주의사항 알려줘",
+        answer="근거에 따르면 어지러움이 있으면 의사나 약사에게 상담하세요.",
+        answer_source="llm (gpt-4o-mini)",
+        source_refs=[{"item_name": "노바스크정5밀리그램", "field": "주의사항"}],
+        rag_context_count=1,
+        dur_context_count=0,
+    )
+
+    assert client.scores
+    assert all(score["trace_id"] == "trace-123" for score in client.scores)
+    assert {score["name"] for score in client.scores} >= {"groundedness", "source_relevance"}
 
 
 def test_chat_answer_dangerous_instruction_lowers_medical_safety(monkeypatch):

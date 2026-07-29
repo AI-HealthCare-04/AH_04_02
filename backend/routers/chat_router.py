@@ -906,6 +906,33 @@ _LIFESTYLE_KEYWORDS = (
 )
 
 
+_GENERAL_CHAT_KEYWORDS = (
+    "안녕",
+    "하이",
+    "hello",
+    "hi",
+    "고마워",
+    "감사",
+    "너 누구",
+    "누구야",
+    "약콩",
+    "사용법",
+    "어떻게 써",
+    "어떻게 사용",
+    "뭐 할 수",
+    "무엇을 할 수",
+    "앱 안내",
+    "서비스 안내",
+    "메뉴",
+)
+
+
+def _is_general_chat_question(question_text: str) -> bool:
+    """인사/앱 안내처럼 외부 의료 근거가 필요 없는 질문인지 판별한다."""
+    normalized = question_text.lower().replace(" ", "")
+    return any(keyword.lower().replace(" ", "") in normalized for keyword in _GENERAL_CHAT_KEYWORDS)
+
+
 def _is_lifestyle_question(question_text: str) -> bool:
     """[2026-07-21 추가] 생활습관(음식/운동/주의사항) 질문인지 판별한다 — 이런 질문은 의약품
     문서보다 질병관리청 건강정보(doc_type="kdca_health_info")를 우선 조회해야 한다
@@ -933,7 +960,7 @@ def _retrieve_chat_rag_docs(question_text: str) -> list:
     최우선으로, 그 외(의약품 관련) 질문은 doc_type="drug"(e약은요/HIRA 기반 문서)를 최우선으로
     조회하고 못 찾을 때만 필터 없는 전체 검색으로 넘어간다.
     """
-    if _should_answer_from_dur_only(question_text):
+    if _is_general_chat_question(question_text) or _should_answer_from_dur_only(question_text):
         return []
 
     # Langfuse retriever span records query metadata. Do not include stored
@@ -1086,6 +1113,11 @@ def _gather_llm_inputs(
     source_refs로 내려주기 위해 한 번의 조회(_retrieve_chat_rag_docs)에서 프롬프트용
     문자열과 함께 만든다(중복 조회 없음)."""
     context_text = _build_patient_context(patient_id, session)
+    setting = session.get(NotificationSetting, patient_id)
+    bot_name = setting.chatbot_name if setting else "약콩이"
+    if _is_general_chat_question(question_text):
+        return context_text, [], [], bot_name, []
+
     # DUR 조회용 약 이름: 처방전 OCR 약 이름 + 환자가 직접 등록한 약 이름을 합친다.
     # (버그: OCR만 보면 처방전 없이 '내 약 등록'만 한 환자는 DUR 조회에서 통째로 빠졌다.)
     registered_drug_names = list(
@@ -1097,8 +1129,6 @@ def _gather_llm_inputs(
     rag_docs = _retrieve_chat_rag_docs(question_text)
     rag_context_lines = _rag_docs_to_prompt_lines(rag_docs)
     rag_refs = _rag_docs_to_source_refs(rag_docs)
-    setting = session.get(NotificationSetting, patient_id)
-    bot_name = setting.chatbot_name if setting else "약콩이"
     # [2026-07-24 추가] DUR 전용 질문과 RAG(ChromaDB) 질문은 _should_answer_from_dur_only로
     # 갈리는 서로 배타적인 경로라 실제로 둘 다 채워지는 경우는 없지만, 합쳐서 반환해두면
     # 호출부가 "DUR인지 RAG인지" 신경 쓰지 않고 그대로 source_refs에 실어 보낼 수 있다.
@@ -1218,6 +1248,7 @@ def ask(payload: ChatAsk, actor: Actor = Depends(get_current_actor), session: Se
             source_refs=source_refs,
             rag_context_count=rag_context_count,
             dur_context_count=dur_context_count,
+            observation=trace,
         )
         flush_langfuse()
 
@@ -1353,6 +1384,7 @@ async def ask_stream(
                 source_refs=source_refs,
                 rag_context_count=rag_context_count,
                 dur_context_count=dur_context_count,
+                observation=trace,
             )
             flush_langfuse()
 

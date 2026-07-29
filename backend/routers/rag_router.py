@@ -38,7 +38,13 @@ from core.dependencies import Actor, get_current_actor, require_actor_patient_ac
 from fastapi import APIRouter, Depends, HTTPException
 from models import GuideCache, GuideResult, MedicalRecord, OcrResult
 from services.langfuse_scoring import score_prescription_guide
-from services.langfuse_tracing import flush_langfuse, mask_for_langfuse, optional_observation, update_observation
+from services.langfuse_tracing import (
+    flush_langfuse,
+    mask_for_langfuse,
+    optional_observation,
+    update_observation,
+)
+from services.ocr_quality import is_auto_guide_eligible_ocr_item
 from sqlmodel import Session, select
 
 router = APIRouter(prefix="/rag", tags=["RAG"])
@@ -52,7 +58,10 @@ router = APIRouter(prefix="/rag", tags=["RAG"])
 # [2026-07-23] v1.2 — lifestyle_guide.guides[].guide(자유 텍스트)를 diet/exercise/other ×
 # recommended/avoid 구조로 바꿨다. v1.1 이하 캐시는 옛 모양(guide: str)이라 새 프론트가
 # 못 읽으므로 버전을 올려 무효화한다.
-GUIDE_DATA_VERSION = os.environ.get("GUIDE_DATA_VERSION", "v1.2")
+# [2026-07-29] v1.3 — OCR 오탐/낮은 약품명 매칭 신뢰도 항목을 자동 RAG 생성 대상에서
+# 제외한다. v1.2 캐시에는 "샘플은OCR", "튼튼정→고리튼정" 같은 항목이 들어간 결과가
+# 남아 있을 수 있어 기본 버전을 올려 무효화한다.
+GUIDE_DATA_VERSION = os.environ.get("GUIDE_DATA_VERSION", "v1.3")
 GUIDE_CACHE_TTL_DAYS = int(os.environ.get("GUIDE_CACHE_TTL_DAYS", "7"))
 
 
@@ -170,6 +179,10 @@ def _generate_via_rag(ocr_items: Sequence[OcrResult]) -> tuple[dict, dict, list]
     if not _RAG_AVAILABLE:
         return None
 
+    eligible_items = [item for item in ocr_items if is_auto_guide_eligible_ocr_item(item)]
+    if not eligible_items:
+        return {"drugs": []}, {"diagnosis": "", "guides": []}, []
+
     medications = [
         {
             # [2026-07-20 버그수정] item.drug_name(축약명)이 아니라 item.display_name(확신
@@ -183,7 +196,7 @@ def _generate_via_rag(ocr_items: Sequence[OcrResult]) -> tuple[dict, dict, list]
             "drug_class": item.drug_class,
             "confidence": item.confidence,
         }
-        for item in ocr_items
+        for item in eligible_items
     ]
     # [2026-07-21 회의 반영] generate_guides_from_medications()가 이제 (약별 가이드, 진단명별
     # 생활습관 안내) 튜플을 돌려준다 — 생활습관 안내는 약 개수가 아니라 고유 진단명 개수만큼만 있다.
@@ -192,6 +205,7 @@ def _generate_via_rag(ocr_items: Sequence[OcrResult]) -> tuple[dict, dict, list]
         name="rag-generate-guides",
         input={
             "drug_count": len(medications),
+            "excluded_drug_count": len(ocr_items) - len(eligible_items),
             "drug_names": [mask_for_langfuse(str(m["drug_name"])) for m in medications],
             "diagnosis_count": len({str(m.get("diagnosis") or "") for m in medications if m.get("diagnosis")}),
             "diagnoses": [mask_for_langfuse(str(m.get("diagnosis") or "")) for m in medications if m.get("diagnosis")],
@@ -315,6 +329,20 @@ async def run_rag(record_id: int, session: Session) -> tuple[GuideResult, bool, 
             flush_langfuse()
             raise ValueError("해당 record_id의 OCR 결과가 없어요. 먼저 OCR이 실행되어야 합니다.")
 
+        eligible_ocr_items = [item for item in ocr_items if is_auto_guide_eligible_ocr_item(item)]
+        excluded_ocr_count = len(ocr_items) - len(eligible_ocr_items)
+        if not eligible_ocr_items:
+            update_observation(
+                trace,
+                output={
+                    "status": "no_auto_guide_eligible_drugs",
+                    "ocr_item_count": len(ocr_items),
+                    "excluded_ocr_count": excluded_ocr_count,
+                },
+            )
+            flush_langfuse()
+            raise ValueError("자동 복약가이드 생성 가능한 약품명이 없어요. 약품명을 먼저 확인해 주세요.")
+
         update_observation(
             trace,
             input={
@@ -323,13 +351,17 @@ async def run_rag(record_id: int, session: Session) -> tuple[GuideResult, bool, 
                 "rag_available": _RAG_AVAILABLE,
                 "guide_data_version": GUIDE_DATA_VERSION,
                 "ocr_item_count": len(ocr_items),
-                "drug_names": [mask_for_langfuse(item.display_name) for item in ocr_items],
-                "diagnoses": [mask_for_langfuse(item.diagnosis or "") for item in ocr_items if item.diagnosis],
+                "auto_guide_drug_count": len(eligible_ocr_items),
+                "excluded_ocr_count": excluded_ocr_count,
+                "drug_names": [mask_for_langfuse(item.display_name) for item in eligible_ocr_items],
+                "diagnoses": [
+                    mask_for_langfuse(item.diagnosis or "") for item in eligible_ocr_items if item.diagnosis
+                ],
             },
         )
 
         # ── REQ-020: 캐시 조회 ──
-        cache_key = _make_cache_key(ocr_items, GUIDE_DATA_VERSION)
+        cache_key = _make_cache_key(eligible_ocr_items, GUIDE_DATA_VERSION)
         with optional_observation(
             as_type="span",
             name="rag-guide-cache-lookup",
@@ -349,8 +381,8 @@ async def run_rag(record_id: int, session: Session) -> tuple[GuideResult, bool, 
             # 캐시 미스 — LLM/벡터DB 호출
             result = None
             if _RAG_AVAILABLE:
-                result = await asyncio.to_thread(_generate_via_rag, ocr_items)
-            medication_guide, lifestyle_guide, source_refs = result or _fake_guide_payload(ocr_items)
+                result = await asyncio.to_thread(_generate_via_rag, eligible_ocr_items)
+            medication_guide, lifestyle_guide, source_refs = result or _fake_guide_payload(eligible_ocr_items)
             from_cache = False
             # stub 모드(가짜 데이터)는 캐시에 저장하지 않는다 — RAG_PROVIDER=real 전환 후
             # 같은 키로 히트돼 가짜 데이터가 실제 결과처럼 반환되는 문제를 방지한다.
@@ -362,7 +394,7 @@ async def run_rag(record_id: int, session: Session) -> tuple[GuideResult, bool, 
                     input={"cache_key_prefix": cache_key[:12], "guide_data_version": GUIDE_DATA_VERSION},
                 ) as save_span:
                     cache_expires_at: datetime | None = await asyncio.to_thread(
-                        _save_cache, cache_key, ocr_items, GUIDE_DATA_VERSION,
+                        _save_cache, cache_key, eligible_ocr_items, GUIDE_DATA_VERSION,
                         medication_guide, lifestyle_guide, source_refs, session,
                     )
                     update_observation(save_span, output={"cache_expires_at": cache_expires_at.isoformat()})
@@ -390,6 +422,7 @@ async def run_rag(record_id: int, session: Session) -> tuple[GuideResult, bool, 
                 "medication_drug_count": len((medication_guide or {}).get("drugs") or []),
                 "lifestyle_guide_count": len((lifestyle_guide or {}).get("guides") or []),
                 "source_ref_count": len(source_refs or []),
+                "excluded_ocr_count": excluded_ocr_count,
                 "cache_expires_at": cache_expires_at.isoformat() if cache_expires_at else None,
             },
         )
@@ -399,6 +432,7 @@ async def run_rag(record_id: int, session: Session) -> tuple[GuideResult, bool, 
             source_refs=source_refs,
             from_cache=from_cache,
             rag_available=_RAG_AVAILABLE,
+            observation=trace,
         )
         flush_langfuse()
         return guide, from_cache, cache_expires_at

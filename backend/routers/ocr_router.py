@@ -45,6 +45,7 @@ from services.langfuse_tracing import (
     update_observation,
 )
 from services.ocr_interface import get_ocr_provider  # noqa: E402
+from services.ocr_quality import requires_drug_name_review
 from services.parsing_rules import extract_prescription_date
 
 # [2026-07-20 추가, 담당: 김영혜] /drug-info(DrugDetail.tsx)에 사용상의 주의사항·부작용·
@@ -373,6 +374,7 @@ def drug_info(drug_name: str):
             rag_detail=rag_detail,
             patient_summary=patient_summary,
             match_score=score,
+            observation=trace,
         )
         flush_langfuse()
         return response
@@ -506,8 +508,11 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
         )
 
     def _save_ocr_results() -> None:
+        has_drug_name_review_item = False
         for med in ocr_result.medications:
             matched_name, score = match_drug(med.drug_name)
+            drug_name_needs_review = requires_drug_name_review(med.drug_name, matched_name, score)
+            has_drug_name_review_item = has_drug_name_review_item or drug_name_needs_review
             row = OcrResult(
                 record_id=record.id,
                 drug_name=med.drug_name,
@@ -519,12 +524,15 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
                 drug_class=med.drug_class,
                 total_days=med.total_days,
                 confidence=med.confidence,
-                review_required=ocr_result.review_required,
+                review_required=ocr_result.review_required or drug_name_needs_review,
                 matched_drug_name=matched_name,
                 match_score=score,
-                needs_review=score < MATCH_THRESHOLD,
+                needs_review=drug_name_needs_review,
             )
             session.add(row)
+        if has_drug_name_review_item:
+            record.status = "review_required"
+            session.add(record)
         session.commit()
         session.refresh(record)
 
@@ -587,6 +595,7 @@ async def test_ocr_upload(
             low_confidence_count=low_confidence_count,
             review_required=record.status == "review_required",
             false_positive_hint_count=false_positive_hint_count,
+            observation=trace,
         )
         flush_langfuse()
     return {
