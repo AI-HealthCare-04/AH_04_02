@@ -105,6 +105,39 @@ def test_drug_name_re_matches_gum_form():
     assert DRUG_NAME_RE.search("니코틴껌").group(1) == "니코틴껌"
 
 
+# ── DRUG_NAME_RE — [2026-07-28 추가] 한글+영문 방출제어 접미사 혼용 약품명 ──────
+# CLOVA가 bbox 병합으로 "글루코파지XR"처럼 한글+영문이 공백 없이 붙은 텍스트를
+# 만들어내도(ocr_interface._merge_split_drug_name_fields), 기존 regex는 이걸 하나의
+# 약품명으로 못 묶었다 — 순수 한글 분기는 SR/XR 등 뒤에 오는 지정 제형 접미사가
+# 없어서 실패하고, 순수 영문 분기는 앞에 한글이 있어서 실패했기 때문.
+
+def test_drug_name_re_matches_hangul_plus_release_suffix_with_dosage():
+    m = DRUG_NAME_RE.search("글루코파지XR 500mg 1일 2회")
+    assert m.group(1) == "글루코파지XR"
+
+
+def test_drug_name_re_matches_hangul_plus_release_suffix_with_form_word():
+    """제형 단어("정")가 접미사 뒤에 바로 붙어도 함께 인식된다."""
+    assert DRUG_NAME_RE.search("글루코파지XR정500mg").group(1) == "글루코파지XR정"
+
+
+def test_drug_name_re_matches_release_suffix_directly_followed_by_dosage_number():
+    """접미사 뒤에 공백 없이 용량 숫자가 바로 붙어도(병합 필드에 흔함) 접미사까지만 약품명으로 잡는다."""
+    assert DRUG_NAME_RE.search("디아미크롱MR60 1정").group(1) == "디아미크롱MR"
+
+
+def test_drug_name_re_release_suffix_branch_is_case_sensitive():
+    """소문자로 끝나는 일반 영단어(예: 'concor cor')는 방출제어 접미사로 오인하지 않는다 —
+    regex 전체가 re.IGNORECASE라 이 분기만 (?-i:...)로 대소문자 구분을 강제한다."""
+    assert DRUG_NAME_RE.search("concor cor 5mg") is None
+
+
+def test_drug_name_re_still_matches_pure_korean_forms_without_english_suffix():
+    """영문 접미사 분기가 추가돼도 순수 한글 제형 이름 매칭은 회귀 없이 그대로 동작한다."""
+    assert DRUG_NAME_RE.search("암로디핀정5mg").group(1) == "암로디핀정"
+    assert DRUG_NAME_RE.search("타이레놀8시간이알서방정").group(1) == "타이레놀8시간이알서방정"
+
+
 # ── extract_dose_quantity — 부피·방울 단위 ──────────────────────────────────
 
 def test_extract_dose_quantity_with_ml_unit():

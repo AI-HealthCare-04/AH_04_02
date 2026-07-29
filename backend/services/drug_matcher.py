@@ -13,6 +13,8 @@ from __future__ import annotations
 import re
 from difflib import SequenceMatcher, get_close_matches
 
+from rapidfuzz import fuzz, process
+
 from services.drug_reference import get_drug_name_list
 
 MATCH_THRESHOLD = 0.7
@@ -139,6 +141,28 @@ def _match_normalized(
     return best_name, best_score
 
 
+def _fuzzy_fallback(ocr_text: str, raw_pool: list[str]) -> tuple[str, float]:
+    """difflib 기반 매칭이 MATCH_THRESHOLD 미만일 때만 시도하는 보조 매칭.
+
+    [2026-07-28 추가] OCR이 약품명을 두 개의 텍스트로 쪼개 인식하거나(예: 한글+영문
+    분리) 일부 글자를 오탈자로 잘못 읽은 경우, difflib.SequenceMatcher.ratio()는
+    전체 문자열 길이 대비 일치 구간 비율을 보므로 점수가 과도하게 낮게 나온다.
+    rapidfuzz.fuzz.partial_ratio()는 짧은 쪽 문자열이 긴 쪽의 부분 문자열로 얼마나
+    잘 들어맞는지만 보기 때문에, 조각나거나 앞뒤로 잡음이 섞인 텍스트에 더 관대하다.
+    기존 SequenceMatcher 결과가 이미 MATCH_THRESHOLD 이상이면(=충분히 신뢰 가능) 이
+    폴백은 아예 호출되지 않으므로, 기존 테스트가 검증하는 정확 매칭 점수(1.0 등)에는
+    영향이 없다 — 오직 이미 "검토 필요"로 판정될 만큼 낮은 점수를 개선할 수 있는지만
+    본다.
+    """
+    if not raw_pool:
+        return "", 0.0
+    result = process.extractOne(ocr_text, raw_pool, scorer=fuzz.partial_ratio)
+    if result is None:
+        return "", 0.0
+    name, score, _ = result
+    return name, score / 100.0
+
+
 def match_drug(ocr_text: str) -> tuple[str, float]:
     """OCR 인식 약품명과 기준 목록 간 유사도 매칭.
 
@@ -172,5 +196,13 @@ def match_drug(ocr_text: str) -> tuple[str, float]:
             score = SequenceMatcher(None, ocr_text, raw_name).ratio()
             if score > best_score:
                 best_score, best_name = score, raw_name
+
+    # difflib 매칭이 임계값 미만이면 rapidfuzz 부분 유사도 폴백을 시도한다
+    # (분리 인식·오탈자로 정상 매칭이 실패한 경우를 구제) — 이미 임계값 이상이면
+    # 건너뛰어 기존 정확 매칭 결과(스코어 1.0 등)를 그대로 보존한다.
+    if best_score < MATCH_THRESHOLD:
+        fuzzy_name, fuzzy_score = _fuzzy_fallback(ocr_text, raw_pool)
+        if fuzzy_score > best_score:
+            best_name, best_score = fuzzy_name, fuzzy_score
 
     return best_name, round(best_score, 4)
