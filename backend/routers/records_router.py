@@ -22,6 +22,7 @@ from pathlib import Path
 from core.database import get_session
 from core.dependencies import Actor, get_current_actor, require_actor_patient_access
 from core.push import send_push_to_recipient
+from core.schedule_alerts import caregiver_wants_notifications
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from models import (
@@ -188,11 +189,14 @@ def _initial_caregiver_review_status(record: MedicalRecord, session: Session) ->
                 event="review_pending",
             )
         )
-        send_push_to_recipient(
-            session, "caregiver", caregiver_id,
-            title="새 처방전이 등록됐어요", body="검토가 필요한 처방전이 있어요.",
-            url=f"/records/{record.id}/guide",
-        )
+        # [2026-07-30 추가] 알림함 알림(위)은 그대로 남기고, "이 기기로" 받는 푸시만
+        # (이 보호자, 이 환자) 관계 단위로 꺼져있으면 건너뛴다.
+        if caregiver_wants_notifications(caregiver_id, record.patient_id, session):
+            send_push_to_recipient(
+                session, "caregiver", caregiver_id,
+                title="새 처방전이 등록됐어요", body="검토가 필요한 처방전이 있어요.",
+                url=f"/records/{record.id}/guide",
+            )
     return "pending"
 
 
@@ -937,11 +941,12 @@ async def correct_medication_field(
                         event="correction_completed",
                     )
                 )
-                send_push_to_recipient(
-                    session, "caregiver", caregiver_id,
-                    title="환자가 처방전을 수정했어요", body="요청한 칸을 모두 고쳤어요. 확인하고 검토를 완료해주세요.",
-                    url=f"/records/{rec.id}/guide",
-                )
+                if caregiver_wants_notifications(caregiver_id, rec.patient_id, session):
+                    send_push_to_recipient(
+                        session, "caregiver", caregiver_id,
+                        title="환자가 처방전을 수정했어요", body="요청한 칸을 모두 고쳤어요. 확인하고 검토를 완료해주세요.",
+                        url=f"/records/{rec.id}/guide",
+                    )
             session.commit()
 
         session.refresh(rec)

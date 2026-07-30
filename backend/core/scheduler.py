@@ -47,7 +47,7 @@ from sqlmodel import Session, func, select
 from core.database import engine
 from core.email import send_email
 from core.push import send_push_to_recipient
-from core.schedule_alerts import effective_alert_caregiver_ids
+from core.schedule_alerts import caregiver_wants_notifications, effective_alert_caregiver_ids
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +179,10 @@ def _push_targets(session: Session, patient: Patient, schedule: MedicationSchedu
         return targets
 
     for caregiver_id in effective_alert_caregiver_ids(schedule, session):
-        targets.append(("caregiver", caregiver_id))
+        # [2026-07-30 추가] 여러 환자를 관리하는 보호자·기관이 이 환자에 대한 알림을
+        # 개별로 꺼뒀으면 제외 — 일정 단위 선택(위 함수)과는 별개 축.
+        if caregiver_wants_notifications(caregiver_id, patient.id, session):
+            targets.append(("caregiver", caregiver_id))
     return targets
 
 

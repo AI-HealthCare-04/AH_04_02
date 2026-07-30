@@ -208,6 +208,7 @@ export function useGuardedPatientId(options?: { silent?: boolean }): number | nu
   useEffect(() => {
     if (!caregiverId) return;
     let cancelled = false;
+
     getCaregiverPatients(caregiverId)
       .then((patients) => {
         if (cancelled) return;
@@ -230,6 +231,7 @@ export function useGuardedPatientId(options?: { silent?: boolean }): number | nu
         if (cancelled) return;
         if (!silent) navigate("/patients", { replace: true });
       });
+
     return () => {
       cancelled = true;
     };

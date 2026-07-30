@@ -64,7 +64,17 @@ const CAREGIVER_NAV_ITEMS: NavItem[] = [
   // PatientContextBanner 주석에 이미 보호자·기관용으로 설계돼 있었는데, 여기 메뉴에
   // 링크가 아예 없어서 보호자·기관 계정은 진입 자체를 못 하고 있었다 — 환자 쪽처럼
   // "설정" 하위로 넣는다.
-  { label: "설정", to: "/settings", children: [{ label: "알림 설정", to: "/notification" }] },
+  // [2026-07-30 추가] "알림 관리"(NotificationManagement.tsx) — 여러 환자를 관리할 때
+  // 환자별로 이 기기 알림을 켜고 끌 수 있는 화면. 환자 계정은 자기 자신만 관리해서
+  // 의미가 없으니 보호자·기관 메뉴에만 넣는다.
+  {
+    label: "설정",
+    to: "/settings",
+    children: [
+      { label: "알림 설정", to: "/notification" },
+      { label: "알림 관리", to: "/notification-management" },
+    ],
+  },
 ];
 
 /**

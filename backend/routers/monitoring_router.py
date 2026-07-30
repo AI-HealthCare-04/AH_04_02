@@ -114,6 +114,10 @@ class PatientPublic(BaseModel):
     # [2026-07-23 추가] 환자 관리 테이블 맨 오른쪽 "오늘 상태" 동그라미용 — 다른 계산
     # 필드와 동일하게 GET /caregivers/{id}/patients에서만 채운다.
     today_status: Literal["ok", "missed"] = "ok"
+    # [2026-07-30 추가] "환자 단위"가 아니라 "이 보호자·이 환자 관계 단위" 값
+    # (CaregiverPatient.notifications_enabled) — 다른 계산 필드와 동일하게
+    # GET /caregivers/{id}/patients에서만 실제 값을 채운다.
+    notifications_enabled: bool = True
 
 
 class MealTimesUpdate(BaseModel):
@@ -560,20 +564,62 @@ def list_patients_of_caregiver(
     patient_ids = [link.patient_id for link in links]
     if not patient_ids:
         return []
+    links_by_patient = {link.patient_id: link for link in links}
     patients = session.exec(select(Patient).where(Patient.id.in_(patient_ids))).all()
     result = []
     for patient in patients:
-        public = PatientPublic.model_validate(patient, from_attributes=True)
+        try:
+            # [2026-07-30 발견] PII_ENCRYPTION_KEY가 다른 값으로 등록된(다른 팀원 로컬
+            # 키 등) 환자가 목록에 하나만 섞여 있어도 name/phone 복호화(InvalidToken)가
+            # 여기서 터져서 이 캐어기버의 환자 목록 전체가 500으로 죽었다 — 그 환자
+            # 하나만 건너뛰고 나머지는 정상 표시한다.
+            public = PatientPublic.model_validate(patient, from_attributes=True)
+        except Exception:  # noqa: BLE001
+            continue
         result.append(
             public.model_copy(
                 update={
                     "diagnoses": _patient_diagnoses(session, patient.id),
                     "medication_status": _patient_medication_status(session, patient.id),
                     "today_status": _patient_today_status(session, patient.id),
+                    "notifications_enabled": links_by_patient[patient.id].notifications_enabled,
                 }
             )
         )
     return result
+
+
+class CaregiverPatientNotificationsUpdate(BaseModel):
+    enabled: bool
+
+
+@router.patch("/caregivers/{caregiver_id}/patients/{patient_id}/notifications")
+def update_caregiver_patient_notifications(
+    caregiver_id: int,
+    patient_id: int,
+    payload: CaregiverPatientNotificationsUpdate,
+    caregiver: Caregiver = Depends(get_current_caregiver),
+    session: Session = Depends(get_session),
+):
+    """[2026-07-30 추가] 여러 환자를 관리하는 보호자·기관이 "이 환자 알림은 이 기기로
+    안 받고 싶다"를 개별로 끄고 켤 수 있게 — NotificationSetting(환자 단위, 모든 보호자가
+    공유하는 값)과 달리 이건 (이 보호자, 이 환자) 관계 하나만 바꾼다."""
+    if caregiver_id != caregiver.id:
+        raise HTTPException(403, "다른 보호자의 알림 설정은 바꿀 수 없어요")
+
+    link = session.exec(
+        select(CaregiverPatient)
+        .where(CaregiverPatient.caregiver_id == caregiver_id)
+        .where(CaregiverPatient.patient_id == patient_id)
+        .where(CaregiverPatient.status != "revoked")
+    ).first()
+    if not link:
+        raise HTTPException(404, "연결된 환자가 아니에요")
+
+    link.notifications_enabled = payload.enabled
+    session.add(link)
+    session.commit()
+    return {"notifications_enabled": link.notifications_enabled}
 
 
 @router.get("/patients/{patient_id}/caregivers", response_model=list[CaregiverPublic])
