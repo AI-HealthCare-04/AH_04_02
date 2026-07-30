@@ -227,6 +227,7 @@ export function useGuardedPatientId(options?: { silent?: boolean }): number | nu
         }
       })
       .catch(() => {
+        if (cancelled) return;
         if (!silent) navigate("/patients", { replace: true });
       });
     return () => {
