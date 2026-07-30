@@ -84,7 +84,7 @@ DRUG_NAME_RE = re.compile(
     # 앰플/바이알/시린지(주사제), 페이스트(반고형제), 좌제/좌약, 필름, 트로키/로젠지, 껌.
     r"(?<![가-힣\d])([가-힣A-Za-z]{2,}(?:\d+(?!연질)[가-힣A-Za-z]{2,})?(?:\d+)?(?:연질)?"
     r"(?:정|캡슐|주|산|시럽|액|크림|연고|로션|겔|패취|패치|점안|점이|환|스프레이"
-    r"|과립|세립|엘릭서|드링크|앰플|바이알|시린지|페이스트|좌제|좌약|필름|트로키|로젠지|껌)"
+    r"|과립|세립|엘릭서|드링크|앰플|바이알|시린지|페이스트|좌제|좌약|필름|트로키|로젠지|껌)(?![가-힣])"
     # [2026-07-28 추가] "글루코파지XR"/"디아미크롱MR"처럼 한글 브랜드명 뒤에 영문 방출제어
     # 접미사(서방정 계열 SR/XR/ER/CR/MR/IR/LA/CD/SA)만 붙고 정/캡슐 같은 한글 제형어가
     # 따로 없는 이름은 위 첫 갈래로 못 잡혔다 — 접미사가 항상 대문자로 표기되는 관례를
@@ -92,7 +92,14 @@ DRUG_NAME_RE = re.compile(
     # 구분). CLOVA가 이 이름을 두 개의 bounding box로 쪼개 인식해도(예: "글루코파지" /
     # "XR"), ocr_interface.py의 _merge_split_name_fields()가 먼저 공백 없이 붙여주므로
     # 이 갈래가 온전한 한 단어로 매칭할 수 있다.
-    r"|[가-힣A-Za-z]{2,}?(?-i:SR|XR|ER|CR|MR|IR|LA|CD|SA)(?:정|캡슐)?"
+    # [2026-07-30 버그수정] 이 갈래가 "부분 문자열"까지 잡아버려서 "처방전OCR"/"기반OCR"/
+    # "샘플은OCR" 같은, 실제 처방전과 무관한 안내문구·헤더·푸터 텍스트가 전부 약품명으로
+    # 오인식됐다 — "OCR"의 마지막 두 글자 "CR"이 서방정 접미사로 걸리면서 그 앞 아무
+    # 글자나 다 약품명 취급된 것(실사용 재현: 10개 국가서식 샘플 전부에서 "샘플은OCR"이
+    # 나옴). 실제 서방정 접미사는 한글 브랜드명 바로 뒤에 오지, "O"처럼 또 다른 대문자
+    # 뒤에 오지 않는다 — 접미사 직전이 대문자면 그건 "OCR"처럼 하나의 영문 약어이지
+    # 브랜드명+접미사 조합이 아니라고 보고 매칭에서 제외한다.
+    r"|[가-힣A-Za-z]{2,}?(?<!(?-i:[A-Z]))(?-i:SR|XR|ER|CR|MR|IR|LA|CD|SA)(?:정|캡슐)?"
     r"|(?-i:[A-Z][a-zA-Z]{4,})(?=\s+\d))"  # 영문 PascalCase 5자+, 바로 뒤에 숫자(용량/횟수) 필수
     # [2026-07-18] "정 5mg"처럼 띄어쓴 용량도 이름에 붙게 허용
     # [2026-07-19] "50/1000mg"같은 복합제 용량(성분 두 개를 슬래시로 묶고 단위는 한 번만
@@ -515,6 +522,220 @@ def _detect_format(text: str) -> str:
         return "list"
     return "table"
 
+
+# ─────────────────────────────────────────────────────────────
+# 5-b. 국가 표준 처방전 표 서식 — bbox 기반 전용 파서
+# ─────────────────────────────────────────────────────────────
+# [2026-07-30 추가] "No / 처방 의약품 명칭 / 1회 투약량 / 1일 횟수 / 총일수 / 용법·용량 /
+# 조제시 참고" 표 헤더를 쓰는 국가 표준 처방전 서식은 위 4개 포맷(official/abbrev/list/
+# oriental) 어디에도 안 걸려 가장 약한 "table" 폴백으로 떨어졌다. table 폴백은 raw_text로
+# 평탄화한 뒤 "마지막 횟수 매치 이후 텍스트 전체"에서 숫자를 긁어와 총일수를 정하는데,
+# 이 서식엔 정지 조건("진단명")이 없어 면허번호·전화번호까지 총일수로 잘못 뽑힌다
+# (실사용 재현: 10개 국가서식 샘플 전부에서 총일수가 "123456일"(면허번호)/"031일"(전화
+# 지역번호) 같은 값으로 나옴). 표 밖 헤더·환자정보·참고사항 텍스트가 약품명 정규식에
+# 걸리는 오탐(예: "샘플은OCR", "장다정"(환자 이름))도 10개 전부에서 재현됐다.
+#
+# ocr_interface.py가 raw_text로 펼치기 전 가지고 있는 CLOVA fields(boundingPoly 포함)를
+# 여기서 그대로 받아 표 구조를 복원한다 — 헤더 7개 라벨의 x좌표로 각 컬럼의 가로 범위를
+# 구하고, "처방 의약품 명칭" 컬럼에서 DRUG_NAME_RE에 걸리는 필드만 행(row)의 기준으로
+# 삼는다. 그 결과 표 밖 텍스트는 애초에 약품명 후보 자체가 될 수 없고(표의 "처방 의약품
+# 명칭" 컬럼 x범위 밖이므로), 총일수도 그 약의 행 안에서 "총일수" 컬럼 x범위에 있는
+# 필드만 가져오므로 다른 행·다른 컬럼의 숫자가 섞일 수 없다.
+_TABLE_HEADER_COLUMNS: list[tuple[str, set[str]]] = [
+    ("no", {"No"}),
+    ("drug_name", {"처방", "의약품", "명칭"}),
+    ("dosage", {"1회", "투약량"}),
+    ("frequency", {"1일", "횟수"}),
+    ("total_days", {"총일수"}),
+    ("usage", {"용법·용량"}),
+    ("note", {"조제시", "참고"}),
+]
+
+
+def _bbox_center_y(field: dict) -> float:
+    verts = field.get("boundingPoly", {}).get("vertices", [])
+    if not verts:
+        return 0.0
+    return sum(v.get("y", 0) for v in verts) / len(verts)
+
+
+def _bbox_left_x(field: dict) -> float:
+    """필드의 x축 왼쪽 끝(min x). [2026-07-30 버그수정] 처음엔 중심 x로 컬럼을
+    판정했는데, "처방 의약품 명칭" 컬럼은 왼쪽 정렬이라 짧은 이름("칼디비타정")과 긴
+    이름("포사맥스플러스디정70밀리그램/5600IU")의 중심 x가 서로 크게 달라져서 짧은
+    이름이 그 왼쪽 "No" 컬럼 범위로 잘못 판정됐다(실사용 재현: sample_07에서 칼디비타정
+    행 자체가 통째로 누락). 실측 결과 이 표의 모든 컬럼은 왼쪽 정렬이라(예: 세 약품명
+    전부 left=171.0으로 동일) 왼쪽 끝이 텍스트 길이와 무관한 안정적인 기준이다."""
+    verts = field.get("boundingPoly", {}).get("vertices", [])
+    if not verts:
+        return 0.0
+    return min(v.get("x", 0) for v in verts)
+
+
+def is_official_prescription_table(fields: list) -> bool:
+    """이 표 헤더(No/처방 의약품 명칭/1회 투약량/1일 횟수/총일수)가 있는 국가 표준
+    처방전 서식인지 판정한다."""
+    texts = {f.get("inferText", "") for f in fields}
+    return {"총일수", "투약량", "횟수", "명칭"}.issubset(texts)
+
+
+def _locate_table_columns(fields: list) -> list[tuple[str, float, float]] | None:
+    """헤더 행에서 각 컬럼의 (key, 왼쪽 경계, 오른쪽 경계)를 x좌표(왼쪽 끝) 중간점
+    기준으로 구해 왼쪽부터 정렬해 반환한다. 헤더 라벨을 하나라도 못 찾으면 None
+    (호출부가 raw_text 기반 파싱으로 폴백하게 한다)."""
+    total_days_field = next((f for f in fields if f.get("inferText") == "총일수"), None)
+    if total_days_field is None:
+        return None
+    header_y = _bbox_center_y(total_days_field)
+
+    anchors: list[tuple[str, float]] = []
+    for key, labels in _TABLE_HEADER_COLUMNS:
+        matched = [
+            f for f in fields
+            if f.get("inferText") in labels and abs(_bbox_center_y(f) - header_y) <= 15
+        ]
+        if not matched:
+            return None
+        xs = [_bbox_left_x(f) for f in matched]
+        anchors.append((key, (min(xs) + max(xs)) / 2))
+    anchors.sort(key=lambda a: a[1])
+
+    columns = []
+    for i, (key, cx) in enumerate(anchors):
+        left = -1.0 if i == 0 else (anchors[i - 1][1] + cx) / 2
+        right = float("inf") if i == len(anchors) - 1 else (cx + anchors[i + 1][1]) / 2
+        columns.append((key, left, right))
+    return columns
+
+
+def _column_range(columns: list[tuple[str, float, float]], key: str) -> tuple[float, float]:
+    for k, left, right in columns:
+        if k == key:
+            return left, right
+    return (-1.0, float("inf"))
+
+
+# [2026-07-30 추가] 헤더 라벨 위치로 계산한 컬럼 경계는 근사치일 뿐이다 — "용법·용량"
+# 헤더는 그 컬럼 안에서 오른쪽으로 치우쳐 표기돼 있어(넓은 라벨), 경계를 헤더 위치
+# 중간점으로만 잡으면 그 컬럼의 실제 내용(예: "아침", "식후")이 "총일수" 컬럼 경계
+# 안쪽으로 잘못 포함된다(실사용 재현: 총일수가 "30일아침"처럼 나옴). 컬럼 경계를 더
+# 정교하게 구하는 대신, 각 숫자 컬럼에 실제로 들어갈 수 있는 값의 "모양"을 정의해서
+# 그 모양에 맞는 필드만 취한다 — 경계에 걸치는 서술형 텍스트("아침", "동중 부위에")는
+# 애초에 이 모양에 안 맞아 자동으로 걸러진다.
+_DOSAGE_VALUE_RE = re.compile(
+    r"^\d+(?:\.\d+)?\s*(?:정|캡슐|캅셀|포|병|환|스틱|앰플|바이알|시린지|개|매|mL|ml|g|단위|방울|분무|분사)$",
+    re.IGNORECASE,
+)
+_FREQUENCY_VALUE_RE = re.compile(r"^(?:주\s*)?\d+\s*회$")
+_TOTAL_DAYS_VALUE_RE = re.compile(r"^\d+(?:\.\d+)?\s*(?:일|주|개월|년)$")
+_PRN_VALUE_RE = re.compile(r"^필요\s*시$")
+_DOSAGE_LITERAL_VALUES = {"소량"}  # 후시딘연고처럼 숫자 없이 "소량"만 적히는 경우
+
+
+def _first_matching_cell_value(
+    fields: list, top: float, bottom: float, col_range: tuple[float, float],
+    value_res: list, literals: frozenset = frozenset(),
+) -> str:
+    """y범위 [top, bottom)·x범위(col_range) 안에서, 정의된 값 모양(value_res/literals)에
+    맞는 첫 필드의 텍스트를 반환한다. 컬럼 경계가 근사치라 다른 컬럼 텍스트가 섞여
+    들어와도, 그 값이 기대하는 모양(숫자+단위 등)이 아니면 그냥 건너뛴다."""
+    left, right = col_range
+    matched = sorted(
+        (f for f in fields if top <= _bbox_center_y(f) < bottom and left <= _bbox_left_x(f) < right),
+        key=lambda f: _bbox_left_x(f),
+    )
+    for f in matched:
+        text = f.get("inferText", "").strip()
+        if text in literals or any(rx.match(text) for rx in value_res):
+            return text
+    return ""
+
+
+def parse_official_table_by_bbox(fields: list) -> list[dict]:
+    """국가 표준 처방전(No/처방 의약품 명칭/1회 투약량/1일 횟수/총일수 표) 전용 파서.
+
+    헤더를 못 찾거나 표의 "처방 의약품 명칭" 컬럼에서 실제 약품명으로 보이는 행을
+    하나도 못 찾으면 빈 리스트를 반환한다 — 호출부(parse_prescription)가 그 경우
+    기존 raw_text 기반 파싱으로 폴백한다.
+    """
+    columns = _locate_table_columns(fields)
+    if columns is None:
+        return []
+
+    header_y = _bbox_center_y(next(f for f in fields if f.get("inferText") == "총일수"))
+    drug_name_range = _column_range(columns, "drug_name")
+
+    # [2026-07-30 버그수정] "처방 의약품 명칭" 헤더 라벨(3어절, 넓음)은 그 컬럼 안에서
+    # 가운데 정렬돼 있어 실제 데이터(왼쪽 정렬, 예: 모든 약품명이 x=171에서 시작)보다
+    # 훨씬 오른쪽에 위치한다 — 이 헤더 위치로 계산한 컬럼 왼쪽 경계를 그대로 쓰면 실제
+    # 약품명 데이터가 전부(짧은 이름뿐 아니라 긴 이름까지) 그 경계 밖으로 밀려나 행을
+    # 하나도 못 찾는다(실사용 재현: 모든 국가서식 샘플에서 바로 위 raw_text 폴백으로
+    # 떨어져 총일수가 다시 면허번호/전화번호로 깨짐). "No" 컬럼과 "1회 투약량" 컬럼은
+    # 둘 다 좁은 숫자 전용 컬럼이라 헤더 위치가 데이터와 잘 맞으므로, 왼쪽 경계 대신
+    # 오른쪽 경계("1회 투약량" 컬럼 시작 전)만으로 표 밖 텍스트를 걸러낸다 — 환자정보·
+    # 의료기관정보(표보다 위, header_y 이전)는 아래 y 조건으로 이미 배제된다.
+    row_anchors = sorted(
+        (
+            f for f in fields
+            if _bbox_left_x(f) < drug_name_range[1]
+            and _bbox_center_y(f) > header_y + 5
+            and DRUG_NAME_RE.search(f.get("inferText", ""))
+        ),
+        key=lambda f: _bbox_center_y(f),
+    )
+    if not row_anchors:
+        return []
+
+    row_ys = [_bbox_center_y(f) for f in row_anchors]
+    dosage_range = _column_range(columns, "dosage")
+    frequency_range = _column_range(columns, "frequency")
+    total_days_range = _column_range(columns, "total_days")
+
+    # [2026-07-30 버그수정] 마지막 행의 아래쪽 경계를 무한대로 두면 "4. 의약품 조제 시
+    # 참고사항"·서명란·푸터까지 전부 마지막 행의 칸으로 잡혀버린다(실제 재현: 마지막 약의
+    # dosage/frequency/total_days에 "조제약사 서명:", "PHARMACY USE" 같은 문구가 통째로
+    # 섞임) — 앞선 행 간격(없으면 헤더~첫 행 간격)의 절반만큼만 아래로 확장해 표 실제
+    # 마지막 행 높이만큼만 본다.
+    if len(row_ys) >= 2:
+        half_gap = (row_ys[-1] - row_ys[-2]) / 2
+    elif row_ys:
+        half_gap = (row_ys[0] - header_y) / 2
+    else:
+        half_gap = 0.0
+
+    results = []
+    for i, anchor in enumerate(row_anchors):
+        # [2026-07-30 버그수정] i==0일 때 top을 header_y와 같게 두면(비교가 <=라서) 헤더
+        # 라벨 자신("1회"/"투약량" 등)이 첫 행의 칸으로 같이 잡혔다(실제 재현: 첫 행
+        # dosage가 "1회1정투약량"으로 나옴) — 헤더 행 아래로 확실히 내려서 제외한다.
+        top = header_y + 5 if i == 0 else (row_ys[i - 1] + row_ys[i]) / 2
+        bottom = row_ys[i] + half_gap if i == len(row_anchors) - 1 else (row_ys[i] + row_ys[i + 1]) / 2
+
+        dm = DRUG_NAME_RE.search(anchor.get("inferText", ""))
+        drug_name = dm.group(1) + (f" {_dm_dosage(dm)}" if dm.group(2) else "")
+
+        dosage = _first_matching_cell_value(
+            fields, top, bottom, dosage_range, [_DOSAGE_VALUE_RE], _DOSAGE_LITERAL_VALUES
+        )
+        frequency = _first_matching_cell_value(
+            fields, top, bottom, frequency_range, [_FREQUENCY_VALUE_RE, _PRN_VALUE_RE]
+        )
+        total_days = _first_matching_cell_value(
+            fields, top, bottom, total_days_range, [_TOTAL_DAYS_VALUE_RE, _PRN_VALUE_RE]
+        )
+
+        results.append({
+            "drug_name":   drug_name,
+            "drug_code":   "",
+            "dosage":      dosage,
+            "dose_amount": _dm_dosage(dm),
+            "frequency":   frequency,
+            "total_days":  total_days,
+            "drug_class":  lookup_drug_class(drug_name),
+        })
+    return results
+
+
 # ─────────────────────────────────────────────────────────────
 # 6. 포맷별 파서
 # ─────────────────────────────────────────────────────────────
@@ -753,8 +974,22 @@ def _parse_table_format(text: str) -> list:
 # 7. 공개 메인 API
 # ─────────────────────────────────────────────────────────────
 
-def parse_prescription(raw_text: str) -> tuple:
-    """raw_text → (약품 목록, 진단명)"""
+def parse_prescription(raw_text: str, fields: list | None = None) -> tuple:
+    """raw_text → (약품 목록, 진단명)
+
+    [2026-07-30 추가] fields(CLOVA boundingPoly 포함 원본, ocr_interface.py가 raw_text로
+    평탄화하기 전 값)가 주어지고 국가 표준 처방전 표 서식이면, raw_text를 버리고 표
+    구조를 그대로 이용해 파싱한다(5-b 참고) — 이 표 형식에서는 이쪽이 항상 더 정확하다.
+    fields가 없거나(예: Tesseract 폴백) 이 서식이 아니거나 행을 하나도 못 찾으면 기존
+    raw_text 기반 포맷 감지+정규식 파싱으로 폴백한다.
+    """
+    if fields and is_official_prescription_table(fields):
+        meds = parse_official_table_by_bbox(fields)
+        if meds:
+            for m in meds:
+                m["dosage"] = reconcile_dose_fields(m["dosage"], m.get("dose_amount", ""), m["drug_name"])
+            return meds, extract_diagnosis(raw_text)
+
     fmt = _detect_format(raw_text)
     if fmt == "oriental":
         meds = _parse_oriental_format(raw_text)

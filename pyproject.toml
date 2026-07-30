@@ -34,6 +34,7 @@ dependencies = [
     "pywebpush>=2.0",  # [2026-07-24 추가] Web Push 실발송(VAPID) — 프론트 서비스워커/구독은 HTTPS 배포 이후
     "opencv-python-headless>=5.0.0.93",  # [2026-07-28 추가] 카메라 촬영 처방전 사진 전처리(services/image_preprocessing.py)
     "pillow>=10.0",  # [2026-07-28] 기존엔 dev 전용(목업 스크립트)이었으나, image_preprocessing.py가 운영 경로에서 EXIF 방향 보정에 씀 — main으로 승격
+    "diskcache>=5.6",  # 식약처 API 응답 디스크 캐싱 — lru_cache(메모리) 대체, 서버 재시작 후에도 유지
 ]
 
 # backend(routers/chat_router.py)가 rag/를 sys.path에 얹어 같은 프로세스에서 import하므로

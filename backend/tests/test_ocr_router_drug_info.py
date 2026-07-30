@@ -31,6 +31,7 @@ def _drug_info_hit(**overrides):
         "se_qesitm": "어지러움, 두통이 나타날 수 있습니다.",
         "intrc_qesitm": "다른 진통제와 함께 복용 시 상호작용이 있을 수 있습니다.",
         "deposit_method_qesitm": "실온보관, 습기를 피하세요.",
+        "efcy_qesitm": None,
     }
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -173,6 +174,78 @@ class TestDrugInfoDegradedGracefully:
         data = r.json()
         assert data["precautions"] is None
         assert data["dur_cautions"] == []
+
+
+class TestDrugInfoIndicationLiveFallback:
+    """[이슈 #107] get_drug_info()가 HIRA로 매칭되면 efficacy(적응증)를 항상 빈
+    문자열로 반환한다 — 그 경우 live e약은요 API(search_by_name)에서 조회한
+    efcy_qesitm으로 "indication" 응답 필드를 보강해야 한다."""
+
+    def _hira_matched_result(self, efficacy: str = ""):
+        return {
+            "drug_name": "노바스크정5mg",
+            "drug_class": "칼슘채널차단제",
+            "efficacy": efficacy,
+            "match_source": "hira_name",
+            "matched_item": "노바스크정5mg",
+            "atc_code": "C08CA01",
+        }
+
+    def test_indication_falls_back_to_live_efficacy_when_local_efficacy_empty(self):
+        with (
+            patch("routers.ocr_router.get_drug_info", return_value=self._hira_matched_result()),
+            patch("rag.mfds_client.search_permit_detail", return_value=[]),
+            patch(
+                "rag.mfds_client.search_by_name",
+                return_value=[_drug_info_hit(efcy_qesitm="이 약은 고혈압에 사용합니다.")],
+            ),
+            patch("rag.dur_master.search_elderly_caution", return_value=[]),
+            patch("rag.dur_master.search_age_taboo", return_value=[]),
+            patch("rag.dur_master.search_pregnancy_taboo", return_value=[]),
+            patch("routers.ocr_router._summarize_precautions_for_patient", return_value=None),
+        ):
+            r = client.get("/ocr/drug-info", params={"drug_name": "노바스크정5mg"})
+
+        data = r.json()
+        assert data["indication"] == "이 약은 고혈압에 사용합니다."
+        assert "live_indication" not in data  # 응답 스키마에 새 필드가 새어나가면 안 됨
+
+    def test_indication_prefers_local_efficacy_over_live_when_both_present(self):
+        """로컬 efficacy가 이미 채워져 있으면(emed 매칭) live 값으로 덮어쓰지 않는다."""
+        with (
+            patch(
+                "routers.ocr_router.get_drug_info",
+                return_value=self._hira_matched_result(efficacy="로컬 e약은요 적응증"),
+            ),
+            patch("rag.mfds_client.search_permit_detail", return_value=[]),
+            patch(
+                "rag.mfds_client.search_by_name",
+                return_value=[_drug_info_hit(efcy_qesitm="live API 적응증(다른 값)")],
+            ),
+            patch("rag.dur_master.search_elderly_caution", return_value=[]),
+            patch("rag.dur_master.search_age_taboo", return_value=[]),
+            patch("rag.dur_master.search_pregnancy_taboo", return_value=[]),
+            patch("routers.ocr_router._summarize_precautions_for_patient", return_value=None),
+        ):
+            r = client.get("/ocr/drug-info", params={"drug_name": "노바스크정5mg"})
+
+        data = r.json()
+        assert data["indication"] == "로컬 e약은요 적응증"
+
+    def test_indication_stays_empty_when_neither_local_nor_live_has_it(self):
+        with (
+            patch("routers.ocr_router.get_drug_info", return_value=self._hira_matched_result()),
+            patch("rag.mfds_client.search_permit_detail", return_value=[]),
+            patch("rag.mfds_client.search_by_name", return_value=[_drug_info_hit(efcy_qesitm=None)]),
+            patch("rag.dur_master.search_elderly_caution", return_value=[]),
+            patch("rag.dur_master.search_age_taboo", return_value=[]),
+            patch("rag.dur_master.search_pregnancy_taboo", return_value=[]),
+            patch("routers.ocr_router._summarize_precautions_for_patient", return_value=None),
+        ):
+            r = client.get("/ocr/drug-info", params={"drug_name": "노바스크정5mg"})
+
+        data = r.json()
+        assert data["indication"] == ""
 
 
 class TestDrugInfoMatchedNameValidation:

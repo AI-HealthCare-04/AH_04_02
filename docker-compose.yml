@@ -11,9 +11,15 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     env_file:
-      - backend/.env
+      - path: backend/.env
+        required: true
+      - path: rag/.env
+        required: false
     volumes:
       - .:/workspace
+      # .:/workspace 바인드마운트로 /workspace/mfds_cache/(식약처 API 디스크 캐시)가
+      # 컨테이너 재시작·재빌드 후에도 호스트에 그대로 유지된다(별도 named volume 불필요).
+      # 이 volumes 항목을 수정하거나 배포 방식이 바뀌면 mfds_cache/ 영속성을 별도로 보장할 것.
       # frontend의 node_modules와 동일한 이유 — 바인드마운트가 이미지에 이미 설치된
       # .venv를 덮어써서, 컨테이너 시작마다 uv sync가 torch/CUDA 등 수 GB를 매번 다시
       # 받고 있었다(호스트에 .venv가 없거나 다른 경로를 가리키면 통째로 재생성됨).

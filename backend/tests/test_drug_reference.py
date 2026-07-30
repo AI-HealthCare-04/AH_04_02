@@ -13,7 +13,13 @@ from unittest.mock import patch
 
 import pandas as pd
 import services.drug_reference as drug_reference
-from services.drug_reference import _HARDCODED_FALLBACK, _clean_product_name, get_drug_name_list
+from services.drug_reference import (
+    _HARDCODED_FALLBACK,
+    _clean_product_name,
+    _lookup_emedinfo,
+    get_drug_info,
+    get_drug_name_list,
+)
 
 
 def test_get_drug_name_list_excludes_hardcoded_fallback_keys():
@@ -136,3 +142,72 @@ def test_match_drug_prefers_exact_prefix_match_over_similar_length_wrong_brand()
 
     assert name == "태극암로디핀정"
     assert score == 1.0
+
+
+# ── [이슈 #108] _lookup_emedinfo() 유사도 폴백 오매칭 ──────────────────────────
+# SequenceMatcher.ratio()는 순수 문자열 편집거리라 활성 성분이 전혀 다른 약도 이름이
+# 비슷하면 통과한다. 실사용 재현: "플라빅스정"(클로피도그렐, 항혈소판제)이
+# "플라낙스정"(나프록센나트륨, NSAID)에 0.75로 매칭됐다 — 예전 임계값(0.72)은 이걸
+# 그대로 통과시켰다.
+
+def test_lookup_emedinfo_rejects_similar_but_different_ingredient():
+    """[실제 재현] "플라빅스정"이 "플라낙스정"(전혀 다른 성분)에 0.75로 매칭되던
+    문제 — 임계값을 0.9로 올려서 이 케이스는 더 이상 통과하지 않아야 한다."""
+    fake_table = [
+        {"item_name": "플라낙스정(나프록센나트륨)", "norm": "플라낙스", "efcy": "관절염 등 통증 완화"},
+    ]
+    with patch("services.drug_reference._load_drug_table", return_value=fake_table):
+        entry = _lookup_emedinfo("플라빅스정75mg")
+
+    assert entry is None
+
+
+def test_lookup_emedinfo_still_matches_when_score_is_very_high():
+    """임계값을 올려도, 정말 거의 동일한 이름(사소한 오타 수준, 점수 0.9 이상)은
+    여전히 매칭돼야 한다 — 전부 다 막아버리는 회귀 방지."""
+    fake_table = [
+        {"item_name": "가나다라마바사아자카정", "norm": "가나다라마바사아자카", "efcy": "테스트 효능"},
+    ]
+    with patch("services.drug_reference._load_drug_table", return_value=fake_table):
+        entry = _lookup_emedinfo("가나다라마바사아자차")
+
+    assert entry is not None
+    assert entry["item_name"] == "가나다라마바사아자카정"
+
+
+def test_get_drug_info_prefers_safe_atc_pattern_over_risky_emed_match():
+    """[이슈 #108] get_drug_class()와 동일한 우선순위로 바뀌었는지 확인 — ATC 패턴으로
+    안전하게 분류 가능한 약은, e약은요에 유사도로 오매칭될 후보가 있어도 그 위험한
+    폴백까지 가지 않고 match_source가 "atc_pattern"이어야 한다(예전 순서였다면 emed가
+    먼저 걸려 "졸피뎁정(전혀다른성분)"의 efficacy가 그대로 노출됐을 것)."""
+    fake_table = [
+        # "졸피뎀"과 무관한 엉뚱한 성분이지만 우연히 유사도가 높게 나온다고 가정
+        {"item_name": "졸피뎁정(전혀다른성분)", "norm": "졸피뎁", "efcy": "전혀 다른 효능"},
+    ]
+    with (
+        patch("services.drug_reference._load_hira"),
+        patch.object(drug_reference, "_hira_name_df", None),
+        patch("services.drug_reference._load_drug_table", return_value=fake_table),
+    ):
+        result = get_drug_info("졸피뎀정10mg")
+
+    assert result["match_source"] == "atc_pattern"
+    assert result["drug_class"] == _HARDCODED_FALLBACK["졸피뎀"]
+    assert result["efficacy"] == ""
+
+
+def test_get_drug_info_still_falls_back_to_emed_when_nothing_safer_matches():
+    """HIRA/ATC 패턴/하드코딩 폴백 어디에도 안 걸리는 약은, 여전히(마지막 수단으로)
+    e약은요 매칭을 시도해야 한다 — 순서만 바뀌었지 emed 경로 자체가 없어지면 안 됨."""
+    fake_table = [
+        {"item_name": "가나다라마바사아자카정", "norm": "가나다라마바사아자카", "efcy": "테스트 효능"},
+    ]
+    with (
+        patch("services.drug_reference._load_hira"),
+        patch.object(drug_reference, "_hira_name_df", None),
+        patch("services.drug_reference._load_drug_table", return_value=fake_table),
+    ):
+        result = get_drug_info("가나다라마바사아자차")
+
+    assert result["match_source"] == "emed"
+    assert result["efficacy"] == "테스트 효능"

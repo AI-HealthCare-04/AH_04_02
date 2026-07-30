@@ -27,8 +27,7 @@
 모르므로 조건 판단 없이 정보성으로만 노출한다 (schemas.DurCaution 참고).
 """
 
-from functools import lru_cache
-
+import rag.mfds_client as _mfds_client_mod
 from rag.config import settings
 from rag.mfds_client import _request
 from rag.schemas import DurCaution, DurTabooInfo
@@ -65,16 +64,23 @@ def _dedupe_taboo(taboos: list[DurTabooInfo]) -> list[DurTabooInfo]:
     return deduped
 
 
-# [2026-07-21 추가] chat_router._build_on_demand_dur_context가 한 질문당 후보 이름마다
-# 이 4개 API를 전부 순차 호출한다(최대 약 40회) — DUR 데이터도 정부가 주기적으로만 갱신하는
-# 정적에 가까운 데이터라 mfds_client의 캐싱과 동일한 이유로 인메모리 캐싱한다.
-@lru_cache(maxsize=512)
+# [2026-07-21 추가 → 2026-07-30 디스크 캐시로 전환]
+# mfds_client의 lru_cache와 동일한 이유로 diskcache로 전환한다.
+# _mfds_client_mod._disk_cache는 mfds_client._mfds_client_mod._disk_cache와 동일한 인스턴스를 공유해 캐시 디렉토리를 통일한다.
 def search_usjnt_taboo(item_name: str, num_of_rows: int = 100, page_no: int = 1) -> list[DurTabooInfo]:
     """품목명(부분일치)으로 병용금기 상대 목록을 조회합니다.
 
     못 찾으면 빈 리스트 — "이 약은 병용금기가 없다"는 의미가 아니라 "DUR 데이터에 해당
     품목명이 등재돼 있지 않다"는 뜻이므로 호출부에서 그렇게 해석하지 않도록 주의할 것.
     """
+    key = f"dur.search_usjnt_taboo|{item_name}|{num_of_rows}|{page_no}"
+    if _mfds_client_mod._disk_cache is not None:
+        try:
+            cached = _mfds_client_mod._disk_cache.get(key)
+            if cached is not None:
+                return [DurTabooInfo.model_validate(d) for d in cached]
+        except Exception:
+            pass
     data = _request(
         {"itemName": item_name, "numOfRows": num_of_rows, "pageNo": page_no},
         base_url=settings.DUR_USJNT_TABOO_BASE_URL,
@@ -89,16 +95,29 @@ def search_usjnt_taboo(item_name: str, num_of_rows: int = 100, page_no: int = 1)
         for item in items
         if item.get("MIXTURE_ITEM_NAME")
     ]
-    return _dedupe_taboo(taboos)
+    result = _dedupe_taboo(taboos)
+    if _mfds_client_mod._disk_cache is not None:
+        try:
+            _mfds_client_mod._disk_cache.set(key, [r.model_dump() for r in result], expire=settings.MFDS_CACHE_TTL_SECONDS)
+        except Exception:
+            pass
+    return result
 
 
-@lru_cache(maxsize=512)
 def search_elderly_caution(item_name: str, num_of_rows: int = 100, page_no: int = 1) -> list[DurCaution]:
     """품목명(부분일치)으로 노인주의 정보를 조회합니다.
 
     [2026-07-14] API 전환 이후 "노인주의(해열진통소염제)" 세부 분류는 더 이상 구분하지
     않는다 — 승인된 API(getOdsnAtentInfoList03)가 전체 노인주의 항목을 하나로 반환한다.
     """
+    key = f"dur.search_elderly_caution|{item_name}|{num_of_rows}|{page_no}"
+    if _mfds_client_mod._disk_cache is not None:
+        try:
+            cached = _mfds_client_mod._disk_cache.get(key)
+            if cached is not None:
+                return [DurCaution.model_validate(d) for d in cached]
+        except Exception:
+            pass
     data = _request(
         {"itemName": item_name, "numOfRows": num_of_rows, "pageNo": page_no},
         base_url=settings.DUR_ODSN_ATENT_BASE_URL,
@@ -112,12 +131,25 @@ def search_elderly_caution(item_name: str, num_of_rows: int = 100, page_no: int 
         )
         for item in items
     ]
-    return _dedupe_cautions(cautions)
+    result = _dedupe_cautions(cautions)
+    if _mfds_client_mod._disk_cache is not None:
+        try:
+            _mfds_client_mod._disk_cache.set(key, [r.model_dump() for r in result], expire=settings.MFDS_CACHE_TTL_SECONDS)
+        except Exception:
+            pass
+    return result
 
 
-@lru_cache(maxsize=512)
 def search_age_taboo(item_name: str, num_of_rows: int = 100, page_no: int = 1) -> list[DurCaution]:
     """품목명(부분일치)으로 연령금기(특정 연령대 사용 금지) 정보를 조회합니다."""
+    key = f"dur.search_age_taboo|{item_name}|{num_of_rows}|{page_no}"
+    if _mfds_client_mod._disk_cache is not None:
+        try:
+            cached = _mfds_client_mod._disk_cache.get(key)
+            if cached is not None:
+                return [DurCaution.model_validate(d) for d in cached]
+        except Exception:
+            pass
     data = _request(
         {"itemName": item_name, "numOfRows": num_of_rows, "pageNo": page_no},
         base_url=settings.DUR_AGE_TABOO_BASE_URL,
@@ -131,12 +163,25 @@ def search_age_taboo(item_name: str, num_of_rows: int = 100, page_no: int = 1) -
         )
         for item in items
     ]
-    return _dedupe_cautions(cautions)
+    result = _dedupe_cautions(cautions)
+    if _mfds_client_mod._disk_cache is not None:
+        try:
+            _mfds_client_mod._disk_cache.set(key, [r.model_dump() for r in result], expire=settings.MFDS_CACHE_TTL_SECONDS)
+        except Exception:
+            pass
+    return result
 
 
-@lru_cache(maxsize=512)
 def search_pregnancy_taboo(item_name: str, num_of_rows: int = 100, page_no: int = 1) -> list[DurCaution]:
     """품목명(부분일치)으로 임부금기 정보를 조회합니다."""
+    key = f"dur.search_pregnancy_taboo|{item_name}|{num_of_rows}|{page_no}"
+    if _mfds_client_mod._disk_cache is not None:
+        try:
+            cached = _mfds_client_mod._disk_cache.get(key)
+            if cached is not None:
+                return [DurCaution.model_validate(d) for d in cached]
+        except Exception:
+            pass
     data = _request(
         {"itemName": item_name, "numOfRows": num_of_rows, "pageNo": page_no},
         base_url=settings.DUR_PREGNANCY_TABOO_BASE_URL,
@@ -150,4 +195,10 @@ def search_pregnancy_taboo(item_name: str, num_of_rows: int = 100, page_no: int 
         )
         for item in items
     ]
-    return _dedupe_cautions(cautions)
+    result = _dedupe_cautions(cautions)
+    if _mfds_client_mod._disk_cache is not None:
+        try:
+            _mfds_client_mod._disk_cache.set(key, [r.model_dump() for r in result], expire=settings.MFDS_CACHE_TTL_SECONDS)
+        except Exception:
+            pass
+    return result

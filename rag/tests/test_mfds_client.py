@@ -218,3 +218,47 @@ def test_parse_doc_sections_returns_empty_list_when_no_data():
 
 def test_parse_doc_sections_returns_empty_list_on_invalid_xml():
     assert parse_doc_sections("<DOC><ARTICLE title=") == []
+
+
+# ── 디스크 캐시 동작 검증 ────────────────────────────────────────────────────
+# conftest._isolate_mfds_disk_cache(autouse)가 각 테스트에 격리된 임시 캐시를 주입한다.
+
+def test_search_by_name_cache_hit_skips_api():
+    """같은 인자로 두 번 호출 시 두 번째는 requests.get을 호출하지 않아야 한다."""
+    import rag.mfds_client as mfds_mod
+
+    with patch("rag.mfds_client.requests.get", return_value=_FakeResponse(SAMPLE_RESPONSE)):
+        search_by_name("활명수")
+
+    with patch("rag.mfds_client.requests.get") as mock_get:
+        result = search_by_name("활명수")
+
+    mock_get.assert_not_called()
+    assert result[0].item_name == "활명수"
+
+
+def test_search_by_name_cache_miss_stores_result():
+    """API 응답을 캐시에 저장해 다음 호출에서 재사용할 수 있어야 한다."""
+    import rag.mfds_client as mfds_mod
+
+    with patch("rag.mfds_client.requests.get", return_value=_FakeResponse(SAMPLE_RESPONSE)):
+        search_by_name("활명수")
+
+    cached = mfds_mod._disk_cache.get("mfds.search_by_name|활명수|10|1")
+    assert cached is not None
+    assert len(cached) == 1
+    assert cached[0]["item_name"] == "활명수"
+
+
+def test_search_by_name_falls_back_to_api_on_cache_read_error():
+    """캐시 read가 예외를 던져도 API 호출로 폴백되어 정상 결과를 반환해야 한다."""
+    import rag.mfds_client as mfds_mod
+
+    with (
+        patch.object(mfds_mod._disk_cache, "get", side_effect=Exception("disk error")),
+        patch("rag.mfds_client.requests.get", return_value=_FakeResponse(SAMPLE_RESPONSE)) as mock_api,
+    ):
+        results = search_by_name("활명수")
+
+    mock_api.assert_called_once()
+    assert results[0].item_name == "활명수"

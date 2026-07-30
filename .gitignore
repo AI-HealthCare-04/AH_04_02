@@ -140,6 +140,10 @@ logs/
 # ===== SQLite (backend/ 로컬 개발 DB) =====
 *.db
 
+# ===== 식약처 API 디스크 캐시 (mfds_client.py / dur_master.py) =====
+# diskcache가 SQLite + 보조 파일로 생성하는 런타임 캐시 디렉토리 — 커밋 불필요
+mfds_cache/
+
 # ===== 공유 개발 DB(Aiven) SSL CA 인증서 — 팀원 각자 로컬에 두는 파일, 레포에 커밋 안 함 =====
 backend/certs/*.pem
 

@@ -365,7 +365,13 @@ def _lookup_emedinfo(drug_name: str) -> dict | None:
         score = SequenceMatcher(None, norm_name, entry["norm"]).ratio()
         if score > best_score:
             best_score, best_entry = score, entry
-    if best_score >= 0.72 and best_entry:
+    # [2026-07-30 버그수정, 이슈 #108] SequenceMatcher.ratio()는 순수 문자열 편집거리라
+    # 활성 성분이 전혀 다른 약도 이름이 비슷하면 높은 점수를 받는다 — 실사용 재현:
+    # "플라빅스정"(클로피도그렐, 항혈소판제)이 "플라낙스정"(나프록센나트륨, NSAID)에
+    # 0.750으로 매칭됐다. 0.72였던 예전 임계값은 이 케이스를 그대로 통과시켰다 — 이
+    # 오매칭 사례보다 확실히 높은 0.9로 올려서, 실제로 거의 동일한 이름(사소한 OCR
+    # 오타 수준)일 때만 통과하게 한다.
+    if best_score >= 0.9 and best_entry:
         return best_entry
     return None
 
@@ -505,7 +511,15 @@ def get_drug_name_list() -> list[str]:
 
 
 def get_drug_info(drug_name: str, drug_code: str = "") -> dict:
-    """상세 정보 반환 (match_source 포함). efficacy는 e약은요 매칭(emed)일 때만 채워짐."""
+    """상세 정보 반환 (match_source 포함). efficacy는 e약은요 매칭(emed)일 때만 채워짐.
+
+    [2026-07-30 버그수정, 이슈 #108] 조회 순서를 get_drug_class()와 동일하게(HIRA 코드 →
+    HIRA 이름 → ATC 패턴 → 하드코딩 폴백 → e약은요 순) 맞췄다. get_drug_class()는
+    자신의 docstring에 이미 "e약은요 유사도 매칭이 오분류를 일으켜서 마지막(5순위)에만
+    쓴다"고 명시해뒀는데, get_drug_info()는 이 개선 이전 순서(HIRA 다음 3순위) 그대로라
+    ATC 패턴/폴백으로 안전하게 분류 가능한 약도 먼저 이 위험한 유사도 폴백을 거쳤다
+    (실사용 재현: "플라빅스정" → "플라낙스정"(전혀 다른 성분) 오매칭, 이슈 #108).
+    """
     if drug_code:
         atc = _lookup_hira_by_code(drug_code)
         if atc:
@@ -521,6 +535,16 @@ def get_drug_info(drug_name: str, drug_code: str = "") -> dict:
             return {"drug_name": drug_name, "drug_class": cls, "efficacy": "",
                     "match_source": "hira_name", "matched_item": drug_name, "atc_code": atc}
 
+    cls = _class_from_atc_pattern(drug_name)
+    if cls:
+        return {"drug_name": drug_name, "drug_class": cls, "efficacy": "",
+                "match_source": "atc_pattern", "matched_item": drug_name, "atc_code": ""}
+
+    fallback_cls = _class_from_fallback(drug_name)
+    if fallback_cls:
+        return {"drug_name": drug_name, "drug_class": fallback_cls, "efficacy": "",
+                "match_source": "fallback", "matched_item": drug_name, "atc_code": ""}
+
     entry = _lookup_emedinfo(drug_name)
     if entry:
         cls = _class_from_efcy(entry["efcy"])
@@ -528,12 +552,5 @@ def get_drug_info(drug_name: str, drug_code: str = "") -> dict:
                 "efficacy": entry["efcy"], "match_source": "emed", "matched_item": entry["item_name"],
                 "atc_code": ""}
 
-    cls = _class_from_atc_pattern(drug_name)
-    if cls:
-        return {"drug_name": drug_name, "drug_class": cls, "efficacy": "",
-                "match_source": "atc_pattern", "matched_item": drug_name, "atc_code": ""}
-
-    cls = _class_from_fallback(drug_name)
-    return {"drug_name": drug_name, "drug_class": cls, "efficacy": "",
-            "match_source": "fallback" if cls else "unknown",
-            "matched_item": drug_name if cls else "", "atc_code": ""}
+    return {"drug_name": drug_name, "drug_class": "", "efficacy": "",
+            "match_source": "unknown", "matched_item": "", "atc_code": ""}
