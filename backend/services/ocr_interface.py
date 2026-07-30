@@ -63,8 +63,8 @@ class OCRResult:
 # 1-b. 파싱 헬퍼 — raw_text → MedicationItem 리스트
 # ------------------------------------------------------------------
 
-def _build_medications(raw_text: str, confidence: float) -> list:
-    meds, diagnosis = parse_prescription(raw_text)
+def _build_medications(raw_text: str, confidence: float, fields: list | None = None) -> list:
+    meds, diagnosis = parse_prescription(raw_text, fields)
     return [
         MedicationItem(
             drug_name=m["drug_name"],
@@ -343,7 +343,7 @@ class ClovaOCRProvider(OCRProvider):
 
         result = OCRResult(
             raw_text=raw_text,
-            medications=_build_medications(raw_text, round(overall_confidence, 4)),
+            medications=_build_medications(raw_text, round(overall_confidence, 4), fields),
             overall_confidence=round(overall_confidence, 4),
             source="clova",
         )
