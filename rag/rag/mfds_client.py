@@ -15,7 +15,7 @@ class MfdsApiError(RuntimeError):
     pass
 
 
-def _request(params: dict, base_url: str | None = None, retries: int = 2, timeout: float = 10.0) -> dict:
+def _request(params: dict, base_url: str | None = None, retries: int = 1, timeout: float = 10.0) -> dict:
     query = {"serviceKey": settings.DATA_GO_KR_SERVICE_KEY, "type": "json", **params}
     url = base_url or settings.MFDS_BASE_URL
 
