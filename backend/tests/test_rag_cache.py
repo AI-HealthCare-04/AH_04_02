@@ -15,10 +15,8 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
-from sqlmodel import Session, SQLModel, create_engine, select
-from sqlmodel.pool import StaticPool
-
 from core.database import get_session
+from fastapi.testclient import TestClient
 from main import app
 from models import (
     Caregiver,
@@ -34,7 +32,8 @@ from routers.rag_router import (
     _make_cache_key,
     _save_cache,
 )
-
+from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel.pool import StaticPool
 
 # ── fixtures ─────────────────────────────────────────────────────────────────
 
@@ -332,3 +331,82 @@ def test_run_rag_stub_then_real_no_cache_hit(session: Session):
     assert from_cache is False           # stub 결과가 캐시 히트로 오인돼선 안 됨
     assert expires_at is not None        # real 결과는 저장됨
     assert mock_gen.call_count == 1
+
+
+def test_run_rag_excludes_review_required_ocr_drugs_from_generation(session: Session):
+    """OCR 오탐/낮은 신뢰도 보정 항목은 자동 복약가이드 생성 대상에서 제외한다."""
+    _, _, rec, _ = _setup_record(session)
+    session.add(
+        OcrResult(
+            record_id=rec.id,
+            drug_name="튼튼정",
+            matched_drug_name="고리튼정",
+            match_score=0.8,
+            diagnosis="고혈압",
+            confidence=0.9,
+            review_required=True,
+            needs_review=True,
+        )
+    )
+    session.add(
+        OcrResult(
+            record_id=rec.id,
+            drug_name="샘플은OCR",
+            matched_drug_name="아펜CR정",
+            match_score=0.5714,
+            diagnosis="고혈압",
+            confidence=0.9,
+            review_required=True,
+            needs_review=True,
+        )
+    )
+    session.commit()
+
+    captured_drug_names: list[str] = []
+
+    def _fake_generate(items):
+        captured_drug_names.extend(item.drug_name for item in items)
+        return _FAKE_PAYLOAD
+
+    with patch("routers.rag_router._RAG_AVAILABLE", True), \
+         patch("routers.rag_router._generate_via_rag", side_effect=_fake_generate):
+        from routers.rag_router import run_rag
+
+        _run(run_rag(rec.id, session))
+
+    assert captured_drug_names == ["메트포르민정500mg", "암로디핀정5mg"]
+
+
+def test_run_rag_raises_when_all_ocr_drugs_need_review(session: Session):
+    """검토 필요한 OCR 항목만 있으면 잘못된 약품명으로 가이드를 만들지 않는다."""
+    cg = Caregiver(password_hash="x")
+    cg.name = "보호자"
+    pt = Patient(password_hash="x")
+    pt.name = "환자"
+    session.add(cg)
+    session.add(pt)
+    session.commit()
+    session.refresh(pt)
+    rec = MedicalRecord(patient_id=pt.id, image_path="t.jpg", status="review_required")
+    session.add(rec)
+    session.commit()
+    session.refresh(rec)
+    session.add(
+        OcrResult(
+            record_id=rec.id,
+            drug_name="튼튼정",
+            matched_drug_name="고리튼정",
+            match_score=0.8,
+            diagnosis="고혈압",
+            confidence=0.9,
+            review_required=True,
+            needs_review=True,
+        )
+    )
+    session.commit()
+
+    with patch("routers.rag_router._RAG_AVAILABLE", True):
+        from routers.rag_router import run_rag
+
+        with pytest.raises(ValueError, match="약품명을 먼저 확인"):
+            _run(run_rag(rec.id, session))

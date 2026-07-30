@@ -96,8 +96,11 @@ DRUG_NAME_RE = re.compile(
     r"|(?-i:[A-Z][a-zA-Z]{4,})(?=\s+\d))"  # 영문 PascalCase 5자+, 바로 뒤에 숫자(용량/횟수) 필수
     # [2026-07-18] "정 5mg"처럼 띄어쓴 용량도 이름에 붙게 허용
     # [2026-07-19] "50/1000mg"같은 복합제 용량(성분 두 개를 슬래시로 묶고 단위는 한 번만
-    # 표기)도 통째로 붙게 허용
-    r"\s?(\d+(?:\.\d+)?(?:\s*/\s*\d+(?:\.\d+)?)?(?:mg|g|ml|%))?"
+    # 표기)도 통째로 붙게 허용.
+    # [2026-07-29] "228mg/5ml"처럼 슬래시 뒤에도 단위가 붙는 시럽 농도 표기도 통째로
+    # 약품명에 남긴다.
+    r"\s?(\d+(?:\.\d+)?(?:\s*/\s*\d+(?:\.\d+)?)?(?:mg|g|ml|%)"
+    r"(?:\s*/\s*\d*(?:\.\d+)?(?:mg|g|ml|%))?)?"
     r"(?:\([^)]+\))?",
     re.IGNORECASE,
 )
@@ -154,6 +157,7 @@ ABBREV_FREQ_RE  = re.compile(r"\b(qd|od|bid|tid|qid|prn|hs|ac|pc)\b", re.IGNOREC
 PRN_RE          = re.compile(r"필요\s*시|\bprn\b", re.IGNORECASE)
 DAYS_KOR_RE     = re.compile(r"(\d+)\s*일\s*분")
 DAYS_ABBREV_RE  = re.compile(r"#\s*(\d+)")
+MAX_PRESCRIPTION_DAYS = 365
 # [2026-07-20 버그수정] CLOVA가 표(연락처/발행일/처방 내역 등)를 개행 없이 한 줄로 합쳐
 # 내보내면, 원래 있던 정지 조건(숫자+".)"+공백, "[\n■", 문자열 끝)이 전혀 안 걸려서
 # "진단: 제2형 당뇨병" 뒤의 연락처·처방 목록·주의문구까지 전부 diagnosis로 삼켜버렸다
@@ -274,6 +278,15 @@ def extract_dose_amount(post_text: str, dm_dosage: str = "") -> str:
     return extract_dosage(post_text) or dm_dosage
 
 
+def _strip_dose_column_labels(text: str) -> str:
+    """수량/일수 후보를 찾기 전에 컬럼 라벨의 '1회' 숫자를 제거한다."""
+    return re.sub(r"1\s*회\s*(?:투여량|투약량|사용량|복용량)", " ", text)
+
+
+def _match_inside_spans(match: "re.Match", spans: list[tuple[int, int]]) -> bool:
+    return any(start <= match.start() < end for start, end in spans)
+
+
 # [2026-07-25 추가] 1회 사용량(dosage)과 1회 투여량(dose_amount)의 인식 결과를 조합한다.
 # reconcile_dose_fields 자체는 "사용량이 비었을 때 채우는" 역할만 한다 — dose_amount는
 # 이미 파싱 단계에서 결정된 값을 그대로 받는다.
@@ -354,15 +367,26 @@ def extract_drug_code_list(text: str) -> list:
     return DRUG_CODE_RE.findall(text)
 
 
+def _format_total_days(value: str) -> str:
+    """투약일수 후보를 표시값으로 변환한다. 비현실적인 OCR 숫자열은 버린다."""
+    try:
+        days = int(value)
+    except ValueError:
+        return ""
+    if 1 <= days <= MAX_PRESCRIPTION_DAYS:
+        return f"{days}일"
+    return ""
+
+
 def extract_days(text: str) -> str:
     """[2026-07-27 추가] 명시적인 일수("30일분"/"#30")를 못 찾았는데 "필요시"(PRN)가
     있으면 정해진 기간이 없다는 뜻이므로, 빈 값 대신 그 자체를 총 투약일수로 보여준다."""
     m = DAYS_KOR_RE.search(text)
     if m:
-        return f"{m.group(1)}일"
+        return _format_total_days(m.group(1))
     m = DAYS_ABBREV_RE.search(text)
     if m:
-        return f"{m.group(1)}일"
+        return _format_total_days(m.group(1))
     if PRN_RE.search(text):
         return "필요시"
     return ""
@@ -530,8 +554,9 @@ def _parse_official_format(text: str) -> list:
         dose_amount = extract_dose_amount(post, _dm_dosage(dm))
         # 날짜(2026-07-09)·시각(10:00) 앞뒤 숫자를 col_nums에서 제외하기 위해
         # 기존 패턴에 '-' ':' 추가
+        post_without_labels = _strip_dose_column_labels(post)
         col_nums = re.findall(
-            r"(?<![./\d:-])(\d+)(?![./\d:-]|mg|g|ml|분|시|초)", post
+            r"(?<![./\d:-])(\d+)(?![./\d:-]|mg|g|ml|분|시|초)", post_without_labels
         )
 
         seg_clean = seg.split("■")[0]
@@ -553,7 +578,9 @@ def _parse_official_format(text: str) -> list:
                 elif drug_idx < len(all_freqs):
                     freq = all_freqs[drug_idx]
 
-        days = f"{col_nums[2]}일" if len(col_nums) >= 3 else ""
+        days = extract_days(post_without_labels) or next(
+            (formatted for n in col_nums[2:] if (formatted := _format_total_days(n))), ""
+        )
         drug_code = all_codes[drug_idx] if drug_idx < len(all_codes) else ""
 
         results.append({
@@ -668,7 +695,12 @@ def _parse_table_format(text: str) -> list:
     diag_m = re.search(r"진단명", tail)
     if diag_m:
         tail = tail[:diag_m.start()]
-    day_nums = re.findall(r"(?<![.\d])(\d+)(?![.\d]|mg|g|ml|일|분)", tail)
+    tail = _strip_dose_column_labels(tail)
+    day_nums = [
+        n
+        for n in re.findall(r"(?<![.\d])(\d+)(?![.\d]|mg|g|ml|일|분)", tail)
+        if _format_total_days(n)
+    ]
 
     # [2026-07-23 추가] "1회 복용량"(예: "1정", "1T") — 단위가 붙은 수량 표기만 위치 순으로
     # 모아 약품 순서에 매핑한다. 단위 없는 숫자 컬럼(공식 포맷의 "1.00" 같은)은 이 포맷에서는
@@ -686,19 +718,32 @@ def _parse_table_format(text: str) -> list:
     qty_entries.sort()
     dose_quantities = [qty for _, qty in qty_entries]
 
+    drug_spans = [(dm.start(), dm.end()) for dm in drug_matches]
+    dose_amount_entries = [
+        (m.start(), f"{m.group(1).replace(' ', '')}{m.group(2)}")
+        for m in DOSAGE_RE.finditer(text)
+        if not _match_inside_spans(m, drug_spans)
+    ]
+    dose_amounts = [amount for _, amount in sorted(dose_amount_entries)]
+    has_dose_amount_column = re.search(r"1\s*회\s*(?:투여량|투약량)", text) is not None
+
     results = []
     for i, dm in enumerate(drug_matches):
         drug_name = dm.group(1) + (f" {_dm_dosage(dm)}" if dm.group(2) else "")
+        dose_amount = dose_amounts[i] if has_dose_amount_column and i < len(dose_amounts) else _dm_dosage(dm)
+        dosage = dose_quantities[i] if i < len(dose_quantities) else ""
+        if has_dose_amount_column:
+            dosage = reconcile_dose_fields("", dose_amount, drug_name) or dosage
         results.append({
             "drug_name":   drug_name,
             "drug_code":   "",
-            "dosage":      dose_quantities[i] if i < len(dose_quantities) else "",
+            "dosage":      dosage,
             # [2026-07-25 추가] 테이블 포맷은 컬럼 그룹 출력이라 사용량처럼 위치 기반으로
             # 신뢰도 있게 "1회 투여량" 문구를 찾기 어렵다 — 약품명에 붙어 나오는 단위당
             # 함량(_dm_dosage)만 폴백으로 쓴다.
-            "dose_amount": _dm_dosage(dm),
+            "dose_amount": dose_amount,
             "frequency":   frequencies[i] if i < len(frequencies) else "",
-            "total_days":  f"{day_nums[i]}일" if i < len(day_nums) else "",
+            "total_days":  _format_total_days(day_nums[i]) if i < len(day_nums) else "",
             "drug_class":  lookup_drug_class(drug_name),
         })
     return results
