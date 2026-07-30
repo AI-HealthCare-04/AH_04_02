@@ -1,3 +1,4 @@
+import logging
 import re
 import time
 import xml.etree.ElementTree as ET
@@ -7,16 +8,27 @@ import requests
 from rag.config import settings
 from rag.schemas import DrugInfo, DrugPermitDetail, DrugPermitInfo
 
+_logger = logging.getLogger(__name__)
+
 # 식약처 API 응답 디스크 캐시 — lru_cache(메모리 전용, 재시작 시 초기화)를 대체한다.
 # diskcache.Cache는 내부적으로 SQLite를 사용하며 멀티프로세스(--workers 2)에서도 안전하다.
 # timeout=1: 락 획득 대기 시간(초). 기본값 0.010은 멀티프로세스 환경에서 Timeout이 날 수
 # 있어 1초로 늘린다. 초기화 실패(경로 접근 불가 등)가 있어도 API 호출 자체는 계속 작동한다.
+# size_limit=100MB: 약물 데이터 건당 수 KB 수준이므로 실용적으로 넉넉하되 상한을 명시한다.
+#
+# 캐시 키 네임스페이스 규칙: "모듈접두사.함수명|인자1|인자2|..."
+#   mfds.*  — mfds_client.py (e약은요, 허가정보 목록, 허가정보 상세)
+#   dur.*   — dur_master.py  (병용금기, 노인주의, 연령금기, 임부금기)
+# dur_master.py는 _disk_cache를 이 모듈에서 import해 같은 SQLite 파일을 공유한다.
+# 새 함수를 추가할 때는 위 접두사 규칙에 따라 키 충돌을 방지할 것.
 try:
     _disk_cache: diskcache.Cache | None = diskcache.Cache(
         settings.MFDS_CACHE_DIR,
         timeout=1,
+        size_limit=100 * 1024 * 1024,  # 100 MB
     )
-except Exception:
+except Exception as _e:
+    _logger.warning("diskcache 초기화 실패 — 캐시 없이 동작합니다: %s", _e)
     _disk_cache = None
 
 _TAG_RE = re.compile(r"<[^>]+>")
