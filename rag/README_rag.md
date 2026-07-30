@@ -152,7 +152,7 @@ e약은요와 원천이 다른 **로컬 정적 데이터**. 효능효과 같은 
 ### OCR 연동 & 배치 처리 (`generate_guide_from_medication` / `generate_guides_from_ocr_result`)
 
 - `generate_guide_from_medication(item)`: OCR `MedicationItem` 1건(dataclass/dict 무엇이든)을 받아 `GuideResponse` 1건을 반환. 내부적으로 `generate_guide()` 호출 후, `item.confidence`를 후처리로 병합한다(`_merge_ocr_confidence`) — `generate_guide()` 자체 시그니처는 건드리지 않는다.
-- `generate_guides_from_ocr_result(ocr_result)` / `generate_guides_from_medications(list)`: `OCRResult.medications`(여러 약) 전체를 순회 처리. 항목 하나가 `NoContextFoundError` 등으로 실패해도 나머지는 정상 반환되고, 실패건은 `review_flags=["generation_error"]`로 표시된다. **비용 주의**: 약 1건당 `SELF_CONSISTENCY_SAMPLES`(기본 3)회 LLM 호출이 순차 발생하므로, 처방전 1건에 약 N개면 3×N회 직렬 호출이다.
+- `generate_guides_from_ocr_result(ocr_result)` / `generate_guides_from_medications(list)`: `OCRResult.medications`(여러 약) 전체를 순회 처리. 항목 하나가 `NoContextFoundError` 등으로 실패해도 나머지는 정상 반환되고, 실패건은 `review_flags=["generation_error"]`로 표시된다. **비용 주의**: 약/진단명 1건당 `SELF_CONSISTENCY_SAMPLES`(기본 3)회 LLM 호출이 발생한다. 이 3회는 `ThreadPoolExecutor`로 병렬 실행되며, 약/진단명별 outer 루프는 임베딩(CPU-bound) 경합 방지를 위해 순차로 유지된다.
 - OCR 개별 `confidence`가 `OCR_CONFIDENCE_REVIEW_THRESHOLD`(0.80) 미만이면 인용/self-consistency가 멀쩡해도 `review_required`가 강제로 True가 되고, `confidence == 0.0`(Tesseract 등 미제공)이면 `ocr_confidence_unavailable`로 별도 구분된다. 자세한 배경과 근거는 `CONTRACT.md` 참고.
 
 ### 파일 지도
