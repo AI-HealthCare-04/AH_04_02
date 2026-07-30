@@ -7,11 +7,16 @@ test_parsing_rules_dose_quantity.py — extract_dose_quantity()/parse_prescripti
 후자(복용량)를 담는지, 세 가지 표기 방식(텍스트 단위, 약식 T/C, 단위 없는 숫자
 컬럼 + 약품명 제형 조합)을 모두 인식하는지 확인한다.
 """
-from services.parsing_rules import extract_dose_quantity, parse_prescription
+from services.parsing_rules import extract_days, extract_dose_quantity, parse_prescription
 
 
 def test_extract_dose_quantity_with_explicit_unit():
     assert extract_dose_quantity("1회 1정, 1일 1회, 30일분 복용") == "1정"
+
+
+def test_extract_days_ignores_unrealistic_ocr_number():
+    assert extract_days("678901일분") == ""
+    assert extract_days("5일분") == "5일"
 
 
 def test_extract_dose_quantity_with_capsule_unit():

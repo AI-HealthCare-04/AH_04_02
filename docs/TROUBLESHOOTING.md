@@ -467,3 +467,16 @@ for raw, norm in zip(raw_pool, norm_pool):
 | **해결** | `langfuse_tracing.py`의 모든 `except Exception` 블록에 `logger.warning(..., exc_info=True)`를 추가했다(챗봇 동작은 여전히 막지 않음 — 로그만 남김). 키 자체가 없는 경우(`_enabled() == False`)는 흔한 정상 상황(로컬 개발 등)일 수 있어 요청마다 남기지 않고 프로세스당 한 번만 info 레벨로 남긴다. 이 로그로 "키 누락"과 "키는 있는데 SDK/네트워크 문제"를 서버 로그만 보고 구분할 수 있다. **EC2 서버의 실제 `backend/.env`에 `LANGFUSE_SECRET_KEY`/`LANGFUSE_PUBLIC_KEY`/`LANGFUSE_BASE_URL` 세 값이 전부 정확히 들어있는지는 직접 확인이 필요함(로컬 코드만으로는 확인 불가) — 서버 로그에 "Langfuse tracing disabled" 메시지가 있는지 먼저 확인해보면 바로 알 수 있다.** |
 | **테스트/검증** | `backend/tests/test_langfuse_tracing.py`에 disabled 상태 1회만 로그하는지, 자격증명 없을 때 예외 없이 None을 반환하는지 검증하는 테스트 3개 추가 — 통과 확인. |
 | **재발 방지** | 배포 환경(EC2 인스턴스)이 바뀌면 `CORS_ALLOWED_ORIGINS`/`VITE_MONITORING_API_URL`뿐 아니라 `LANGFUSE_SECRET_KEY`/`LANGFUSE_PUBLIC_KEY`/`LANGFUSE_BASE_URL`도 함께 다시 세팅해야 한다. "실패해도 절대 죽지 않아야 하는" 선택적(optional) 연동이라도, 최소한 로그 한 줄은 남겨야 한다 — 안 그러면 "이게 꺼진 건지, 설정이 잘못된 건지, 코드가 고장난 건지"조차 알 수 없다. |
+
+---
+
+| 날짜 | 2026.07.29 |
+|---|---|
+| **작성자** | 김영혜 |
+| **이슈** | OCR 테스트 처방전에서 실제 약품이 아닌 문구 또는 낮은 신뢰도 보정명이 복약가이드 생성 대상에 들어갈 수 있음. 예: "튼튼정" 같은 OCR 결과가 실제 존재 약품인 "고리튼정"으로 보정되어 환자 화면/RAG 가이드에 사용될 위험 |
+| **발생 위치** | `backend/routers/ocr_router.py`, `backend/routers/rag_router.py`, `backend/services/ocr_quality.py` |
+| **원인** | `match_drug()`는 오타 보정을 위해 유사도 기반 후보를 반환한다. 이 자체는 필요하지만, OCR 원문과 매칭명이 서로 다른데 점수가 0.85 미만인 경우까지 자동 가이드 생성에 사용하면, 처방전 주변 문구·샘플 문구·낮은 신뢰도 OCR 조각이 그럴듯한 실제 약품명으로 바뀌어 들어갈 수 있었다. 기존 `MATCH_THRESHOLD`는 "사용자에게 후보를 보여줄 수 있는 최소 기준"에 가까웠고, "환자용 복약가이드를 자동 생성해도 되는 기준"으로는 충분히 엄격하지 않았다. 또한 v1.2 캐시에 이미 잘못된 OCR 항목으로 만든 가이드가 남아 있으면 코드 수정 후에도 화면이 같은 결과를 재사용할 수 있었다. |
+| **해결** | `ocr_quality.py`를 추가해 OCR 약품명 품질 게이트를 분리했다. 샘플/OCR/가상/병원/환자 등 명백한 비약품 문구는 검토 필요로 표시하고, OCR 원문과 매칭명이 달라졌는데 점수가 0.85 미만이면 자동 가이드 대상에서 제외한다. OCR 저장 시 해당 항목은 `needs_review=True`, 처방전은 `review_required` 상태로 남긴다. RAG 생성 시에도 같은 게이트를 적용해 검토 필요한 약품은 캐시 키·LLM 입력·stub fallback에서 모두 제외한다. 모든 약품이 제외되면 잘못된 가이드를 만들지 않고 "약품명을 먼저 확인"하도록 오류를 반환한다. `GUIDE_DATA_VERSION` 기본값을 v1.3으로 올려 기존 v1.2 캐시를 우회한다. |
+| **추가 발견/해결** | 테스트 중 Langfuse observation wrapper가 내부의 정상 예외(`ValueError`)까지 "observation 시작 실패"로 오인해 `RuntimeError: generator didn't stop after throw()`로 바꾸는 문제가 드러났다. `optional_observation()`을 수동 enter/exit 구조로 바꿔 observation 시작 실패만 폴백하고, 라우터 내부 예외는 원래 예외 그대로 전달되도록 수정했다. |
+| **테스트/검증** | `backend/tests/test_ocr_quality.py` 신규 추가. `backend/tests/test_rag_cache.py`에 검토 필요한 OCR 항목이 RAG 생성 대상에서 제외되는지, 전부 제외되면 가이드를 만들지 않는지 회귀 테스트 추가. `uv run pytest backend/tests/test_ocr_quality.py backend/tests/test_rag_cache.py backend/tests/test_langfuse_tracing.py backend/tests/test_ocr_router_drug_info.py backend/tests/test_langfuse_scoring.py -q` 결과 47개 통과. `uv run ruff check backend/services/ocr_quality.py backend/services/langfuse_tracing.py backend/routers/rag_router.py backend/tests/test_ocr_quality.py backend/tests/test_rag_cache.py` 통과. |
+| **재발 방지** | 의약품 fuzzy matching은 "후보 제안"과 "자동 환자 안내 생성"의 기준을 분리한다. OCR 원문을 다른 약품명으로 바꾸는 경우에는 더 높은 신뢰도 기준을 적용하고, 검토 필요한 OCR 항목은 RAG 입력과 캐시 키에서 모두 제외한다. 캐시 결과 모양이나 생성 대상 정책이 바뀌면 `GUIDE_DATA_VERSION`도 함께 올려 기존 캐시가 새 정책을 가리지 않게 한다. |

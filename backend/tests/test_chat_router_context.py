@@ -14,6 +14,7 @@ from routers.chat_router import (
     _build_on_demand_dur_context,
     _dur_lookup_modes,
     _extract_dur_candidate_drug_names,
+    _is_general_chat_question,
     _is_lifestyle_question,
     _menu_map_text,
     _retrieve_chat_rag_docs,
@@ -146,6 +147,16 @@ def test_dur_question_does_not_use_general_kdca_rag_context():
     assert _should_answer_from_dur_only("이 약 드셔도 되나요?")
     with patch("rag.vectorstore.similarity_search") as mock_search:
         assert _retrieve_chat_rag_docs("노바스크정5밀리그람과 타이레놀 병용 가능해?") == []
+
+    mock_search.assert_not_called()
+
+
+def test_general_greeting_does_not_use_kdca_rag_context():
+    """인사/앱 안내성 질문은 의료 근거가 아니므로 질병관리청 참고자료를 붙이지 않는다."""
+    assert _is_general_chat_question("안녕하세요")
+    assert _is_general_chat_question("약콩이는 뭐 할 수 있어?")
+    with patch("rag.vectorstore.similarity_search") as mock_search:
+        assert _retrieve_chat_rag_docs("안녕하세요") == []
 
     mock_search.assert_not_called()
 

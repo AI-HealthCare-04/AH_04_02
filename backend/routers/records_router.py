@@ -38,6 +38,7 @@ from models import (
 )
 from pydantic import BaseModel
 from services.drug_matcher import MATCH_THRESHOLD, match_drug
+from services.ocr_quality import requires_drug_name_review
 from sqlmodel import Session, select
 
 from routers.ocr_router import run_ocr
@@ -472,7 +473,7 @@ def patch_medication_item(
     matched_name, score = match_drug(payload.drug_name)
     item.matched_drug_name = matched_name
     item.match_score = score
-    item.needs_review = score < MATCH_THRESHOLD
+    item.needs_review = requires_drug_name_review(payload.drug_name, matched_name, score)
 
     session.add(item)
     session.commit()

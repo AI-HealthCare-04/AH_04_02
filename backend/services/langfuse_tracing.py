@@ -125,9 +125,10 @@ def optional_observation(*, as_type: str, name: str, **kwargs: Any) -> Iterator[
             yield observation
         return
 
+    manager = None
     try:
-        with client.start_as_current_observation(as_type=as_type, name=name, **kwargs) as observation:
-            yield observation
+        manager = client.start_as_current_observation(as_type=as_type, name=name, **kwargs)
+        observation = manager.__enter__()
     except Exception:  # noqa: BLE001
         # 키는 설정돼 있고 클라이언트도 만들어졌는데 여기서 실패한다면(예: EC2 아웃바운드
         # 방화벽/보안그룹이 langfuse 서버로 나가는 443을 막는 경우) 실제 네트워크/연결
@@ -135,6 +136,19 @@ def optional_observation(*, as_type: str, name: str, **kwargs: Any) -> Iterator[
         logger.warning("Langfuse observation(%s) 시작에 실패했습니다.", name, exc_info=True)
         with nullcontext(None) as observation:
             yield observation
+        return
+
+    try:
+        yield observation
+    except BaseException as exc:
+        if manager is not None:
+            suppress = manager.__exit__(type(exc), exc, exc.__traceback__)
+            if suppress:
+                return
+        raise
+    else:
+        if manager is not None:
+            manager.__exit__(None, None, None)
 
 
 def update_observation(observation: Any, **kwargs: Any) -> None:

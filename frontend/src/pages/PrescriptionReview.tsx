@@ -45,12 +45,11 @@ function expandInterval(startTime: string, intervalHours: number): string[] {
 }
 
 
-// 1회 사용량엔 반드시 숫자+개수단위가 같이 있어야 함 (예: "1정") — "1"처럼 단위 빠진 OCR
-// 오류를 잡아냄. [PR #90 리뷰 반영 — pecs0310] parsing_rules.py의
-// DOSE_QTY_UNITS(정|캡슐|캅셀|포|병|환)와 맞춰 캅셀(대체 표기)/병/환을 추가 — 이 세 단위가
-// 빠져 있어서 해당 단위로 처방된 항목은 isUsageValid()가 계속 실패로 잡고, allOk가
-// false가 돼 "확인 완료" 제출 자체가 막혀 있었다.
-const USAGE_RE = /(\d+\.?\d*)\s*(정|캡슐|캅셀|포|병|환)/i;
+// 1회 사용량엔 반드시 숫자+단위가 같이 있어야 함 (예: "1정", "5mL") — "1"처럼 단위 빠진
+// OCR 오류를 잡아냄. 시럽/점안액/주사/흡입제 등은 정·캡슐 개수가 아니라 mL/방울/단위/분사
+// 같은 단위가 정상 사용량이므로 parsing_rules.py의 DOSE_QTY_UNITS/DOSE_QTY_VOLUME_UNITS와
+// 맞춰 허용한다.
+const USAGE_RE = /(\d+\.?\d*)\s*(정|캡슐|캅셀|포|병|환|스틱|앰플|바이알|시린지|개|매|ml|mL|방울|분무|분사|퍼프|g|단위)/i;
 function isUsageValid(dosage: string) {
   return USAGE_RE.test(dosage.trim());
 }
@@ -75,7 +74,7 @@ function computeIssues(m: OcrMedication, drugNameOk: boolean | undefined, nameOv
     issues.push({ field: "drug_name", message: "약품명이 비어있어요. 입력해주세요." });
   }
   if (m.dosage.trim() && !isUsageValid(m.dosage)) {
-    issues.push({ field: "dosage", message: "1회 사용량 형식이 잘못됐어요 (예: 1정, 2캡슐처럼 단위를 함께 입력)." });
+    issues.push({ field: "dosage", message: "1회 사용량 형식이 잘못됐어요 (예: 1정, 2캡슐, 5mL처럼 단위를 함께 입력)." });
   } else if (!m.dosage.trim()) {
     issues.push({ field: "dosage", message: "1회 사용량이 비어있어요. 입력해주세요." });
   }
