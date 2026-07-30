@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # Docker 환경에서는 .:/workspace 바인드 마운트 덕분에 컨테이너 재시작·재빌드 후에도
     # 호스트 파일시스템에 그대로 남는다. 로컬 실행 시에는 프로젝트 루트/mfds_cache에 생성된다.
     MFDS_CACHE_DIR: str = str(BASE_DIR.parent / "mfds_cache")
-    MFDS_CACHE_TTL_SECONDS: int = 60 * 60 * 24 * 7  # 7일 — 식약처 데이터 갱신 주기 기준
+    MFDS_CACHE_TTL_SECONDS: int = 60 * 60 * 48  # 48시간 — 식약처/DUR 고시 수시 개정 대응
 
     OPENAI_API_KEY: str | None = None
     OPENAI_MODEL: str = "gpt-4o-mini"
