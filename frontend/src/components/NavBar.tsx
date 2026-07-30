@@ -2,9 +2,10 @@ import { useState, useEffect, useRef } from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Bell, ChevronDown, ChevronRight, Menu, Pill, Search, X } from "lucide-react";
-import { getCurrentCaregiverId } from "../lib/session";
+import { getCurrentCaregiverId, useGuardedPatientId } from "../lib/session";
 import { listCorrectionNotices } from "../api/records";
 import { listRelationNotices } from "../api/care";
+import { getNotifications } from "../api/monitoring";
 import { C } from "../theme";
 
 interface NavBarProps {
@@ -84,10 +85,12 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
   // 데스크톱 입력창 대신, 돋보기 버튼을 누르면 헤더 아래로 펼쳐지는 검색줄을 추가.
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   // [2026-07-30 추가] "알림함" 메뉴 텍스트 링크를 없애고 프로필 옆 종 아이콘 + 배지로
-  // 대체 — 미확인 개수는 안 읽음 상태가 있는 두 소스(처방전 검토·수정 알림, 환자 연결
-  // 알림)만 합산한다. 복약 알림(NotificationLog)은 백엔드가 안 읽음 상태를 응답에
-  // 아예 안 내려줘서 집계 대상에서 뺐다.
+  // 대체 — 처방전 검토·수정 알림, 환자 연결 알림, 복약 알림(알림함에 아직 한 번도
+  // 표시된 적 없는 것만) 세 가지를 합산한다.
   const [unreadCount, setUnreadCount] = useState(0);
+  // silent: 여기서 환자가 아직 안 정해졌다고 화면을 /patients로 떠나보내면 안 됨
+  // (Notifications.tsx와 동일한 이유).
+  const badgePatientId = useGuardedPatientId({ silent: true });
   const allMenuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLDivElement>(null);
   const navItems = getCurrentCaregiverId() ? CAREGIVER_NAV_ITEMS : PATIENT_NAV_ITEMS;
@@ -132,16 +135,20 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
   useEffect(() => {
     if (!isLoggedIn) return;
     let cancelled = false;
-    Promise.all([listCorrectionNotices().catch(() => []), listRelationNotices().catch(() => [])]).then(
-      ([corrections, relations]) => {
-        if (cancelled) return;
-        setUnreadCount(corrections.length + relations.length);
-      }
-    );
+    Promise.all([
+      listCorrectionNotices().catch(() => []),
+      listRelationNotices().catch(() => []),
+      // badgePatientId가 아직 안 정해졌으면(환자 미선택 등) 복약 알림은 집계에서 뺀다.
+      badgePatientId != null ? getNotifications(badgePatientId).catch(() => []) : Promise.resolve([]),
+    ]).then(([corrections, relations, reminders]) => {
+      if (cancelled) return;
+      const unreadReminders = reminders.filter((r) => r.acknowledged_at == null).length;
+      setUnreadCount(corrections.length + relations.length + unreadReminders);
+    });
     return () => {
       cancelled = true;
     };
-  }, [isLoggedIn]);
+  }, [isLoggedIn, badgePatientId]);
 
   // [2026-07-20] 항목별 호버 드롭다운과 달리 이건 클릭으로 열고 닫으므로, 바깥을
   // 클릭했을 때도 닫히게 해야 한다 (호버 드롭다운은 mouseleave로 이미 처리됨).

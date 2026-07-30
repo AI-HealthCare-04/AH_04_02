@@ -1118,6 +1118,10 @@ class NotificationLogEntry(BaseModel):
     kind: Literal["reminder", "missed"]
     status: Literal["pending", "sent", "suppressed", "failed"]
     fired_at: datetime
+    # [2026-07-30 추가] NavBar 종 아이콘의 안 읽음 배지가 "한 번도 알림함에 표시된 적
+    # 없는" 복약 알림만 안 읽음으로 세도록 하기 위해 노출한다. 이전엔 모델에 이미
+    # acknowledged_at 컬럼이 있었는데 응답에 안 내려주고 있었다.
+    acknowledged_at: datetime | None = None
 
 
 @router.get("/patients/{patient_id}/notifications", response_model=list[NotificationLogEntry])
@@ -1152,9 +1156,33 @@ def list_notifications(
             kind=log.kind,
             status=log.status,
             fired_at=log.fired_at,
+            acknowledged_at=log.acknowledged_at,
         )
         for log in logs
     ]
+
+
+@router.post("/patients/{patient_id}/notifications/acknowledge")
+def acknowledge_notifications(
+    patient_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """[2026-07-30 추가] 알림함(Notifications.tsx)이 복약 알림 목록을 화면에 띄운 시점에
+    호출 — 개별 클릭이 아니라 "한 번이라도 표시됐는지"가 기준이라(복약 알림은 눌러서
+    들어갈 대상이 없는 단순 로그), 그 시점에 아직 안 읽은 것 전부를 한 번에 처리한다."""
+    require_actor_patient_access(patient_id, actor, session)
+    unacknowledged = session.exec(
+        select(NotificationLog)
+        .where(NotificationLog.patient_id == patient_id)
+        .where(NotificationLog.acknowledged_at == None)  # noqa: E711
+    ).all()
+    now = datetime.now()
+    for log in unacknowledged:
+        log.acknowledged_at = now
+        session.add(log)
+    session.commit()
+    return {"acknowledged": len(unacknowledged)}
 
 
 # ── Dashboard.tsx가 그대로 쓸 수 있는 오늘자 통합 조회 [7/6: patient_id 필수로 변경] ──

@@ -4,7 +4,7 @@ import { Bell, AlertTriangle, FileEdit, CheckCircle2, Link2, Unlink } from "luci
 import NavBar from "../components/NavBar";
 import Skeleton from "../components/Skeleton";
 import EmptyState from "../components/EmptyState";
-import { getNotifications, type NotificationLogEntry } from "../api/monitoring";
+import { acknowledgeNotifications, getNotifications, type NotificationLogEntry } from "../api/monitoring";
 import { listCorrectionNotices, markCorrectionNoticeRead, type RecordCorrectionNotice } from "../api/records";
 import { listRelationNotices, markRelationNoticeRead, type RelationNotice } from "../api/care";
 import { getCurrentUserName, isLoggedIn, useGuardedPatientId } from "../lib/session";
@@ -52,7 +52,13 @@ export default function Notifications() {
 
   useEffect(() => {
     if (patientId == null) return;
-    getNotifications(patientId).then(setReminders).catch(() => {});
+    getNotifications(patientId)
+      .then(setReminders)
+      // [2026-07-30 추가] 이 화면에 목록이 실제로 표시된 시점 = "읽음" 처리 기준.
+      // 개별 항목이 클릭 대상이 없는 단순 로그라, 목록을 성공적으로 불러온 직후
+      // 그 시점까지 안 읽었던 것 전부를 한 번에 표시 처리한다(실패해도 무시).
+      .then(() => acknowledgeNotifications(patientId).catch(() => {}))
+      .catch(() => {});
   }, [patientId]);
 
   useEffect(() => {

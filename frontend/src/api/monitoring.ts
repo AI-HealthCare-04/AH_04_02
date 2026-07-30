@@ -396,6 +396,8 @@ export interface NotificationLogEntry {
   kind: "reminder" | "missed";
   status: "pending" | "sent" | "suppressed" | "failed";
   fired_at: string;
+  // [2026-07-30 추가] null이면 알림함에 한 번도 표시된 적 없음(안 읽음).
+  acknowledged_at: string | null;
 }
 
 export async function getNotifications(patientId: number, days = 30) {
@@ -404,4 +406,11 @@ export async function getNotifications(patientId: number, days = 30) {
     { params: { days } }
   );
   return data;
+}
+
+/** [2026-07-30 추가] 알림함이 복약 알림 목록을 화면에 띄우는 시점에 호출 — 그 시점까지
+ * 안 읽었던 것 전부를 "표시함"으로 처리한다(개별 클릭 대상이 없는 단순 로그라 목록
+ * 노출 자체를 읽음 기준으로 삼음). */
+export async function acknowledgeNotifications(patientId: number) {
+  await monitoringClient.post(`/monitoring/patients/${patientId}/notifications/acknowledge`);
 }
