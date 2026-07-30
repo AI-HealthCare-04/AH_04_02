@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     )
     DUR_PREGNANCY_TABOO_BASE_URL: str = "https://apis.data.go.kr/1471000/DURPrdlstInfoService03/getPwnmTabooInfoList03"
 
+    # 식약처 API 응답 디스크 캐시 경로 — 서버 재시작 후에도 캐시가 유지된다.
+    # Docker 환경에서는 .:/workspace 바인드 마운트 덕분에 컨테이너 재시작·재빌드 후에도
+    # 호스트 파일시스템에 그대로 남는다. 로컬 실행 시에는 프로젝트 루트/mfds_cache에 생성된다.
+    MFDS_CACHE_DIR: str = str(BASE_DIR.parent / "mfds_cache")
+    MFDS_CACHE_TTL_SECONDS: int = 60 * 60 * 24 * 7  # 7일 — 식약처 데이터 갱신 주기 기준
+
     OPENAI_API_KEY: str | None = None
     OPENAI_MODEL: str = "gpt-4o-mini"
 
