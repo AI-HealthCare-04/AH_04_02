@@ -831,6 +831,22 @@ async def mark_reviewed(
         require_actor_patient_access(rec.patient_id, actor, session)
         rec.caregiver_review_status = "reviewed"
         session.add(rec)
+        # [2026-07-30 추가] 보호자·기관이 검토를 완료해도 환자한테는 아무 알림이 안 가서,
+        # 환자가 자기 처방전이 검토 끝났는지 알 방법이 없었다 — correction_requested/
+        # correction_completed와 같은 패턴으로 환자에게 알림+푸시를 남긴다.
+        session.add(
+            RecordCorrectionNotice(
+                recipient_role="patient",
+                recipient_id=rec.patient_id,
+                record_id=rec.id,
+                event="review_completed",
+            )
+        )
+        send_push_to_recipient(
+            session, "patient", rec.patient_id,
+            title="처방전 검토가 완료됐어요", body="보호자·기관이 처방전 확인을 마쳤어요.",
+            url=f"/records/{rec.id}/guide",
+        )
         session.commit()
         session.refresh(rec)
         return rec

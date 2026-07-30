@@ -430,12 +430,13 @@ export interface RecordCorrectionNotice {
   record_id: number;
   patient_id: number;
   patient_name: string;
-  event: "review_pending" | "correction_requested" | "correction_completed";
+  // [2026-07-30 추가] "review_completed": 보호자·기관이 검토를 완료 — 환자에게 알림.
+  event: "review_pending" | "correction_requested" | "correction_completed" | "review_completed";
   created_at: string;
   read_at: string | null;
 }
 
-/** 읽지 않은 처방전 검토 알림 — 환자는 "수정 요청"을, 보호자·기관은 "수정 완료"를 받는다. */
+/** 읽지 않은 처방전 검토 알림 — 환자는 "수정 요청"/"검토 완료"를, 보호자·기관은 "수정 완료"를 받는다. */
 export async function listCorrectionNotices() {
   const { data } = await monitoringClient.get<RecordCorrectionNotice[]>("/records/notices");
   return data;
