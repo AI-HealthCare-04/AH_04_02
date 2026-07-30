@@ -239,6 +239,7 @@ def _deliver(session: Session, schedule: MedicationSchedule, patient: Patient, k
             attempted = send_push_to_recipient(
                 session, role, recipient_id, title=subject, body=body,
                 url=f"/dashboard?highlight={schedule.id}",
+                schedule_id=schedule.id,
             )
             # [2026-07-24] 구독이 없거나 VAPID 키가 없으면 아무 일도 안 했다는 뜻이라
             # channels에 남기지 않는다 — "발송했다"는 로그가 실제로 아무것도 안 보낸

@@ -4,6 +4,7 @@
 모킹해서 검증한다: VAPID 키 미설정 시 스킵, 구독별 발송, 410/404 응답 시 구독 삭제,
 그 외 오류는 삭제하지 않고 넘어가는지.
 """
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -83,6 +84,23 @@ class TestSendPushToRecipient:
         assert first_call["vapid_private_key"] == "priv"
         assert first_call["vapid_claims"] == {"sub": "mailto:team@example.com"}
         assert first_call["subscription_info"]["keys"] == {"p256dh": "p256dh-key", "auth": "auth-key"}
+
+    def test_includes_schedule_id_in_payload_when_given(self, session: Session, monkeypatch):
+        # [2026-07-30 추가] sw.ts가 복용 액션 버튼을 붙이려면 schedule_id가 payload에
+        # 실려있어야 한다 — 안 넘기면(다른 알림 종류) payload에 빠져있는지도 같이 확인.
+        monkeypatch.setattr(push, "_VAPID_PUBLIC_KEY", "pub")
+        monkeypatch.setattr(push, "_VAPID_PRIVATE_KEY", "priv")
+        _make_subscription(session)
+
+        with patch("core.push.webpush") as mock_webpush:
+            push.send_push_to_recipient(session, "patient", 1, "복약 시간이에요", "약 드실 시간이에요", schedule_id=42)
+        payload = json.loads(mock_webpush.call_args.kwargs["data"])
+        assert payload["schedule_id"] == 42
+
+        with patch("core.push.webpush") as mock_webpush:
+            push.send_push_to_recipient(session, "patient", 1, "검토 완료", "확인해주세요")
+        payload = json.loads(mock_webpush.call_args.kwargs["data"])
+        assert "schedule_id" not in payload
 
     def test_does_not_send_to_other_recipients(self, session: Session, monkeypatch):
         monkeypatch.setattr(push, "_VAPID_PUBLIC_KEY", "pub")
