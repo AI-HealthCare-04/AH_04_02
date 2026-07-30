@@ -65,7 +65,7 @@ def _request(params: dict, base_url: str | None = None, retries: int = 2, timeou
 # [2026-07-21 추가 → 2026-07-30 디스크 캐시로 전환]
 # 식약처 데이터는 정부가 보통 하루~한 달 단위로 갱신하는 정적에 가까운 데이터다. 기존
 # lru_cache는 프로세스 메모리에만 유지돼 서버 재시작 시 초기화됐다 — diskcache로 전환해서
-# 한 번 조회된 결과를 서버 재시작 후에도 재사용한다(TTL=7일, settings.MFDS_CACHE_TTL_SECONDS).
+# 한 번 조회된 결과를 서버 재시작 후에도 재사용한다(TTL=48시간, settings.MFDS_CACHE_TTL_SECONDS).
 # Pydantic 모델은 model_dump()/model_validate()로 명시적 JSON 직렬화해서 pickle 의존 없이
 # Pydantic 버전 변경에도 안전하게 처리한다. 캐시 장애 시에도 API 직접 호출로 폴백된다.
 def search_by_name(item_name: str, num_of_rows: int = 10, page_no: int = 1) -> list[DrugInfo]:
