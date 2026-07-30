@@ -11,7 +11,10 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     env_file:
-      - backend/.env
+      - path: backend/.env
+        required: true
+      - path: rag/.env
+        required: false
     volumes:
       - .:/workspace
       # .:/workspace 바인드마운트로 /workspace/mfds_cache/(식약처 API 디스크 캐시)가
