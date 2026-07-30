@@ -119,7 +119,16 @@ export default function InviteAccept() {
           patient_phone: phone.trim() || undefined,
         });
         // 환자 본인 계정을 만든 것이므로 patient_id만 저장한다(보호자 계정 아님).
+        // [2026-07-29 수정] 이 브라우저가 예전에 보호자로 로그인한 적 있으면 caregiver_id가
+        // 남아있을 수 있다 — Login.tsx(97-111번 줄)처럼 반대쪽 키를 지워야 하는데 여기만
+        // 빠져 있었다. 안 지우면 Connect.tsx 등이 자신을 보호자로 착각해 엉뚱한
+        // caregiver_id로 API를 호출 → 401 연쇄 → 강제 로그아웃까지 이어졌다(실제 재현됨).
         localStorage.setItem("patient_id", String(result.patient_id));
+        localStorage.removeItem("caregiver_id");
+        // [2026-07-29 추가] 백엔드가 이제 새 계정 생성 시 access_token도 같이 내려준다 —
+        // 이게 없으면 "수락 성공" 화면만 보이고 정작 로그인은 안 된 상태라 다음 화면부터
+        // 전부 401로 튕겨나갔다(진짜 원인).
+        if (result.access_token) localStorage.setItem("access_token", result.access_token);
         setDecided("accepted");
       } catch (e) {
         setError(describeError(e, "가입 처리에 실패했어요. 입력한 정보를 확인해 주세요."));
@@ -142,6 +151,9 @@ export default function InviteAccept() {
       });
       localStorage.setItem("caregiver_id", String(result.caregiver_id));
       localStorage.setItem("patient_id", String(result.patient_id));
+      // [2026-07-29 추가] 새로 만든 보호자 계정일 때만 백엔드가 access_token을 내려준다
+      // (기존 로그인 계정으로 수락한 경우는 이미 유효한 토큰이 있어 안 내려줌).
+      if (result.access_token) localStorage.setItem("access_token", result.access_token);
       setDecided("accepted");
     } catch (e) {
       setError(
@@ -186,7 +198,17 @@ export default function InviteAccept() {
           </div>
         ) : error && !invite ? (
           <div className="rounded-3xl p-10 w-full max-w-md text-center bg-[#F9F4EB] shadow-lg">
-            <p className="text-[15px] text-[#D94F4F]">{error}</p>
+            <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-5 bg-[rgba(224,138,91,0.15)]">
+              <AlertTriangle className="w-8 h-8 text-[#C1653D]" />
+            </div>
+            <h2 className="text-[22px] font-black text-[#1E1A17] mb-2">초대 링크를 열 수 없어요</h2>
+            <p className="text-[14px] text-[#8A7E75] mb-7">{error}</p>
+            <button
+              onClick={() => navigate(isLoggedIn() ? "/dashboard" : "/login")}
+              className="w-full py-3.5 rounded-full text-white font-bold text-[15px] bg-[#C1653D]"
+            >
+              {isLoggedIn() ? "대시보드로 이동" : "로그인하러 가기"}
+            </button>
           </div>
         ) : decided ? (
           <div className="rounded-3xl p-10 w-full max-w-md text-center bg-[#F9F4EB] shadow-lg">

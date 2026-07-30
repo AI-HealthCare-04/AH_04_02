@@ -33,7 +33,7 @@ from core.dependencies import (
 from core.push import send_push_to_recipient, vapid_public_key
 from core.relation_notices import create_relation_notice
 from core.security import hash_phone, hash_token, normalize_phone
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from models import (
     Caregiver,
     CaregiverPatient,
@@ -46,6 +46,7 @@ from models import (
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
+from routers.auth_router import _issue_login_response
 from routers.monitoring_router import PatientCreate, _register_patient
 
 INVITATION_EXPIRE_DAYS = 7
@@ -189,6 +190,10 @@ def accept_invitation(
     session: Session = Depends(get_session),
     actor: Caregiver | None = Depends(get_current_caregiver_optional),
     patient_actor: Patient | None = Depends(get_current_patient_optional),
+    # [2026-07-29 추가] 기존 테스트들이 (token, payload, session[, actor[, patient_actor]])
+    # 위치 인자 관례로 이 함수를 직접 호출한다 — response를 그 앞에 끼워넣으면 session 자리가
+    # 밀려서 전부 깨진다(실제로 재현됨). 관례를 안 깨려고 맨 뒤에 둔다.
+    response: Response = Response(),
 ):
     """[2026-07-22 수정 — HIGH, 팀원 리뷰(fkmc10101-hub) 지적 반영] 이 엔드포인트는 계정이
     없는 사람도 써야 해서(인증 없이 새 보호자 계정을 만드는 경로) 여전히 로그인을 강제하지
@@ -257,7 +262,13 @@ def accept_invitation(
         invitation.accepted_at = datetime.now()
         session.add(invitation)
         session.commit()
-        return {"patient_id": new_patient.id, "status": "accepted"}
+        # [2026-07-29 추가, 실제 재현된 버그 수정] 여기서 새로 만든 계정인데 access_token을
+        # 안 내려주고 있었다 — 프론트가 patient_id만 localStorage에 저장하고 "로그인된 것처럼"
+        # 다음 화면(대시보드 등)으로 보내니, 실제 인증 없는 요청이 전부 401 → 강제 로그아웃으로
+        # 이어졌다(연결이 "제대로 안 되는" 현상의 실제 원인). login()과 동일한 방식으로 토큰을
+        # 발급한다.
+        login_info = _issue_login_response(response, new_patient.id, "patient", new_patient.name, session)
+        return {**login_info.model_dump(), "patient_id": new_patient.id, "status": "accepted"}
 
     if payload.caregiver_id:
         # [2026-07-22 수정 — HIGH] payload.caregiver_id를 그대로 신뢰하지 않는다 — 실제로
@@ -280,7 +291,16 @@ def accept_invitation(
         session.refresh(caregiver)
 
     _link_caregiver_to_invitation(session, invitation, caregiver)
-    return {"caregiver_id": caregiver.id, "patient_id": invitation.patient_id, "status": "accepted"}
+    result = {"caregiver_id": caregiver.id, "patient_id": invitation.patient_id, "status": "accepted"}
+    # [2026-07-29 추가] 위 new_patient 분기와 동일한 이유 — 새로 만든 보호자 계정도 access_token
+    # 없이 caregiver_id만 내려가서 다음 화면부터 인증 실패로 튕겨나갔다. 기존 로그인 계정으로
+    # 수락한 경우(payload.caregiver_id 있음)는 이미 유효한 토큰이 있으니 새로 안 내려줘도 된다.
+    if not payload.caregiver_id:
+        login_info = _issue_login_response(
+            response, caregiver.id, "caregiver", caregiver.name, session, relation_type=caregiver.relation_type
+        )
+        result = {**login_info.model_dump(), **result}
+    return result
 
 
 def _reactivate_or_create_link(session: Session, caregiver_id: int, patient_id: int) -> None:
