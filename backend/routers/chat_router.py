@@ -912,25 +912,39 @@ _GENERAL_CHAT_KEYWORDS = (
     "hello",
     "hi",
     "고마워",
-    "감사",
     "너 누구",
     "누구야",
     "약콩",
-    "사용법",
     "어떻게 써",
     "어떻게 사용",
     "뭐 할 수",
     "무엇을 할 수",
     "앱 안내",
     "서비스 안내",
-    "메뉴",
 )
+
+# 인사말 뒤에 실제 의료 질문이 이어지면(예: "안녕하세요, 이 약 부작용 있나요?") 근거 조회를
+# 건너뛰면 안 되므로, 키워드를 지운 나머지가 이 길이 이하로 짧을 때만 "일반 대화"로 본다.
+_GENERAL_CHAT_MAX_REMAINDER = 8
+_GENERAL_CHAT_PUNCTUATION_RE = re.compile(r"[!?.,~♥♡ㅎㅋㅜㅠ]")
 
 
 def _is_general_chat_question(question_text: str) -> bool:
-    """인사/앱 안내처럼 외부 의료 근거가 필요 없는 질문인지 판별한다."""
+    """인사/앱 안내처럼 외부 의료 근거가 필요 없는 질문인지 판별한다.
+
+    부분 문자열 포함 여부만 보면 "노바스크 메뉴판에 있나요"(메뉴), "아스피린 감사합니다"(감사)
+    같은 실제 의료 질문까지 일반 대화로 오분류된다. 키워드를 지우고 남는 나머지 텍스트가
+    짧을 때만(=인사말 외에 실질적인 질문 내용이 없을 때만) 일반 대화로 판별한다.
+    """
     normalized = question_text.lower().replace(" ", "")
-    return any(keyword.lower().replace(" ", "") in normalized for keyword in _GENERAL_CHAT_KEYWORDS)
+    for keyword in _GENERAL_CHAT_KEYWORDS:
+        key = keyword.lower().replace(" ", "")
+        if key not in normalized:
+            continue
+        remainder = _GENERAL_CHAT_PUNCTUATION_RE.sub("", normalized.replace(key, "", 1))
+        if len(remainder) <= _GENERAL_CHAT_MAX_REMAINDER:
+            return True
+    return False
 
 
 def _is_lifestyle_question(question_text: str) -> bool:
