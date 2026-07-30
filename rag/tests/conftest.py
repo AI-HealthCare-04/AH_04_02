@@ -15,12 +15,11 @@ def _isolate_mfds_disk_cache(tmp_path, monkeypatch):
     monkeypatch가 테스트 종료 시 _disk_cache를 자동으로 원래 값으로 복원한다.
     """
     import diskcache
-    import rag.dur_master as _dur_master_mod
     import rag.mfds_client as _mfds_client_mod
 
     test_cache = diskcache.Cache(str(tmp_path / "mfds_cache"), timeout=1)
     monkeypatch.setattr(_mfds_client_mod, "_disk_cache", test_cache)
-    monkeypatch.setattr(_dur_master_mod, "_disk_cache", test_cache)
+    # dur_master는 _mfds_client_mod._disk_cache를 런타임에 참조하므로 별도 패치 불필요
     yield
     test_cache.close()
 
