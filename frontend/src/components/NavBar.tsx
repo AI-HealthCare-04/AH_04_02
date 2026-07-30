@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ChevronDown, ChevronRight, Menu, Pill, Search, X } from "lucide-react";
+import { Bell, ChevronDown, ChevronRight, Menu, Pill, Search, X } from "lucide-react";
 import { getCurrentCaregiverId } from "../lib/session";
+import { listCorrectionNotices } from "../api/records";
+import { listRelationNotices } from "../api/care";
 import { C } from "../theme";
 
 interface NavBarProps {
@@ -32,7 +34,6 @@ const PATIENT_NAV_ITEMS: NavItem[] = [
     children: [
       { label: "복약 알림", to: "/schedule" },
       { label: "알림 설정", to: "/notification" },
-      { label: "알림함", to: "/notifications" },
     ],
   },
   { label: "복약 가이드", to: "/guides" },
@@ -57,7 +58,6 @@ const CAREGIVER_NAV_ITEMS: NavItem[] = [
   // 여러 환자를 관리하는 보호자·기관 입장에서 진입점이 너무 깊었다 — 다중 환자 요약형으로
   // 바뀐 대시보드를 내비바 최상위 메뉴로 승격.
   { label: "모니터링", to: "/monitoring" },
-  { label: "알림함", to: "/notifications" },
   { label: "연결관리", to: "/connect" },
   { label: "설정", to: "/settings" },
 ];
@@ -83,6 +83,11 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
   // [2026-07-20] 통합검색이 lg 미만(모바일 포함 전체)에서 아예 안 보이던 문제 —
   // 데스크톱 입력창 대신, 돋보기 버튼을 누르면 헤더 아래로 펼쳐지는 검색줄을 추가.
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  // [2026-07-30 추가] "알림함" 메뉴 텍스트 링크를 없애고 프로필 옆 종 아이콘 + 배지로
+  // 대체 — 미확인 개수는 안 읽음 상태가 있는 두 소스(처방전 검토·수정 알림, 환자 연결
+  // 알림)만 합산한다. 복약 알림(NotificationLog)은 백엔드가 안 읽음 상태를 응답에
+  // 아예 안 내려줘서 집계 대상에서 뺐다.
+  const [unreadCount, setUnreadCount] = useState(0);
   const allMenuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLDivElement>(null);
   const navItems = getCurrentCaregiverId() ? CAREGIVER_NAV_ITEMS : PATIENT_NAV_ITEMS;
@@ -120,6 +125,23 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  // [2026-07-30 추가] 페이지 이동마다 NavBar가 새로 마운트되므로(각 페이지가 직접
+  // <NavBar />를 그려서 공용 레이아웃이 아님), 여기서 매번 새로 받아오는 것만으로도
+  // 배지가 충분히 최신 상태를 반영한다 — 별도 폴링 불필요.
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    let cancelled = false;
+    Promise.all([listCorrectionNotices().catch(() => []), listRelationNotices().catch(() => [])]).then(
+      ([corrections, relations]) => {
+        if (cancelled) return;
+        setUnreadCount(corrections.length + relations.length);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoggedIn]);
 
   // [2026-07-20] 항목별 호버 드롭다운과 달리 이건 클릭으로 열고 닫으므로, 바깥을
   // 클릭했을 때도 닫히게 해야 한다 (호버 드롭다운은 mouseleave로 이미 처리됨).
@@ -343,6 +365,23 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
                   style={{ color: textColor }}
                 >
                   {mobileSearchOpen ? <X className="w-5 h-5" /> : <Search className="w-5 h-5" />}
+                </button>
+
+                <button
+                  onClick={() => navigate("/notifications")}
+                  aria-label={unreadCount > 0 ? `알림함 (안 읽은 알림 ${unreadCount}개)` : "알림함"}
+                  className="relative flex items-center justify-center w-8 h-8 shrink-0 transition-opacity hover:opacity-60"
+                  style={{ color: textColor }}
+                >
+                  <Bell className="w-5 h-5" />
+                  {unreadCount > 0 && (
+                    <span
+                      className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center text-[10px] font-bold text-white"
+                      style={{ background: "#D94F4F" }}
+                    >
+                      {unreadCount > 9 ? "9+" : unreadCount}
+                    </span>
+                  )}
                 </button>
 
                 <button
