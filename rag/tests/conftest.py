@@ -4,34 +4,25 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _clear_mfds_lru_caches():
-    """[2026-07-21 추가] search_by_name/search_permit_info/search_permit_detail/DUR 4종에
-    lru_cache를 추가했다(챗봇 DUR 조회 속도 개선) — 캐시가 프로세스 생명주기 동안 유지되면
-    같은 item_name을 서로 다른 mock 응답으로 검증하는 테스트끼리 캐시를 공유해 먼저 실행된
-    테스트의 결과가 나중 테스트에 새어나간다(실제로 test_search_by_name_raises_on_error_code가
-    이렇게 깨졌다). 매 테스트 전후로 캐시를 비워 테스트 간 격리를 보장한다."""
-    from rag.dur_master import (
-        search_age_taboo,
-        search_elderly_caution,
-        search_pregnancy_taboo,
-        search_usjnt_taboo,
-    )
-    from rag.mfds_client import search_by_name, search_permit_detail, search_permit_info
+def _isolate_mfds_disk_cache(tmp_path, monkeypatch):
+    """[2026-07-21 추가 → 2026-07-30 diskcache 전환에 맞게 수정]
+    lru_cache 시절의 cache_clear() 역할을 diskcache 방식으로 대체한다.
 
-    caches = [
-        search_by_name,
-        search_permit_info,
-        search_permit_detail,
-        search_usjnt_taboo,
-        search_elderly_caution,
-        search_age_taboo,
-        search_pregnancy_taboo,
-    ]
-    for cached_fn in caches:
-        cached_fn.cache_clear()
+    각 테스트마다 tmp_path 아래 격리된 임시 캐시 디렉토리를 사용해 테스트 간 캐시 오염을
+    방지한다 — lru_cache.cache_clear()와 달리 디스크 캐시는 프로세스 재시작 후에도 남으므로,
+    단순 clear() 대신 테스트마다 새 디렉토리를 쓰는 방식이 더 안전하다.
+
+    monkeypatch가 테스트 종료 시 _disk_cache를 자동으로 원래 값으로 복원한다.
+    """
+    import diskcache
+    import rag.dur_master as _dur_master_mod
+    import rag.mfds_client as _mfds_client_mod
+
+    test_cache = diskcache.Cache(str(tmp_path / "mfds_cache"), timeout=1)
+    monkeypatch.setattr(_mfds_client_mod, "_disk_cache", test_cache)
+    monkeypatch.setattr(_dur_master_mod, "_disk_cache", test_cache)
     yield
-    for cached_fn in caches:
-        cached_fn.cache_clear()
+    test_cache.close()
 
 
 @pytest.fixture(autouse=True)
