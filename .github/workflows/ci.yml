@@ -63,5 +63,9 @@ jobs:
             mkdir -p backend/certs
             echo "${{ secrets.AIVEN_CA_CERT_BASE64 }}" | base64 -d > backend/certs/aiven-ca.pem
             [ -s backend/certs/aiven-ca.pem ] || { echo "AIVEN_CA_CERT_BASE64 secret이 비어있거나 잘못됨"; exit 1; }
-            git pull --ff-only origin dev
+            git fetch origin dev
+            git merge --ff-only origin/dev || {
+              echo "⚠️ Fast-forward 실패 - EC2 로컬에 예상치 못한 변경이 있습니다. 강제 리셋합니다."
+              git reset --hard origin/dev
+            }
             docker compose -f docker-compose.yml up -d --build
