@@ -274,6 +274,7 @@ def _summarize_precautions_for_patient(
                 model=rag_settings.OPENAI_MODEL,
                 api_key=rag_settings.OPENAI_API_KEY,
                 temperature=0.3,
+                timeout=30,
                 model_kwargs={"response_format": {"type": "json_object"}},
             )
             callbacks = []
