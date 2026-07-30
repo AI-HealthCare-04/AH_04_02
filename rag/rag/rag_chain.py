@@ -1,6 +1,8 @@
 import json
 import logging
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from langchain_core.documents import Document
 from rag.chunking import drugs_to_documents
@@ -41,6 +43,13 @@ from rag.vectorstore import (
 )
 
 logger = logging.getLogger(__name__)
+
+# OpenAI API rate limit 대응 — 동시 LLM 호출 수를 전역으로 제한한다.
+# SELF_CONSISTENCY_SAMPLES × 약 수 × 진단명 수가 모두 병렬로 쏠릴 때 사용.
+# (asyncio.gather 대신 ThreadPoolExecutor를 쓰는 이유: rag_chain.py는 동기 모듈이고
+#  rag_router.py에서 asyncio.to_thread()로 스레드 안에서 호출된다 — 그 스레드 안에서
+#  asyncio 이벤트 루프를 새로 만드는 것보다 스레드 기반 병렬화가 더 단순하고 안전하다.)
+_LLM_SEMAPHORE = threading.BoundedSemaphore(5)
 
 SYSTEM_PROMPT = """\
 당신은 고령 만성질환 환자와 보호자를 위한 복약 안내를 작성하는 보조자입니다.
@@ -501,13 +510,26 @@ def _llm_generate_once(
         + f"환자 상황: {situation or '특이사항 없음'}\n\n"
         f"[참고자료]\n{context_text}"
     )
-    response = chat.invoke(
-        [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ]
-    )
+    with _LLM_SEMAPHORE:
+        response = chat.invoke(
+            [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ]
+        )
     return json.loads(response.content)
+
+
+def _lifestyle_llm_invoke_once(chat, system_prompt: str, user_prompt: str) -> dict:
+    with _LLM_SEMAPHORE:
+        return json.loads(
+            chat.invoke(
+                [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ]
+            ).content
+        )
 
 
 def generate_guide(
@@ -536,13 +558,16 @@ def generate_guide(
         model=settings.OPENAI_MODEL,
         api_key=settings.OPENAI_API_KEY,
         temperature=0.4,
+        timeout=30,
         model_kwargs={"response_format": {"type": "json_object"}},
     )
 
-    raw_candidates = [
-        _llm_generate_once(chat, drug_name, situation, dosage, context_text, diagnosis=diagnosis)
-        for _ in range(settings.SELF_CONSISTENCY_SAMPLES)
-    ]
+    with ThreadPoolExecutor(max_workers=settings.SELF_CONSISTENCY_SAMPLES) as pool:
+        futs = [
+            pool.submit(_llm_generate_once, chat, drug_name, situation, dosage, context_text, diagnosis=diagnosis)
+            for _ in range(settings.SELF_CONSISTENCY_SAMPLES)
+        ]
+        raw_candidates = [f.result() for f in futs]
 
     candidate_texts = [c.get("medication_guide") or "" for c in raw_candidates]
     best_idx, avg_similarity = pick_consistent_answer(candidate_texts)
@@ -699,20 +724,17 @@ def generate_lifestyle_guide_for_diagnosis(diagnosis: str | None) -> LifestyleGu
         model=settings.OPENAI_MODEL,
         api_key=settings.OPENAI_API_KEY,
         temperature=0.4,
+        timeout=30,
         model_kwargs={"response_format": {"type": "json_object"}},
     )
 
-    raw_candidates = [
-        json.loads(
-            chat.invoke(
-                [
-                    {"role": "system", "content": LIFESTYLE_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ]
-            ).content
-        )
-        for _ in range(settings.SELF_CONSISTENCY_SAMPLES)
-    ]
+    with ThreadPoolExecutor(max_workers=settings.SELF_CONSISTENCY_SAMPLES) as pool:
+        futs = [
+            pool.submit(_lifestyle_llm_invoke_once, chat, LIFESTYLE_SYSTEM_PROMPT, user_prompt)
+            for _ in range(settings.SELF_CONSISTENCY_SAMPLES)
+        ]
+        raw_candidates = [f.result() for f in futs]
+
     candidate_texts = [_flatten_lifestyle_candidate(c) for c in raw_candidates]
     best_idx, avg_similarity = pick_consistent_answer(candidate_texts)
     best = raw_candidates[best_idx]
@@ -943,6 +965,10 @@ def generate_guides_from_medications(medications: list) -> tuple[list[GuideRespo
         for medication in medications
     ]
 
+    # 약별 가이드 — 순서 보존(입력 인덱스 순), 항목별 실패 격리.
+    # 각 guide 내부에서 SELF_CONSISTENCY_SAMPLES 만큼의 LLM 호출이 ThreadPoolExecutor로
+    # 병렬화되므로, outer 루프를 병렬화하면 pick_consistent_answer()의 embed_documents()
+    # (CPU-bound, PyTorch) 가 동시에 경합해 Python GIL thrashing이 발생한다 — outer는 순차.
     guides: list[GuideResponse] = []
     for idx, medication in enumerate(medications):
         try:
