@@ -19,6 +19,7 @@ from routers.care_router import (
     accept_invitation_as_caregiver,
     create_invitation,
     delete_pending_invitation,
+    list_pending_invitations_for_caregiver,
     list_sent_patient_invitations,
 )
 from sqlmodel import Session, SQLModel, create_engine, select
@@ -590,3 +591,151 @@ def test_list_sent_patient_invitations_marks_expired_and_excludes():
         assert result == []
         session.refresh(expired)
         assert expired.status == "expired"
+
+
+# ── [2026-07-30 추가] 이미 연결된 사용자 재초대 차단 ──────────────────────────
+# 실사용 재현: 이미 연결된 보호자/환자를 다시 초대하면 그냥 성공해서 "초대중" 상태로
+# 넘어갔고, 그 낡은 초대가 "받은 초대" 목록에도 남아 수락/거절해도 "초대를 찾을 수
+# 없어요"만 뜨고 사라지지 않았다.
+
+def test_create_invitation_rejects_already_connected_caregiver():
+    """환자가 이미 연결된 보호자를 전화번호로 다시 초대하면 409."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        patient = models.Patient()
+        patient.name = "테스트 환자"
+        session.add(patient)
+        session.commit()
+        session.refresh(patient)
+
+        caregiver = _make_caregiver(session, "이미보호자", phone="010-1111-2222", relation_type="guardian")
+        session.add(models.CaregiverPatient(caregiver_id=caregiver.id, patient_id=patient.id, status="active"))
+        session.commit()
+
+        with pytest.raises(HTTPException) as exc:
+            create_invitation(
+                InvitationCreate(
+                    patient_id=patient.id,
+                    relation_type="guardian",
+                    invited_phone="010-1111-2222",
+                ),
+                ("patient", patient),
+                session,
+            )
+
+        assert exc.value.status_code == 409
+        assert session.exec(select(models.Invitation)).all() == []
+
+
+def test_create_invitation_rejects_already_connected_patient():
+    """보호자가 이미 연결된 환자를 전화번호로 다시 초대하면(relation_type="patient") 409."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        caregiver = _make_caregiver(session, "요양보호사")
+        patient = models.Patient()
+        patient.name = "이미환자"
+        patient.phone = "010-3333-4444"
+        session.add(patient)
+        session.commit()
+        session.refresh(patient)
+        session.add(models.CaregiverPatient(caregiver_id=caregiver.id, patient_id=patient.id, status="active"))
+        session.commit()
+
+        with pytest.raises(HTTPException) as exc:
+            create_invitation(
+                InvitationCreate(
+                    relation_type="patient",
+                    inviter_caregiver_id=caregiver.id,
+                    invited_phone="010-3333-4444",
+                ),
+                ("caregiver", caregiver),
+                session,
+            )
+
+        assert exc.value.status_code == 409
+
+
+def test_create_invitation_allows_reinviting_after_revoked_link():
+    """연결이 해제(status="revoked")된 사이라면 같은 상대를 다시 초대할 수 있어야 한다 —
+    active만 막고 revoked는 막지 않는지 확인."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        patient = models.Patient()
+        patient.name = "테스트 환자"
+        session.add(patient)
+        session.commit()
+        session.refresh(patient)
+
+        caregiver = _make_caregiver(session, "예전보호자", phone="010-1111-2222", relation_type="guardian")
+        session.add(
+            models.CaregiverPatient(caregiver_id=caregiver.id, patient_id=patient.id, status="revoked")
+        )
+        session.commit()
+
+        result = create_invitation(
+            InvitationCreate(
+                patient_id=patient.id,
+                relation_type="guardian",
+                invited_phone="010-1111-2222",
+            ),
+            ("patient", patient),
+            session,
+        )
+
+        assert "token" in result
+
+
+def test_create_invitation_skips_check_without_invited_phone():
+    """특정 대상 없이(링크 공유용) 만드는 초대는 사전 확인 자체를 건너뛰고 정상 생성돼야 한다."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        patient = models.Patient()
+        patient.name = "테스트 환자"
+        session.add(patient)
+        session.commit()
+        session.refresh(patient)
+
+        result = create_invitation(
+            InvitationCreate(patient_id=patient.id, relation_type="guardian"),
+            ("patient", patient),
+            session,
+        )
+
+        assert "token" in result
+
+
+# ── [2026-07-30 추가] "받은 초대" 목록에서 이미 연결된 사용자의 초대 숨김 ──────────
+
+def test_list_pending_invitations_excludes_already_connected_patient():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        caregiver = _make_caregiver(session, "보호자", phone="010-1111-2222")
+        invitation = _make_pending_invitation(session, invited_phone="010-1111-2222")
+        session.add(
+            models.CaregiverPatient(
+                caregiver_id=caregiver.id, patient_id=invitation.patient_id, status="active"
+            )
+        )
+        session.commit()
+
+        result = list_pending_invitations_for_caregiver(caregiver.id, caregiver, session)
+
+        assert result == []
+
+
+def test_list_pending_invitations_still_includes_unconnected_patient():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        caregiver = _make_caregiver(session, "보호자", phone="010-1111-2222")
+        invitation = _make_pending_invitation(session, invited_phone="010-1111-2222")
+
+        result = list_pending_invitations_for_caregiver(caregiver.id, caregiver, session)
+
+        assert len(result) == 1
+        assert result[0]["id"] == invitation.id

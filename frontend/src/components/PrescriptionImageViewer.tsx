@@ -244,7 +244,11 @@ export default function PrescriptionImageViewer({
           onClick={toggle}
         >
           <div
-            className="rounded-3xl p-5 w-[95vw] h-[92vh] max-w-5xl flex flex-col"
+            // [2026-07-30 버그수정] max-w-5xl(1024px)이 실제 처방전 사진 해상도에 비해
+            // 너무 좁아서, object-contain으로 사진 전체가 다 보이긴 해도 많이 축소된
+            // 채로만 보였다("전체 사진으로 확인할 수 있도록 사이즈 변경" 요청) — 너비
+            // 상한을 없애 뷰포트에 맞게(95vw) 최대한 크게 보이도록 한다.
+            className="rounded-3xl p-5 w-[95vw] h-[95vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
             style={{ background: C.surface }}
           >
