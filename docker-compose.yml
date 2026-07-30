@@ -11,7 +11,10 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     env_file:
-      - backend/.env
+      - path: backend/.env
+        required: true
+      - path: rag/.env
+        required: false
     volumes:
       - .:/workspace
       # frontend의 node_modules와 동일한 이유 — 바인드마운트가 이미지에 이미 설치된
