@@ -17,6 +17,7 @@ function dateKey(iso: string) {
 const REVIEW_STATUS_LABEL: Record<string, { text: string; bg: string; color: string }> = {
   pending: { text: "검토해 주세요", bg: `${C.terracotta}15`, color: C.terracotta },
   needs_correction: { text: "환자 수정 대기 중", bg: "#F5E6C8", color: "#8A6D1F" },
+  correction_completed: { text: "환자 수정 완료", bg: `${C.terracotta}15`, color: C.terracotta },
   reviewed: { text: "검토 완료", bg: `${C.success}20`, color: "#4A7A47" },
 };
 

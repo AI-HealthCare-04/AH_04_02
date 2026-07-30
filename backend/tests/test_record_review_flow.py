@@ -322,6 +322,23 @@ class TestCorrectMedicationField:
         assert notices_after_second[0].recipient_id == cg.id
         assert notices_after_second[0].event == "correction_completed"
 
+    def test_all_flags_corrected_flips_status_to_correction_completed(self, client: TestClient, session: Session):
+        # [2026-07-30 추가] 환자가 지목된 칸을 전부 고쳐도 caregiver_review_status가
+        # needs_correction에 그대로 머물러서, 보호자 화면이 "아직 환자가 안 고쳤다"는
+        # 문구를 계속 보여주던 버그의 회귀 테스트.
+        cg = _make_caregiver(session)
+        pt = _make_patient(session)
+        _link(session, cg, pt)
+        rec, ocr = _make_completed_record(session, pt.id, review_status="needs_correction")
+        session.add(MedicationFieldFlag(ocr_result_id=ocr.id, field_name="dosage", reason="틀렸어요", suggested_value="2정"))
+        session.commit()
+        headers = {"Authorization": f"Bearer {_token(pt.id, 'patient')}"}
+
+        client.patch(f"/records/{rec.id}/medications/{ocr.id}/correct", json={"field_name": "dosage"}, headers=headers)
+
+        session.refresh(rec)
+        assert rec.caregiver_review_status == "correction_completed"
+
     def test_unknown_field_name_rejected(self, client: TestClient, session: Session):
         pt = _make_patient(session)
         rec, ocr = _make_completed_record(session, pt.id, review_status="needs_correction")

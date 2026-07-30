@@ -131,8 +131,10 @@ export function formatUniqueSourceRefs(refs: SourceRef[]): { text: string; url?:
 
 // [2026-07-25 추가] 보호자·기관 검토 상태 — "none": 연결된 보호자·기관 없음(검토 대상 아님)
 // "pending": 검토 대기 / "needs_correction": 보호자·기관이 수정 요청, 환자 응답 대기
+// [2026-07-30 추가] "correction_completed": 환자가 지목된 칸을 전부 고쳐서 보호자·기관
+// 재검토 대기 — 이 값이 없으면 환자가 다 고쳐도 needs_correction에 계속 머물러 있었다.
 // "reviewed": 보호자·기관 최종 확인 완료
-export type CaregiverReviewStatus = "none" | "pending" | "needs_correction" | "reviewed";
+export type CaregiverReviewStatus = "none" | "pending" | "needs_correction" | "correction_completed" | "reviewed";
 
 export interface RecordResult {
   record_id: number;

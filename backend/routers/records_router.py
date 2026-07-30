@@ -901,6 +901,12 @@ async def correct_medication_field(
             .where(MedicationFieldFlag.corrected == False)  # noqa: E712
         ).first()
         if not remaining:
+            # [2026-07-30 추가] 환자가 지목된 칸을 전부 고치기 전까지는 caregiver_review_status가
+            # 계속 "needs_correction"(보호자 요청, 환자 응답 대기)이었는데, 다 고친 뒤에도 이 값이
+            # 안 바뀌어서 보호자 화면이 "아직 환자가 안 고쳤다"는 문구를 계속 보여주는 버그가 있었다.
+            # 이제 "환자가 다 고쳐서 재검토 대기" 상태로 명확히 전이시킨다.
+            rec.caregiver_review_status = "correction_completed"
+            session.add(rec)
             caregiver_ids = session.exec(
                 select(CaregiverPatient.caregiver_id)
                 .where(CaregiverPatient.patient_id == rec.patient_id)
