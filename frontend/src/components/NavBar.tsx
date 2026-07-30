@@ -60,7 +60,11 @@ const CAREGIVER_NAV_ITEMS: NavItem[] = [
   // 바뀐 대시보드를 내비바 최상위 메뉴로 승격.
   { label: "모니터링", to: "/monitoring" },
   { label: "연결관리", to: "/connect" },
-  { label: "설정", to: "/settings" },
+  // [2026-07-30 버그수정] Notification.tsx(이 기기로 알림 받기 + 환자 알림 설정)는
+  // PatientContextBanner 주석에 이미 보호자·기관용으로 설계돼 있었는데, 여기 메뉴에
+  // 링크가 아예 없어서 보호자·기관 계정은 진입 자체를 못 하고 있었다 — 환자 쪽처럼
+  // "설정" 하위로 넣는다.
+  { label: "설정", to: "/settings", children: [{ label: "알림 설정", to: "/notification" }] },
 ];
 
 /**
