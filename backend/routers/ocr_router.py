@@ -45,8 +45,8 @@ from services.langfuse_tracing import (
     update_observation,
 )
 from services.ocr_interface import get_ocr_provider  # noqa: E402
-from services.ocr_quality import requires_drug_name_review
-from services.parsing_rules import extract_prescription_date
+from services.ocr_quality import requires_drug_name_review  # noqa: E402
+from services.parsing_rules import extract_prescription_date  # noqa: E402
 
 # [2026-07-20 추가, 담당: 김영혜] /drug-info(DrugDetail.tsx)에 사용상의 주의사항·부작용·
 # 상호작용·보관법을 채워주기 위해 rag/ 패키지의 e약은요·DUR 클라이언트를 재사용한다.

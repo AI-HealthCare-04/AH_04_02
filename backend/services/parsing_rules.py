@@ -712,6 +712,10 @@ def parse_official_table_by_bbox(fields: list) -> list[dict]:
         bottom = row_ys[i] + half_gap if i == len(row_anchors) - 1 else (row_ys[i] + row_ys[i + 1]) / 2
 
         dm = DRUG_NAME_RE.search(anchor.get("inferText", ""))
+        if dm is None:
+            # row_anchors 자체가 이 regex로 걸러 뽑은 필드들이라 이론상 항상 매치되지만,
+            # 이 파일의 다른 파서들과 동일하게 방어적으로 처리한다(ty의 None 내로잉도 만족).
+            continue
         drug_name = dm.group(1) + (f" {_dm_dosage(dm)}" if dm.group(2) else "")
 
         dosage = _first_matching_cell_value(
