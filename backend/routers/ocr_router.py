@@ -110,6 +110,7 @@ def _fetch_eyakeun_info(candidates: list[str]) -> dict:
     side_effects: str | None = None
     interactions: str | None = None
     storage: str | None = None
+    indication: str | None = None
     try:
         from rag.mfds_client import search_by_name
 
@@ -132,6 +133,12 @@ def _fetch_eyakeun_info(candidates: list[str]) -> dict:
             side_effects = best_hit.se_qesitm.strip() if best_hit.se_qesitm else None
             interactions = best_hit.intrc_qesitm.strip() if best_hit.intrc_qesitm else None
             storage = best_hit.deposit_method_qesitm.strip() if best_hit.deposit_method_qesitm else None
+            # [2026-07-30 추가, 이슈 #107] search_by_name은 정부 API 자체의 "품목명 부분일치"
+            # 조회라 drug_reference._lookup_emedinfo()의 클라이언트 측 유사도 폴백과 달리
+            # 성분이 전혀 다른 약으로 오매칭될 위험이 없다 — get_drug_info()가 HIRA로 매칭돼
+            # efficacy를 못 채운 경우(효능·효과 필드가 로컬 e약은요 xlsx 매칭에만 존재해서
+            # HIRA 매칭 시 항상 빈 문자열이었던 문제)의 안전한 보강 소스로 쓴다.
+            indication = best_hit.efcy_qesitm.strip() if best_hit.efcy_qesitm else None
     except Exception:  # noqa: BLE001 — 키 미설정/네트워크 실패/미등재 약품명 등 어떤 이유로든 조용히 폴백
         pass
     return {
@@ -139,6 +146,7 @@ def _fetch_eyakeun_info(candidates: list[str]) -> dict:
         "side_effects": side_effects,
         "interactions": interactions,
         "storage": storage,
+        "indication": indication,
     }
 
 
@@ -207,6 +215,10 @@ def _fetch_rag_drug_detail(drug_name: str) -> dict:
         "interactions": eyakeun["interactions"],
         "storage": eyakeun["storage"],
         "dur_cautions": dur_cautions,
+        # [2026-07-30 추가, 이슈 #107] drug_info()가 get_drug_info()의 로컬 efficacy가
+        # 빈 값일 때 폴백으로 쓴다 — 응답 스키마에 새 필드를 노출하지 않도록 drug_info()가
+        # pop해서 소비한다.
+        "live_indication": eyakeun["indication"],
     }
 
 
@@ -347,14 +359,20 @@ def drug_info(drug_name: str):
         _, score = match_drug(drug_name)
         matched_name = drug_name if score >= MATCH_THRESHOLD else None
         rag_detail = _fetch_rag_drug_detail(drug_name)
+        # [2026-07-30 추가, 이슈 #107] get_drug_info()는 HIRA로 매칭되면 efficacy를 항상
+        # 빈 문자열로 반환한다(적응증 텍스트는 로컬 e약은요 xlsx 매칭 결과에만 있음) —
+        # 그 경우 live API(_fetch_eyakeun_info)로 보강 조회한 효능효과로 대체한다.
+        # 응답 스키마엔 그대로 없던 필드라 pop해서 소비하고 남기지 않는다.
+        live_indication = rag_detail.pop("live_indication", None)
         patient_summary = _summarize_precautions_for_patient(
             drug_name, rag_detail["precautions"], rag_detail["side_effects"], rag_detail["interactions"]
         )
+        indication = efficacy.strip() if efficacy else (live_indication.strip() if live_indication else efficacy)
         response = {
             "drug_name": drug_name,
             "matched_name": matched_name,
             "drug_class": result["drug_class"],
-            "indication": efficacy.strip() if efficacy else efficacy,
+            "indication": indication,
             **rag_detail,
             "patient_summary": patient_summary,
         }
