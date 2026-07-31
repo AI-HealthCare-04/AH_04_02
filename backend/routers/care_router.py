@@ -46,7 +46,7 @@ from models import (
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from routers.auth_router import _issue_login_response
+from routers.auth_router import _display_name_for_login, _issue_login_response
 from routers.monitoring_router import PatientCreate, _register_patient
 
 INVITATION_EXPIRE_DAYS = 7
@@ -308,8 +308,18 @@ def accept_invitation(
     # 없이 caregiver_id만 내려가서 다음 화면부터 인증 실패로 튕겨나갔다. 기존 로그인 계정으로
     # 수락한 경우(payload.caregiver_id 있음)는 이미 유효한 토큰이 있으니 새로 안 내려줘도 된다.
     if not payload.caregiver_id:
+        # [2026-07-31 수정, 리뷰 지적 반영] login()과 동일하게 _display_name_for_login()을
+        # 거친다 — 지금은 이 분기에서 만들어지는 caregiver가 organization일 수 없어(위
+        # relation_type == "patient" 분기와 배타적, invitation.relation_type이 그대로
+        # 넘어옴) caregiver.name과 결과가 같지만, login()과 다른 경로를 타는 것 자체가
+        # 나중에 organization 초대가 추가되면 조용히 틀어질 수 있는 지점이라 통일한다.
         login_info = _issue_login_response(
-            response, caregiver.id, "caregiver", caregiver.name, session, relation_type=caregiver.relation_type
+            response,
+            caregiver.id,
+            "caregiver",
+            _display_name_for_login("caregiver", caregiver),
+            session,
+            relation_type=caregiver.relation_type,
         )
         result = {**login_info.model_dump(), **result}
     return result
