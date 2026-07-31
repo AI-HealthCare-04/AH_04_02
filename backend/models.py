@@ -195,6 +195,10 @@ class CaregiverPatient(SQLModel, table=True):
     # [2026-07-23 추가] 승인 대기 시작 시각 — 2주(14일) 안에 상대가 응답하지 않으면 요청자가
     # 스스로 확정(자동 승인)할 수 있게 하는 타임아웃 기준점.
     revocation_requested_at: datetime | None = Field(default=None)
+    # [2026-07-30 추가] 여러 환자를 관리하는 보호자·기관이 "이 환자에 대한 알림은 이 기기로
+    # 안 받고 싶다"를 개별로 끌 수 있게 — NotificationSetting(환자 단위, 모든 보호자가 공유)과
+    # 달리 이건 (이 보호자, 이 환자) 관계 단위라 여기(CaregiverPatient)에 둔다.
+    notifications_enabled: bool = Field(default=True)
 
 
 # [2026-07-23 추가, 2026-07-24 확장] 환자-보호자 관계에 생긴 일(연결/해제/해제 요청 처리 결과)을

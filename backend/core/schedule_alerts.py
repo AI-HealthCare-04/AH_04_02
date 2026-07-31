@@ -51,3 +51,17 @@ def effective_alert_caregiver_ids(schedule: MedicationSchedule, session: Session
     if selected:
         return selected
     return linked_caregiver_ids(schedule.patient_id, session)
+
+
+def caregiver_wants_notifications(caregiver_id: int, patient_id: int, session: Session) -> bool:
+    """[2026-07-30 추가] 여러 환자를 관리하는 보호자·기관이 (이 보호자, 이 환자) 관계
+    단위로 알림을 꺼뒀는지 — CaregiverPatient.notifications_enabled. 연결 자체가 없거나
+    이미 해제됐으면(레코드 없음) 판단할 관계가 없으니 True로 둔다(호출부가 이미
+    linked_caregiver_ids/명시적 선택 등으로 "연결됨"을 전제하고 부르기 때문)."""
+    link = session.exec(
+        select(CaregiverPatient)
+        .where(CaregiverPatient.caregiver_id == caregiver_id)
+        .where(CaregiverPatient.patient_id == patient_id)
+        .where(CaregiverPatient.status != "revoked")
+    ).first()
+    return link.notifications_enabled if link else True

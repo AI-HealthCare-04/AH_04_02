@@ -23,6 +23,11 @@ export default function Dashboard() {
   // 어떤 약 때문에 알림이 왔는지 카드를 강조 표시한다 (core/scheduler.py의 push url 참고).
   const [searchParams] = useSearchParams();
   const highlightId = searchParams.get("highlight");
+  // [2026-07-30 추가] 복약 알림의 "복용했어요"/"건너뛸게요" 액션 버튼(sw.ts notificationclick)이
+  // 앱을 이 쿼리로 열거나 이미 열린 탭을 이동시킨다 — 서비스워커는 로그인 토큰이 없어 직접
+  // API를 못 부르니, 여기서 이미 인증된 checkIntake를 대신 호출해준다.
+  const actionParam = searchParams.get("action");
+  const appliedActionRef = useRef(false);
   const highlightRef = useRef<HTMLDivElement | null>(null);
   const [meds, setMeds] = useState<Medication[]>([]);
   const [loading, setLoading] = useState(true);
@@ -81,6 +86,15 @@ export default function Dashboard() {
       setSavingId(null);
     }
   };
+
+  useEffect(() => {
+    if (!highlightId || (actionParam !== "taken" && actionParam !== "skipped")) return;
+    if (appliedActionRef.current) return; // StrictMode 이중 마운트 방어(session.ts 관례와 동일)
+    appliedActionRef.current = true;
+    updateStatus(highlightId, actionParam);
+    navigate(`/dashboard?highlight=${highlightId}`, { replace: true }); // 재방문 시 중복 처리 방지
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightId, actionParam]);
 
   const today = new Date();
   const dateLabel = `${today.getFullYear()}년 ${today.getMonth() + 1}월 ${today.getDate()}일 (${"일월화수목금토"[today.getDay()]})`;

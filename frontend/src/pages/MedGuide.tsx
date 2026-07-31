@@ -30,9 +30,13 @@ import { getCurrentCaregiverId, getCurrentUserName, isLoggedIn } from "../lib/se
 import { FIELDS } from "../lib/prescriptionFields";
 
 // [2026-07-25 추가] caregiver_review_status 뱃지 표시.
+// [2026-07-30 수정] needs_correction은 "환자가 아직 안 고침"(보호자 요청, 응답 대기) 상태다 —
+// correction_completed(환자가 다 고침, 재검토 대기)와 구분해야 아래 검토하기 버튼을
+// 환자가 실제로 고치기 전에 잘못 보여주지 않는다.
 const REVIEW_STATUS_LABEL: Record<string, { text: string; bg: string; color: string }> = {
   pending: { text: "검토 대기", bg: `${C.terracotta}15`, color: C.terracotta },
-  needs_correction: { text: "환자 수정 대기", bg: "#F5E6C8", color: "#8A6D1F" },
+  needs_correction: { text: "환자 수정 대기 중", bg: "#F5E6C8", color: "#8A6D1F" },
+  correction_completed: { text: "환자 수정 완료", bg: `${C.terracotta}15`, color: C.terracotta },
   reviewed: { text: "검토 완료", bg: `${C.success}20`, color: "#4A7A47" },
 };
 
@@ -245,10 +249,17 @@ export default function MedGuide() {
 
             {result.caregiver_review_status === "reviewed" ? (
               <p className="text-[13px] mt-1" style={{ color: C.muted }}>검토를 완료했어요.</p>
+            ) : result.caregiver_review_status === "needs_correction" ? (
+              // [2026-07-30 추가] 보호자·기관이 방금 수정을 요청한 직후 — 환자가 아직 안 고쳤으니
+              // 검토하기 버튼을 눌러도 볼 게 없다. 환자가 다 고치면 correction_completed로 바뀌면서
+              // 아래 분기(검토하기 버튼)로 넘어간다.
+              <p className="text-[13px] mt-1" style={{ color: C.muted }}>
+                환자가 아직 수정하지 않았어요. 환자가 수정을 완료하면 검토할 수 있어요.
+              </p>
             ) : !reviewing ? (
               <>
                 <p className="text-[13px] mt-1 mb-3" style={{ color: C.muted }}>
-                  {result.caregiver_review_status === "needs_correction"
+                  {result.caregiver_review_status === "correction_completed"
                     ? "환자가 수정을 완료했어요. 검토하기를 눌러 칸별로 확인해 주세요."
                     : "검토하기를 눌러 환자가 확인한 처방전 내용을 그대로 확인해 주세요."}
                 </p>

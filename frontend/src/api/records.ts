@@ -131,8 +131,10 @@ export function formatUniqueSourceRefs(refs: SourceRef[]): { text: string; url?:
 
 // [2026-07-25 추가] 보호자·기관 검토 상태 — "none": 연결된 보호자·기관 없음(검토 대상 아님)
 // "pending": 검토 대기 / "needs_correction": 보호자·기관이 수정 요청, 환자 응답 대기
+// [2026-07-30 추가] "correction_completed": 환자가 지목된 칸을 전부 고쳐서 보호자·기관
+// 재검토 대기 — 이 값이 없으면 환자가 다 고쳐도 needs_correction에 계속 머물러 있었다.
 // "reviewed": 보호자·기관 최종 확인 완료
-export type CaregiverReviewStatus = "none" | "pending" | "needs_correction" | "reviewed";
+export type CaregiverReviewStatus = "none" | "pending" | "needs_correction" | "correction_completed" | "reviewed";
 
 export interface RecordResult {
   record_id: number;
@@ -428,12 +430,13 @@ export interface RecordCorrectionNotice {
   record_id: number;
   patient_id: number;
   patient_name: string;
-  event: "review_pending" | "correction_requested" | "correction_completed";
+  // [2026-07-30 추가] "review_completed": 보호자·기관이 검토를 완료 — 환자에게 알림.
+  event: "review_pending" | "correction_requested" | "correction_completed" | "review_completed";
   created_at: string;
   read_at: string | null;
 }
 
-/** 읽지 않은 처방전 검토 알림 — 환자는 "수정 요청"을, 보호자·기관은 "수정 완료"를 받는다. */
+/** 읽지 않은 처방전 검토 알림 — 환자는 "수정 요청"/"검토 완료"를, 보호자·기관은 "수정 완료"를 받는다. */
 export async function listCorrectionNotices() {
   const { data } = await monitoringClient.get<RecordCorrectionNotice[]>("/records/notices");
   return data;

@@ -529,6 +529,27 @@ class TestPushIntegration:
         called_targets = {(c.args[1], c.args[2]) for c in mock_push.call_args_list}
         assert called_targets == {("patient", pt.id)}
 
+    def test_push_respects_per_caregiver_notifications_enabled(self, session: Session):
+        # [2026-07-30 추가] 여러 환자를 관리하는 보호자·기관이 이 환자 알림만 개별로 꺼둔
+        # 경우 — caregiver_alert_false(일정 단위)와 달리 (보호자, 환자) 관계 단위 토글.
+        pt = _make_patient(session)
+        cg_off = _make_caregiver_linked(session, pt, "알림꺼둔보호자")
+        cg_on = _make_caregiver_linked(session, pt, "알림켜둔보호자")
+        link = session.exec(
+            select(CaregiverPatient).where(CaregiverPatient.caregiver_id == cg_off.id)
+        ).one()
+        link.notifications_enabled = False
+        session.add(link)
+        session.commit()
+        _make_schedule(session, pt, "08:00")
+        now = datetime(2026, 7, 19, 8, 5)
+
+        with patch("core.scheduler.send_push_to_recipient") as mock_push:
+            scheduler._fire_due_reminders(session, now)
+
+        called_targets = {(c.args[1], c.args[2]) for c in mock_push.call_args_list}
+        assert called_targets == {("patient", pt.id), ("caregiver", cg_on.id)}
+
 
 class TestSchedulerEnabledGate:
     def test_defaults_false_in_test_env(self, monkeypatch):

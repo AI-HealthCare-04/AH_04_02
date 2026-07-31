@@ -21,6 +21,7 @@ const STATUS_LABEL: Record<RecordSummary["status"], { text: string; bg: string; 
 const REVIEW_STATUS_LABEL: Record<string, { text: string; bg: string; color: string }> = {
   pending: { text: "보호자 검토 대기", bg: `${C.terracotta}15`, color: C.terracotta },
   needs_correction: { text: "내가 수정할 칸 있어요", bg: "#F5E6C8", color: "#8A6D1F" },
+  correction_completed: { text: "보호자 재검토 대기", bg: `${C.terracotta}15`, color: C.terracotta },
   reviewed: { text: "보호자 검토 완료", bg: `${C.success}20`, color: "#4A7A47" },
 };
 

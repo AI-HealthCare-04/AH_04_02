@@ -38,6 +38,9 @@ export interface Patient {
   medication_status: "active" | "paused" | "none";
   // [2026-07-23 추가] 환자 관리 테이블 "오늘 상태" 동그라미용 — GET /caregivers/{id}/patients만 채움
   today_status: "ok" | "missed";
+  // [2026-07-30 추가] "환자 단위"가 아니라 "이 보호자·이 환자 관계 단위" 값 — GET
+  // /caregivers/{id}/patients만 채움. 다른 곳에서는 항상 기본값(true)으로 온다.
+  notifications_enabled: boolean;
 }
 
 export interface Caregiver {
@@ -98,9 +101,37 @@ export async function clearIntake(scheduleId: string) {
  * 특정 보호자가 케어하는 환자 목록
  * (로그인이 없어서 지금은 caregiver_id를 localStorage 등에서 직접 관리)
  */
+// [2026-07-30 추가] 한 페이지에서 NavBar 배지·PatientContextBanner·useGuardedPatientId 등
+// 여러 컴포넌트가 동시에 이 함수를 호출해 같은 GET이 한 순간에 몰리면 일부가
+// net::ERR_ABORTED로 실패하는 걸 재현 확인했다 — 진행 중인 요청을 캐시해 동시 호출은
+// 실제 네트워크 요청 하나만 공유하게 한다(끝나면 즉시 비워 다음 호출은 새로 나간다).
+let inFlight: Promise<Patient[]> | null = null;
+let inFlightCaregiverId: number | null = null;
+
 export async function getCaregiverPatients(caregiverId: number) {
-  const { data } = await monitoringClient.get<Patient[]>(
-    `/monitoring/caregivers/${caregiverId}/patients`
+  if (inFlight && inFlightCaregiverId === caregiverId) return inFlight;
+  inFlightCaregiverId = caregiverId;
+  inFlight = monitoringClient
+    .get<Patient[]>(`/monitoring/caregivers/${caregiverId}/patients`)
+    .then((res) => res.data)
+    .finally(() => {
+      inFlight = null;
+      inFlightCaregiverId = null;
+    });
+  return inFlight;
+}
+
+/** [2026-07-30 추가] 여러 환자를 관리하는 보호자·기관이 (본인, 이 환자) 관계 단위로
+ * 알림 수신 여부를 끄고 켠다 — NotificationSetting(환자 단위, 모든 보호자가 공유하는
+ * "복약 알림"/"돌봄 알림" 설정)과는 별개다. */
+export async function updateCaregiverPatientNotifications(
+  caregiverId: number,
+  patientId: number,
+  enabled: boolean
+) {
+  const { data } = await monitoringClient.patch<{ notifications_enabled: boolean }>(
+    `/monitoring/caregivers/${caregiverId}/patients/${patientId}/notifications`,
+    { enabled }
   );
   return data;
 }
@@ -396,6 +427,8 @@ export interface NotificationLogEntry {
   kind: "reminder" | "missed";
   status: "pending" | "sent" | "suppressed" | "failed";
   fired_at: string;
+  // [2026-07-30 추가] null이면 알림함에 한 번도 표시된 적 없음(안 읽음).
+  acknowledged_at: string | null;
 }
 
 export async function getNotifications(patientId: number, days = 30) {
@@ -404,4 +437,11 @@ export async function getNotifications(patientId: number, days = 30) {
     { params: { days } }
   );
   return data;
+}
+
+/** [2026-07-30 추가] 알림함이 복약 알림 목록을 화면에 띄우는 시점에 호출 — 그 시점까지
+ * 안 읽었던 것 전부를 "표시함"으로 처리한다(개별 클릭 대상이 없는 단순 로그라 목록
+ * 노출 자체를 읽음 기준으로 삼음). */
+export async function acknowledgeNotifications(patientId: number) {
+  await monitoringClient.post(`/monitoring/patients/${patientId}/notifications/acknowledge`);
 }

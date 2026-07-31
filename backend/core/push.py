@@ -37,6 +37,7 @@ def send_push_to_recipient(
     title: str,
     body: str,
     url: str = "/",
+    schedule_id: int | None = None,
 ) -> bool:
     """recipient(환자 또는 보호자 본인 계정)가 등록한 모든 기기로 발송한다.
     한 기기 발송이 실패해도 나머지 기기는 계속 시도한다.
@@ -56,7 +57,13 @@ def send_push_to_recipient(
     if not subs:
         return False
 
-    payload = json.dumps({"title": title, "body": body, "url": url}, ensure_ascii=False)
+    payload_dict = {"title": title, "body": body, "url": url}
+    # [2026-07-30 추가] 복약 알림에 schedule_id를 같이 보내면 sw.ts가 "복용했어요"/
+    # "건너뛸게요" 액션 버튼을 붙인다 — 안드로이드/데스크톱 Chrome 계열만 지원(iOS Safari는
+    # 웹 푸시 액션 버튼 자체를 지원 안 해서 이 값이 있어도 버튼 없이 기존처럼 탭-오픈만 됨).
+    if schedule_id is not None:
+        payload_dict["schedule_id"] = schedule_id
+    payload = json.dumps(payload_dict, ensure_ascii=False)
     for sub in subs:
         try:
             webpush(

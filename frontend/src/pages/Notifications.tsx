@@ -4,7 +4,7 @@ import { Bell, AlertTriangle, FileEdit, CheckCircle2, Link2, Unlink } from "luci
 import NavBar from "../components/NavBar";
 import Skeleton from "../components/Skeleton";
 import EmptyState from "../components/EmptyState";
-import { getNotifications, type NotificationLogEntry } from "../api/monitoring";
+import { acknowledgeNotifications, getNotifications, type NotificationLogEntry } from "../api/monitoring";
 import { listCorrectionNotices, markCorrectionNoticeRead, type RecordCorrectionNotice } from "../api/records";
 import { listRelationNotices, markRelationNoticeRead, type RelationNotice } from "../api/care";
 import { getCurrentUserName, isLoggedIn, useGuardedPatientId } from "../lib/session";
@@ -17,10 +17,12 @@ const KIND_META: Record<NotificationLogEntry["kind"], { label: string; bg: strin
 
 // [2026-07-25 추가] 처방전 검토/수정 알림 — review_pending(보호자·기관에게: 새 처방전 등록됨),
 // correction_requested(환자에게: 수정 요청 옴), correction_completed(보호자·기관에게: 환자가 수정함)
+// [2026-07-30 추가] review_completed(환자에게: 보호자·기관이 검토를 완료함)
 const CORRECTION_META: Record<RecordCorrectionNotice["event"], { label: string; bg: string; color: string }> = {
   review_pending: { label: "검토 요청", bg: `${C.terracotta}18`, color: C.terracotta },
   correction_requested: { label: "수정 요청", bg: "rgba(217,79,79,0.12)", color: "#D94F4F" },
   correction_completed: { label: "수정 완료", bg: `${C.success}18`, color: "#4A7A47" },
+  review_completed: { label: "검토 완료", bg: `${C.success}18`, color: "#4A7A47" },
 };
 
 const RELATION_META: Record<RelationNotice["event"], { label: string; bg: string; color: string }> = {
@@ -50,7 +52,13 @@ export default function Notifications() {
 
   useEffect(() => {
     if (patientId == null) return;
-    getNotifications(patientId).then(setReminders).catch(() => {});
+    getNotifications(patientId)
+      .then(setReminders)
+      // [2026-07-30 추가] 이 화면에 목록이 실제로 표시된 시점 = "읽음" 처리 기준.
+      // 개별 항목이 클릭 대상이 없는 단순 로그라, 목록을 성공적으로 불러온 직후
+      // 그 시점까지 안 읽었던 것 전부를 한 번에 표시 처리한다(실패해도 무시).
+      .then(() => acknowledgeNotifications(patientId).catch(() => {}))
+      .catch(() => {});
   }, [patientId]);
 
   useEffect(() => {
@@ -154,7 +162,7 @@ export default function Notifications() {
                     style={border}
                   >
                     <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: meta.bg }}>
-                      {n.event === "correction_completed" ? (
+                      {n.event === "correction_completed" || n.event === "review_completed" ? (
                         <CheckCircle2 className="w-4 h-4" style={{ color: meta.color }} />
                       ) : (
                         <FileEdit className="w-4 h-4" style={{ color: meta.color }} />

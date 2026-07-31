@@ -24,7 +24,12 @@ function Toggle({ on, onChange, disabled = false }: { on: boolean; onChange: () 
 }
 
 export default function Notification() {
-  const patientId = useGuardedPatientId();
+  // [2026-07-30 버그수정] non-silent였어서, 여러 환자를 관리하는 보호자·기관이 아직
+  // 특정 환자를 안 골랐으면(2명 이상, localStorage에 저장된 patient_id 없음) 이 화면에
+  // 들어오자마자 /patients로 강제 이동됐다 — "이 기기로 알림 받기"는 잠깐 보이다가
+  // 환자별 토글은 아예 못 보고 튕겨나가는 것으로 보였다. silent로 바꿔서 null이면
+  // 아래에서 안내만 보여주고, PatientContextBanner로 환자를 고르면 그때 채워진다.
+  const patientId = useGuardedPatientId({ silent: true });
   const [settings, setSettings] = useState<NotificationSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -37,7 +42,13 @@ export default function Notification() {
   const [pushError, setPushError] = useState("");
 
   useEffect(() => {
-    if (patientId == null) return;
+    if (patientId == null) {
+      // 아직 특정 환자가 안 골라진 상태(보호자·기관이 2명 이상 관리 중) — 더 이상
+      // 스켈레톤을 무한히 띄우지 않고, 아래에서 "환자를 선택해주세요" 안내로 대체한다.
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     getNotificationSettings(patientId)
       .then(setSettings)
       .catch(() => setError("설정을 불러오지 못했어요."))
@@ -149,6 +160,11 @@ export default function Notification() {
               </div>
             ))}
           </div>
+        )}
+        {!loading && patientId == null && (
+          <p className="text-[14px] text-[#6E6259] bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl p-6">
+            위에서 환자를 선택하면 그 환자의 알림 설정을 볼 수 있어요.
+          </p>
         )}
         {error && <p className="text-[13px] text-[#D94F4F] mb-4">{error}</p>}
 

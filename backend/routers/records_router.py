@@ -22,6 +22,7 @@ from pathlib import Path
 from core.database import get_session
 from core.dependencies import Actor, get_current_actor, require_actor_patient_access
 from core.push import send_push_to_recipient
+from core.schedule_alerts import caregiver_wants_notifications
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from models import (
@@ -188,11 +189,14 @@ def _initial_caregiver_review_status(record: MedicalRecord, session: Session) ->
                 event="review_pending",
             )
         )
-        send_push_to_recipient(
-            session, "caregiver", caregiver_id,
-            title="새 처방전이 등록됐어요", body="검토가 필요한 처방전이 있어요.",
-            url=f"/records/{record.id}/guide",
-        )
+        # [2026-07-30 추가] 알림함 알림(위)은 그대로 남기고, "이 기기로" 받는 푸시만
+        # (이 보호자, 이 환자) 관계 단위로 꺼져있으면 건너뛴다.
+        if caregiver_wants_notifications(caregiver_id, record.patient_id, session):
+            send_push_to_recipient(
+                session, "caregiver", caregiver_id,
+                title="새 처방전이 등록됐어요", body="검토가 필요한 처방전이 있어요.",
+                url=f"/records/{record.id}/guide",
+            )
     return "pending"
 
 
@@ -829,8 +833,30 @@ async def mark_reviewed(
         if not rec:
             raise HTTPException(404, "해당 기록을 찾을 수 없어요")
         require_actor_patient_access(rec.patient_id, actor, session)
+        # [2026-07-31 추가] 이미 "reviewed"면 그대로 반환 — 아니면 같은 처방전을 여러
+        # 보호자/기관이 각자 검토 완료를 누르거나, 중복 클릭·새로고침 후 재호출될 때마다
+        # RecordCorrectionNotice(review_completed)가 계속 쌓이고 환자에게 푸시가 매번
+        # 다시 나간다(리뷰 지적사항, 실사용에서 반복될 수 있는 케이스).
+        if rec.caregiver_review_status == "reviewed":
+            return rec
         rec.caregiver_review_status = "reviewed"
         session.add(rec)
+        # [2026-07-30 추가] 보호자·기관이 검토를 완료해도 환자한테는 아무 알림이 안 가서,
+        # 환자가 자기 처방전이 검토 끝났는지 알 방법이 없었다 — correction_requested/
+        # correction_completed와 같은 패턴으로 환자에게 알림+푸시를 남긴다.
+        session.add(
+            RecordCorrectionNotice(
+                recipient_role="patient",
+                recipient_id=rec.patient_id,
+                record_id=rec.id,
+                event="review_completed",
+            )
+        )
+        send_push_to_recipient(
+            session, "patient", rec.patient_id,
+            title="처방전 검토가 완료됐어요", body="보호자·기관이 처방전 확인을 마쳤어요.",
+            url=f"/records/{rec.id}/guide",
+        )
         session.commit()
         session.refresh(rec)
         return rec
@@ -901,6 +927,12 @@ async def correct_medication_field(
             .where(MedicationFieldFlag.corrected == False)  # noqa: E712
         ).first()
         if not remaining:
+            # [2026-07-30 추가] 환자가 지목된 칸을 전부 고치기 전까지는 caregiver_review_status가
+            # 계속 "needs_correction"(보호자 요청, 환자 응답 대기)이었는데, 다 고친 뒤에도 이 값이
+            # 안 바뀌어서 보호자 화면이 "아직 환자가 안 고쳤다"는 문구를 계속 보여주는 버그가 있었다.
+            # 이제 "환자가 다 고쳐서 재검토 대기" 상태로 명확히 전이시킨다.
+            rec.caregiver_review_status = "correction_completed"
+            session.add(rec)
             caregiver_ids = session.exec(
                 select(CaregiverPatient.caregiver_id)
                 .where(CaregiverPatient.patient_id == rec.patient_id)
@@ -915,11 +947,12 @@ async def correct_medication_field(
                         event="correction_completed",
                     )
                 )
-                send_push_to_recipient(
-                    session, "caregiver", caregiver_id,
-                    title="환자가 처방전을 수정했어요", body="요청한 칸을 모두 고쳤어요. 확인하고 검토를 완료해주세요.",
-                    url=f"/records/{rec.id}/guide",
-                )
+                if caregiver_wants_notifications(caregiver_id, rec.patient_id, session):
+                    send_push_to_recipient(
+                        session, "caregiver", caregiver_id,
+                        title="환자가 처방전을 수정했어요", body="요청한 칸을 모두 고쳤어요. 확인하고 검토를 완료해주세요.",
+                        url=f"/records/{rec.id}/guide",
+                    )
             session.commit()
 
         session.refresh(rec)

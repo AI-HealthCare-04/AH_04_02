@@ -136,3 +136,83 @@ def test_linked_caregiver_can_view(client: TestClient, session: Session):
     )
     assert r.status_code == 200
     assert len(r.json()) == 1
+
+
+# ── POST /monitoring/patients/{patient_id}/notifications/acknowledge [2026-07-30 신규] ──
+# NavBar 종 아이콘 배지가 "알림함에 한 번도 표시된 적 없는" 복약 알림만 안 읽음으로
+# 세도록, acknowledged_at을 응답에 노출하고 일괄 표시 처리하는 엔드포인트를 검증한다.
+
+def _make_log(session: Session, patient_id: int, sched_id: int) -> NotificationLog:
+    log = NotificationLog(
+        schedule_id=sched_id, patient_id=patient_id, due_date=date.today().isoformat(),
+        time_slot="08:00", kind="reminder", status="sent",
+    )
+    session.add(log)
+    session.commit()
+    session.refresh(log)
+    return log
+
+
+def test_new_log_is_unacknowledged_by_default(client: TestClient, session: Session):
+    pt = _make_patient(session)
+    sched = MedicationSchedule(patient_id=pt.id, drug_name="약C", time_slot="08:00")
+    session.add(sched)
+    session.commit()
+    session.refresh(sched)
+    _make_log(session, pt.id, sched.id)
+
+    r = client.get(f"/monitoring/patients/{pt.id}/notifications", headers=_headers(pt.id))
+    assert r.json()[0]["acknowledged_at"] is None
+
+
+def test_acknowledge_marks_all_unread_logs(client: TestClient, session: Session):
+    pt = _make_patient(session)
+    sched1 = MedicationSchedule(patient_id=pt.id, drug_name="약D-1", time_slot="08:00")
+    sched2 = MedicationSchedule(patient_id=pt.id, drug_name="약D-2", time_slot="20:00")
+    session.add(sched1)
+    session.add(sched2)
+    session.commit()
+    session.refresh(sched1)
+    session.refresh(sched2)
+    log1 = _make_log(session, pt.id, sched1.id)
+    log2 = _make_log(session, pt.id, sched2.id)
+
+    r = client.post(f"/monitoring/patients/{pt.id}/notifications/acknowledge", headers=_headers(pt.id))
+    assert r.status_code == 200
+    assert r.json()["acknowledged"] == 2
+
+    session.refresh(log1)
+    session.refresh(log2)
+    assert log1.acknowledged_at is not None
+    assert log2.acknowledged_at is not None
+
+
+def test_acknowledge_does_not_touch_already_acknowledged_logs(client: TestClient, session: Session):
+    # 이미 표시된 로그의 acknowledged_at을 새 시각으로 덮어쓰지 않는지까지는 별도로 보진
+    # 않지만(현재 구현은 where acknowledged_at is null만 대상으로 삼아 자동으로 보장됨),
+    # 두 번째 호출이 이번엔 셀 게 없다는 것만 확인한다.
+    pt = _make_patient(session)
+    sched = MedicationSchedule(patient_id=pt.id, drug_name="약E", time_slot="08:00")
+    session.add(sched)
+    session.commit()
+    session.refresh(sched)
+    _make_log(session, pt.id, sched.id)
+
+    client.post(f"/monitoring/patients/{pt.id}/notifications/acknowledge", headers=_headers(pt.id))
+    r = client.post(f"/monitoring/patients/{pt.id}/notifications/acknowledge", headers=_headers(pt.id))
+    assert r.json()["acknowledged"] == 0
+
+
+def test_acknowledge_forbidden_for_unrelated_caregiver(client: TestClient, session: Session):
+    pt = _make_patient(session)
+    outsider = Caregiver(hashed_password="x")
+    outsider.name = "무관자"
+    session.add(outsider)
+    session.commit()
+    session.refresh(outsider)
+
+    r = client.post(
+        f"/monitoring/patients/{pt.id}/notifications/acknowledge",
+        headers={"Authorization": f"Bearer {create_access_token(outsider.id, 'caregiver')}"},
+    )
+    assert r.status_code == 403

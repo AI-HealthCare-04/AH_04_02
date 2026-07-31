@@ -47,7 +47,7 @@ from sqlmodel import Session, func, select
 from core.database import engine
 from core.email import send_email
 from core.push import send_push_to_recipient
-from core.schedule_alerts import effective_alert_caregiver_ids
+from core.schedule_alerts import caregiver_wants_notifications, effective_alert_caregiver_ids
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +179,10 @@ def _push_targets(session: Session, patient: Patient, schedule: MedicationSchedu
         return targets
 
     for caregiver_id in effective_alert_caregiver_ids(schedule, session):
-        targets.append(("caregiver", caregiver_id))
+        # [2026-07-30 추가] 여러 환자를 관리하는 보호자·기관이 이 환자에 대한 알림을
+        # 개별로 꺼뒀으면 제외 — 일정 단위 선택(위 함수)과는 별개 축.
+        if caregiver_wants_notifications(caregiver_id, patient.id, session):
+            targets.append(("caregiver", caregiver_id))
     return targets
 
 
@@ -230,6 +233,11 @@ def _deliver(session: Session, schedule: MedicationSchedule, patient: Patient, k
     # 있는 토글. 캐어기버 본인의 push 선호도를 patient별 설정으로 같이 묶는 건 단순화다
     # (환자 단위 NotificationSetting을 그대로 재사용) — 실제 요구가 생기면 분리 필요.
     if setting is None or setting.all_push_enabled:
+        # [2026-07-31 추가, 리뷰 지적 반영] role 구분 없이 patient/caregiver 모두에게 같은
+        # schedule_id를 실어 보낸다 — 의도된 동작이다. 보호자·기관도 "복용했어요" 액션
+        # 버튼으로 대신 체크할 수 있고(monitoring_router.py의 confirmed_by_caregiver_id가
+        # 인증된 actor 기준으로 이 경우를 이미 구분해서 기록한다), require_actor_patient_access가
+        # 이 환자에 연결된 보호자인지 어차피 검증하므로 새로운 인가 구멍은 아니다.
         for role, recipient_id in _push_targets(session, patient, schedule):
             if recipient_id is None:
                 continue
@@ -239,6 +247,7 @@ def _deliver(session: Session, schedule: MedicationSchedule, patient: Patient, k
             attempted = send_push_to_recipient(
                 session, role, recipient_id, title=subject, body=body,
                 url=f"/dashboard?highlight={schedule.id}",
+                schedule_id=schedule.id,
             )
             # [2026-07-24] 구독이 없거나 VAPID 키가 없으면 아무 일도 안 했다는 뜻이라
             # channels에 남기지 않는다 — "발송했다"는 로그가 실제로 아무것도 안 보낸

@@ -215,6 +215,45 @@ class TestMarkReviewed:
         )
         assert r.status_code == 403
 
+    def test_marking_reviewed_notifies_patient(self, client: TestClient, session: Session):
+        # [2026-07-30 추가] 보호자·기관이 검토를 완료해도 환자한테 알림이 안 가던 문제의
+        # 회귀 테스트 — review_completed 알림이 환자에게 남는지 확인한다.
+        cg = _make_caregiver(session)
+        pt = _make_patient(session)
+        _link(session, cg, pt)
+        rec, _ocr = _make_completed_record(session, pt.id)
+
+        r = client.post(
+            f"/records/{rec.id}/mark-reviewed",
+            headers={"Authorization": f"Bearer {_token(cg.id, 'caregiver')}"},
+        )
+        assert r.status_code == 200
+
+        notices = session.exec(select(RecordCorrectionNotice)).all()
+        assert len(notices) == 1
+        assert notices[0].recipient_role == "patient"
+        assert notices[0].recipient_id == pt.id
+        assert notices[0].event == "review_completed"
+
+    def test_marking_reviewed_twice_does_not_duplicate_notice(self, client: TestClient, session: Session):
+        """[2026-07-31 추가, 리뷰 지적 반영] 이미 "reviewed"인 처방전에 다시 호출해도(중복
+        클릭·새로고침 재시도·여러 보호자가 각자 호출 등) review_completed 알림/푸시가 또
+        쌓이면 안 된다 — 두 번째 호출부턴 그냥 조기 반환해야 한다."""
+        cg = _make_caregiver(session)
+        pt = _make_patient(session)
+        _link(session, cg, pt)
+        rec, _ocr = _make_completed_record(session, pt.id)
+
+        for _ in range(2):
+            r = client.post(
+                f"/records/{rec.id}/mark-reviewed",
+                headers={"Authorization": f"Bearer {_token(cg.id, 'caregiver')}"},
+            )
+            assert r.status_code == 200
+
+        notices = session.exec(select(RecordCorrectionNotice)).all()
+        assert len(notices) == 1
+
 
 # ── PATCH /records/{id}/medications/{med_id}/correct ───────────────────────
 
@@ -321,6 +360,23 @@ class TestCorrectMedicationField:
         assert notices_after_second[0].recipient_role == "caregiver"
         assert notices_after_second[0].recipient_id == cg.id
         assert notices_after_second[0].event == "correction_completed"
+
+    def test_all_flags_corrected_flips_status_to_correction_completed(self, client: TestClient, session: Session):
+        # [2026-07-30 추가] 환자가 지목된 칸을 전부 고쳐도 caregiver_review_status가
+        # needs_correction에 그대로 머물러서, 보호자 화면이 "아직 환자가 안 고쳤다"는
+        # 문구를 계속 보여주던 버그의 회귀 테스트.
+        cg = _make_caregiver(session)
+        pt = _make_patient(session)
+        _link(session, cg, pt)
+        rec, ocr = _make_completed_record(session, pt.id, review_status="needs_correction")
+        session.add(MedicationFieldFlag(ocr_result_id=ocr.id, field_name="dosage", reason="틀렸어요", suggested_value="2정"))
+        session.commit()
+        headers = {"Authorization": f"Bearer {_token(pt.id, 'patient')}"}
+
+        client.patch(f"/records/{rec.id}/medications/{ocr.id}/correct", json={"field_name": "dosage"}, headers=headers)
+
+        session.refresh(rec)
+        assert rec.caregiver_review_status == "correction_completed"
 
     def test_unknown_field_name_rejected(self, client: TestClient, session: Session):
         pt = _make_patient(session)
