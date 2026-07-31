@@ -64,13 +64,16 @@ def test_accept_invitation_commits_caregiver_and_link_together():
     with Session(engine) as session:
         _make_pending_invitation(session)
 
-        accept_invitation(RAW_TOKEN, InvitationAccept(caregiver_name="박보호"), session)
+        result = accept_invitation(RAW_TOKEN, InvitationAccept(caregiver_name="박보호"), session)
 
         caregivers = session.exec(select(models.Caregiver)).all()
         links = session.exec(select(models.CaregiverPatient)).all()
         assert len(caregivers) == 1
         assert len(links) == 1
         assert links[0].caregiver_id == caregivers[0].id
+        # [2026-07-31 추가, 리뷰 지적 반영] 신규 보호자 계정 생성 시 access_token이 함께
+        # 내려가는지 — 이게 빠지면 "가입 성공" 화면 이후 전부 401로 튕겨나가는 회귀다.
+        assert result["access_token"]
 
 
 def test_invitation_create_rejects_arbitrary_relation_type():
@@ -436,6 +439,9 @@ def test_accept_patient_invitation_creates_real_patient_and_link():
         assert result["status"] == "accepted"
         assert patient.name == "환자본인"
         assert patient.hashed_password is not None  # 실제 로그인 가능한 계정
+        # [2026-07-31 추가, 리뷰 지적 반영] 신규 환자 계정 생성 시 access_token이 함께
+        # 내려가는지 — 이게 빠지면 "가입 성공" 화면 이후 전부 401로 튕겨나가는 회귀다.
+        assert result["access_token"]
 
         notices = session.exec(select(models.RelationNotice)).all()
         assert len(notices) == 1

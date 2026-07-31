@@ -27,9 +27,13 @@ class FakeLangfuseClient:
 class FakeObservation:
     def __init__(self):
         self.updates: list[dict] = []
+        self.scores: list[dict] = []
 
     def update(self, **kwargs):
         self.updates.append(kwargs)
+
+    def score(self, **kwargs):
+        self.scores.append(kwargs)
 
 
 def _score_map(client: FakeLangfuseClient) -> dict[str, float]:
@@ -97,7 +101,13 @@ def test_chat_answer_records_auto_scores_in_trace_output(monkeypatch):
         "medical_safety",
         "patient_clarity",
     }
-    assert _score_map(client)["groundedness"] == output["auto_scores"]["groundedness"]
+    # [2026-07-31 버그수정 회귀 테스트] observation이 있으면 observation.score()로 그
+    # 특정 span에 점수가 붙어야 한다 — client.create_score(trace_id=...)로만 붙이면
+    # Langfuse UI에서 그 observation을 peek하며 보는 Scores 탭엔 안 뜬다(observationId
+    # 없는 트레이스-레벨 점수라서). client.scores가 비어있다는 것으로 트레이스-레벨
+    # fallback 경로를 안 탔다는 것까지 함께 확인한다.
+    assert _score_map(observation)["groundedness"] == output["auto_scores"]["groundedness"]
+    assert client.scores == []
 
 
 def test_chat_answer_creates_scores_with_current_trace_id(monkeypatch):

@@ -50,12 +50,36 @@ def _source_ref_count(source_refs: list[dict] | None) -> int:
     return len(source_refs or [])
 
 
-def _score_current_trace(name: str, value: float, *, comment: str, metadata: dict[str, Any] | None = None) -> None:
-    """Write a numeric score to the current Langfuse trace if available."""
+def _score_current_trace(
+    name: str, value: float, *, comment: str, metadata: dict[str, Any] | None = None, observation: Any = None
+) -> None:
+    """Write a numeric score to the given observation, or the current Langfuse trace.
+
+    [2026-07-31 버그수정] 기존엔 항상 client.create_score(trace_id=...)만 써서 점수가
+    트레이스 레벨에만 붙었다 — Langfuse UI에서 특정 observation(span)을 peek하며 그
+    observation 기준 Scores 탭을 보면(예: traceTab=scores와 함께 observation=... 쿼리로
+    들어온 링크) observationId가 없는 트레이스-레벨 점수는 안 뜬다. observation이 있으면
+    observation.score()로 그 span에 직접 점수를 붙인다 — 트레이스 레벨 Scores 탭에서도
+    여전히 보이고, 추가로 해당 observation의 Scores 탭에서도 보인다.
+    """
+    rounded_value = round(_clamp(value), 2)
+    if observation is not None:
+        try:
+            observation.score(
+                name=name,
+                value=rounded_value,
+                data_type="NUMERIC",
+                comment=comment,
+                metadata=metadata or {},
+            )
+            return
+        except Exception:  # noqa: BLE001 — scoring must never break the app response
+            logger.warning("Langfuse 자동 점수(%s) observation 기록에 실패했습니다.", name, exc_info=True)
+            return
+
     client = get_langfuse_client()
     if client is None:
         return
-    rounded_value = round(_clamp(value), 2)
     try:
         trace_id = client.get_current_trace_id()
         if trace_id:
@@ -156,30 +180,35 @@ def score_chat_answer(
         scores["groundedness"],
         comment="RAG context와 source_refs가 많을수록 높게 평가한 자동 점수입니다.",
         metadata=metadata,
+        observation=observation,
     )
     _score_current_trace(
         "source_relevance",
         scores["source_relevance"],
         comment="RAG 검색 근거를 70% 비중으로 반영한 자동 점수입니다.",
         metadata=metadata,
+        observation=observation,
     )
     _score_current_trace(
         "completeness",
         scores["completeness"],
         comment="근거 수와 답변 분량을 함께 본 자동 완성도 점수입니다.",
         metadata=metadata,
+        observation=observation,
     )
     _score_current_trace(
         "medical_safety",
         scores["medical_safety"],
         comment="위험한 복약 지시 표현은 감점하고 의사·약사 상담 안내는 가점한 자동 점수입니다.",
         metadata=metadata,
+        observation=observation,
     )
     _score_current_trace(
         "patient_clarity",
         scores["patient_clarity"],
         comment="답변 길이와 환자 친화적 표현을 기준으로 한 자동 점수입니다.",
         metadata=metadata,
+        observation=observation,
     )
 
 
@@ -228,30 +257,35 @@ def score_prescription_guide(
         scores["groundedness"],
         comment="복약가이드 source_refs 비율을 가장 크게 반영한 자동 점수입니다.",
         metadata=metadata,
+        observation=observation,
     )
     _score_current_trace(
         "source_relevance",
         scores["source_relevance"],
         comment="RAG 출처가 약/진단명 결과에 충분히 붙었는지 본 자동 점수입니다.",
         metadata=metadata,
+        observation=observation,
     )
     _score_current_trace(
         "completeness",
         scores["completeness"],
         comment="약별 주의사항과 진단명별 생활습관 안내가 채워졌는지 본 자동 점수입니다.",
         metadata=metadata,
+        observation=observation,
     )
     _score_current_trace(
         "medical_safety",
         scores["medical_safety"],
         comment="검토 필요 약품 비율을 반영한 자동 안전성 점수입니다.",
         metadata=metadata,
+        observation=observation,
     )
     _score_current_trace(
         "patient_clarity",
         scores["patient_clarity"],
         comment="구조화된 복약/생활습관 안내 존재 여부를 기준으로 한 자동 점수입니다.",
         metadata=metadata,
+        observation=observation,
     )
 
 
@@ -294,30 +328,35 @@ def score_drug_info_detail(
         scores["groundedness"],
         comment="허가사항/e약은요/DUR 근거 필드 존재 여부를 반영한 자동 점수입니다.",
         metadata=metadata,
+        observation=observation,
     )
     _score_current_trace(
         "source_relevance",
         scores["source_relevance"],
         comment="약품명 매칭 점수와 근거 필드 존재 여부를 반영한 자동 점수입니다.",
         metadata=metadata,
+        observation=observation,
     )
     _score_current_trace(
         "completeness",
         scores["completeness"],
         comment="주의사항/부작용/상호작용/환자용 요약이 채워졌는지 본 자동 점수입니다.",
         metadata=metadata,
+        observation=observation,
     )
     _score_current_trace(
         "medical_safety",
         scores["medical_safety"],
         comment="주의사항 또는 DUR 주의 근거가 있으면 높게 평가한 자동 안전성 점수입니다.",
         metadata=metadata,
+        observation=observation,
     )
     _score_current_trace(
         "patient_clarity",
         scores["patient_clarity"],
         comment="환자용 쉬운 말 요약 생성 여부를 기준으로 한 자동 점수입니다.",
         metadata=metadata,
+        observation=observation,
     )
 
 
@@ -356,22 +395,26 @@ def score_ocr_extraction(
         scores["source_relevance"],
         comment="OCR 결과에 약품명과 진단명이 실제로 추출됐는지 본 자동 점수입니다.",
         metadata=metadata,
+        observation=observation,
     )
     _score_current_trace(
         "completeness",
         scores["completeness"],
         comment="약품 개수, 진단명 추출, 낮은 신뢰도 비율을 반영한 OCR 완성도 점수입니다.",
         metadata=metadata,
+        observation=observation,
     )
     _score_current_trace(
         "groundedness",
         scores["groundedness"],
         comment="처방전에서 구조화된 약/진단 근거를 얼마나 확보했는지 본 자동 점수입니다.",
         metadata=metadata,
+        observation=observation,
     )
     _score_current_trace(
         "medical_safety",
         scores["medical_safety"],
         comment="검토 필요 상태이면 OCR 결과를 그대로 신뢰하지 않도록 낮게 표시한 자동 점수입니다.",
         metadata=metadata,
+        observation=observation,
     )
