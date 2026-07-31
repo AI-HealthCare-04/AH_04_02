@@ -69,3 +69,9 @@ jobs:
               git reset --hard origin/dev
             }
             docker compose -f docker-compose.yml up -d --build
+            # [2026-07-31 추가] 매 배포마다 --build로 새 이미지를 만들면서 예전 태그 없는
+            # (dangling) 이미지가 계속 쌓여 EC2 디스크를 채운다(실제로 40G 중 40G까지
+            # 차서 배포 자체가 실패하는 장애로 재현됨) — 배포마다 정리한다. 지금 쓰는
+            # 컨테이너/이미지는 건드리지 않는 안전한 범위(-a는 미사용 컨테이너의 이미지까지
+            # 포함하되 실행 중인 컨테이너가 쓰는 이미지는 제외)만 지운다.
+            docker image prune -af
