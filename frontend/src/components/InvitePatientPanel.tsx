@@ -3,6 +3,14 @@ import { Link2, MessageSquare, Phone, QrCode, RotateCw } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { createInvitation, deleteInvitation } from "../api/care";
 import { copyTextToClipboard } from "../lib/clipboard";
+import InfoModal from "./InfoModal";
+
+/** [2026-07-30 추가] Connect.tsx의 describeError와 동일한 패턴 — 백엔드가 내려준 구체적인
+ * 사유(예: "이미 연결된 사용자입니다.")를 뭉개지 않고 그대로 보여준다. */
+function describeError(e: unknown, fallback: string): string {
+  const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+  return typeof detail === "string" && detail ? detail : fallback;
+}
 
 /**
  * 문자 앱(sms:)으로 초대 링크를 보내기 위한 href를 만든다.
@@ -35,6 +43,9 @@ export default function InvitePatientPanel({
   const [urlCopied, setUrlCopied] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  // [2026-07-30 추가] 이미 연결된 환자를 다시 초대하면(409) 인라인 에러 문구로는 놓치기
+  // 쉬워서 팝업으로 확실히 알려준다.
+  const [alreadyConnectedMessage, setAlreadyConnectedMessage] = useState("");
 
   const handleInvite = async () => {
     setSending(true);
@@ -48,8 +59,13 @@ export default function InvitePatientPanel({
       setInviteId(created.id);
       setInviteUrl(window.location.origin + created.invite_url);
       onCreated?.();
-    } catch {
-      setError("초대를 만들지 못했어요.");
+    } catch (e) {
+      const status = (e as { response?: { status?: number } })?.response?.status;
+      if (status === 409) {
+        setAlreadyConnectedMessage(describeError(e, "이미 연결된 사용자입니다."));
+      } else {
+        setError("초대를 만들지 못했어요.");
+      }
     } finally {
       setSending(false);
     }
@@ -80,8 +96,13 @@ export default function InvitePatientPanel({
       setInviteUrl(window.location.origin + created.invite_url);
       setUrlCopied(false);
       onCreated?.();
-    } catch {
-      setError("초대를 다시 만들지 못했어요.");
+    } catch (e) {
+      const status = (e as { response?: { status?: number } })?.response?.status;
+      if (status === 409) {
+        setAlreadyConnectedMessage(describeError(e, "이미 연결된 사용자입니다."));
+      } else {
+        setError("초대를 다시 만들지 못했어요.");
+      }
     } finally {
       setSending(false);
     }
@@ -237,6 +258,12 @@ export default function InvitePatientPanel({
           )}
         </div>
       )}
+
+      <InfoModal
+        open={!!alreadyConnectedMessage}
+        message={alreadyConnectedMessage}
+        onClose={() => setAlreadyConnectedMessage("")}
+      />
     </div>
   );
 }

@@ -5,6 +5,7 @@ import NavBar from "../components/NavBar";
 import Skeleton from "../components/Skeleton";
 import EmptyState from "../components/EmptyState";
 import InvitePatientPanel from "../components/InvitePatientPanel";
+import InfoModal from "../components/InfoModal";
 import {
   acceptInvitationAsCaregiver,
   approveRevocation,
@@ -124,6 +125,9 @@ export default function Connect() {
   // 항목이 실패했는지 알아채기 어려웠다. 이 항목 근처(클릭한 자리)에 바로 보이도록
   // invitationId별로 별도 상태를 둔다.
   const [receivedInviteError, setReceivedInviteError] = useState<{ id: number; message: string } | null>(null);
+  // [2026-07-30 추가] 이미 연결된 사용자를 다시 초대하면(409) 인라인 에러 문구로는 놓치기
+  // 쉬워서 팝업으로 확실히 알려준다.
+  const [alreadyConnectedMessage, setAlreadyConnectedMessage] = useState("");
   const [inviteUrlInput, setInviteUrlInput] = useState("");
   const [inviteUrlError, setInviteUrlError] = useState("");
   // [2026-07-23 추가] "받은 해제 요청" — 기관이 사유를 남기고 연결 해제를 요청하면, 환자
@@ -269,8 +273,13 @@ export default function Connect() {
       setInviteId(created.id);
       setInviteUrl(window.location.origin + created.invite_url);
       await loadConnections(patientId);
-    } catch {
-      setError("초대를 만들지 못했어요.");
+    } catch (e) {
+      const status = (e as { response?: { status?: number } })?.response?.status;
+      if (status === 409) {
+        setAlreadyConnectedMessage(describeError(e, "이미 연결된 사용자입니다."));
+      } else {
+        setError("초대를 만들지 못했어요.");
+      }
     } finally {
       setCreatingInvite(false);
     }
@@ -298,8 +307,13 @@ export default function Connect() {
       setInviteUrl(window.location.origin + created.invite_url);
       setCopied(false);
       await loadConnections(patientId);
-    } catch {
-      setError("초대를 다시 만들지 못했어요.");
+    } catch (e) {
+      const status = (e as { response?: { status?: number } })?.response?.status;
+      if (status === 409) {
+        setAlreadyConnectedMessage(describeError(e, "이미 연결된 사용자입니다."));
+      } else {
+        setError("초대를 다시 만들지 못했어요.");
+      }
     } finally {
       setCreatingInvite(false);
     }
@@ -379,6 +393,13 @@ export default function Connect() {
       await acceptInvitationAsCaregiver(invitationId);
       setReceivedInvitations((prev) => prev.filter((inv) => inv.id !== invitationId));
     } catch (e) {
+      // [2026-07-30 버그수정] 404("초대를 찾을 수 없어요")는 이 초대가 이미 무효(예: 그
+      // 사이 다른 경로로 연결됨)라는 뜻이라, 계속 목록에 남겨두면 사용자가 눌러도 이
+      // 에러만 반복해서 보고 사라지지 않는 것처럼 보였다 — 목록에서도 함께 지운다.
+      const status = (e as { response?: { status?: number } })?.response?.status;
+      if (status === 404) {
+        setReceivedInvitations((prev) => prev.filter((inv) => inv.id !== invitationId));
+      }
       setReceivedInviteError({ id: invitationId, message: describeError(e, "초대 수락에 실패했어요.") });
     } finally {
       setActingInvitationId(null);
@@ -393,6 +414,10 @@ export default function Connect() {
       await rejectInvitationAsCaregiver(invitationId);
       setReceivedInvitations((prev) => prev.filter((inv) => inv.id !== invitationId));
     } catch (e) {
+      const status = (e as { response?: { status?: number } })?.response?.status;
+      if (status === 404) {
+        setReceivedInvitations((prev) => prev.filter((inv) => inv.id !== invitationId));
+      }
       setReceivedInviteError({ id: invitationId, message: describeError(e, "초대 거절에 실패했어요.") });
     } finally {
       setActingInvitationId(null);
@@ -831,6 +856,12 @@ export default function Connect() {
           </div>
         )}
       </main>
+
+      <InfoModal
+        open={!!alreadyConnectedMessage}
+        message={alreadyConnectedMessage}
+        onClose={() => setAlreadyConnectedMessage("")}
+      />
     </div>
   );
 }
