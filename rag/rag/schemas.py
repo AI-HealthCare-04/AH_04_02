@@ -307,6 +307,7 @@ class LifestyleGuideResult(BaseModel):
         default_factory=list,
         description=(
             "검토 사유 코드: no_diagnosis | no_lifestyle_context | no_citation | "
-            "low_self_consistency | dry_run | empty_lifestyle_fallback | empty_lifestyle_guide"
+            "low_self_consistency | dry_run | empty_lifestyle_fallback | empty_lifestyle_guide | "
+            "generation_error"
         ),
     )
