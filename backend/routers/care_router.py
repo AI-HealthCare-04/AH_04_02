@@ -193,7 +193,17 @@ def accept_invitation(
     # [2026-07-29 추가] 기존 테스트들이 (token, payload, session[, actor[, patient_actor]])
     # 위치 인자 관례로 이 함수를 직접 호출한다 — response를 그 앞에 끼워넣으면 session 자리가
     # 밀려서 전부 깨진다(실제로 재현됨). 관례를 안 깨려고 맨 뒤에 둔다.
-    response: Response = Response(),
+    #
+    # [2026-07-31 수정, 리뷰 지적 반영] 기본값을 `Response()`(변경 가능한 객체 리터럴) 대신
+    # `None`으로 둔다 — FastAPI가 실제 HTTP 요청에서는 타입 어노테이션(`Response`)만 보고
+    # 항상 새 Response를 주입해서 실제 서비스 동작엔 영향이 없지만(직접 검증함), response를
+    # 안 넘기고 이 함수를 직접 호출하는 기존 테스트들은 파이썬 함수 정의 시점에 단 한 번
+    # 생성된 이 기본값 객체를 전부 공유하게 된다 — 한 테스트가 쿠키를 심으면 다음 테스트가
+    # response를 직접 확인할 때 그 값이 새어 들어갈 수 있다. `None` 기본값은 매번 새로
+    # 만들어지므로 이 공유 문제가 없다. (`Response | None` 타입으로 바꾸면 FastAPI가 아예
+    # 이 파라미터를 특수 주입 대상으로 인식하지 못해 앱이 시작조차 안 되므로, 타입 자체는
+    # `Response`로 유지하고 기본값만 `None`으로 둔다.)
+    response: Response = None,  # type: ignore[assignment]
 ):
     """[2026-07-22 수정 — HIGH, 팀원 리뷰(fkmc10101-hub) 지적 반영] 이 엔드포인트는 계정이
     없는 사람도 써야 해서(인증 없이 새 보호자 계정을 만드는 경로) 여전히 로그인을 강제하지
@@ -201,6 +211,8 @@ def accept_invitation(
     믿으면, 초대 토큰만 가진 누구나 임의의 caregiver_id를 넣어 그 계정을 남의 환자에
     연결시킬 수 있었다(실제로 재현 — 인증 전혀 없이 성공). 이제 `caregiver_id`가 오면
     `get_current_caregiver_optional`로 실제 로그인된 그 계정인지 검증하고, 아니면 거부한다."""
+    if response is None:
+        response = Response()
     # [알려진 한계] 이 pending 체크와 아래 최종 commit 사이에 행 잠금이 없어, 같은 토큰으로
     # 동시에 두 번 수락 요청이 오면(예: 링크를 두 기기에서 거의 동시에 열기) 둘 다 이 체크를
     # 통과해 patient 분기에서 계정이 2개 생길 수 있다 — 이 앱 규모(소규모 팀, 낮은 동시성)에선
