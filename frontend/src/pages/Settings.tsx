@@ -65,7 +65,6 @@ export default function Settings() {
     <div className="min-h-screen bg-[#F2E8D8]">
       <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-xl mx-auto px-6 sm:px-8 py-10">
-        <PatientContextBanner />
         <h1 className="text-[26px] font-black text-[#1E1A17] mb-1">화면·챗봇 설정</h1>
         <p className="text-[14px] text-[#6E6259] mb-7">챗봇 이름과 글자 크기를 원하는 대로 바꿀 수 있어요.</p>
 
@@ -79,6 +78,11 @@ export default function Settings() {
 
         {settings && (
           <div className="bg-[#F9F4EB] border border-[rgba(30,26,23,0.12)] rounded-2xl p-6 mb-6">
+            {/* [2026-07-30 버그수정] "테스트환자님의 화면이에요"가 페이지 맨 위(글자
+                크기 같은 보호자 본인 설정까지 포함)에 있어서, 이 화면 전체가 환자의
+                화면인 것처럼 보였다 — 실제로 환자별로 다른 값은 챗봇 이름뿐이라, 그
+                카드 안으로 옮겨 "이 챗봇 이름은 어느 환자 기준인지"만 알려준다. */}
+            <PatientContextBanner />
             <p className="text-[16px] font-bold text-[#1E1A17] mb-1">챗봇 이름</p>
             <p className="text-[14px] text-[#6E6259] mb-4">기본값은 "{DEFAULT_CHATBOT_NAME}"예요. 원하는 이름으로 바꿔보세요.</p>
             <div className="flex gap-2">

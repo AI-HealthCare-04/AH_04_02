@@ -115,6 +115,51 @@ def _get_invitation_by_token(session: Session, token: str) -> Invitation:
     return invitation
 
 
+def _reject_if_already_connected(
+    session: Session,
+    *,
+    relation_type: str,
+    invited_phone: str,
+    patient_id: int | None,
+    inviter_caregiver_id: int | None,
+) -> None:
+    """[2026-07-30 추가] 초대 대상이 이미 이 환자와 활성 연결이 있으면 초대 자체를 만들지
+    않는다 — 안 그러면 이미 연결된 사람에게 또 초대를 보내도 그냥 성공해버려서, 프론트가
+    "이미 연결된 사용자"와 "정상적인 새 초대"를 구분할 방법이 없었다(실사용 재현: 이미
+    연결된 보호자를 다시 초대하면 "초대중" 상태로 넘어가고, 그 초대가 "받은 초대" 목록에도
+    떠서 수락/거절 시 "초대를 찾을 수 없어요"만 뜨고 사라지지 않았다).
+
+    invited_phone이 없는(링크 공유용, 특정 대상 없음) 초대는 애초에 누구에게 갈지 몰라
+    사전 확인이 불가능하므로 호출부에서 이 함수 자체를 건너뛴다.
+    """
+    phone_hash = hash_phone(invited_phone)
+    if relation_type == "patient":
+        target_patient = session.exec(select(Patient).where(Patient.phone_hash == phone_hash)).first()
+        if not target_patient:
+            return
+        link_query = (
+            select(CaregiverPatient)
+            .where(CaregiverPatient.caregiver_id == inviter_caregiver_id)
+            .where(CaregiverPatient.patient_id == target_patient.id)
+        )
+    else:
+        target_caregiver = session.exec(
+            select(Caregiver)
+            .where(Caregiver.phone_hash == phone_hash)
+            .where(Caregiver.relation_type == relation_type)
+        ).first()
+        if not target_caregiver:
+            return
+        link_query = (
+            select(CaregiverPatient)
+            .where(CaregiverPatient.caregiver_id == target_caregiver.id)
+            .where(CaregiverPatient.patient_id == patient_id)
+        )
+    link = session.exec(link_query.where(CaregiverPatient.status == "active")).first()
+    if link:
+        raise HTTPException(409, "이미 연결된 사용자입니다.")
+
+
 @router.post("/invitations")
 def create_invitation(
     payload: InvitationCreate,
@@ -141,6 +186,15 @@ def create_invitation(
         require_actor_patient_access(payload.patient_id, actor, session)
         patient_id = payload.patient_id
         inviter_caregiver_id = None
+
+    if payload.invited_phone:
+        _reject_if_already_connected(
+            session,
+            relation_type=payload.relation_type,
+            invited_phone=payload.invited_phone,
+            patient_id=patient_id,
+            inviter_caregiver_id=inviter_caregiver_id,
+        )
 
     token = secrets.token_urlsafe(8)
     invitation = Invitation(
@@ -483,6 +537,20 @@ def list_pending_invitations_for_caregiver(
             inv.status = "expired"
             session.add(inv)
             continue
+        # [2026-07-30 추가] 초대 생성 시점 이후 이미 연결됐거나(예: 다른 경로로 먼저 수락),
+        # create_invitation의 중복 방지 이전에 만들어진 낡은 초대는 여기서도 한 번 더
+        # 걸러낸다 — 이미 연결된 환자의 초대가 목록에 남아있으면 수락/거절해도
+        # "초대를 찾을 수 없어요"만 뜨고 사라지지 않는 문제가 있었다(받는 사람 입장에선
+        # 애초에 이 초대 자체가 뜨지 않아야 한다).
+        if inv.patient_id is not None:
+            already_connected = session.exec(
+                select(CaregiverPatient)
+                .where(CaregiverPatient.caregiver_id == caregiver.id)
+                .where(CaregiverPatient.patient_id == inv.patient_id)
+                .where(CaregiverPatient.status == "active")
+            ).first()
+            if already_connected:
+                continue
         patient = session.get(Patient, inv.patient_id) if inv.patient_id else None
         result.append(
             {
