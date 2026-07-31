@@ -233,6 +233,11 @@ def _deliver(session: Session, schedule: MedicationSchedule, patient: Patient, k
     # 있는 토글. 캐어기버 본인의 push 선호도를 patient별 설정으로 같이 묶는 건 단순화다
     # (환자 단위 NotificationSetting을 그대로 재사용) — 실제 요구가 생기면 분리 필요.
     if setting is None or setting.all_push_enabled:
+        # [2026-07-31 추가, 리뷰 지적 반영] role 구분 없이 patient/caregiver 모두에게 같은
+        # schedule_id를 실어 보낸다 — 의도된 동작이다. 보호자·기관도 "복용했어요" 액션
+        # 버튼으로 대신 체크할 수 있고(monitoring_router.py의 confirmed_by_caregiver_id가
+        # 인증된 actor 기준으로 이 경우를 이미 구분해서 기록한다), require_actor_patient_access가
+        # 이 환자에 연결된 보호자인지 어차피 검증하므로 새로운 인가 구멍은 아니다.
         for role, recipient_id in _push_targets(session, patient, schedule):
             if recipient_id is None:
                 continue

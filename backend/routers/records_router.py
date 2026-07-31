@@ -833,6 +833,12 @@ async def mark_reviewed(
         if not rec:
             raise HTTPException(404, "해당 기록을 찾을 수 없어요")
         require_actor_patient_access(rec.patient_id, actor, session)
+        # [2026-07-31 추가] 이미 "reviewed"면 그대로 반환 — 아니면 같은 처방전을 여러
+        # 보호자/기관이 각자 검토 완료를 누르거나, 중복 클릭·새로고침 후 재호출될 때마다
+        # RecordCorrectionNotice(review_completed)가 계속 쌓이고 환자에게 푸시가 매번
+        # 다시 나간다(리뷰 지적사항, 실사용에서 반복될 수 있는 케이스).
+        if rec.caregiver_review_status == "reviewed":
+            return rec
         rec.caregiver_review_status = "reviewed"
         session.add(rec)
         # [2026-07-30 추가] 보호자·기관이 검토를 완료해도 환자한테는 아무 알림이 안 가서,
