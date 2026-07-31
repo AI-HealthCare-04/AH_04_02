@@ -52,13 +52,20 @@ def test_lists_notifications_with_drug_name_newest_first(client: TestClient, ses
     session.commit()
     session.refresh(sched)
 
+    # [2026-07-31 버그수정] 절대 날짜(2026-07-01 등)로 하드코딩돼 있어서, 기본 조회
+    # 윈도우(days=30)가 "오늘" 기준으로 계속 움직이며 언젠가는 이 값이 그 윈도우 밖으로
+    # 밀려나 실패하는 time-bomb이었다(실제로 CI에서 재현됨) — 아래
+    # test_excludes_notifications_outside_days_window처럼 datetime.now() 기준 상대
+    # 오프셋으로 바꿔서, 실행 시점과 무관하게 항상 윈도우 안에 들어오게 한다.
+    older_fired_at = datetime.now() - timedelta(days=20)
+    newer_fired_at = datetime.now() - timedelta(days=5)
     older = NotificationLog(
-        schedule_id=sched.id, patient_id=pt.id, due_date="2026-07-01", time_slot="08:00",
-        kind="reminder", status="sent", fired_at=datetime(2026, 7, 1, 8, 0),
+        schedule_id=sched.id, patient_id=pt.id, due_date=older_fired_at.date().isoformat(), time_slot="08:00",
+        kind="reminder", status="sent", fired_at=older_fired_at,
     )
     newer = NotificationLog(
-        schedule_id=sched.id, patient_id=pt.id, due_date="2026-07-20", time_slot="08:00",
-        kind="missed", status="sent", fired_at=datetime(2026, 7, 20, 9, 0),
+        schedule_id=sched.id, patient_id=pt.id, due_date=newer_fired_at.date().isoformat(), time_slot="08:00",
+        kind="missed", status="sent", fired_at=newer_fired_at,
     )
     session.add(older)
     session.add(newer)
