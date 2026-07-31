@@ -7,7 +7,7 @@ import EmptyState from "../components/EmptyState";
 import { acknowledgeNotifications, getNotifications, type NotificationLogEntry } from "../api/monitoring";
 import { listCorrectionNotices, markCorrectionNoticeRead, type RecordCorrectionNotice } from "../api/records";
 import { listRelationNotices, markRelationNoticeRead, type RelationNotice } from "../api/care";
-import { getCurrentUserName, isLoggedIn, useGuardedPatientId } from "../lib/session";
+import { getCurrentCaregiverId, getCurrentUserName, isLoggedIn, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
 
 const KIND_META: Record<NotificationLogEntry["kind"], { label: string; bg: string; color: string }> = {
@@ -77,7 +77,15 @@ export default function Notifications() {
   const handleCorrectionClick = async (notice: RecordCorrectionNotice) => {
     await markCorrectionNoticeRead(notice.id).catch(() => {});
     setCorrectionNotices((prev) => prev.filter((n) => n.id !== notice.id));
-    navigate(notice.event === "correction_requested" ? `/records/${notice.record_id}/review?mode=correction` : `/records/${notice.record_id}/guide`);
+    // [2026-07-31 추가] correction_requested를 이제 환자뿐 아니라 다른 보호자·기관에게도
+    // 보낸다 — 보호자·기관은 직접 수정하는 사람이 아니라 지켜보는 입장이라, 환자용 수정
+    // 화면(review?mode=correction) 대신 다른 보호자용 알림과 동일하게 읽기 전용 가이드로 보낸다.
+    const isCaregiver = getCurrentCaregiverId() != null;
+    navigate(
+      notice.event === "correction_requested" && !isCaregiver
+        ? `/records/${notice.record_id}/review?mode=correction`
+        : `/records/${notice.record_id}/guide`
+    );
   };
 
   const handleRelationClick = async (notice: RelationNotice) => {
