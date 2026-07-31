@@ -316,8 +316,14 @@ export async function createRecord(patientId: number, file: File, caregiverId?: 
 }
 
 /** 새로고침 등으로 결과 화면을 다시 열었을 때 재조회용 */
+// [2026-07-31 버그수정] getRecordImageBlobUrl/createRecord와 같은 이유로 timeout을 늘린다 —
+// 공용 클라이언트의 기본 10초(monitoringClient.ts)로는 로컬(loopback)에서는 안 걸리다가
+// 실제 배포 환경(브라우저 → nginx → 백엔드, DB도 원격 Aiven)에서만 가끔 넘겨서, 가이드가
+// 실제로는 저장돼 있는데도 화면엔 "안 나옴"으로 보이던 문제.
 export async function getRecord(recordId: number) {
-  const { data } = await monitoringClient.get<RecordResult>(`/records/${recordId}`);
+  const { data } = await monitoringClient.get<RecordResult>(`/records/${recordId}`, {
+    timeout: 120000,
+  });
   return normalizeRecordResult(data);
 }
 
