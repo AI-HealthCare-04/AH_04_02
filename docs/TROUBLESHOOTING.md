@@ -1,4 +1,18 @@
 
+| 날짜 | 2026.07.01 |
+|---|---|
+| **작성자** | 권순현 |
+| **이슈** | PyCharm 이름 변경 다이얼로그에 슬래시(`/`) 포함 브랜치명 입력 시 “올바른 식별자가 아닙니다” 오류 |
+| **발생 위치** | PyCharm IDE Rename 다이얼로그 |
+| **원인** | `feature/ocr-day1-setup_soonhyun`은 Git 브랜치명이지 파일시스템 경로가 아니다. PyCharm의 Rename 다이얼로그는 파일·디렉터리 이름을 변경하는 UI이기 때문에, 슬래시(`/`)가 포함된 이름을 유효하지 않은 식별자로 판단한다. |
+| **해결** | 브랜치 생성과 push는 파일 탐색기가 아니라 터미널 Git 명령어로 처리한다. |
+| **핵심 패턴** | PyCharm의 Rename 다이얼로그는 파일명용이다. Git 브랜치는 반드시 터미널에서 `git checkout -b <name>` + `git push -u origin <name>`으로 생성한다. |
+
+```bash
+git checkout -b feature/ocr-day1-setup_soonhyun
+git push -u origin feature/ocr-day1-setup_soonhyun
+```
+
 ---
 
 | 날짜 | 2026.07.02 |
@@ -68,6 +82,44 @@ export async function askChat(patientId: number, questionId: string) {
 | **시도한 방법** | `/ocr/drug-info`(적응증 조회용 별도 엔드포인트)와 `drug_matcher.py`/`drug_reference.py`를 먼저 의심했으나, 이 엔드포인트는 처음부터 적응증(효능효과)만 담당하고 부작용/주의사항 필드는 조회하지 않도록 설계돼 있어 관련 없음을 확인. 실제 원인은 이미 응답에 있는 `record.guide.medication_guide.drugs[].precautions`를 화면이 안 읽는 것이었음 |
 | **해결** | `DrugInfo.tsx`에 `MedGuide.tsx`/`Result.tsx`와 동일한 분기 로직 추가: `guideText = guideDrug?.medication_guide ?? guideDrug?.dosage_text`, `cautionText = guideDrug?.precautions?.length ? guideDrug.precautions.join(" ") : guideDrug?.caution` |
 | **핵심 패턴** | stub/실제 두 응답 모양을 처리하는 방어 로직을 한 화면에만 추가하고 끝내지 말 것 — 같은 `GuideDrug`/`LifestyleGuide` 데이터를 읽는 화면이 여러 개(Result/MedGuide/DrugInfo)면 전부 같은 분기를 적용해야 함. 새 화면을 추가할 때마다 "이 필드, stub에만 있는 필드 아닌가?"를 `docs/rag-real-response-sample.md`로 확인하는 습관이 필요 |
+
+---
+
+| 날짜 | 2026.07.15 |
+|---|---|
+| **작성자** | 권순현 |
+| **이슈** | `backend/.env`의 `DATABASE_URL`을 수정하고 `docker compose restart`를 실행했는데, 로그에 여전히 이전 값(`APP_ENV=local`, SQLite)이 출력됨 |
+| **발생 위치** | `docker-compose.yml` backend 서비스 |
+| **원인** | `docker-compose.yml`의 `backend` 서비스에 `env_file`이나 `environment` 지시자가 없었다. 코드가 `load_dotenv()`로 `.env`를 직접 읽는 방식에만 의존하고 있어서 Compose 레벨에서는 이 파일의 존재를 알지 못했다. `docker compose restart`는 기존 컨테이너 프로세스를 그대로 재시작할 뿐이라, `.env` 파일을 수정해도 컨테이너 시작 시점에 이미 로드된 값이 유지된다. |
+| **해결** | `docker compose down` → `docker compose up -d` 로 컨테이너를 완전히 재생성한다. |
+| **검증** | `docker compose logs backend --tail=30 \| grep “\[db\]”` 로 `APP_ENV=development`로 변경됐는지 확인 |
+| **핵심 패턴** | 환경변수 변경 시 `restart`만으로는 반영되지 않는다. `down` → `up` 습관화 필요. 근본 해결은 `docker-compose.yml`에 `env_file: - backend/.env` 추가. |
+
+---
+
+| 날짜 | 2026.07.20 |
+|---|---|
+| **작성자** | 권순현 |
+| **이슈** | OCR이 “메트포르민정500mg”을 정확히 읽어도 `drug_matcher`가 `(“메트포르민정250mg”, score=1.0)`을 반환함 |
+| **발생 위치** | `backend/services/drug_matcher.py` — `match_drug()` |
+| **원인** | `_normalize()` 로직이 용량 표기를 제거하고 성분명만 남긴다. 서로 다른 용량의 약품(250mg / 500mg / 1000mg)이 모두 같은 정규화 키로 축약되는데, `dict[str, str]`로 관리하다 보니 먼저 등록된 값이 나중 값을 덮어써 나머지 후보가 소실됐다. score가 1.0으로 반환되어 “정확히 일치”로 오판되는 점이 더 위험하다. |
+| **영향 범위** | 24개 목업 테스트에서는 충돌 8그룹이 전부 외용제라 미발생. HIRA 약가마스터(30만 건) 적용 시 실제 발생 가능. |
+| **해결** | `dict[str, str]` → `dict[str, list[str]]`로 변경해 모든 후보를 보존하도록 수정(PR #57). 신규 테스트 15건 추가. |
+| **핵심 패턴** | 정규화 키가 충돌할 수 있는 사전은 `dict[str, str]` 대신 `dict[str, list[str]]`로 설계해 덮어쓰기를 방지한다. |
+
+```python
+# ❌ 문제가 된 코드 — 나중에 등록된 용량이 덮어써짐
+norm_to_raw: dict[str, str] = {}
+for raw, norm in zip(raw_pool, norm_pool):
+    if norm in close_norm and norm not in norm_to_raw:
+        norm_to_raw[norm] = raw
+
+# ✅ 수정 — 모든 후보 보존
+norm_to_raws: dict[str, list[str]] = {}
+for raw, norm in zip(raw_pool, norm_pool):
+    if norm in close_norm:
+        norm_to_raws.setdefault(norm, []).append(raw)
+```
 
 ---
 
@@ -286,118 +338,6 @@ retrieve-dur-lookup
 
 ---
 
-| 날짜 | 2026.07.01 |
-|---|---|
-| **작성자** | 권순현 |
-| **이슈** | PyCharm 이름 변경 다이얼로그에 슬래시(`/`) 포함 브랜치명 입력 시 “올바른 식별자가 아닙니다” 오류 |
-| **발생 위치** | PyCharm IDE Rename 다이얼로그 |
-| **원인** | `feature/ocr-day1-setup_soonhyun`은 Git 브랜치명이지 파일시스템 경로가 아니다. PyCharm의 Rename 다이얼로그는 파일·디렉터리 이름을 변경하는 UI이기 때문에, 슬래시(`/`)가 포함된 이름을 유효하지 않은 식별자로 판단한다. |
-| **해결** | 브랜치 생성과 push는 파일 탐색기가 아니라 터미널 Git 명령어로 처리한다. |
-| **핵심 패턴** | PyCharm의 Rename 다이얼로그는 파일명용이다. Git 브랜치는 반드시 터미널에서 `git checkout -b <name>` + `git push -u origin <name>`으로 생성한다. |
-
-```bash
-git checkout -b feature/ocr-day1-setup_soonhyun
-git push -u origin feature/ocr-day1-setup_soonhyun
-```
-
----
-
-| 날짜 | 2026.07.15 |
-|---|---|
-| **작성자** | 권순현 |
-| **이슈** | `backend/.env`의 `DATABASE_URL`을 수정하고 `docker compose restart`를 실행했는데, 로그에 여전히 이전 값(`APP_ENV=local`, SQLite)이 출력됨 |
-| **발생 위치** | `docker-compose.yml` backend 서비스 |
-| **원인** | `docker-compose.yml`의 `backend` 서비스에 `env_file`이나 `environment` 지시자가 없었다. 코드가 `load_dotenv()`로 `.env`를 직접 읽는 방식에만 의존하고 있어서 Compose 레벨에서는 이 파일의 존재를 알지 못했다. `docker compose restart`는 기존 컨테이너 프로세스를 그대로 재시작할 뿐이라, `.env` 파일을 수정해도 컨테이너 시작 시점에 이미 로드된 값이 유지된다. |
-| **해결** | `docker compose down` → `docker compose up -d` 로 컨테이너를 완전히 재생성한다. |
-| **검증** | `docker compose logs backend --tail=30 \| grep “\[db\]”` 로 `APP_ENV=development`로 변경됐는지 확인 |
-| **핵심 패턴** | 환경변수 변경 시 `restart`만으로는 반영되지 않는다. `down` → `up` 습관화 필요. 근본 해결은 `docker-compose.yml`에 `env_file: - backend/.env` 추가. |
-
----
-
-| 날짜 | 2026.07.27 |
-|---|---|
-| **작성자** | 권순현 |
-| **이슈** | Duck DNS 도메인(`yakcong.duckdns.org`) + nginx + HTTPS 적용 후, 기존 IP:포트(`http://52.200.250.115:5173`) 접속에서 잘 되던 로그인이 새 도메인(`https://yakcong.duckdns.org`)에서 네트워크 에러/CORS 에러로 실패함 |
-| **발생 위치** | EC2 서버의 `backend/.env` (`CORS_ALLOWED_ORIGINS`), `frontend/.env` (`VITE_MONITORING_API_URL`) |
-| **원인** | ① `backend/.env`의 `CORS_ALLOWED_ORIGINS`가 예전 IP 기준(`http://52.200.250.115:5173`)으로 남아있어, 새 도메인에서 오는 요청을 CORS가 차단함. ② `frontend/.env`의 `VITE_MONITORING_API_URL`도 예전 IP:포트(`http://52.200.250.115:8000`)를 그대로 가리켜, HTTPS 페이지에서 HTTP로 요청이 나가면서 Mixed Content로 차단되거나 CORS 에러가 발생함 |
-| **해결** | 도메인/HTTPS로 배포 방식이 바뀔 때마다 아래 두 값을 함께 갱신한다. EC2에서 실행: |
-| **재발 방지** | 배포 환경(IP/포트 → 도메인/HTTPS)이 바뀌면 `CORS_ALLOWED_ORIGINS`·`VITE_MONITORING_API_URL` 두 값을 반드시 함께 갱신한다. 회원가입/로그인 데이터는 DB(Aiven MySQL)에 그대로 남아있으므로 데이터 손실 걱정 없음. `backend/.env`·`frontend/.env`는 `.gitignore`로 git에 올라가지 않는 EC2 인스턴스 로컬 파일이라, 인스턴스를 새로 만들거나 재설정할 경우 이 항목을 참고해 다시 세팅해야 함 |
-
-```bash
-sed -i 's|CORS_ALLOWED_ORIGINS=.*|CORS_ALLOWED_ORIGINS=https://yakcong.duckdns.org|' backend/.env
-echo 'VITE_MONITORING_API_URL=https://yakcong.duckdns.org/api' > frontend/.env
-docker compose restart backend frontend
-```
-
-> ⚠️ 주의: 위 sed/echo 명령어는 파일 전체 값을 덮어씁니다. CORS_ALLOWED_ORIGINS에 이미 다른 도메인(예: 스테이징)이 콤마로 함께 등록되어 있거나, frontend/.env에 다른 변수가 있다면 이 명령어 대신 직접 파일을 열어 해당 줄만 수정하세요.
-
----
-
-| 날짜 | 2026.07.20 |
-|---|---|
-| **작성자** | 권순현 |
-| **이슈** | OCR이 “메트포르민정500mg”을 정확히 읽어도 `drug_matcher`가 `(“메트포르민정250mg”, score=1.0)`을 반환함 |
-| **발생 위치** | `backend/services/drug_matcher.py` — `match_drug()` |
-| **원인** | `_normalize()` 로직이 용량 표기를 제거하고 성분명만 남긴다. 서로 다른 용량의 약품(250mg / 500mg / 1000mg)이 모두 같은 정규화 키로 축약되는데, `dict[str, str]`로 관리하다 보니 먼저 등록된 값이 나중 값을 덮어써 나머지 후보가 소실됐다. score가 1.0으로 반환되어 “정확히 일치”로 오판되는 점이 더 위험하다. |
-| **영향 범위** | 24개 목업 테스트에서는 충돌 8그룹이 전부 외용제라 미발생. HIRA 약가마스터(30만 건) 적용 시 실제 발생 가능. |
-| **해결** | `dict[str, str]` → `dict[str, list[str]]`로 변경해 모든 후보를 보존하도록 수정(PR #57). 신규 테스트 15건 추가. |
-| **핵심 패턴** | 정규화 키가 충돌할 수 있는 사전은 `dict[str, str]` 대신 `dict[str, list[str]]`로 설계해 덮어쓰기를 방지한다. |
-
-```python
-# ❌ 문제가 된 코드 — 나중에 등록된 용량이 덮어써짐
-norm_to_raw: dict[str, str] = {}
-for raw, norm in zip(raw_pool, norm_pool):
-    if norm in close_norm and norm not in norm_to_raw:
-        norm_to_raw[norm] = raw
-
-# ✅ 수정 — 모든 후보 보존
-norm_to_raws: dict[str, list[str]] = {}
-for raw, norm in zip(raw_pool, norm_pool):
-    if norm in close_norm:
-        norm_to_raws.setdefault(norm, []).append(raw)
-```
-
----
-
-## 과거 EasyOCR 실험 기록 (참고용, 현재 미사용 — 현재는 CLOVA OCR 사용)
-
-> 아래 항목은 초기 프로토타입 단계에서 EasyOCR을 직접 사용하던 시기의 기록이다. 현재 OCR 처리는 `backend/routers/ocr_router.py`의 CLOVA OCR 인터페이스(`ocr_interface.py`)로 전환됐으며, EasyOCR 의존성은 제거됐다.
-
----
-
-| 날짜 | (EasyOCR 실험 초기) |
-|---|---|
-| **작성자** | 권순현 |
-| **이슈** | 한글이 포함된 처방전 이미지를 OCR에 넣었을 때 한글 부분이 전부 빈 결과로 반환됨 |
-| **발생 위치** | EasyOCR `Reader` 초기화 |
-| **원인** | EasyOCR은 Reader 초기화 시 선언한 언어 코드에 해당하는 모델만 로드한다. `[“en”]`만 선언하면 한국어 모델 자체를 불러오지 않는다. |
-| **해결** | `reader = easyocr.Reader([“en”, “ko”])` |
-| **현재 상태** | CLOVA OCR 전환으로 EasyOCR 미사용. 참고용으로만 보존. |
-
----
-
-| 날짜 | (EasyOCR 실험 초기) |
-|---|---|
-| **작성자** | 권순현 |
-| **이슈** | 한글이 포함된 샘플 이미지를 PIL로 생성했을 때 한글 부분이 깨지거나 빈 박스로 출력됨 |
-| **발생 위치** | PIL(Pillow) 이미지 생성 코드 |
-| **원인** | PIL의 기본 폰트(`ImageFont.load_default()`)는 ASCII 문자만 지원한다. 한글 렌더링에는 시스템에 설치된 한글 폰트 파일 경로를 직접 지정해야 한다. |
-| **해결** | `font = ImageFont.truetype(“/System/Library/Fonts/AppleSDGothicNeo.ttc”, size=24)` (macOS 기준) |
-| **현재 상태** | EasyOCR 테스트용 이미지 생성 코드였으므로 현재 미사용. |
-
----
-
-| 날짜 | (EasyOCR 실험 초기) |
-|---|---|
-| **작성자** | 권순현 |
-| **이슈** | “캡슐500mg” → “캡쑬50Omg” 처럼 약품명과 용량이 동시에 오인식됨 |
-| **발생 위치** | EasyOCR raw 결과 후처리 |
-| **원인** | EasyOCR이 시각적으로 유사한 문자를 혼동한다. 의약품 도메인에서는 한글 받침 혼동(“캡슐”→”캡쑬”)이나 숫자·문자 혼동(`0`→`O`)이 처방 용량이나 약품명 오인식으로 직결된다. |
-| **해결** | 2단계 후처리: ① 자주 혼동되는 패턴 사전 치환(`CHAR_CORRECTIONS`) → ② 의약품 도메인 사전과 유사도 비교(`difflib.get_close_matches`) |
-| **현재 상태** | CLOVA OCR 전환으로 후처리 파이프라인 불필요. 참고용으로만 보존. |
-
----
-
 | 날짜 | 2026.07.23 |
 |---|---|
 | **작성자** | 김영혜 |
@@ -448,6 +388,25 @@ for raw, norm in zip(raw_pool, norm_pool):
 
 | 날짜 | 2026.07.27 |
 |---|---|
+| **작성자** | 권순현 |
+| **이슈** | Duck DNS 도메인(`yakcong.duckdns.org`) + nginx + HTTPS 적용 후, 기존 IP:포트(`http://52.200.250.115:5173`) 접속에서 잘 되던 로그인이 새 도메인(`https://yakcong.duckdns.org`)에서 네트워크 에러/CORS 에러로 실패함 |
+| **발생 위치** | EC2 서버의 `backend/.env` (`CORS_ALLOWED_ORIGINS`), `frontend/.env` (`VITE_MONITORING_API_URL`) |
+| **원인** | ① `backend/.env`의 `CORS_ALLOWED_ORIGINS`가 예전 IP 기준(`http://52.200.250.115:5173`)으로 남아있어, 새 도메인에서 오는 요청을 CORS가 차단함. ② `frontend/.env`의 `VITE_MONITORING_API_URL`도 예전 IP:포트(`http://52.200.250.115:8000`)를 그대로 가리켜, HTTPS 페이지에서 HTTP로 요청이 나가면서 Mixed Content로 차단되거나 CORS 에러가 발생함 |
+| **해결** | 도메인/HTTPS로 배포 방식이 바뀔 때마다 아래 두 값을 함께 갱신한다. EC2에서 실행: |
+| **재발 방지** | 배포 환경(IP/포트 → 도메인/HTTPS)이 바뀌면 `CORS_ALLOWED_ORIGINS`·`VITE_MONITORING_API_URL` 두 값을 반드시 함께 갱신한다. 회원가입/로그인 데이터는 DB(Aiven MySQL)에 그대로 남아있으므로 데이터 손실 걱정 없음. `backend/.env`·`frontend/.env`는 `.gitignore`로 git에 올라가지 않는 EC2 인스턴스 로컬 파일이라, 인스턴스를 새로 만들거나 재설정할 경우 이 항목을 참고해 다시 세팅해야 함 |
+
+```bash
+sed -i 's|CORS_ALLOWED_ORIGINS=.*|CORS_ALLOWED_ORIGINS=https://yakcong.duckdns.org|' backend/.env
+echo 'VITE_MONITORING_API_URL=https://yakcong.duckdns.org/api' > frontend/.env
+docker compose restart backend frontend
+```
+
+> ⚠️ 주의: 위 sed/echo 명령어는 파일 전체 값을 덮어씁니다. CORS_ALLOWED_ORIGINS에 이미 다른 도메인(예: 스테이징)이 콤마로 함께 등록되어 있거나, frontend/.env에 다른 변수가 있다면 이 명령어 대신 직접 파일을 열어 해당 줄만 수정하세요.
+
+---
+
+| 날짜 | 2026.07.27 |
+|---|---|
 | **작성자** | 김영혜 |
 | **이슈** | (1) 처방전 OCR이 정제/캡슐 외 제형(시럽·주사·패치·점안·점이·나잘스프레이 등)을 인식 못해 그 약이 결과에서 통째로 빠짐 (2) 처방약물 정보의 부작용/보관방법이 실제로는 있는데도 "확인하지 못했어요"로 표시됨 (3) 복약가이드 생활습관 안내에 같은 내용이 중복 기재됨 (4) 1일 투약횟수/총 투약일수에 "필요시"(PRN)가 있으면 값이 그냥 비어서 표시됨 (5) 다른 역할로 가입한 계정으로 초대를 수락하면 이유를 알 수 없이 "수락 처리에 실패했어요"만 뜸 |
 | **발생 위치** | `backend/services/parsing_rules.py`, `backend/services/drug_matcher.py`, `backend/services/drug_reference.py`, `backend/routers/ocr_router.py`, `rag/rag/rag_chain.py`, `frontend/src/pages/InviteAccept.tsx` |
@@ -480,23 +439,6 @@ for raw, norm in zip(raw_pool, norm_pool):
 | **추가 발견/해결** | 테스트 중 Langfuse observation wrapper가 내부의 정상 예외(`ValueError`)까지 "observation 시작 실패"로 오인해 `RuntimeError: generator didn't stop after throw()`로 바꾸는 문제가 드러났다. `optional_observation()`을 수동 enter/exit 구조로 바꿔 observation 시작 실패만 폴백하고, 라우터 내부 예외는 원래 예외 그대로 전달되도록 수정했다. |
 | **테스트/검증** | `backend/tests/test_ocr_quality.py` 신규 추가. `backend/tests/test_rag_cache.py`에 검토 필요한 OCR 항목이 RAG 생성 대상에서 제외되는지, 전부 제외되면 가이드를 만들지 않는지 회귀 테스트 추가. `uv run pytest backend/tests/test_ocr_quality.py backend/tests/test_rag_cache.py backend/tests/test_langfuse_tracing.py backend/tests/test_ocr_router_drug_info.py backend/tests/test_langfuse_scoring.py -q` 결과 47개 통과. `uv run ruff check backend/services/ocr_quality.py backend/services/langfuse_tracing.py backend/routers/rag_router.py backend/tests/test_ocr_quality.py backend/tests/test_rag_cache.py` 통과. |
 | **재발 방지** | 의약품 fuzzy matching은 "후보 제안"과 "자동 환자 안내 생성"의 기준을 분리한다. OCR 원문을 다른 약품명으로 바꾸는 경우에는 더 높은 신뢰도 기준을 적용하고, 검토 필요한 OCR 항목은 RAG 입력과 캐시 키에서 모두 제외한다. 캐시 결과 모양이나 생성 대상 정책이 바뀌면 `GUIDE_DATA_VERSION`도 함께 올려 기존 캐시가 새 정책을 가리지 않게 한다. |
-
----
-
-| 날짜 | 2026.07.31 |
-|---|---|
-| **작성자** | 김영혜 (Claude 세션) |
-| **이슈** | 로컬 서버에서 팀 자체 제작 OCR 테스트지(`mock_prescription_05.png`, "정검증" 환자, 심바스타틴정/노바스크정/니트로링구알스프레이 3종)를 업로드하면 3번째 약(니트로링구알스프레이)의 용법·횟수·일수가 비어서 나옴. "PR #127에서 국가 표준 처방전 bbox 파서를 신설해 이 부분을 해소하고 테스트도 통과했다"고 했는데도 로컬에서 여전히 재현됨 |
-| **발생 위치** | `backend/services/parsing_rules.py`(`DRUG_NAME_RE`, `_parse_table_format`) |
-| **이미지 확인** | Claude가 이미지를 직접 읽어 표(No/의약품명/용법/일수) 3행을 확인: ①심바스타틴정20밀리그램/1일 1회 저녁 1정/30일 ②노바스크정5밀리그램/1일 1회 아침 1정/30일 ③니트로링구알스프레이/흉통 시 혀 밑에 1회 분무/필요시. 대각선 "MOCK TEST ONLY" 워터마크가 3번째 행을 가로지르고 있음. |
-| **원인 0 — PR #127과의 관계(오해 아님, 서로 다른 범위)** | PR #127의 bbox 파서(`parse_official_table_by_bbox`)는 CLOVA가 `fields`(좌표 포함)를 내려주고 `is_official_prescription_table(fields)`가 참일 때, 즉 **정부 국가 표준 처방전 양식**에서만 동작한다(`prescription_sample_*.png` 10종이 이 양식이라 실제로 정상 동작 — 직접 재현해 확인). 팀이 자체 제작한 "처방전 OCR 테스트지"(`mock_prescription_*.png` 5종)는 이 표준 양식이 아니라서 `is_official_prescription_table`이 거짓으로 판정되고, PR #127 이전부터 있던 구식 `_parse_table_format`(원문 텍스트 기반 정규식) 폴백을 그대로 탄다 — PR #127 테스트가 통과한 것과 이 이미지가 안 되는 것은 애초에 서로 다른 코드 경로라 모순이 아니다. |
-| **원인 1 — 진단명의 "질환"이 "환"(알약) 제형으로 오매칭** | `mock_prescription_03.png`(심혈관질환 예방)에서 재현: `DRUG_NAME_RE`가 "정|캡슐|...|환|..." 제형 접미사로 "환"을 인식하는데, 진단명 줄의 "심혈관**질환**"의 마지막 글자도 우연히 "환"이라 "심혈관질"이 가짜 약품명으로 잡혔다. 이 가짜 항목이 실제 약보다 앞선 위치에 끼어들면서, 위치(인덱스) 기반으로 약에 배정되는 용법/일수 배열이 한 칸씩 밀려 마지막 실제 약(크레스토정)이 빈 값이 됐다. |
-| **원인 2 — "1회 분무"처럼 숫자 뒤에 한글이 바로 오는 PRN 표기를 인식 못함** | `BARE_FREQ_RE`가 `(?<!\d)(\d+)\s*회(?!\s*[가-힣\)])`라서 "1회" 뒤에 한글(분무)이 바로 오면 매칭을 포기한다(다른 오탐 방지용으로 원래 있던 제외 규칙). 그런데 `_parse_table_format` 자체엔 다른 포맷 파서(`extract_frequency`/`extract_days`)가 가진 "필요시"(PRN) 폴백이 없어서, 니트로링구알스프레이 행은 횟수·일수 모두 빈 값이 됐다. |
-| **원인 3 — 일수(총 투약일수) 배열이 "마지막 횟수 매치 이후" 텍스트에서만 찾음** | `_parse_table_format`의 기존 로직은 "약품명 1일 N회 ... N일"이 약마다 한 행씩 반복 출력되는(컬럼이 아니라 행 단위) 이 목업 텍스트에서, 앞쪽 약들의 "30일"이 전부 검색 범위(마지막 횟수 매치 이후) 밖에 있어 아예 못 찾고, 대신 각주/헤더의 엉뚱한 숫자가 위치 순서대로 잘못 배정됐다(mock_prescription_01~05 전체에서 재현 — 실제 "30일"/"60일" 대신 "1일"/"3일" 등으로 저장됨). |
-| **해결** | (1) `DRUG_NAME_RE`의 "환" 접미사에 `(?<!질)`(질 바로 뒤는 제외) 부정 전방탐색 추가 — "우황청심환" 같은 실제 "환"제형 약품명은 그대로 인식하면서 "질환"만 제외. (2) `_parse_table_format`에서 위치 기반 횟수가 비어있을 때만, 그 약과 다음 약 사이 구간을 잘라 `extract_frequency`(PRN 인식 포함)로 한 번 더 확인. (3) 총 투약일수를 "이 약 자신의 횟수 매치 뒤 ~ 다음 약 시작 전" 구간에서 직접 "N일" 패턴으로 찾고, 없으면 PRN을, 그래도 없으면 기존 위치 기반 값으로 폴백하도록 재작성. 부수적으로 이 구간 탐색용 bare-number 정규식에 "회"(횟수) 제외 조건이 빠져 있어 "1회"의 "1"이 다시 일수로 오매칭되는 것도 같이 막았다. |
-| **검증 방법** | 로컬 서버(`uv run uvicorn --reload`)를 띄운 채 실제 `/ocr/test` 엔드포인트에 `/Users/kim-yunghye/Desktop/ocr_test_prescriptions/` 폴더의 이미지 15장(`mock_prescription_01~05.png` + `prescription_sample_01~10_*.png`) 전부를 업로드해 DB에 저장된 실제 `OcrResult`를 직접 조회하는 방식으로 회귀 검증(단위 테스트 목업이 아니라 실제 CLOVA OCR 응답으로 end-to-end 확인). 수정 전/후 41개 약품 행을 전부 비교. |
-| **남은 한계(코드 버그 아님, 참고용)** | (a) `mock_prescription_02.png`의 글루코파지정 "28일"이 CLOVA OCR 자체에서 "8일"로 읽힘(원문에 "28"이 아예 없음) — 이미지 인식 품질 문제라 `parsing_rules.py` 수정 범위 밖. (b) `mock_prescription_05.png`의 니트로링구알스프레이는 "1회 복용량"(dosage)이 여전히 빈 값인데, 원본 문구가 "혀 밑에 1회 분무"라 숫자가 "분무"에 직접 붙어있지 않아(예: "1분무") 애초에 추출할 수량 표기가 없다 — 데이터 자체의 표기 모호성이며, `prescription_sample_08_angina_antiplatelet.png`처럼 "1분무"로 붙여 쓴 같은 약은 정상 인식됨(직접 확인). (c) `_parse_table_format`은 여전히 위치(인덱스) 기반 매핑을 폴백으로 쓰고 있어서, PRN 약이 목록 중간에 있고 그로 인해 횟수 매치 개수가 실제 약 개수보다 적어지면 그 뒤 약들의 배정이 밀릴 여지가 이론적으로 남아있다(이번에 확인한 15장에서는 PRN 약이 전부 마지막 행이라 재현 안 됨) — 근본적으로는 이 표 폴백 파서 자체를 bbox/행 구조 기반으로 재작성하는 게 맞지만 이번엔 범위를 넘어서 다루지 않았다. |
-| **테스트/검증** | `backend/tests/` 전체 588 passed, 1 failed(무관한 기존 flaky 테스트 `test_notification_inbox.py::test_lists_notifications_with_drug_name_newest_first` — 날짜 하드코딩 이슈, 이번 수정과 무관, 이전부터 실패해오던 것). `uv run ruff check backend/services/parsing_rules.py` 통과. |
 
 ---
 
@@ -534,6 +476,23 @@ for raw, norm in zip(raw_pool, norm_pool):
 | **해결** | `login()`과 동일한 방식(`_issue_login_response`)으로 신규 계정 생성 두 분기 모두에 `access_token` 발급을 추가했다. 기존 로그인 계정으로 초대를 수락한 경우(`payload.caregiver_id`가 이미 있는 경우)는 이미 유효한 토큰이 있으므로 재발급하지 않는다. 기존 테스트들이 `accept_invitation(token, payload, session[, actor[, patient_actor]])` 위치 인자 관례로 직접 호출하고 있어서, 새로 추가한 `response: Response` 파라미터는 기본값과 함께 맨 뒤에 둬서 기존 호출부를 깨지 않게 했다. 프론트(`InviteAccept.tsx`)는 응답의 `access_token`을 저장하고, 환자 계정 생성 시 이 브라우저에 예전에 남아있을 수 있는 `caregiver_id`도 같이 제거하도록 했다(안 지우면 다른 화면이 보호자로 착각해 엉뚱한 API를 호출). |
 | **테스트/검증** | 백엔드 관련 테스트 32개(`-k "invite or invitation"`) 통과, 전체 568개 통과. `tsc --noEmit` 클린. |
 | **핵심 패턴** | 신규 계정을 만드는 인증 관련 엔드포인트는 "계정 생성"과 "로그인"을 별개로 취급하기 쉬운데, 계정을 새로 만드는 모든 경로는 `login()`이 하는 것과 동일하게 즉시 사용 가능한 토큰까지 발급해야 한다 — 그렇지 않으면 "성공 화면은 보이는데 실제로는 로그인이 안 된" 상태가 된다. |
+
+---
+
+| 날짜 | 2026.07.31 |
+|---|---|
+| **작성자** | 김영혜 (Claude 세션) |
+| **이슈** | 로컬 서버에서 팀 자체 제작 OCR 테스트지(`mock_prescription_05.png`, "정검증" 환자, 심바스타틴정/노바스크정/니트로링구알스프레이 3종)를 업로드하면 3번째 약(니트로링구알스프레이)의 용법·횟수·일수가 비어서 나옴. "PR #127에서 국가 표준 처방전 bbox 파서를 신설해 이 부분을 해소하고 테스트도 통과했다"고 했는데도 로컬에서 여전히 재현됨 |
+| **발생 위치** | `backend/services/parsing_rules.py`(`DRUG_NAME_RE`, `_parse_table_format`) |
+| **이미지 확인** | Claude가 이미지를 직접 읽어 표(No/의약품명/용법/일수) 3행을 확인: ①심바스타틴정20밀리그램/1일 1회 저녁 1정/30일 ②노바스크정5밀리그램/1일 1회 아침 1정/30일 ③니트로링구알스프레이/흉통 시 혀 밑에 1회 분무/필요시. 대각선 "MOCK TEST ONLY" 워터마크가 3번째 행을 가로지르고 있음. |
+| **원인 0 — PR #127과의 관계(오해 아님, 서로 다른 범위)** | PR #127의 bbox 파서(`parse_official_table_by_bbox`)는 CLOVA가 `fields`(좌표 포함)를 내려주고 `is_official_prescription_table(fields)`가 참일 때, 즉 **정부 국가 표준 처방전 양식**에서만 동작한다(`prescription_sample_*.png` 10종이 이 양식이라 실제로 정상 동작 — 직접 재현해 확인). 팀이 자체 제작한 "처방전 OCR 테스트지"(`mock_prescription_*.png` 5종)는 이 표준 양식이 아니라서 `is_official_prescription_table`이 거짓으로 판정되고, PR #127 이전부터 있던 구식 `_parse_table_format`(원문 텍스트 기반 정규식) 폴백을 그대로 탄다 — PR #127 테스트가 통과한 것과 이 이미지가 안 되는 것은 애초에 서로 다른 코드 경로라 모순이 아니다. |
+| **원인 1 — 진단명의 "질환"이 "환"(알약) 제형으로 오매칭** | `mock_prescription_03.png`(심혈관질환 예방)에서 재현: `DRUG_NAME_RE`가 "정|캡슐|...|환|..." 제형 접미사로 "환"을 인식하는데, 진단명 줄의 "심혈관**질환**"의 마지막 글자도 우연히 "환"이라 "심혈관질"이 가짜 약품명으로 잡혔다. 이 가짜 항목이 실제 약보다 앞선 위치에 끼어들면서, 위치(인덱스) 기반으로 약에 배정되는 용법/일수 배열이 한 칸씩 밀려 마지막 실제 약(크레스토정)이 빈 값이 됐다. |
+| **원인 2 — "1회 분무"처럼 숫자 뒤에 한글이 바로 오는 PRN 표기를 인식 못함** | `BARE_FREQ_RE`가 `(?<!\d)(\d+)\s*회(?!\s*[가-힣\)])`라서 "1회" 뒤에 한글(분무)이 바로 오면 매칭을 포기한다(다른 오탐 방지용으로 원래 있던 제외 규칙). 그런데 `_parse_table_format` 자체엔 다른 포맷 파서(`extract_frequency`/`extract_days`)가 가진 "필요시"(PRN) 폴백이 없어서, 니트로링구알스프레이 행은 횟수·일수 모두 빈 값이 됐다. |
+| **원인 3 — 일수(총 투약일수) 배열이 "마지막 횟수 매치 이후" 텍스트에서만 찾음** | `_parse_table_format`의 기존 로직은 "약품명 1일 N회 ... N일"이 약마다 한 행씩 반복 출력되는(컬럼이 아니라 행 단위) 이 목업 텍스트에서, 앞쪽 약들의 "30일"이 전부 검색 범위(마지막 횟수 매치 이후) 밖에 있어 아예 못 찾고, 대신 각주/헤더의 엉뚱한 숫자가 위치 순서대로 잘못 배정됐다(mock_prescription_01~05 전체에서 재현 — 실제 "30일"/"60일" 대신 "1일"/"3일" 등으로 저장됨). |
+| **해결** | (1) `DRUG_NAME_RE`의 "환" 접미사에 `(?<!질)`(질 바로 뒤는 제외) 부정 전방탐색 추가 — "우황청심환" 같은 실제 "환"제형 약품명은 그대로 인식하면서 "질환"만 제외. (2) `_parse_table_format`에서 위치 기반 횟수가 비어있을 때만, 그 약과 다음 약 사이 구간을 잘라 `extract_frequency`(PRN 인식 포함)로 한 번 더 확인. (3) 총 투약일수를 "이 약 자신의 횟수 매치 뒤 ~ 다음 약 시작 전" 구간에서 직접 "N일" 패턴으로 찾고, 없으면 PRN을, 그래도 없으면 기존 위치 기반 값으로 폴백하도록 재작성. 부수적으로 이 구간 탐색용 bare-number 정규식에 "회"(횟수) 제외 조건이 빠져 있어 "1회"의 "1"이 다시 일수로 오매칭되는 것도 같이 막았다. |
+| **검증 방법** | 로컬 서버(`uv run uvicorn --reload`)를 띄운 채 실제 `/ocr/test` 엔드포인트에 `/Users/kim-yunghye/Desktop/ocr_test_prescriptions/` 폴더의 이미지 15장(`mock_prescription_01~05.png` + `prescription_sample_01~10_*.png`) 전부를 업로드해 DB에 저장된 실제 `OcrResult`를 직접 조회하는 방식으로 회귀 검증(단위 테스트 목업이 아니라 실제 CLOVA OCR 응답으로 end-to-end 확인). 수정 전/후 41개 약품 행을 전부 비교. |
+| **남은 한계(코드 버그 아님, 참고용)** | (a) `mock_prescription_02.png`의 글루코파지정 "28일"이 CLOVA OCR 자체에서 "8일"로 읽힘(원문에 "28"이 아예 없음) — 이미지 인식 품질 문제라 `parsing_rules.py` 수정 범위 밖. (b) `mock_prescription_05.png`의 니트로링구알스프레이는 "1회 복용량"(dosage)이 여전히 빈 값인데, 원본 문구가 "혀 밑에 1회 분무"라 숫자가 "분무"에 직접 붙어있지 않아(예: "1분무") 애초에 추출할 수량 표기가 없다 — 데이터 자체의 표기 모호성이며, `prescription_sample_08_angina_antiplatelet.png`처럼 "1분무"로 붙여 쓴 같은 약은 정상 인식됨(직접 확인). (c) `_parse_table_format`은 여전히 위치(인덱스) 기반 매핑을 폴백으로 쓰고 있어서, PRN 약이 목록 중간에 있고 그로 인해 횟수 매치 개수가 실제 약 개수보다 적어지면 그 뒤 약들의 배정이 밀릴 여지가 이론적으로 남아있다(이번에 확인한 15장에서는 PRN 약이 전부 마지막 행이라 재현 안 됨) — 근본적으로는 이 표 폴백 파서 자체를 bbox/행 구조 기반으로 재작성하는 게 맞지만 이번엔 범위를 넘어서 다루지 않았다. |
+| **테스트/검증** | `backend/tests/` 전체 588 passed, 1 failed(무관한 기존 flaky 테스트 `test_notification_inbox.py::test_lists_notifications_with_drug_name_newest_first` — 날짜 하드코딩 이슈, 이번 수정과 무관, 이전부터 실패해오던 것). `uv run ruff check backend/services/parsing_rules.py` 통과. |
 
 ---
 
@@ -612,3 +571,42 @@ for raw, norm in zip(raw_pool, norm_pool):
 | **테스트/검증** | 실제 장애 당시 수동으로 동일한 정리(`docker system prune -af --volumes`)를 적용해 디스크 99%→7%로 복구, 이후 컨테이너 정상 기동을 이미 확인함 — 이 PR은 그 정리를 배포 파이프라인에 자동으로 넣는 것(PR #137). |
 | **재발 방지** | 이미지 정리 외에 로컬 볼륨(익명 볼륨) 누적도 관찰됐으나(21GB), `docker-compose.yml`의 바인드마운트 제외 용도 익명 볼륨은 컨테이너 재생성마다 매번 새로 생기는 구조라 근본적으로는 named volume 전환 등 더 큰 변경이 필요 — 이번엔 가장 빠르고 안전한 이미지 정리만 우선 반영하고, 볼륨 누적이 다시 문제가 되면 별도로 재검토하기로 함. |
 | **핵심 패턴** | 정규식 기반 "이 접미사가 나오면 약품명"류 판별은 그 접미사가 다른 흔한 한국어 단어의 끝 글자와 겹칠 수 있다("환"↔"질환") — 겹치는 게 확인되면 그 특정 단어만 부정 전방탐색으로 제외하는 게 전체 목록을 다시 설계하는 것보다 안전하다. "OCR이 컬럼을 그룹으로 출력한다"고 가정하고 짠 위치(인덱스) 기반 파서는, 실제로는 행 단위로 반복 출력되는 텍스트가 들어오면 뒤쪽 항목일수록 배정이 어긋난다 — 여러 항목을 다루는 파서는 "전체에서 한 번에 배열을 뽑아 인덱스로 매핑"하는 대신 "각 항목 자신의 위치 구간 안에서 값을 찾는" 방식이 더 안전하다(단, 진짜 컬럼-그룹 포맷을 위해 기존 방식도 폴백으로는 남겨둠). PR이 "해소했다"고 보고한 범위가 지금 겪는 문제와 코드 경로 자체가 다를 수 있으니, 재현이 안 되면 먼저 "같은 함수/같은 조건을 타는 게 맞는지"부터 확인할 것. |
+
+---
+
+## 과거 EasyOCR 실험 기록 (참고용, 현재 미사용 — 현재는 CLOVA OCR 사용)
+
+> 아래 항목은 초기 프로토타입 단계에서 EasyOCR을 직접 사용하던 시기의 기록이다. 현재 OCR 처리는 `backend/routers/ocr_router.py`의 CLOVA OCR 인터페이스(`ocr_interface.py`)로 전환됐으며, EasyOCR 의존성은 제거됐다.
+
+---
+
+| 날짜 | (EasyOCR 실험 초기) |
+|---|---|
+| **작성자** | 권순현 |
+| **이슈** | 한글이 포함된 처방전 이미지를 OCR에 넣었을 때 한글 부분이 전부 빈 결과로 반환됨 |
+| **발생 위치** | EasyOCR `Reader` 초기화 |
+| **원인** | EasyOCR은 Reader 초기화 시 선언한 언어 코드에 해당하는 모델만 로드한다. `[“en”]`만 선언하면 한국어 모델 자체를 불러오지 않는다. |
+| **해결** | `reader = easyocr.Reader([“en”, “ko”])` |
+| **현재 상태** | CLOVA OCR 전환으로 EasyOCR 미사용. 참고용으로만 보존. |
+
+---
+
+| 날짜 | (EasyOCR 실험 초기) |
+|---|---|
+| **작성자** | 권순현 |
+| **이슈** | 한글이 포함된 샘플 이미지를 PIL로 생성했을 때 한글 부분이 깨지거나 빈 박스로 출력됨 |
+| **발생 위치** | PIL(Pillow) 이미지 생성 코드 |
+| **원인** | PIL의 기본 폰트(`ImageFont.load_default()`)는 ASCII 문자만 지원한다. 한글 렌더링에는 시스템에 설치된 한글 폰트 파일 경로를 직접 지정해야 한다. |
+| **해결** | `font = ImageFont.truetype(“/System/Library/Fonts/AppleSDGothicNeo.ttc”, size=24)` (macOS 기준) |
+| **현재 상태** | EasyOCR 테스트용 이미지 생성 코드였으므로 현재 미사용. |
+
+---
+
+| 날짜 | (EasyOCR 실험 초기) |
+|---|---|
+| **작성자** | 권순현 |
+| **이슈** | “캡슐500mg” → “캡쑬50Omg” 처럼 약품명과 용량이 동시에 오인식됨 |
+| **발생 위치** | EasyOCR raw 결과 후처리 |
+| **원인** | EasyOCR이 시각적으로 유사한 문자를 혼동한다. 의약품 도메인에서는 한글 받침 혼동(“캡슐”→”캡쑬”)이나 숫자·문자 혼동(`0`→`O`)이 처방 용량이나 약품명 오인식으로 직결된다. |
+| **해결** | 2단계 후처리: ① 자주 혼동되는 패턴 사전 치환(`CHAR_CORRECTIONS`) → ② 의약품 도메인 사전과 유사도 비교(`difflib.get_close_matches`) |
+| **현재 상태** | CLOVA OCR 전환으로 후처리 파이프라인 불필요. 참고용으로만 보존. |
