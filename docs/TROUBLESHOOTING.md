@@ -22,7 +22,7 @@ git push -u origin feature/ocr-day1-setup_soonhyun
 | **발생 위치** | 환경변수 파일 위치가 `envs/.local.env`(프로젝트 루트의 기본 `.env`가 아님) |
 | **원인** | Docker Compose는 기본적으로 프로젝트 루트의 `.env`만 자동으로 읽는다. `envs/.local.env` 자체엔 값이 정상적으로 채워져 있었지만, 그 경로를 compose가 알 방법이 없어 모든 환경변수가 빈 값으로 처리됐다. |
 | **해결** | `docker compose --env-file envs/.local.env up -d --build`로 커스텀 경로를 명시하거나, `ln -s envs/.local.env .env` 심볼릭 링크로 상시 해결. |
-| **참고 자료** | Docker Compose는 `--env-file` 플래그로 커스텀 경로의 env 파일을 지정할 수 있음. |
+| **핵심 패턴** | Docker Compose는 `--env-file` 플래그로 커스텀 경로의 env 파일을 지정할 수 있다 — 기본 `.env` 경로가 아니면 반드시 명시해야 한다. |
 
 ---
 
@@ -55,6 +55,7 @@ git push -u origin feature/ocr-day1-setup_soonhyun
 | **발생 위치** | Vite dev server |
 | **원인** | `npm run dev` 기본 실행 시 localhost에만 바인딩된다. |
 | **해결** | `npm run dev -- --host` |
+| **핵심 패턴** | 같은 네트워크의 다른 기기(휴대폰 등)에서 개발 서버에 접속하려면 `--host` 플래그로 모든 인터페이스에 바인딩해야 한다. |
 
 ---
 
@@ -65,6 +66,7 @@ git push -u origin feature/ocr-day1-setup_soonhyun
 | **발생 위치** | React + Vite + TypeScript, `react-router-dom` |
 | **원인** | `react-router-dom`이 설치는 되어 있었지만 `package.json`의 `dependencies`에 실제로 등록이 안 되어 있어 React 버전 충돌이 발생한 것으로 확인(같은 날 겪은 다른 셋업 이슈들과 함께 아래 "7/7 문제들" 표 참고 — 근본 원인은 `react-router-dom` 자체가 `package.json`에서 누락된 것). |
 | **해결** | `npm install react-router-dom` 후 전체 재설치. |
+| **핵심 패턴** | "설치돼 있다"(`node_modules`에 존재)와 "`package.json`에 등록돼 있다"는 다르다 — 수동으로 옮기거나 복사한 프로젝트는 `package.json`/`package-lock.json` 정합성을 별도로 확인해야 한다. |
 
 ---
 
@@ -72,7 +74,9 @@ git push -u origin feature/ocr-day1-setup_soonhyun
 |---|---|
 | **작성자** | 박소정 |
 | **이슈** | 프로젝트 초기 셋업 중 하루에 겪은 문제 6건 — Vite 무한 재시작부터 PR 머지 충돌까지 |
-| **해결 요약** | 아래 표 참고 |
+| **발생 위치** | Vite 설정, `react-router-dom` 의존성, `App.tsx`, `pages/`·`components/` 폴더, git merge/PR 흐름 |
+| **원인** | 아래 표 참고 — 하루 안에 서로 다른 원인의 문제 6건이 연달아 발생 |
+| **해결** | 아래 표 참고 |
 
 | 이슈 | 원인 | 해결 |
 | --- | --- | --- |
@@ -83,6 +87,8 @@ git push -u origin feature/ocr-day1-setup_soonhyun
 | "Failed to resolve import './pages/Landing'" | `pages/`, `components/` 폴더가 실제 프로젝트에 반영된 적이 없었음 | 전체 프론트 파일 일괄 재적용 |
 | `git merge --abort`가 미커밋 작업까지 되돌림 | OCR 통합 파일들이 커밋 전 상태였는데 merge abort로 함께 소실 | 파일 재적용 후 즉시 커밋하는 방식으로 전환 |
 | PR 머지 시 관련없는 `app/`, `docs/` 파일 대량 충돌 | PR 브랜치가 dev 기준이 아니라 개인 작업폴더(`AH_04_02_soonhyun/`) 기준이었음 | `git merge` 대신 실제 코드 파일을 텍스트로 받아 `backend/`에 직접 포팅 |
+
+**핵심 패턴**: 프로젝트 초기 셋업 단계에서는 iCloud 등 자동 동기화 폴더, 수동으로 옮긴 프론트 파일, 개인 작업폴더 기준 브랜치처럼 "겉보기엔 문제 없어 보이는" 환경 설정이 한꺼번에 여러 문제를 일으킬 수 있다 — `git merge --abort`처럼 되돌리기 쉬운 명령도 미커밋 작업이 있으면 위험하므로, 재적용 후 즉시 커밋하는 습관이 중요하다.
 
 ---
 
