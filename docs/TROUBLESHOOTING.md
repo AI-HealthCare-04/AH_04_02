@@ -15,12 +15,83 @@ git push -u origin feature/ocr-day1-setup_soonhyun
 
 ---
 
+| 날짜 | (프로젝트 초기 설정 — 정확한 날짜 미상) |
+|---|---|
+| **작성자** | 박소정 |
+| **이슈** | `docker compose up -d --build` 실행 시 모든 환경변수가 빈 값으로 인식됨(`WARN[0000] The "DB_PORT" variable is not set. Defaulting to a blank string. no port specified: :<empty>`) |
+| **발생 위치** | 환경변수 파일 위치가 `envs/.local.env`(프로젝트 루트의 기본 `.env`가 아님) |
+| **원인** | Docker Compose는 기본적으로 프로젝트 루트의 `.env`만 자동으로 읽는다. `envs/.local.env` 자체엔 값이 정상적으로 채워져 있었지만, 그 경로를 compose가 알 방법이 없어 모든 환경변수가 빈 값으로 처리됐다. |
+| **해결** | `docker compose --env-file envs/.local.env up -d --build`로 커스텀 경로를 명시하거나, `ln -s envs/.local.env .env` 심볼릭 링크로 상시 해결. |
+| **참고 자료** | Docker Compose는 `--env-file` 플래그로 커스텀 경로의 env 파일을 지정할 수 있음. |
+
+---
+
+| 날짜 | (프로젝트 초기 설정 — 정확한 날짜 미상) |
+|---|---|
+| **작성자** | 박소정 |
+| **이슈** | `fastapi` 컨테이너가 `Restarting` 상태를 반복(`sh: 1: uv: not found`) |
+| **발생 위치** | `docker-compose.yml`의 fastapi 서비스 `command: sh -c "uv run uvicorn app.main:app ..."`, 멀티스테이지 Dockerfile(builder → runtime) |
+| **원인** | `uv` 바이너리를 builder 스테이지에만 복사해뒀고, runtime 스테이지엔 없었다. `docker-compose.yml`의 `command:`가 Dockerfile의 `CMD`를 덮어써서 `uv run`으로 실행되는 구조인데, 정작 실행에 필요한 `uv`가 최종 런타임 이미지엔 없었던 것. |
+| **해결** | runtime 스테이지에도 `uv` 바이너리를 복사: `COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/` |
+| **핵심 패턴** | `docker-compose.yml`의 `command:`가 Dockerfile의 `CMD`를 덮어쓰므로, compose 파일의 실행 방식에 맞춰 런타임 이미지를 구성해야 한다. |
+
+---
+
+| 날짜 | (프로젝트 초기 설정 — 정확한 날짜 미상) |
+|---|---|
+| **작성자** | 박소정 |
+| **이슈** | `ai-worker` 컨테이너가 에러 로그 없이 계속 `Restarting` 상태를 반복 |
+| **발생 위치** | `ai_worker/main.py`, `docker-compose.yml`의 `restart: always` |
+| **원인** | `docker compose logs ai-worker`는 로그가 완전히 비어있었고, `docker compose run --rm ai-worker python -m ai_worker.main`으로 직접 실행해도 출력 없이 즉시 종료됐다. `ls -la ai_worker/`로 확인한 결과 `main.py`가 0 bytes(완전히 빈 파일)였다 — 빈 파일을 실행하면 아무 동작 없이 정상 종료(exit 0)되고, `restart: always` 정책 때문에 종료→재시작이 무한 반복된 것. |
+| **해결** | 실제 로직 구현 전까지 임시 대기 루프(`asyncio.sleep`)로 채워 컨테이너가 죽지 않고 대기하도록 함 — 실제 OCR/RAG 추론 로직은 추후 구현 필요. |
+| **핵심 패턴** | 컨테이너가 에러 없이 재시작만 반복하면, 코드 자체가 비어있거나 즉시 종료되는 경우일 수 있다 — `run --rm`으로 직접 실행해서 확인. |
+
+---
+
+| 날짜 | (프로젝트 초기 설정 — 정확한 날짜 미상) |
+|---|---|
+| **작성자** | 박소정 |
+| **이슈** | 모바일 기기에서 개발 서버 접속 불가 |
+| **발생 위치** | Vite dev server |
+| **원인** | `npm run dev` 기본 실행 시 localhost에만 바인딩된다. |
+| **해결** | `npm run dev -- --host` |
+
+---
+
+| 날짜 | 2026.07.07 |
+|---|---|
+| **작성자** | 박소정 |
+| **이슈** | React 컴포넌트 렌더링 시 `Invalid hook call` 에러, `useRef` null 에러 |
+| **발생 위치** | React + Vite + TypeScript, `react-router-dom` |
+| **원인** | `react-router-dom`이 설치는 되어 있었지만 `package.json`의 `dependencies`에 실제로 등록이 안 되어 있어 React 버전 충돌이 발생한 것으로 확인(같은 날 겪은 다른 셋업 이슈들과 함께 아래 "7/7 문제들" 표 참고 — 근본 원인은 `react-router-dom` 자체가 `package.json`에서 누락된 것). |
+| **해결** | `npm install react-router-dom` 후 전체 재설치. |
+
+---
+
+| 날짜 | 2026.07.07 |
+|---|---|
+| **작성자** | 박소정 |
+| **이슈** | 프로젝트 초기 셋업 중 하루에 겪은 문제 6건 — Vite 무한 재시작부터 PR 머지 충돌까지 |
+| **해결 요약** | 아래 표 참고 |
+
+| 이슈 | 원인 | 해결 |
+| --- | --- | --- |
+| Vite 무한 재시작(livelock) | 프로젝트가 iCloud Drive 동기화 폴더 안에 있어서 `vite.config.ts` 타임스탬프가 계속 갱신됨 | 프로젝트를 `~/dev/`(비동기화 폴더)로 이동 |
+| `node_modules/tapable` 손상, Vite 설정 로드 실패 | iCloud 이동 중 대용량 폴더 손상 | `node_modules`, `package-lock.json` 삭제 후 재설치 |
+| "Invalid hook call" (react-router-dom) | `package.json`에 `react-router-dom` 자체가 누락 | `npm install react-router-dom` 후 전체 재설치 |
+| 화면 위 정체불명 메뉴바, URL과 실제 화면 불일치 | `App.tsx`가 실제로는 Figma Make 프로토타입(state 기반)이었고 react-router 미사용 상태였음 | 라우터 기반 `App.tsx`로 교체 |
+| "Failed to resolve import './pages/Landing'" | `pages/`, `components/` 폴더가 실제 프로젝트에 반영된 적이 없었음 | 전체 프론트 파일 일괄 재적용 |
+| `git merge --abort`가 미커밋 작업까지 되돌림 | OCR 통합 파일들이 커밋 전 상태였는데 merge abort로 함께 소실 | 파일 재적용 후 즉시 커밋하는 방식으로 전환 |
+| PR 머지 시 관련없는 `app/`, `docs/` 파일 대량 충돌 | PR 브랜치가 dev 기준이 아니라 개인 작업폴더(`AH_04_02_soonhyun/`) 기준이었음 | `git merge` 대신 실제 코드 파일을 텍스트로 받아 `backend/`에 직접 포팅 |
+
+---
+
 | 날짜 | 2026.07.02 |
 |---|---|
 | **이슈** | 토글 버튼 클릭 후 검은 테두리(outline)가 사라지지 않고 잔류 |
 | **발생 위치** | `Check.tsx` 자가진단 버튼, `Dashboard.tsx` 복약 상태 버튼, `Connect.tsx` 관계 유형 버튼 |
 | **원인** | React 인라인 스타일에서 `border` 단축속성과 `borderColor` 개별속성을 **동시에 사용**하면, 상태 전환 시 React가 이전 `border` 값을 제거하면서 브라우저 기본 `outline`(2.85px)이 노출됨. 크롬 DevTools Computed 탭에서 `outline-style: none` 이지만 `outline-width: 2.85714px` 가 남아있는 것으로 확인. 추가로 콘솔에 `"Removing a style property during rerender (borderColor)"` 경고 발생 |
-| **시도한 방법 (실패)** | ① `index.css`에 `button:focus { outline: none }` 추가 → 효과 없음 ② `!important` 추가 → 효과 없음 ③ `onMouseDown={(e) => e.preventDefault()}` 단독 적용 → 효과 없음 ④ `borderWidth/borderStyle/borderColor` 개별속성으로 분리 → 오히려 테두리 두꺼워짐 |
+| **시도한 방법 (실패)** | ① `index.css`에 `button:focus { outline: none }` 추가 → 효과 없음 ② `button:focus-visible`, `button:active`, `!important` 추가 → 효과 없음 ③ `onMouseDown={(e) => e.preventDefault()}` 단독 적용 → 효과 없음 ④ `borderWidth/borderStyle/borderColor` 개별속성으로 분리 → 오히려 테두리 두꺼워짐 ⑤ Grammarly 확장프로그램 비활성화 → 효과 없음 ⑥ Chrome DevTools Computed 탭에서 `outline-style: none`이지만 `outline-width: 2.85714px` 잔류 확인 ⑦ Console 경고 `"Removing a style property during rerender (borderColor)"` 확인 → 원인 특정 |
 | **해결** | `styles` 객체에서 버튼 스타일을 분리하고, JSX 렌더링 시 **`isActive` 조건으로 모든 border 속성을 인라인으로 직접 계산**하여 적용. spread(`...`) 병합 없이 하나의 style 객체로 완성해서 React rerender 시 속성 충돌 원천 차단 |
 | **핵심 패턴** | `border` 단축속성과 개별속성(`borderColor` 등)을 같은 컴포넌트에서 섞지 말 것. 상태에 따라 스타일이 바뀌는 버튼은 반드시 JSX 인라인 계산 방식 사용 |
 
