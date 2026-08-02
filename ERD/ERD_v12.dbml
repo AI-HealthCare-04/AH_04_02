@@ -1,0 +1,355 @@
+// 진료기록 기반 복약·생활습관 안내 시스템 — DBML (ERD_v12.md 기준, 2026-08-03)
+// dbdiagram.io(https://dbdiagram.io/d)의 왼쪽 편집창에 이 파일 내용을 그대로 붙여넣으면
+// 오른쪽에 ERD가 바로 렌더링됩니다. drawSQL 등 DBML 호환 도구에서도 동일하게 사용 가능합니다.
+//
+// [v7.dbml과의 관계] 이 저장소의 ERD/ERD_v7.dbml은 REQ-005~007(자가진단)·교육관리(REQ-040~044)가
+// 아직 살아있던 시절의 개념 스키마(generic `users` 테이블 + role_enum 등)를 반영한 것으로,
+// 현재(v12) 스키마와는 테이블 구조 자체가 다르다(patients/caregivers 분리, education_* 삭제,
+// 자가진단 테이블 삭제, 신규 테이블 다수 추가). v7.dbml을 패치하는 대신 v12 ERD 기준으로
+// 전면 재작성했다.
+//
+// [정규화/설계 메모]
+// - 대부분의 다형 참조(recipient_role/recipient_id, subject_type/subject_id 등: password_reset_codes,
+//   privacy_purge_audits, revocation_notices, record_correction_notices, medication_field_flags,
+//   push_subscriptions)는 대상이 patients 또는 caregivers 둘 중 하나라 진짜 FK를 걸 수 없다 —
+//   DBML에서도 Ref로 표현하지 않고 컬럼 note로만 남긴다(ERD_v12.md 본문과 동일 관례).
+// - patients.name/phone, caregivers.name/phone은 실제로는 *_encrypted(Fernet)로 저장되고
+//   .name/.phone 파이썬 프로퍼티가 투명 복호화한다 — 이 DBML에서는 실제 컬럼명(name_encrypted 등)
+//   그대로 표기했다.
+
+Table patients {
+  id int [pk, increment]
+  name_encrypted varchar [note: 'Fernet 암호화, .name 프로퍼티로 투명 암복호화']
+  note varchar [null, note: '자유 텍스트(예: 치매 초기)']
+  phone_encrypted varchar [null, note: 'Fernet 암호화']
+  phone_hash varchar [null, note: 'indexed, HMAC-SHA256 조회 전용(복호화 불가)']
+  email varchar [null, unique]
+  birth_date varchar [null]
+  hashed_password varchar [null, note: 'bcrypt']
+  push_enabled bool [default: true]
+  sms_enabled bool [default: false]
+  email_opt_in bool [default: false]
+  created_at datetime
+  failed_login_attempts int [default: 0, note: 'REQ-039']
+  locked_at datetime [null, note: 'REQ-039, 5회 실패 시 기록·30분 후 자동 해제']
+  deactivated_at datetime [null, note: 'REQ-035 탈퇴 요청 시각']
+  deletion_scheduled_at datetime [null, note: 'REQ-035, 탈퇴+30일']
+  breakfast_time varchar [null]
+  breakfast_regular bool [null]
+  lunch_time varchar [null]
+  lunch_regular bool [null]
+  dinner_time varchar [null]
+  dinner_regular bool [null]
+  caregiver_alert_dismissed_at datetime [null, note: 'REQ-007a, 30일간 재표시 억제']
+  gender varchar [null, note: '[v11] male/female — 평문(PII 암호화 대상 아님)']
+}
+
+Table caregivers {
+  id int [pk, increment]
+  name_encrypted varchar [note: 'Fernet 암호화']
+  email varchar [null, note: '[v11] unique 제약 제거 — 앱 레벨에서 relation_type끼리만 중복 검사']
+  hashed_password varchar [null]
+  relation_type varchar [note: 'guardian/caregiver/life_support_worker/social_worker/organization']
+  phone_encrypted varchar [null]
+  phone_hash varchar [null]
+  birth_date varchar [null]
+  push_enabled bool [default: true]
+  sms_enabled bool [default: false]
+  email_opt_in bool [default: false]
+  org_name varchar [null, note: 'relation_type=organization일 때만']
+  org_type varchar [null]
+  business_reg_no varchar [null]
+  manager_name varchar [null, note: '암호화 대상 아님(계정 본인 PII 아님)']
+  manager_phone varchar [null]
+  created_at datetime
+  failed_login_attempts int [default: 0]
+  locked_at datetime [null]
+  deactivated_at datetime [null]
+  deletion_scheduled_at datetime [null]
+}
+
+Table caregiver_patients {
+  id int [pk, increment]
+  caregiver_id int [ref: > caregivers.id]
+  patient_id int [ref: > patients.id]
+  created_at datetime
+  status varchar [default: 'active', note: 'active/revocation_pending/revoked (REQ-004/066)']
+  revoked_at datetime [null]
+  revocation_requested_by int [null, note: 'FK 없음(caregivers.id 또는 patients.id, 앱 레벨 검증)']
+  requested_by_role varchar [null, note: "'caregiver'|'patient' — 자기승인 방지 가드"]
+  revocation_reason varchar [null, note: '[v11] organization 계정 해제 요청 시 필수 입력 사유']
+  revocation_requested_at datetime [null, note: '[v11] 14일 무응답 자동확정 기준시각']
+  notifications_enabled bool [default: true, note: "[v12 신규, REQ-082] (보호자,환자) 관계 단위 알림 on/off — patients-notification_settings(환자 단위, 전체 공유)과 별개"]
+}
+
+Table password_reset_codes {
+  id int [pk, increment]
+  subject_type varchar [note: 'patient/caregiver']
+  subject_id int [note: 'indexed, FK 없음(다형 참조)']
+  code_hash varchar [note: 'indexed, HMAC 해시(원문 미저장)']
+  expires_at datetime [note: '발급+10분']
+  used_at datetime [null]
+  attempts int [default: 0, note: '5회 초과 시 코드 무효화']
+  created_at datetime
+}
+
+Table privacy_purge_audits {
+  id int [pk, increment]
+  subject_type varchar [note: 'patient/caregiver']
+  subject_id int [note: 'indexed']
+  requested_at datetime
+  deactivated_at datetime
+  scheduled_purge_at datetime [note: 'requested_at + 30일']
+  status varchar [default: 'pending', note: 'pending/completed/cancelled']
+  completed_at datetime [null]
+}
+
+Table medical_records {
+  id int [pk, increment]
+  patient_id int [ref: > patients.id]
+  image_path varchar [note: '[v11] 실제 저장됨(uploads/prescriptions/{uuid4}.ext) — REQ-064']
+  status varchar [note: 'processing/review_required/completed/failed']
+  raw_text varchar [null, note: 'TEXT, OCR 원문']
+  failure_reason varchar [null]
+  created_at datetime
+  uploaded_by_caregiver_id int [ref: > caregivers.id, null, note: '대리 업로드일 때만']
+  deleted_at datetime [null, note: '소프트 삭제(등록내역 삭제)']
+  pinned bool [default: false, note: '[v11 신규, REQ-074] 즐겨찾기']
+  prescription_date varchar [null, note: '[v11 신규] OCR 원문에서 추출한 처방일자 — 재처방 판단 기준']
+  caregiver_review_status varchar [default: 'none', note: '[v11 신규, REQ-063] none/pending/needs_correction/reviewed']
+}
+
+Table ocr_results {
+  id int [pk, increment]
+  record_id int [ref: > medical_records.id]
+  drug_name varchar
+  drug_code varchar [default: '']
+  dosage varchar [default: '', note: '1회 사용량(정/캡슐 등 단위 수량)']
+  dose_amount varchar [default: '', note: '[v11 신규] 1회 투여량(mg/ml 등 함량)']
+  frequency varchar [default: '']
+  total_days varchar [default: '', note: '총 투약일수']
+  diagnosis varchar [default: '']
+  drug_class varchar [default: '']
+  confidence float [default: 0.0]
+  review_required bool [default: false]
+  user_confirmed bool [default: false]
+  matched_drug_name varchar [default: '', note: 'drug_matcher 결과']
+  match_score float [default: 0.0]
+  needs_review bool [default: false, note: 'match_score<0.7']
+}
+
+Table guide_results {
+  id int [pk, increment]
+  record_id int [ref: > medical_records.id]
+  medication_guide varchar [note: 'TEXT, JSON 문자열']
+  lifestyle_guide varchar [note: 'TEXT, JSON 문자열 — diet/exercise/other x recommended/avoid']
+  source_refs varchar [default: '[]', note: 'TEXT, JSON 문자열']
+  created_at datetime
+}
+
+Table medication_schedules {
+  id int [pk, increment]
+  patient_id int [ref: > patients.id]
+  drug_name varchar
+  time_slot varchar [note: "'08:00' 같은 실제 시각 문자열"]
+  dose_timing varchar [null, note: '공복/식전/식후 등']
+  caregiver_alert bool [default: true]
+  memo varchar [null]
+  active bool [default: true]
+  created_at datetime
+  patient_medication_id int [ref: > patient_medications.id, null, note: 'OCR 자동생성 일정은 없음']
+  meal_relation varchar [null]
+  instructions varchar [null]
+  timezone varchar [null]
+  days_of_week varchar [null, note: 'JSON 배열 문자열']
+  record_id int [ref: > medical_records.id, null, note: '이 일정을 만든 처방전(등록내역 삭제 시 cascade 비활성화용)']
+}
+
+Table medication_logs {
+  id int [pk, increment]
+  schedule_id int [ref: > medication_schedules.id]
+  status varchar [default: 'taken', note: 'taken/skipped만 존재(missed 없음) — 레거시, medication_records가 실사용']
+  checked_at datetime
+  note varchar [null]
+  confirmed_by_type varchar [default: 'patient', note: 'patient/caregiver']
+  confirmed_by_caregiver_id int [ref: > caregivers.id, null]
+}
+
+Table notification_logs {
+  id int [pk, increment]
+  schedule_id int [ref: > medication_schedules.id, note: 'indexed']
+  patient_id int [ref: > patients.id, note: 'indexed']
+  due_date varchar [note: "indexed, 'YYYY-MM-DD'"]
+  time_slot varchar
+  kind varchar [default: 'reminder', note: 'reminder/missed']
+  status varchar [default: 'pending', note: 'pending/sent/suppressed/failed']
+  channels varchar [default: '[]', note: 'JSON 배열']
+  fired_at datetime
+  acknowledged_at datetime [null]
+
+  indexes {
+    (schedule_id, due_date, time_slot, kind) [unique]
+  }
+}
+
+Table patient_medications {
+  id int [pk, increment]
+  patient_id int [ref: > patients.id, note: 'indexed']
+  drug_id int [null, note: 'indexed, FK 없음(마스터 약물 테이블 아직 없음)']
+  item_seq varchar [null, note: 'indexed']
+  product_code varchar [null]
+  medication_name varchar
+  manufacturer_name varchar [null]
+  dosage_amount varchar [null]
+  dosage_unit varchar [null]
+  frequency_per_day int [null]
+  administration_route varchar [null]
+  start_date varchar [null]
+  end_date varchar [null]
+  prescription_id int [ref: > medical_records.id, null]
+  source_type varchar [default: 'manual', note: 'manual/prescription_ocr/pill_image/api_search']
+  source_raw_text varchar [null]
+  verification_status varchar [default: 'unverified', note: 'unverified/matched/user_confirmed/pharmacist_confirmed']
+  is_active bool [default: true]
+  created_at datetime
+  updated_at datetime
+  deleted_at datetime [null, note: '소프트 삭제']
+}
+
+Table medication_records {
+  id int [pk, increment]
+  patient_medication_id int [ref: > patient_medications.id, null, note: 'OCR 기반 스케줄은 없음']
+  schedule_id int [ref: > medication_schedules.id, null]
+  scheduled_at datetime [null]
+  taken_at datetime [null, note: '실제 복용 시간']
+  status varchar [default: 'scheduled', note: 'scheduled/taken/missed/skipped/duplicate_suspected']
+  verification_method varchar [default: 'self_report', note: 'self_report/caregiver/photo/device']
+  evidence_image_url varchar [null]
+  memo varchar [null]
+  confirmed_by_type varchar [null, note: 'patient/caregiver']
+  confirmed_by_caregiver_id int [ref: > caregivers.id, null]
+  created_at datetime
+  updated_at datetime
+}
+
+Table invitations {
+  id int [pk, increment]
+  patient_id int [ref: > patients.id, null, note: '보호자→환자 초대는 수락 전까지 계정 자체가 없음']
+  inviter_caregiver_id int [ref: > caregivers.id, null]
+  relation_type varchar [default: 'guardian', note: 'guardian/caregiver/life_support_worker/social_worker/patient']
+  invited_phone_encrypted varchar [null, note: 'Fernet 암호화(2026-07-15 보안 리뷰로 전환)']
+  invited_phone_hash varchar [null, note: '[v12, v11 mermaid 누락분 보정] indexed, 조회용 HMAC 해시(2026-07-22 추가)']
+  token_hash varchar [unique, note: 'indexed — 2026-07-15 보안 리뷰로 해시 전환(원문 token 아님)']
+  status varchar [note: 'pending/accepted/rejected/expired/cancelled']
+  created_at datetime
+  accepted_at datetime [null]
+  expires_at datetime [null, note: '발급+7일']
+}
+
+Table refresh_tokens {
+  jti varchar [pk, note: 'JWT ID 자체가 PK']
+  subject_id int
+  role varchar
+  revoked bool [default: false]
+  expires_at datetime
+  created_at datetime
+}
+
+Table notification_settings {
+  patient_id int [pk, ref: - patients.id, note: '1:1, patients와 동일 PK 공유']
+  medication_reminder_enabled bool [default: true]
+  care_alert_enabled bool [default: true]
+  all_push_enabled bool [default: true]
+  chatbot_name varchar [default: "'약콩이'"]
+  updated_at datetime
+}
+
+Table chat_messages {
+  id int [pk, increment]
+  patient_id int [ref: > patients.id]
+  question_id varchar [note: "고정 질문(q1/q2/q3), 동적 질문(dyn:*), 또는 'freeform'"]
+  question_text varchar
+  answer_text varchar
+  created_at datetime
+}
+
+Table guide_cache {
+  id int [pk, increment]
+  cache_key varchar [unique, note: 'indexed — SHA-256(진단명+약물조합+data_version)']
+  diagnosis varchar [null]
+  drug_names varchar [default: '[]', note: 'TEXT, JSON 배열']
+  data_version varchar [note: 'GUIDE_DATA_VERSION 환경변수']
+  guide_result varchar [note: 'TEXT, JSON 직렬화']
+  created_at datetime
+  expires_at datetime [note: 'created_at + GUIDE_CACHE_TTL_DAYS(기본 7일)']
+}
+
+Table revocation_notices {
+  id int [pk, increment]
+  recipient_role varchar [note: '[v11 신규, REQ-066/067] caregiver/patient']
+  recipient_id int [note: 'FK 없음(다형 참조)']
+  patient_id int [note: 'FK 없음(표시용 스냅샷)']
+  patient_name varchar
+  counterpart_name varchar
+  event varchar [note: 'linked/unlinked/revocation_approved/revocation_rejected']
+  reason varchar [null]
+  created_at datetime
+  read_at datetime [null]
+}
+
+Table record_correction_notices {
+  id int [pk, increment]
+  recipient_role varchar [note: 'patient/caregiver']
+  recipient_id int [note: 'FK 없음(다형 참조)']
+  record_id int [ref: > medical_records.id]
+  event varchar [note: 'correction_requested/correction_completed']
+  created_at datetime
+  read_at datetime [null]
+}
+
+Table medication_field_flags {
+  id int [pk, increment]
+  ocr_result_id int [ref: > ocr_results.id]
+  field_name varchar [note: 'drug_name/dosage/dose_amount/frequency/total_days/diagnosis/drug_class']
+  reason varchar
+  suggested_value varchar [note: '보호자·기관이 제안한 값 — 환자는 이 값 그대로만 반영 가능']
+  corrected bool [default: false]
+  created_at datetime
+  corrected_at datetime [null]
+}
+
+Table push_subscriptions {
+  id int [pk, increment]
+  recipient_role varchar [note: 'caregiver/patient']
+  recipient_id int [note: 'FK 없음(다형 참조)']
+  endpoint varchar [note: 'VARCHAR(512)']
+  p256dh varchar
+  auth varchar
+  created_at datetime
+
+  indexes {
+    (recipient_role, recipient_id, endpoint) [unique]
+  }
+}
+
+Table schedule_caregiver_alerts {
+  id int [pk, increment]
+  schedule_id int [ref: > medication_schedules.id]
+  caregiver_id int [ref: > caregivers.id]
+
+  indexes {
+    (schedule_id, caregiver_id) [unique]
+  }
+}
+
+Table audit_logs {
+  id int [pk, increment]
+  table_name varchar [note: 'indexed']
+  record_id int [note: 'indexed, FK 없음(대상 테이블이 여러 개)']
+  actor_id int
+  actor_role varchar
+  action varchar [default: 'update']
+  before varchar [null, note: 'TEXT(JSON), PII는 "***" 마스킹']
+  after varchar [null, note: 'TEXT(JSON), 동일 마스킹']
+  created_at datetime
+}
