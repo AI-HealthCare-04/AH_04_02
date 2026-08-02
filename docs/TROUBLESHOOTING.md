@@ -15,7 +15,7 @@ git push -u origin feature/ocr-day1-setup_soonhyun
 
 ---
 
-| 날짜 | (2026.07.07 이전 — 정확한 날짜 미상) |
+| 날짜 | 2026.07.02 |
 |---|---|
 | **작성자** | 박소정 |
 | **이슈** | `docker compose up -d --build` 실행 시 모든 환경변수가 빈 값으로 인식됨(`WARN[0000] The "DB_PORT" variable is not set. Defaulting to a blank string. no port specified: :<empty>`) |
@@ -26,7 +26,7 @@ git push -u origin feature/ocr-day1-setup_soonhyun
 
 ---
 
-| 날짜 | (2026.07.07 이전 — 정확한 날짜 미상) |
+| 날짜 | 2026.07.02 |
 |---|---|
 | **작성자** | 박소정 |
 | **이슈** | `fastapi` 컨테이너가 `Restarting` 상태를 반복(`sh: 1: uv: not found`) |
@@ -37,7 +37,7 @@ git push -u origin feature/ocr-day1-setup_soonhyun
 
 ---
 
-| 날짜 | (2026.07.07 이전 — 정확한 날짜 미상) |
+| 날짜 | 2026.07.02 |
 |---|---|
 | **작성자** | 박소정 |
 | **이슈** | `ai-worker` 컨테이너가 에러 로그 없이 계속 `Restarting` 상태를 반복 |
@@ -48,7 +48,7 @@ git push -u origin feature/ocr-day1-setup_soonhyun
 
 ---
 
-| 날짜 | (2026.07.07 이전 — 정확한 날짜 미상) |
+| 날짜 | 2026.07.02 |
 |---|---|
 | **작성자** | 박소정 |
 | **이슈** | 모바일 기기에서 개발 서버 접속 불가 |
