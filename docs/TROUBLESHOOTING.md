@@ -502,7 +502,7 @@ for raw, norm in zip(raw_pool, norm_pool):
 
 | 날짜 | 2026.07.30 |
 |---|---|
-| **작성자** | 박소정 (Claude 세션) |
+| **작성자** | 박소정 |
 | **이슈** | 여러 환자를 관리하는 보호자·기관 계정이 알림설정 페이지에 들어가면 기기알림설정 섹션만 나오고 그 아래(복약 알림/돌봄 알림 등)는 안 나오다가, 렉이 걸리듯 잠깐 있다 곧바로 환자관리(`/patients`) 화면으로 강제 이동됨 |
 | **발생 위치** | `frontend/src/lib/session.ts`(`useGuardedPatientId`), `frontend/src/pages/Notification.tsx`, `frontend/src/components/PatientContextBanner.tsx`, `frontend/src/components/NavBar.tsx` |
 | **원인** | 같은 페이지 로드 시 NavBar의 안 읽음 배지 계산, `PatientContextBanner`, `Notification.tsx` 자신의 `useGuardedPatientId` 호출이 각자 독립적으로 동시에 `GET /monitoring/caregivers/{id}/patients`를 호출한다. 브라우저 네트워크 탭으로 직접 확인한 결과 이 동시 요청 중 일부가 `net::ERR_ABORTED`로 실패했고, `useGuardedPatientId`가 이 실패를 "케어하는 환자 0명"과 동일하게 취급해 `/patients`로 강제 이동시키고 있었다(실제로는 환자가 여러 명 있었음). |
@@ -515,7 +515,7 @@ for raw, norm in zip(raw_pool, norm_pool):
 
 | 날짜 | 2026.07.30 |
 |---|---|
-| **작성자** | 박소정 (Claude 세션) |
+| **작성자** | 박소정 |
 | **이슈** | (위 항목 디버깅 중 재현 목적으로 테스트 환자를 연결하다가 발견한 별개의 실제 버그) 보호자가 관리하는 환자 중 PII 암호화 키가 안 맞는 계정이 단 하나만 있어도 `GET /monitoring/caregivers/{id}/patients` 전체가 500으로 죽어서, 그 보호자의 정상 환자들까지 전부 안 보임 |
 | **발생 위치** | `backend/routers/monitoring_router.py`(`list_patients_of_caregiver`) |
 | **원인** | 이전 세션에서 이미 발견됐던 팀 전체 PII 키 불일치 이슈(팀원마다 로컬 `PII_ENCRYPTION_KEY`가 다른 상태에서 만든 테스트 계정들)로 인해, 한 환자(id=77)의 `name_encrypted`/`phone_encrypted`가 현재 설정된 키로 복호화 불가능한 상태였다. `PatientPublic.model_validate(patient, from_attributes=True)`가 이 환자 한 명을 변환하는 시점에 `InvalidToken`을 던졌는데, 이 예외가 목록 순회 루프 전체를 중단시켜서 나머지 정상 환자들까지 응답에서 사라졌다. |
@@ -527,7 +527,7 @@ for raw, norm in zip(raw_pool, norm_pool):
 
 | 날짜 | 2026.07.30 |
 |---|---|
-| **작성자** | 박소정 (Claude 세션) |
+| **작성자** | 박소정 |
 | **이슈** | 초대 링크로 새 계정(환자 본인/보호자)을 만들면 "수락 성공" 화면은 뜨는데, 실제로는 로그인이 안 된 상태라 다음 화면부터 API 요청이 전부 401로 실패 — 초대 연결 자체가 "제대로 안 되는" 것처럼 보임 |
 | **발생 위치** | `backend/routers/care_router.py`(`accept_invitation`), `frontend/src/pages/InviteAccept.tsx` |
 | **원인** | `POST /care/invitations/{token}/accept`가 새 계정을 만드는 두 분기(환자 신규 가입, 보호자 신규 가입) 모두에서 `{patient_id, status}`/`{caregiver_id, patient_id, status}`만 반환하고 `access_token`을 전혀 발급하지 않았다. 프론트는 이 값만 보고 `patient_id`/`caregiver_id`를 localStorage에 저장한 뒤 로그인된 것처럼 다음 화면으로 넘어갔지만, 실제 인증 토큰이 없어 그 다음 요청부터 전부 401 → 강제 로그아웃으로 이어졌다. |
@@ -539,7 +539,7 @@ for raw, norm in zip(raw_pool, norm_pool):
 
 | 날짜 | 2026.07.31 |
 |---|---|
-| **작성자** | 박소정 (Claude 세션) |
+| **작성자** | 박소정 |
 | **이슈** | 배포된 사이트에서 이전에 가입한 계정(전화번호 로그인)이 전부 로그인 실패("이메일/전화번호 또는 비밀번호가 올바르지 않습니다") |
 | **발생 위치** | EC2 서버의 `backend/.env`(`PII_HASH_SECRET`), `backend/core/security.py`(`hash_phone`), `backend/routers/auth_router.py`(`_find_by_identifiers`) |
 | **원인** | 전화번호 로그인은 매 요청마다 `hash_phone(identifier)`로 해시를 계산해 DB의 `phone_hash` 컬럼과 비교하는 방식이다. VAPID 키를 EC2 `.env`에 추가한 뒤 `docker compose down && up -d`로 컨테이너를 완전히 재생성했는데, 그 전까지는 오래 떠 있던 컨테이너가 예전에(맞는 값으로) 메모리에 로드해둔 `PII_HASH_SECRET`을 계속 쓰고 있었고, 재생성 과정에서 지금 `.env` 파일에 있던 다른 값을 새로 읽어들이면서 전화번호 해시가 전부 안 맞게 됐다. |
@@ -552,7 +552,7 @@ for raw, norm in zip(raw_pool, norm_pool):
 
 | 날짜 | 2026.07.31 |
 |---|---|
-| **작성자** | 박소정 (Claude 세션) |
+| **작성자** | 박소정 |
 | **이슈** | 위 `PII_HASH_SECRET` 수정을 위해 `docker compose down`까지는 됐는데 `docker compose up -d`가 계속 실패해 사이트가 완전히 다운(`502 Bad Gateway`)된 상태로 이어짐 |
 | **발생 위치** | EC2 인스턴스 디스크(`/dev/nvme0n1p1`), Docker 이미지/빌드캐시/볼륨 |
 | **원인 1 — 디스크 100% 풀** | `df -h` 확인 결과 루트 파티션이 40G 중 40G(99%) 사용 중. `docker system df`로 보니 이미지 4.01GB + 로컬 볼륨 21.18GB(15개, 전부 미사용) + 빌드 캐시 11.86GB, 전부 100% 회수 가능한 상태였다. `docker-compose.yml`이 매 배포마다 `up -d --build`로 새 이미지를 만드는데, CI 배포 스크립트에 정리 단계가 전혀 없어서 예전 이미지·빌드캐시·(컨테이너 재생성마다 새로 생기는) 익명 볼륨이 한 번도 안 지워지고 계속 누적된 것이 원인이었다. |
@@ -566,7 +566,7 @@ for raw, norm in zip(raw_pool, norm_pool):
 
 | 날짜 | 2026.07.31 |
 |---|---|
-| **작성자** | 박소정 (Claude 세션) |
+| **작성자** | 박소정 |
 | **이슈** | 보호자와 기관이 같은 환자에 동시에 연결돼 있을 때, 처방전 수정을 한쪽(예: 기관)이 요청하면 환자에게만 알림이 가고 다른 쪽(보호자)은 화면을 직접 열어봐야만 요청이 있었다는 걸 알 수 있음 |
 | **발생 위치** | `backend/routers/records_router.py`(`request_correction`), `frontend/src/pages/Notifications.tsx` |
 | **원인** | `request_correction`이 `RecordCorrectionNotice(recipient_role="patient", ...)` 하나만 생성하고, 같은 환자에 연결된 다른 caregiver에게는 별도 notice를 만들지 않았다. 반대 방향(환자가 수정을 다 끝내면 연결된 caregiver 전원에게 알림)은 이미 구현돼 있어서 비대칭이었다. |
@@ -577,7 +577,7 @@ for raw, norm in zip(raw_pool, norm_pool):
 
 | 날짜 | 2026.07.31 |
 |---|---|
-| **작성자** | 박소정 (Claude 세션) |
+| **작성자** | 박소정 |
 | **이슈** | 복약가이드/생활습관 화면이 로컬·배포 환경 양쪽에서 간헐적으로 나왔다가 안 나왔다가 함(사용자 제보: "로컬에서도 나왔다가 안 나왔다가, 배포에선 로컬보다 더 자주 안 나옴") |
 | **발생 위치** | `frontend/src/api/records.ts`(`getRecord`), `frontend/src/api/monitoringClient.ts` |
 | **가설 검토(제보자 제시)** | ① 비동기 처리에 wait 누락 — DB write가 덜 끝난 채로 read할 수 있음 ② wait을 넣어도 안 되면 DB 자체 문제(가이드가 실제로 저장 안 됐을 가능성) ③ 비동기 통신 처리가 애초에 없거나, 엉뚱한 레코드를 불러오는 것 아닌지 |
@@ -592,7 +592,7 @@ for raw, norm in zip(raw_pool, norm_pool):
 
 | 날짜 | 2026.07.31 |
 |---|---|
-| **작성자** | 박소정 (Claude 세션) |
+| **작성자** | 박소정 |
 | **이슈** | (위 항목 조사 중 발견한 별개의 잠재적 취약점, 실제 발생 사례는 DB상 확인 안 됨) 생활습관 안내 생성 시 진단명 하나의 LLM 호출만 실패해도 예외가 그대로 전체 요청을 실패시켜, 이미 정상 생성된 약별 가이드까지 전부 날아감 |
 | **발생 위치** | `rag/rag/rag_chain.py`(`generate_guides_from_medications`, `generate_lifestyle_guide_for_diagnosis`) |
 | **원인** | 같은 함수의 약별 가이드 루프는 항목 하나가 실패해도 나머지는 정상 반환하도록 이미 `try/except`로 격리돼 있는데(`review_flags=["generation_error"]`), 바로 아래 진단명 기준 생활습관 안내를 생성하는 부분(`[generate_lifestyle_guide_for_diagnosis(d) for d in seen_diagnoses]`)은 이 보호가 전혀 없이 리스트 컴프리헨션으로 직접 호출되고 있었다. |
@@ -604,7 +604,7 @@ for raw, norm in zip(raw_pool, norm_pool):
 
 | 날짜 | 2026.07.31 |
 |---|---|
-| **작성자** | 박소정 (Claude 세션) |
+| **작성자** | 박소정 |
 | **이슈** | (2026.07.31 EC2 디스크 100% 풀 장애의 재발 방지 조치) CI 배포 파이프라인에 이미지/캐시 정리 단계가 없어 매 배포마다 디스크 사용량이 계속 누적됨 |
 | **발생 위치** | `.github/workflows/ci.yml` |
 | **원인** | 배포 스텝이 `docker compose -f docker-compose.yml up -d --build`만 실행하고 끝나, 매번 새로 만들어지는 이미지 레이어·빌드 캐시·컨테이너 재생성마다 새로 생기는 익명 볼륨이 전혀 정리되지 않았다. |
