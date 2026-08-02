@@ -497,4 +497,118 @@ for raw, norm in zip(raw_pool, norm_pool):
 | **검증 방법** | 로컬 서버(`uv run uvicorn --reload`)를 띄운 채 실제 `/ocr/test` 엔드포인트에 `/Users/kim-yunghye/Desktop/ocr_test_prescriptions/` 폴더의 이미지 15장(`mock_prescription_01~05.png` + `prescription_sample_01~10_*.png`) 전부를 업로드해 DB에 저장된 실제 `OcrResult`를 직접 조회하는 방식으로 회귀 검증(단위 테스트 목업이 아니라 실제 CLOVA OCR 응답으로 end-to-end 확인). 수정 전/후 41개 약품 행을 전부 비교. |
 | **남은 한계(코드 버그 아님, 참고용)** | (a) `mock_prescription_02.png`의 글루코파지정 "28일"이 CLOVA OCR 자체에서 "8일"로 읽힘(원문에 "28"이 아예 없음) — 이미지 인식 품질 문제라 `parsing_rules.py` 수정 범위 밖. (b) `mock_prescription_05.png`의 니트로링구알스프레이는 "1회 복용량"(dosage)이 여전히 빈 값인데, 원본 문구가 "혀 밑에 1회 분무"라 숫자가 "분무"에 직접 붙어있지 않아(예: "1분무") 애초에 추출할 수량 표기가 없다 — 데이터 자체의 표기 모호성이며, `prescription_sample_08_angina_antiplatelet.png`처럼 "1분무"로 붙여 쓴 같은 약은 정상 인식됨(직접 확인). (c) `_parse_table_format`은 여전히 위치(인덱스) 기반 매핑을 폴백으로 쓰고 있어서, PRN 약이 목록 중간에 있고 그로 인해 횟수 매치 개수가 실제 약 개수보다 적어지면 그 뒤 약들의 배정이 밀릴 여지가 이론적으로 남아있다(이번에 확인한 15장에서는 PRN 약이 전부 마지막 행이라 재현 안 됨) — 근본적으로는 이 표 폴백 파서 자체를 bbox/행 구조 기반으로 재작성하는 게 맞지만 이번엔 범위를 넘어서 다루지 않았다. |
 | **테스트/검증** | `backend/tests/` 전체 588 passed, 1 failed(무관한 기존 flaky 테스트 `test_notification_inbox.py::test_lists_notifications_with_drug_name_newest_first` — 날짜 하드코딩 이슈, 이번 수정과 무관, 이전부터 실패해오던 것). `uv run ruff check backend/services/parsing_rules.py` 통과. |
+
+---
+
+| 날짜 | 2026.07.30 |
+|---|---|
+| **작성자** | 박소정 (Claude 세션) |
+| **이슈** | 여러 환자를 관리하는 보호자·기관 계정이 알림설정 페이지에 들어가면 기기알림설정 섹션만 나오고 그 아래(복약 알림/돌봄 알림 등)는 안 나오다가, 렉이 걸리듯 잠깐 있다 곧바로 환자관리(`/patients`) 화면으로 강제 이동됨 |
+| **발생 위치** | `frontend/src/lib/session.ts`(`useGuardedPatientId`), `frontend/src/pages/Notification.tsx`, `frontend/src/components/PatientContextBanner.tsx`, `frontend/src/components/NavBar.tsx` |
+| **원인** | 같은 페이지 로드 시 NavBar의 안 읽음 배지 계산, `PatientContextBanner`, `Notification.tsx` 자신의 `useGuardedPatientId` 호출이 각자 독립적으로 동시에 `GET /monitoring/caregivers/{id}/patients`를 호출한다. 브라우저 네트워크 탭으로 직접 확인한 결과 이 동시 요청 중 일부가 `net::ERR_ABORTED`로 실패했고, `useGuardedPatientId`가 이 실패를 "케어하는 환자 0명"과 동일하게 취급해 `/patients`로 강제 이동시키고 있었다(실제로는 환자가 여러 명 있었음). |
+| **시도한 방법 (부분 실패)** | 처음엔 `.catch()` 핸들러에 한 번 더 재시도(retry-once)하는 로직을 추가했으나, 재시도 자체가 총 요청 수를 더 늘려 오히려 `net::ERR_ABORTED` 발생 빈도가 늘어나는 것을 재현 확인 — 근본 원인(동시 호출 자체)을 건드리지 않고 증상만 완화하려 한 접근이 실패함을 인지하고 철회. |
+| **해결** | 재시도 로직을 되돌리고, `frontend/src/api/monitoring.ts`의 `getCaregiverPatients()`에 진행 중인 요청을 공유하는 모듈 레벨 캐시(in-flight promise cache)를 추가했다 — 같은 `caregiverId`로 동시에 호출되면 실제 네트워크 요청은 하나만 나가고 나머지 호출자는 그 결과를 공유해서 받는다. 요청이 끝나면 캐시를 비워 다음 호출은 새로 나간다. |
+| **테스트/검증** | 브라우저에서 진짜 fresh 탭으로 재확인 — 수정 전엔 같은 `caregivers/2/patients` 요청이 한 번의 페이지 로드에 4~6개씩(StrictMode 이중 렌더 + 여러 호출자) 동시에 나가고 그중 일부가 aborted였는데, 수정 후엔 정확히 1개의 요청만 나가고 200 OK로 정상 처리됨을 `read_network_requests`로 확인. 환자 전환(다른 환자로 배너에서 전환)까지 포함해 전체 플로우 재검증. |
+| **핵심 패턴** | 한 페이지에서 여러 독립된 컴포넌트/훅이 같은 데이터를 각자 fetch하는 구조라면, 실패를 재시도로 완화하려 하지 말고 API 레이어에서 요청 자체를 공유(dedupe)하는 게 근본 해결이다 — 재시도는 총 요청량을 늘려 경쟁 상태를 악화시킬 수 있다. |
+
+---
+
+| 날짜 | 2026.07.30 |
+|---|---|
+| **작성자** | 박소정 (Claude 세션) |
+| **이슈** | (위 항목 디버깅 중 재현 목적으로 테스트 환자를 연결하다가 발견한 별개의 실제 버그) 보호자가 관리하는 환자 중 PII 암호화 키가 안 맞는 계정이 단 하나만 있어도 `GET /monitoring/caregivers/{id}/patients` 전체가 500으로 죽어서, 그 보호자의 정상 환자들까지 전부 안 보임 |
+| **발생 위치** | `backend/routers/monitoring_router.py`(`list_patients_of_caregiver`) |
+| **원인** | 이전 세션에서 이미 발견됐던 팀 전체 PII 키 불일치 이슈(팀원마다 로컬 `PII_ENCRYPTION_KEY`가 다른 상태에서 만든 테스트 계정들)로 인해, 한 환자(id=77)의 `name_encrypted`/`phone_encrypted`가 현재 설정된 키로 복호화 불가능한 상태였다. `PatientPublic.model_validate(patient, from_attributes=True)`가 이 환자 한 명을 변환하는 시점에 `InvalidToken`을 던졌는데, 이 예외가 목록 순회 루프 전체를 중단시켜서 나머지 정상 환자들까지 응답에서 사라졌다. |
+| **해결** | 환자별 `model_validate` 호출을 개별 try/except로 감싸, 복호화 실패한 환자 하나만 `continue`로 건너뛰고 나머지는 정상 응답에 포함시키도록 방어 코드 추가. |
+| **테스트/검증** | `backend/tests/test_caregiver_patients_pii_resilience.py` 신규 추가 — `cryptography.fernet.Fernet(Fernet.generate_key())`로 의도적으로 다른 키의 암호문을 주입해 재현, 200 응답에 정상 환자만 포함되는지 검증. 재현에 썼던 임시 연결(caregiver 2 ↔ patient 77)은 검증 직후 삭제해 공유 dev DB를 정리함. |
+| **핵심 패턴** | 목록 조회 API에서 항목 하나의 변환 실패가 전체 목록을 죽이지 않도록, 컬렉션 순회 시 항목별 방어 코드(try/except + skip)를 기본으로 고려한다 — 특히 PII 복호화처럼 외부 요인(키 불일치)으로 실패할 수 있는 변환에서는 필수. |
+
+---
+
+| 날짜 | 2026.07.30 |
+|---|---|
+| **작성자** | 박소정 (Claude 세션) |
+| **이슈** | 초대 링크로 새 계정(환자 본인/보호자)을 만들면 "수락 성공" 화면은 뜨는데, 실제로는 로그인이 안 된 상태라 다음 화면부터 API 요청이 전부 401로 실패 — 초대 연결 자체가 "제대로 안 되는" 것처럼 보임 |
+| **발생 위치** | `backend/routers/care_router.py`(`accept_invitation`), `frontend/src/pages/InviteAccept.tsx` |
+| **원인** | `POST /care/invitations/{token}/accept`가 새 계정을 만드는 두 분기(환자 신규 가입, 보호자 신규 가입) 모두에서 `{patient_id, status}`/`{caregiver_id, patient_id, status}`만 반환하고 `access_token`을 전혀 발급하지 않았다. 프론트는 이 값만 보고 `patient_id`/`caregiver_id`를 localStorage에 저장한 뒤 로그인된 것처럼 다음 화면으로 넘어갔지만, 실제 인증 토큰이 없어 그 다음 요청부터 전부 401 → 강제 로그아웃으로 이어졌다. |
+| **해결** | `login()`과 동일한 방식(`_issue_login_response`)으로 신규 계정 생성 두 분기 모두에 `access_token` 발급을 추가했다. 기존 로그인 계정으로 초대를 수락한 경우(`payload.caregiver_id`가 이미 있는 경우)는 이미 유효한 토큰이 있으므로 재발급하지 않는다. 기존 테스트들이 `accept_invitation(token, payload, session[, actor[, patient_actor]])` 위치 인자 관례로 직접 호출하고 있어서, 새로 추가한 `response: Response` 파라미터는 기본값과 함께 맨 뒤에 둬서 기존 호출부를 깨지 않게 했다. 프론트(`InviteAccept.tsx`)는 응답의 `access_token`을 저장하고, 환자 계정 생성 시 이 브라우저에 예전에 남아있을 수 있는 `caregiver_id`도 같이 제거하도록 했다(안 지우면 다른 화면이 보호자로 착각해 엉뚱한 API를 호출). |
+| **테스트/검증** | 백엔드 관련 테스트 32개(`-k "invite or invitation"`) 통과, 전체 568개 통과. `tsc --noEmit` 클린. |
+| **핵심 패턴** | 신규 계정을 만드는 인증 관련 엔드포인트는 "계정 생성"과 "로그인"을 별개로 취급하기 쉬운데, 계정을 새로 만드는 모든 경로는 `login()`이 하는 것과 동일하게 즉시 사용 가능한 토큰까지 발급해야 한다 — 그렇지 않으면 "성공 화면은 보이는데 실제로는 로그인이 안 된" 상태가 된다. |
+
+---
+
+| 날짜 | 2026.07.31 |
+|---|---|
+| **작성자** | 박소정 (Claude 세션) |
+| **이슈** | 배포된 사이트에서 이전에 가입한 계정(전화번호 로그인)이 전부 로그인 실패("이메일/전화번호 또는 비밀번호가 올바르지 않습니다") |
+| **발생 위치** | EC2 서버의 `backend/.env`(`PII_HASH_SECRET`), `backend/core/security.py`(`hash_phone`), `backend/routers/auth_router.py`(`_find_by_identifiers`) |
+| **원인** | 전화번호 로그인은 매 요청마다 `hash_phone(identifier)`로 해시를 계산해 DB의 `phone_hash` 컬럼과 비교하는 방식이다. VAPID 키를 EC2 `.env`에 추가한 뒤 `docker compose down && up -d`로 컨테이너를 완전히 재생성했는데, 그 전까지는 오래 떠 있던 컨테이너가 예전에(맞는 값으로) 메모리에 로드해둔 `PII_HASH_SECRET`을 계속 쓰고 있었고, 재생성 과정에서 지금 `.env` 파일에 있던 다른 값을 새로 읽어들이면서 전화번호 해시가 전부 안 맞게 됐다. |
+| **시도한 방법 (진단)** | 사용자가 알려준 전화번호 2개를 로컬 DB에서 직접 조회 — 계정 존재/미잠김 확인(로컬 `PII_HASH_SECRET`으로는 정상 조회됨, 즉 로컬 값은 맞는 값). 이것만으로는 EC2의 실제 값을 알 수 없어, 진단용 테스트 계정을 직접 만들어(`hashed_password`, `phone`, `email` 모두 실제 헬퍼로 설정) 배포된 API에 curl로 직접 로그인 요청 — 전화번호 로그인은 실패, 같은 계정·같은 비밀번호로 이메일 로그인은 성공. 이메일 로그인은 평문 비교(시크릿 무관)라 이 차이가 `PII_HASH_SECRET` 불일치를 확정적으로 증명했다. |
+| **해결** | EC2에 SSH로 접속해 `docker compose exec backend env \| grep PII_HASH_SECRET`으로 실제 값을 확인, 로컬 `.env`의 원래 값과 다름을 확인 → `sed -i`로 정정 → `docker compose down && up -d`로 재생성 → 값 반영 확인 → 새 진단 계정으로 전화번호 로그인 재시도해 성공 확인. `PII_ENCRYPTION_KEY`는 다행히 일치해 개인정보 복호화 불가 문제(더 심각한 사고)는 없었음을 별도로 확인. |
+| **테스트/검증** | 진단용으로 만든 테스트 계정(로컬 DB, EC2 API 양쪽)은 검증 직후 모두 삭제해 공유 DB에 남기지 않음. |
+| **재발 방지** | `PII_HASH_SECRET`/`PII_ENCRYPTION_KEY`/`VAPID_*`처럼 "팀 전체가 항상 같은 값을 써야 하는" 시크릿은, 오래 떠 있던 컨테이너를 재생성하는 작업(`.env` 변경이 목적이 아니어도) 전에 반드시 현재 EC2 값과 로컬/팀 기준값이 일치하는지 먼저 확인한다. `docs/env-var-checklist.md`에 이미 이 값들이 "동기화 필요" 항목으로 명시돼 있었음에도 실제로 어긋난 채로 오래(정확한 시점 불명) 있었다는 것 자체가, 컨테이너를 오래 재생성하지 않고 두면 이런 어긋남이 겉으로 드러나지 않고 누적될 수 있음을 보여준다. |
+
+---
+
+| 날짜 | 2026.07.31 |
+|---|---|
+| **작성자** | 박소정 (Claude 세션) |
+| **이슈** | 위 `PII_HASH_SECRET` 수정을 위해 `docker compose down`까지는 됐는데 `docker compose up -d`가 계속 실패해 사이트가 완전히 다운(`502 Bad Gateway`)된 상태로 이어짐 |
+| **발생 위치** | EC2 인스턴스 디스크(`/dev/nvme0n1p1`), Docker 이미지/빌드캐시/볼륨 |
+| **원인 1 — 디스크 100% 풀** | `df -h` 확인 결과 루트 파티션이 40G 중 40G(99%) 사용 중. `docker system df`로 보니 이미지 4.01GB + 로컬 볼륨 21.18GB(15개, 전부 미사용) + 빌드 캐시 11.86GB, 전부 100% 회수 가능한 상태였다. `docker-compose.yml`이 매 배포마다 `up -d --build`로 새 이미지를 만드는데, CI 배포 스크립트에 정리 단계가 전혀 없어서 예전 이미지·빌드캐시·(컨테이너 재생성마다 새로 생기는) 익명 볼륨이 한 번도 안 지워지고 계속 누적된 것이 원인이었다. |
+| **원인 2 — 컨테이너 이름 충돌** | 디스크 정리(`docker system prune -af --volumes`, 36.8GB 회수) 후 재시도했으나, 이전 실패 시도가 남겨둔 컨테이너(`ah_04_02-backend-1`)가 이름을 이미 점유하고 있어 `Error response from daemon: Conflict` 발생. |
+| **원인 3 — overlay2 xattrs 오류** | 이름 충돌 컨테이너를 `docker rm -f`로 제거하고 재시도했으나, 이번엔 `failed to copy xattrs: ... no such file or directory`(overlay2 그래프 드라이버 레이어 손상)로 재차 실패 — 앞서 디스크 풀 상태에서 파일 복사가 중간에 끊긴 여파로 보임. |
+| **해결** | 컨테이너 이름 충돌은 `docker rm -f <container_id>`로 제거. overlay2 오류는 곧바로 재시도(`docker compose up -d`)한 것만으로 해결됨 — 재시도 시점엔 문제가 재현되지 않아, 직전의 불완전한 상태가 남긴 일시적 현상이었던 것으로 보임(도커 데몬 재시작까지는 필요 없었음). |
+| **테스트/검증** | `docker compose ps`로 `backend`/`frontend` 컨테이너가 둘 다 `Up` 상태인지 확인, 실제 배포 도메인에 브라우저로 접속해 `502` 대신 로그인 페이지가 정상 렌더링되는지 확인. |
+| **재발 방지** | CI 배포 스크립트(`.github/workflows/ci.yml`)의 `docker compose up -d --build` 다음에 `docker image prune -af`를 추가해 배포마다 자동으로 dangling 이미지를 정리하도록 함(PR #137). |
+
+---
+
+| 날짜 | 2026.07.31 |
+|---|---|
+| **작성자** | 박소정 (Claude 세션) |
+| **이슈** | 보호자와 기관이 같은 환자에 동시에 연결돼 있을 때, 처방전 수정을 한쪽(예: 기관)이 요청하면 환자에게만 알림이 가고 다른 쪽(보호자)은 화면을 직접 열어봐야만 요청이 있었다는 걸 알 수 있음 |
+| **발생 위치** | `backend/routers/records_router.py`(`request_correction`), `frontend/src/pages/Notifications.tsx` |
+| **원인** | `request_correction`이 `RecordCorrectionNotice(recipient_role="patient", ...)` 하나만 생성하고, 같은 환자에 연결된 다른 caregiver에게는 별도 notice를 만들지 않았다. 반대 방향(환자가 수정을 다 끝내면 연결된 caregiver 전원에게 알림)은 이미 구현돼 있어서 비대칭이었다. |
+| **해결** | 요청을 보낸 caregiver 본인을 제외하고, 같은 환자에 연결된(`status != "revoked"`) 나머지 caregiver 전원에게 `RecordCorrectionNotice(event="correction_requested")` + (기기별 알림이 켜져있으면) 푸시를 추가로 보내도록 수정. 프론트 `Notifications.tsx`의 `correction_requested` 클릭 시 이동 경로도 같이 수정 — 지금까지 이 이벤트는 무조건 환자용 수정 화면(`/records/{id}/review?mode=correction`)으로 보냈는데, 보호자·기관이 받는 경우엔 직접 고치는 게 아니라 지켜보는 입장이라 다른 caregiver 알림과 동일하게 읽기 전용 가이드 화면(`/records/{id}/guide`)으로 보내도록 분기 추가. |
+| **테스트/검증** | `test_record_review_flow.py`에 다중 caregiver 시나리오 회귀 테스트 추가(요청자 제외 나머지에게만 알림, 요청자 본인에게는 안 감) — 파일 전체 28개 통과. 로컬 dev 서버에서 실제로 기관 계정→수정요청 API 호출 후 같은 환자에 연결된 다른 보호자 계정으로 로그인해 알림함에서 "수정 요청" 알림 확인, 클릭 시 `/records/{id}/guide`로 정확히 이동하는 것까지 브라우저로 검증(PR #134). |
+
+---
+
+| 날짜 | 2026.07.31 |
+|---|---|
+| **작성자** | 박소정 (Claude 세션) |
+| **이슈** | 복약가이드/생활습관 화면이 로컬·배포 환경 양쪽에서 간헐적으로 나왔다가 안 나왔다가 함(사용자 제보: "로컬에서도 나왔다가 안 나왔다가, 배포에선 로컬보다 더 자주 안 나옴") |
+| **발생 위치** | `frontend/src/api/records.ts`(`getRecord`), `frontend/src/api/monitoringClient.ts` |
+| **가설 검토(제보자 제시)** | ① 비동기 처리에 wait 누락 — DB write가 덜 끝난 채로 read할 수 있음 ② wait을 넣어도 안 되면 DB 자체 문제(가이드가 실제로 저장 안 됐을 가능성) ③ 비동기 통신 처리가 애초에 없거나, 엉뚱한 레코드를 불러오는 것 아닌지 |
+| **1차 조사(코드 트레이싱)** | `records_router.py`의 가이드 생성 흐름은 실제로 완전히 동기적이며 `run_rag`가 정확히 `await`되고, HTTP 응답이 나가기 전에 `GuideResult`가 확실히 commit+refresh된다 — 가설 ①(await 누락)은 근거 없음. `GuideCache` 키도 `record_id` 기준으로 정확히 스코프돼 있어 다른 환자/기록의 캐시가 섞이는 경로는 못 찾음 — 가설 ③(엉뚱한 거 불러옴)도 근거 없음. 코드 리딩만으로는 `rag/rag/rag_chain.py`의 생활습관 가이드 생성 LLM 호출에 try/except가 전혀 없다는 게 유력한 원인 후보로 보였음(가설 ②와 부합하는 듯 보임). |
+| **2차 조사(공유 DB 직접 조회로 검증)** | `status IN ('review_required', 'failed')`인 기록 108건을 전부 조회. `review_required` 105건은 전부 연결된 `OcrResult.user_confirmed=False`(confirm을 시도하다 크래시난 흔적 없음, 그냥 미완료 테스트 기록). `failed` 3건은 전부 `failure_reason='알 수 없는 provider: real'`(환경변수 설정 실수, 07-28 09:10~09:11 1분 사이에만 발생하고 재발 없음). **즉 "가이드 생성이 실패해서 유실됐다"는 흔적이 DB에 전혀 없어, 1차 조사에서 유력해 보였던 LLM 예외처리 누락 가설은 실제 관찰된 증상의 원인이 아님이 확인됨.** |
+| **원인** | `getRecord()`(MedGuide.tsx가 처방전+가이드+생활습관을 조회할 때 씀)만 공용 axios 클라이언트의 기본 10초 타임아웃(`monitoringClient.ts`)을 그대로 쓰고 있었다. `createRecord`/`getRecordImageBlobUrl` 등 다른 무거운 요청들은 이미 30~120초로 늘려놨는데(2026-07-09/07-28 항목 참고 — 이 코드베이스에 이미 한 번 있었던 정확히 같은 패턴의 버그), `getRecord`만 그때 빠뜨린 것으로 보인다. 가이드는 DB에 정상 저장돼 있는데, 화면에서 불러오는 요청만 로컬(loopback)에서는 거의 안 걸리고 배포 환경(브라우저→nginx→백엔드, DB도 원격 Aiven)에서만 가끔 10초를 넘겨 실패한 것으로 결론. |
+| **해결** | `getRecord()`에 `timeout: 120000` 추가(다른 RAG 관련 요청과 동일 값). |
+| **테스트/검증** | `tsc --noEmit` 클린. 로컬 dev 서버에서 실제 완료된 처방전 기록으로 `/records/:id/guide` 페이지 재확인 — 복약 가이드/복약 지도/생활습관 탭 전환과 데이터 로딩 정상 동작(200 응답, 콘텐츠 정상 렌더링) 확인(PR #135). |
+| **핵심 패턴** | "간헐적으로 보였다 안 보였다"하는 증상을 마주하면, 코드 리딩만으로 짚이는 가설(특히 "예외처리가 없어 보인다" 류)을 바로 원인으로 단정하지 말고, 실제 DB/로그에서 그 가설이 예측하는 흔적(이 경우 `status=failed`나 크래시로 멈춘 레코드)이 정말 존재하는지 먼저 확인한다. 코드상 진짜 취약점이라도 실제 관찰된 증상의 원인이 아닐 수 있다. |
+
+---
+
+| 날짜 | 2026.07.31 |
+|---|---|
+| **작성자** | 박소정 (Claude 세션) |
+| **이슈** | (위 항목 조사 중 발견한 별개의 잠재적 취약점, 실제 발생 사례는 DB상 확인 안 됨) 생활습관 안내 생성 시 진단명 하나의 LLM 호출만 실패해도 예외가 그대로 전체 요청을 실패시켜, 이미 정상 생성된 약별 가이드까지 전부 날아감 |
+| **발생 위치** | `rag/rag/rag_chain.py`(`generate_guides_from_medications`, `generate_lifestyle_guide_for_diagnosis`) |
+| **원인** | 같은 함수의 약별 가이드 루프는 항목 하나가 실패해도 나머지는 정상 반환하도록 이미 `try/except`로 격리돼 있는데(`review_flags=["generation_error"]`), 바로 아래 진단명 기준 생활습관 안내를 생성하는 부분(`[generate_lifestyle_guide_for_diagnosis(d) for d in seen_diagnoses]`)은 이 보호가 전혀 없이 리스트 컴프리헨션으로 직접 호출되고 있었다. |
+| **해결** | 리스트 컴프리헨션을 for 루프 + try/except로 바꿔 약별 가이드와 동일한 실패 격리 패턴을 적용. 실패한 진단명은 `review_required=True`, `review_reason`에 예외 메시지, `review_flags=["generation_error"]`인 안전한 `LifestyleGuideResult`로 대체하고 나머지 진단명 처리는 계속하도록 함. `rag/rag/schemas.py`의 `review_flags` 문서화 목록에도 `generation_error`를 추가(기존엔 약별 가이드 쪽에만 쓰이고 문서엔 없었음). |
+| **테스트/검증** | `rag/tests/test_rag_chain.py`에 회귀 테스트 추가 — 진단명 2개 중 하나만 실패시켜, 실패한 진단명만 격리되고 다른 진단명 + 약별 가이드는 영향받지 않는지 검증. `rag/tests/` 전체 84개, `backend/tests/` 전체(593 passed, 1개는 기존 날짜 플레이키 테스트로 무관) 통과(PR #136). |
+| **핵심 패턴** | 여러 항목을 순회하며 외부 API(LLM 등)를 호출하는 코드에서 "실패 격리"를 적용할 땐, 같은 함수 안에 유사한 성격의 루프가 여러 개 있는지 확인한다 — 하나만 보호하고 옆의 비슷한 루프를 빠뜨리기 쉽다. |
+
+---
+
+| 날짜 | 2026.07.31 |
+|---|---|
+| **작성자** | 박소정 (Claude 세션) |
+| **이슈** | (2026.07.31 EC2 디스크 100% 풀 장애의 재발 방지 조치) CI 배포 파이프라인에 이미지/캐시 정리 단계가 없어 매 배포마다 디스크 사용량이 계속 누적됨 |
+| **발생 위치** | `.github/workflows/ci.yml` |
+| **원인** | 배포 스텝이 `docker compose -f docker-compose.yml up -d --build`만 실행하고 끝나, 매번 새로 만들어지는 이미지 레이어·빌드 캐시·컨테이너 재생성마다 새로 생기는 익명 볼륨이 전혀 정리되지 않았다. |
+| **해결** | `docker compose up -d --build` 다음 줄에 `docker image prune -af` 추가 — 지금 실행 중인 컨테이너가 참조하는 이미지는 대상에서 제외되는 안전한 범위만 자동 정리. |
+| **테스트/검증** | 실제 장애 당시 수동으로 동일한 정리(`docker system prune -af --volumes`)를 적용해 디스크 99%→7%로 복구, 이후 컨테이너 정상 기동을 이미 확인함 — 이 PR은 그 정리를 배포 파이프라인에 자동으로 넣는 것(PR #137). |
+| **재발 방지** | 이미지 정리 외에 로컬 볼륨(익명 볼륨) 누적도 관찰됐으나(21GB), `docker-compose.yml`의 바인드마운트 제외 용도 익명 볼륨은 컨테이너 재생성마다 매번 새로 생기는 구조라 근본적으로는 named volume 전환 등 더 큰 변경이 필요 — 이번엔 가장 빠르고 안전한 이미지 정리만 우선 반영하고, 볼륨 누적이 다시 문제가 되면 별도로 재검토하기로 함. |
 | **핵심 패턴** | 정규식 기반 "이 접미사가 나오면 약품명"류 판별은 그 접미사가 다른 흔한 한국어 단어의 끝 글자와 겹칠 수 있다("환"↔"질환") — 겹치는 게 확인되면 그 특정 단어만 부정 전방탐색으로 제외하는 게 전체 목록을 다시 설계하는 것보다 안전하다. "OCR이 컬럼을 그룹으로 출력한다"고 가정하고 짠 위치(인덱스) 기반 파서는, 실제로는 행 단위로 반복 출력되는 텍스트가 들어오면 뒤쪽 항목일수록 배정이 어긋난다 — 여러 항목을 다루는 파서는 "전체에서 한 번에 배열을 뽑아 인덱스로 매핑"하는 대신 "각 항목 자신의 위치 구간 안에서 값을 찾는" 방식이 더 안전하다(단, 진짜 컬럼-그룹 포맷을 위해 기존 방식도 폴백으로는 남겨둠). PR이 "해소했다"고 보고한 범위가 지금 겪는 문제와 코드 경로 자체가 다를 수 있으니, 재현이 안 되면 먼저 "같은 함수/같은 조건을 타는 게 맞는지"부터 확인할 것. |
