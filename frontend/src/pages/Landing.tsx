@@ -139,25 +139,31 @@ export default function Landing() {
     <div style={{ fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" }}>
       <div className="min-h-screen flex flex-col" style={{ background: "radial-gradient(ellipse at center, #3A2A1E 0%, #1C1410 70%)" }}>
         <NavBar isLoggedIn={loggedIn} userName={getCurrentUserName()} variant="dark" />
-        <div className="flex flex-col gap-2 px-5 pt-6 md:px-10 md:pt-10">
-          <span className="text-[13px] border rounded-[20px] px-4 py-2 w-fit" style={{ color: "#D9C8B8", borderColor: "#4A3B2E" }}>수도권 독거노인 맞춤 건강 관리</span>
-          <span className="text-[13px] border rounded-[20px] px-4 py-2 w-fit" style={{ color: "#D9C8B8", borderColor: "#4A3B2E" }}>독거노인 및 거동 불편 사용자를 위한 안전한 서비스</span>
-        </div>
-        <div className="flex-1 flex flex-col justify-center px-5 md:px-10 max-w-[900px]">
-          <h1 className="text-[32px] sm:text-[42px] md:text-[56px] font-extrabold leading-[1.3] mb-6 break-keep" style={{ color: C.white }}>
-            효율적인 복약 관리<br />
-            <span style={{ color: "#D98552" }}>맞춤 생활 습관 개선</span><br />
-            스마트 알림 서비스
-          </h1>
-          <p className="text-[15px] md:text-[17px] mb-8 md:mb-9 leading-[1.6] break-keep" style={{ color: "#C9BCAE" }}>
-            진료 기록을 기반으로 한 맞춤형 복약 안내와 생활 습관 개선 가이드로 건강한 일상을 함께합니다.
-          </p>
-          {!loggedIn && (
-            <div className="flex gap-3">
-              <button className="px-7 py-4 md:px-9 text-[15px] md:text-[16px] font-bold rounded-full text-white" style={{ background: "#C16A45" }} onClick={() => navigate("/register")}>무료로 시작하기</button>
-              <button className="px-7 py-4 md:px-9 text-[15px] md:text-[16px] font-bold rounded-full text-white bg-transparent" style={{ border: "1.5px solid #6B5B4C" }} onClick={() => navigate("/login")}>로그인</button>
-            </div>
-          )}
+        {/* [2026-08-03 수정] 배지를 navbar 바로 아래 고정하는 대신 헤드라인과 한 묶음으로
+            묶어 flex-1 justify-center에 맡겼다 — 위아래 빈 공간의 중간쯤에 자연스럽게
+            놓인다. 또한 이 블록에 navbar와 똑같은 max-w-7xl mx-auto px-6 sm:px-10을 줘서,
+            그 전엔 이 값이 없어 아주 넓은 화면에서 로고와 왼쪽 정렬이 어긋났던 것도 맞춘다. */}
+        <div className="flex-1 flex flex-col justify-center w-full max-w-7xl mx-auto px-6 sm:px-10">
+          <div className="flex flex-col gap-2 mb-8 md:mb-10">
+            <span className="text-[13px] border rounded-[20px] px-4 py-2 w-fit" style={{ color: "#D9C8B8", borderColor: "#4A3B2E" }}>수도권 독거노인 맞춤 건강 관리</span>
+            <span className="text-[13px] border rounded-[20px] px-4 py-2 w-fit" style={{ color: "#D9C8B8", borderColor: "#4A3B2E" }}>독거노인 및 거동 불편 사용자를 위한 안전한 서비스</span>
+          </div>
+          <div className="max-w-[900px]">
+            <h1 className="text-[32px] sm:text-[42px] md:text-[56px] font-extrabold leading-[1.3] mb-6 break-keep" style={{ color: C.white }}>
+              효율적인 복약 관리<br />
+              <span style={{ color: "#D98552" }}>맞춤 생활 습관 개선</span><br />
+              스마트 알림 서비스
+            </h1>
+            <p className="text-[15px] md:text-[17px] mb-8 md:mb-9 leading-[1.6] break-keep" style={{ color: "#C9BCAE" }}>
+              진료 기록을 기반으로 한 맞춤형 복약 안내와 생활 습관 개선 가이드로 건강한 일상을 함께합니다.
+            </p>
+            {!loggedIn && (
+              <div className="flex gap-3">
+                <button className="px-7 py-4 md:px-9 text-[15px] md:text-[16px] font-bold rounded-full text-white" style={{ background: "#C16A45" }} onClick={() => navigate("/register")}>무료로 시작하기</button>
+                <button className="px-7 py-4 md:px-9 text-[15px] md:text-[16px] font-bold rounded-full text-white bg-transparent" style={{ border: "1.5px solid #6B5B4C" }} onClick={() => navigate("/login")}>로그인</button>
+              </div>
+            )}
+          </div>
         </div>
         <p className="text-center text-[13px] pb-6" style={{ color: "#8A7A6A" }}>스크롤하여 더 알아보기</p>
       </div>
