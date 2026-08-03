@@ -4,7 +4,6 @@ import { Bell, Check, Lock, Mail, MessageSquare } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import NavBar from "../components/NavBar";
 import Skeleton from "../components/Skeleton";
-import InfoModal from "../components/InfoModal";
 import { verifyPassword, withdrawAccount } from "../api/auth";
 import {
   getCaregivers,
@@ -106,7 +105,6 @@ export default function MyInfo() {
   const [withdrawPassword, setWithdrawPassword] = useState("");
   const [withdrawing, setWithdrawing] = useState(false);
   const [withdrawError, setWithdrawError] = useState("");
-  const [withdrawDoneMessage, setWithdrawDoneMessage] = useState("");
 
   const isOrganization = caregiver?.relation_type === "organization";
 
@@ -218,30 +216,25 @@ export default function MyInfo() {
     }
   };
 
+  // [2026-08-03 수정, 사용자 요청] 30일 유예 안내 모달 없이, 성공하면 바로 로그아웃 —
+  // MyPage.tsx의 logout()과 동일한 키만 지운다(recent_accounts는 "최근 계정" 목록이라
+  // 그대로 둠, 로그아웃과 동일 관례).
   const handleWithdraw = async () => {
     if (!withdrawPassword) return;
     setWithdrawing(true);
     setWithdrawError("");
     try {
-      const { deletion_scheduled_at } = await withdrawAccount(withdrawPassword);
-      const deadline = new Date(deletion_scheduled_at).toLocaleDateString("ko-KR");
-      setWithdrawDoneMessage(`탈퇴 처리됐어요. ${deadline}까지 로그인하면 취소할 수 있고, 그 전까지는 개인정보가 그대로 보존돼요.`);
+      await withdrawAccount(withdrawPassword);
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("patient_id");
+      localStorage.removeItem("caregiver_id");
+      localStorage.removeItem("user_name");
+      navigate("/");
     } catch (e) {
       const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       setWithdrawError(detail || "탈퇴 처리하지 못했어요. 잠시 후 다시 시도해 주세요.");
-    } finally {
       setWithdrawing(false);
     }
-  };
-
-  // [2026-08-03 추가] 탈퇴 완료 안내를 닫으면 그제서야 로그아웃 — MyPage.tsx의 logout()과
-  // 동일한 키만 지운다(recent_accounts는 "최근 계정" 목록이라 그대로 둠, 로그아웃과 동일 관례).
-  const handleWithdrawDone = () => {
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("patient_id");
-    localStorage.removeItem("caregiver_id");
-    localStorage.removeItem("user_name");
-    navigate("/");
   };
 
   if (!verified) {
@@ -431,7 +424,6 @@ export default function MyInfo() {
           </div>
         )}
       </main>
-      <InfoModal open={!!withdrawDoneMessage} message={withdrawDoneMessage} onClose={handleWithdrawDone} />
     </div>
   );
 }
