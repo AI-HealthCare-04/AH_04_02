@@ -212,7 +212,13 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
         className={dark ? "sticky top-0 z-40 bg-transparent" : "sticky top-0 z-40 backdrop-blur-sm border-b"}
         style={dark ? undefined : { background: "rgba(255,255,255,0.95)", borderColor: "rgba(30,26,23,0.10)" }}
       >
-        <div className="max-w-7xl mx-auto px-6 sm:px-10 h-16 grid grid-cols-[auto_1fr_auto] items-center gap-4">
+        {/* [2026-08-03 버그수정] grid-cols(auto_1fr_auto)였을 때, lg 미만에서 가운데 nav가
+            display:none이 되면 grid auto-placement가 오른쪽 아이콘 그룹을 가운데 트랙(1fr)으로
+            당겨와 버려 로고 바로 옆으로 붙어버렸다(오른쪽 끝 auto 트랙은 텅 빈 채로 남음).
+            flex + justify-between으로 바꾸면 nav가 사라져도 로고/오른쪽 그룹 두 개만 남아
+            justify-between이 그 둘을 양 끝으로 밀어준다 — nav가 보일 땐 flex-1로 가운데 공간을
+            다 채우므로 데스크톱 모습은 그대로. */}
+        <div className="max-w-7xl mx-auto px-6 sm:px-10 h-16 flex items-center justify-between gap-4">
           <Link to="/" className="flex items-center gap-2 shrink-0">
             <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: C.terracotta }}>
               <Pill className="w-4 h-4 text-white" strokeWidth={2.4} />
@@ -221,7 +227,7 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
           </Link>
 
           {isLoggedIn && (
-            <nav className="hidden lg:flex items-center justify-center gap-6 min-w-0">
+            <nav className="hidden lg:flex flex-1 items-center justify-center gap-6 min-w-0">
               {navItems.map((item) => (
                 <div
                   key={item.to}

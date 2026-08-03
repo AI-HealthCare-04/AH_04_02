@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, Check, Lock, Mail, MessageSquare } from "lucide-react";
+import { createPortal } from "react-dom";
+import { AlertTriangle, Bell, Check, CheckCircle2, Lock, Mail, MessageSquare } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import NavBar from "../components/NavBar";
 import Skeleton from "../components/Skeleton";
-import { verifyPassword } from "../api/auth";
+import InfoModal from "../components/InfoModal";
+import { verifyPassword, withdrawAccount } from "../api/auth";
 import {
   getCaregivers,
   getPatients,
@@ -98,6 +100,14 @@ export default function MyInfo() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [saved, setSaved] = useState(false);
+
+  // [2026-08-03 추가, REQ-035] 회원 탈퇴 — 흰 카드 아래 가운데 텍스트 버튼, 누르면
+  // 화면 중앙 팝업으로 경고 문구 + 비밀번호 입력을 띄운다(인라인 확장이 아님).
+  const [showWithdraw, setShowWithdraw] = useState(false);
+  const [withdrawPassword, setWithdrawPassword] = useState("");
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawError, setWithdrawError] = useState("");
+  const [withdrawDone, setWithdrawDone] = useState(false);
 
   const isOrganization = caregiver?.relation_type === "organization";
 
@@ -207,6 +217,29 @@ export default function MyInfo() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleWithdraw = async () => {
+    if (!withdrawPassword || withdrawing) return;
+    setWithdrawing(true);
+    setWithdrawError("");
+    try {
+      await withdrawAccount(withdrawPassword);
+      setWithdrawDone(true);
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setWithdrawError(detail || "탈퇴 처리하지 못했어요. 잠시 후 다시 시도해 주세요.");
+      setWithdrawing(false);
+    }
+  };
+
+  // [2026-08-03 추가] 탈퇴 완료 안내를 닫으면 그제서야 로그아웃 — logout()과 동일한 키만 지운다.
+  const handleWithdrawDone = () => {
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("patient_id");
+    localStorage.removeItem("caregiver_id");
+    localStorage.removeItem("user_name");
+    navigate("/");
   };
 
   if (!verified) {
@@ -348,7 +381,82 @@ export default function MyInfo() {
             </div>
           </div>
         )}
+
+        <button
+          onClick={() => setShowWithdraw(true)}
+          className="w-full py-3 mt-3 font-bold text-[14px] transition-opacity hover:opacity-70"
+          style={{ color: C.danger }}
+        >
+          회원 탈퇴
+        </button>
       </main>
+
+      {showWithdraw &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-5"
+            style={{ background: "rgba(30,26,23,0.45)" }}
+            onClick={() => { setShowWithdraw(false); setWithdrawPassword(""); setWithdrawError(""); }}
+          >
+            <div
+              className="w-full max-w-sm rounded-2xl p-7 text-center"
+              style={{ background: C.surface, boxShadow: C.shadowDropdown }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
+                className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4"
+                style={{ background: `${C.danger}15` }}
+              >
+                <AlertTriangle className="w-6 h-6" style={{ color: C.danger }} />
+              </div>
+              <p className="text-[17px] font-black mb-2" style={{ color: C.dark }}>정말 탈퇴하시겠어요?</p>
+              <p className="text-[13px] leading-relaxed mb-1" style={{ color: C.muted }}>
+                탈퇴하면 지금까지 등록한 처방전, 복약 기록, 생활 습관 가이드 등 모든 정보가 삭제되어 더 이상 확인할 수 없어요.
+              </p>
+              <p className="text-[13px] leading-relaxed mb-5" style={{ color: C.muted }}>
+                탈퇴 후에는 이 앱을 계속 이용하실 수 없으니 신중하게 결정해 주세요.
+              </p>
+              <input
+                type="password"
+                value={withdrawPassword}
+                onChange={(e) => setWithdrawPassword(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleWithdraw()}
+                placeholder="현재 비밀번호"
+                className="w-full px-4 py-3.5 rounded-xl border text-[15px] outline-none mb-3 text-center"
+                style={{ borderColor: "rgba(30,26,23,0.12)", color: C.dark, background: C.ivory }}
+                autoFocus
+              />
+              {withdrawError && <p className="text-[13px] mb-3 text-center" style={{ color: C.danger }}>{withdrawError}</p>}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => { setShowWithdraw(false); setWithdrawPassword(""); setWithdrawError(""); }}
+                  className="flex-1 py-3 rounded-full font-bold text-[14px] border-2"
+                  style={{ borderColor: "rgba(30,26,23,0.15)", color: C.dark }}
+                >
+                  취소
+                </button>
+                <button
+                  onClick={handleWithdraw}
+                  disabled={!withdrawPassword || withdrawing}
+                  className="flex-1 py-3 rounded-full font-black text-[14px] text-white disabled:opacity-50"
+                  style={{ background: C.danger }}
+                >
+                  {withdrawing ? "처리 중..." : "탈퇴하기"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      <InfoModal
+        open={withdrawDone}
+        icon={CheckCircle2}
+        iconColor={C.successText}
+        title="탈퇴가 완료됐어요"
+        message={"그동안 건강동행을 이용해 주셔서 감사합니다.\n항상 건강하시고, 언제든 다시 찾아주세요."}
+        onClose={handleWithdrawDone}
+      />
     </div>
   );
 }
