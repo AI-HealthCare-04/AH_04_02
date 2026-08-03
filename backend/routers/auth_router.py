@@ -417,7 +417,16 @@ def _issue_login_response(
     [2026-07-22 수정 — HIGH, 팀원 리뷰(fkmc10101-hub) 반영] remember_device=True면(로그인
     화면의 "이 기기에서 자동 로그인" 체크, 또는 계정 전환으로 재로그인한 경우) 이 계정
     전용 전환 쿠키(_switch_cookie_name)도 같이 심는다 — 이제 refresh_token 원문은 응답
-    body/localStorage 어디에도 나가지 않고, 이 httpOnly 쿠키로만 존재한다."""
+    body/localStorage 어디에도 나가지 않고, 이 httpOnly 쿠키로만 존재한다.
+
+    [2026-08-03 버그수정, 실제 재현된 버그] "저장된 계정으로 전환"이 로그인 직후 얼마 안 가
+    "로그인이 만료됐어요"로 계속 실패하던 원인 — 세션 쿠키(refresh_token)와 전환 쿠키
+    (switch_{role}_{id})가 처음 발급 시 **같은 jti**를 공유했다. 그런데 평소 세션 유지 중
+    자동으로 도는 POST /auth/token/refresh(access_token 60분 만료마다)는 remember_device를
+    안 넘겨서 refresh_token 쿠키만 새 jti로 회전시키고 switch_ 쿠키는 그대로 둔다 — 공유하던
+    jti가 이미 revoke된 뒤라, 그 다음 "저장된 계정" 클릭은 항상 무효화된 jti를 읽어 401이
+    났다(로그인 후 access_token이 처음 한 번만 만료돼도 재현됨). 전환 쿠키는 세션 쿠키와
+    독립된 자기만의 jti를 받아야 한다 — 두 번째 refresh_token을 별도로 발급한다."""
     access_token = create_access_token(subject_id, role)
     refresh_token_value, jti = create_refresh_token(subject_id, role)
     session.add(RefreshToken(
@@ -426,15 +435,22 @@ def _issue_login_response(
         role=role,
         expires_at=datetime.now() + timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES),
     ))
-    session.commit()
     response.set_cookie(key="refresh_token", value=refresh_token_value, httponly=True)
     if remember_device:
+        switch_token_value, switch_jti = create_refresh_token(subject_id, role)
+        session.add(RefreshToken(
+            jti=switch_jti,
+            subject_id=subject_id,
+            role=role,
+            expires_at=datetime.now() + timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES),
+        ))
         response.set_cookie(
             key=_switch_cookie_name(role, subject_id),
-            value=refresh_token_value,
+            value=switch_token_value,
             httponly=True,
             max_age=REFRESH_TOKEN_EXPIRE_MINUTES * 60,
         )
+    session.commit()
     return LoginResponse(
         access_token=access_token,
         caregiver_id=subject_id,

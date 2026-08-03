@@ -79,6 +79,29 @@ def test_remember_device_true_allows_switching_without_password(client: TestClie
     assert r2.json()["access_token"]
 
 
+def test_normal_token_refresh_does_not_invalidate_switch_cookie(client: TestClient):
+    """[2026-08-03 추가, 실제 재현된 버그] 로그인 직후 곧바로 겪는 게 아니라, 그 세션 안에서
+    access_token이 한 번 만료돼(60분) 평소 하던 대로 POST /auth/token/refresh가 자동으로
+    한 번만 돌아도(remember_device 인자 없이) "저장된 계정" 전환이 곧바로 깨졌었다 —
+    세션 쿠키(refresh_token)와 전환 쿠키(switch_...)가 로그인 시점에 같은 jti를
+    공유해서, 세션 쪽만 회전돼도 전환 쿠키가 가리키는 jti가 같이 무효화됐기 때문.
+    이제 두 쿠키가 서로 다른 jti를 받으므로, 세션 갱신이 전환 쿠키에 영향을 주면 안 된다."""
+    _signup_patient(client)
+    r = client.post(
+        "/auth/login",
+        json={"identifier": "switch-patient@test.com", "password": "pw123456", "remember_device": True},
+    )
+    subject_id = r.json()["caregiver_id"]
+
+    # 평소 세션 유지 중 access_token 만료로 자동으로 도는 것과 동일한 호출(body 없음).
+    refresh = client.post("/auth/token/refresh", json={})
+    assert refresh.status_code == 200
+
+    switch = client.post("/auth/switch", json={"role": "patient", "subject_id": subject_id})
+    assert switch.status_code == 200
+    assert switch.json()["access_token"]
+
+
 def test_switch_with_wrong_subject_id_is_rejected(client: TestClient):
     _signup_patient(client)
     client.post(
