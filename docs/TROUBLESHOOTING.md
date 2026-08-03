@@ -59,6 +59,35 @@ git push -u origin feature/ocr-day1-setup_soonhyun
 
 ---
 
+| 날짜 | 2026.07.02 |
+|---|---|
+| **작성자** | 박소정 |
+| **이슈** | 토글 버튼 클릭 후 검은 테두리(outline)가 사라지지 않고 잔류 |
+| **발생 위치** | `Check.tsx` 자가진단 버튼, `Dashboard.tsx` 복약 상태 버튼, `Connect.tsx` 관계 유형 버튼 |
+| **원인** | React 인라인 스타일에서 `border` 단축속성과 `borderColor` 개별속성을 **동시에 사용**하면, 상태 전환 시 React가 이전 `border` 값을 제거하면서 브라우저 기본 `outline`(2.85px)이 노출됨. 크롬 DevTools Computed 탭에서 `outline-style: none` 이지만 `outline-width: 2.85714px` 가 남아있는 것으로 확인. 추가로 콘솔에 `"Removing a style property during rerender (borderColor)"` 경고 발생 |
+| **시도한 방법 (실패)** | ① `index.css`에 `button:focus { outline: none }` 추가 → 효과 없음 ② `button:focus-visible`, `button:active`, `!important` 추가 → 효과 없음 ③ `onMouseDown={(e) => e.preventDefault()}` 단독 적용 → 효과 없음 ④ `borderWidth/borderStyle/borderColor` 개별속성으로 분리 → 오히려 테두리 두꺼워짐 ⑤ Grammarly 확장프로그램 비활성화 → 효과 없음 ⑥ Chrome DevTools Computed 탭에서 `outline-style: none`이지만 `outline-width: 2.85714px` 잔류 확인 ⑦ Console 경고 `"Removing a style property during rerender (borderColor)"` 확인 → 원인 특정 |
+| **해결** | `styles` 객체에서 버튼 스타일을 분리하고, JSX 렌더링 시 **`isActive` 조건으로 모든 border 속성을 인라인으로 직접 계산**하여 적용. spread(`...`) 병합 없이 하나의 style 객체로 완성해서 React rerender 시 속성 충돌 원천 차단 |
+| **핵심 패턴** | `border` 단축속성과 개별속성(`borderColor` 등)을 같은 컴포넌트에서 섞지 말 것. 상태에 따라 스타일이 바뀌는 버튼은 반드시 JSX 인라인 계산 방식 사용 |
+
+```tsx
+// ❌ 잘못된 패턴 — border 단축속성 + borderColor 개별속성 혼용
+const styles = {
+  btn: { border: "1px solid #E0D3C4" },
+  btnActive: { borderColor: "#C16A45" },  // 충돌 발생!
+}
+
+// ✅ 올바른 패턴 — isActive로 전체 속성을 한번에 계산
+<button style={{
+  borderWidth: 1,
+  borderStyle: "solid",
+  borderColor: isActive ? "#C16A45" : "#E0D3C4",
+  background: isActive ? "#C16A45" : "#F5F0EA",
+  outline: "none",
+}}>
+```
+
+---
+
 | 날짜 | 2026.07.07 |
 |---|---|
 | **작성자** | 박소정 |
@@ -89,34 +118,6 @@ git push -u origin feature/ocr-day1-setup_soonhyun
 | PR 머지 시 관련없는 `app/`, `docs/` 파일 대량 충돌 | PR 브랜치가 dev 기준이 아니라 개인 작업폴더(`AH_04_02_soonhyun/`) 기준이었음 | `git merge` 대신 실제 코드 파일을 텍스트로 받아 `backend/`에 직접 포팅 |
 
 **핵심 패턴**: 프로젝트 초기 셋업 단계에서는 iCloud 등 자동 동기화 폴더, 수동으로 옮긴 프론트 파일, 개인 작업폴더 기준 브랜치처럼 "겉보기엔 문제 없어 보이는" 환경 설정이 한꺼번에 여러 문제를 일으킬 수 있다 — `git merge --abort`처럼 되돌리기 쉬운 명령도 미커밋 작업이 있으면 위험하므로, 재적용 후 즉시 커밋하는 습관이 중요하다.
-
----
-
-| 날짜 | 2026.07.02 |
-|---|---|
-| **이슈** | 토글 버튼 클릭 후 검은 테두리(outline)가 사라지지 않고 잔류 |
-| **발생 위치** | `Check.tsx` 자가진단 버튼, `Dashboard.tsx` 복약 상태 버튼, `Connect.tsx` 관계 유형 버튼 |
-| **원인** | React 인라인 스타일에서 `border` 단축속성과 `borderColor` 개별속성을 **동시에 사용**하면, 상태 전환 시 React가 이전 `border` 값을 제거하면서 브라우저 기본 `outline`(2.85px)이 노출됨. 크롬 DevTools Computed 탭에서 `outline-style: none` 이지만 `outline-width: 2.85714px` 가 남아있는 것으로 확인. 추가로 콘솔에 `"Removing a style property during rerender (borderColor)"` 경고 발생 |
-| **시도한 방법 (실패)** | ① `index.css`에 `button:focus { outline: none }` 추가 → 효과 없음 ② `button:focus-visible`, `button:active`, `!important` 추가 → 효과 없음 ③ `onMouseDown={(e) => e.preventDefault()}` 단독 적용 → 효과 없음 ④ `borderWidth/borderStyle/borderColor` 개별속성으로 분리 → 오히려 테두리 두꺼워짐 ⑤ Grammarly 확장프로그램 비활성화 → 효과 없음 ⑥ Chrome DevTools Computed 탭에서 `outline-style: none`이지만 `outline-width: 2.85714px` 잔류 확인 ⑦ Console 경고 `"Removing a style property during rerender (borderColor)"` 확인 → 원인 특정 |
-| **해결** | `styles` 객체에서 버튼 스타일을 분리하고, JSX 렌더링 시 **`isActive` 조건으로 모든 border 속성을 인라인으로 직접 계산**하여 적용. spread(`...`) 병합 없이 하나의 style 객체로 완성해서 React rerender 시 속성 충돌 원천 차단 |
-| **핵심 패턴** | `border` 단축속성과 개별속성(`borderColor` 등)을 같은 컴포넌트에서 섞지 말 것. 상태에 따라 스타일이 바뀌는 버튼은 반드시 JSX 인라인 계산 방식 사용 |
-
-```tsx
-// ❌ 잘못된 패턴 — border 단축속성 + borderColor 개별속성 혼용
-const styles = {
-  btn: { border: "1px solid #E0D3C4" },
-  btnActive: { borderColor: "#C16A45" },  // 충돌 발생!
-}
-
-// ✅ 올바른 패턴 — isActive로 전체 속성을 한번에 계산
-<button style={{
-  borderWidth: 1,
-  borderStyle: "solid",
-  borderColor: isActive ? "#C16A45" : "#E0D3C4",
-  background: isActive ? "#C16A45" : "#F5F0EA",
-  outline: "none",
-}}>
-```
 
 ---
 
