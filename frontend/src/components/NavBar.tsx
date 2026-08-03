@@ -34,6 +34,9 @@ type NavItem = { label: string; to: string; children?: { label: string; to: stri
 // 만들었다(이전엔 마이페이지에서만 갈 수 있고 내비바엔 아예 없었음).
 // [2026-08-04 추가 조정, 사용자 요청] 복약 가이드를 "오늘의 복약" 하위로, 연결관리를
 // "설정" 하위로 다시 묶었다 — 최상위 항목 6개→4개로 줄어 내비바 폭도 더 여유로워졌다.
+// [2026-08-04] "등록내역"은 처방전을 등록한다는 뜻인지 뭔가를 등록한 이력인지 모호하다는
+// 지적 반영 — 실제로는 업로드한 처방전과 그 복약가이드 결과를 모아 보는 화면이라
+// "처방전 목록"으로 이름을 바꿨다(Records.tsx 화면 제목도 함께 변경).
 const PATIENT_NAV_ITEMS: NavItem[] = [
   { label: "처방 약 등록", to: "/upload" },
   {
@@ -45,7 +48,7 @@ const PATIENT_NAV_ITEMS: NavItem[] = [
     ],
   },
   {
-    label: "등록내역",
+    label: "처방전 목록",
     to: "/records",
     children: [{ label: "모니터링", to: "/monitoring" }],
   },
@@ -60,20 +63,17 @@ const PATIENT_NAV_ITEMS: NavItem[] = [
   },
 ];
 
+// [2026-08-04 정리, 사용자 요청 — 환자 쪽과 동일한 방식] 환자 내비바처럼 "모니터링"을
+// 그 출발점이었던 "환자 관리" 하위로 다시 묶었다(원래 /patients 목록의 버튼이었다가
+// 최상위로 승격된 이력 — 위 주석 참고). 연결관리는 보호자에게는 신규 환자를 연결하는
+// 핵심 동작이라 설정 밑에 숨기지 않고 그대로 최상위에 둔다.
 const CAREGIVER_NAV_ITEMS: NavItem[] = [
-  { label: "환자 관리", to: "/patients" },
-  // [2026-07-24 추가] 지금까지 환자 관리 목록의 "모니터링" 버튼으로만 들어갈 수 있어서
-  // 여러 환자를 관리하는 보호자·기관 입장에서 진입점이 너무 깊었다 — 다중 환자 요약형으로
-  // 바뀐 대시보드를 내비바 최상위 메뉴로 승격.
-  { label: "모니터링", to: "/monitoring" },
+  {
+    label: "환자 관리",
+    to: "/patients",
+    children: [{ label: "모니터링", to: "/monitoring" }],
+  },
   { label: "연결관리", to: "/connect" },
-  // [2026-07-30 버그수정] Notification.tsx(이 기기로 알림 받기 + 환자 알림 설정)는
-  // PatientContextBanner 주석에 이미 보호자·기관용으로 설계돼 있었는데, 여기 메뉴에
-  // 링크가 아예 없어서 보호자·기관 계정은 진입 자체를 못 하고 있었다 — 환자 쪽처럼
-  // "설정" 하위로 넣는다.
-  // [2026-07-30 추가] "알림 관리"(NotificationManagement.tsx) — 여러 환자를 관리할 때
-  // 환자별로 이 기기 알림을 켜고 끌 수 있는 화면. 환자 계정은 자기 자신만 관리해서
-  // 의미가 없으니 보호자·기관 메뉴에만 넣는다.
   {
     label: "설정",
     to: "/settings",
@@ -380,7 +380,7 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
                       className="px-3 py-2 rounded-xl text-left text-[13px] font-medium transition-opacity hover:opacity-60"
                       style={{ color: C.terracotta }}
                     >
-                      등록내역에서 "{trimmedQuery}" 검색
+                      처방전 목록에서 "{trimmedQuery}" 검색
                     </button>
                   </div>
                 </div>
@@ -556,7 +556,7 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
                   className="px-3 py-2.5 rounded-xl text-left text-[14px] font-medium transition-opacity hover:opacity-60"
                   style={{ color: C.terracotta }}
                 >
-                  등록내역에서 "{trimmedQuery}" 검색
+                  처방전 목록에서 "{trimmedQuery}" 검색
                 </button>
               </div>
             )}
