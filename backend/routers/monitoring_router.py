@@ -495,52 +495,95 @@ def update_caregiver(
     return caregiver
 
 
-def _patient_diagnoses(session: Session, patient_id: int) -> str | None:
+def _bulk_patient_diagnoses(session: Session, patient_ids: list[int]) -> dict[int, str | None]:
     """환자 관리 테이블 "진단명" 컬럼용 — diagnosis는 MedicalRecord(처방전 1건)가 아니라
     OcrResult(약 1개당 1행)에 있다 — 등록내역(soft-delete 제외)에 딸린 결과들의 진단명을
-    중복 없이 등장 순서대로 모아 "·"로 이어붙인다. 실제로 값이 있는 것만."""
+    중복 없이 등장 순서대로 모아 "·"로 이어붙인다. 실제로 값이 있는 것만.
+
+    [perf, N+1 수정] patient_id별로 따로 조회하던 걸 patient_ids 전체를 모아 한 번에
+    bulk-select하도록 바꿨다 — 반환된 행을 patient_id별로 그룹핑해 원래 함수와 동일한
+    "등장 순서 유지 + 중복 제거" 규칙을 그대로 적용한다."""
+    if not patient_ids:
+        return {}
     rows = session.exec(
-        select(OcrResult.diagnosis)
+        select(MedicalRecord.patient_id, OcrResult.diagnosis)
         .join(MedicalRecord, OcrResult.record_id == MedicalRecord.id)
-        .where(MedicalRecord.patient_id == patient_id)
+        .where(MedicalRecord.patient_id.in_(patient_ids))
         .where(MedicalRecord.deleted_at.is_(None))
         .where(OcrResult.diagnosis != "")
     ).all()
-    distinct = list(dict.fromkeys(rows))
-    return "·".join(distinct) if distinct else None
+    diagnoses_by_patient: dict[int, list[str]] = {}
+    for patient_id, diagnosis in rows:
+        diagnoses_by_patient.setdefault(patient_id, []).append(diagnosis)
+    return {
+        patient_id: "·".join(dict.fromkeys(diagnoses))
+        for patient_id, diagnoses in diagnoses_by_patient.items()
+    }
 
 
-def _patient_medication_status(session: Session, patient_id: int) -> Literal["active", "paused", "none"]:
-    """환자 관리 테이블 "상태" 컬럼용 — 활성 복약 일정이 하나라도 있으면 복약중, 일정
-    자체는 있는데 전부 비활성이면 중단, 아예 없으면 none(표에서 "-"로 표시)."""
-    schedules = session.exec(
-        select(MedicationSchedule.active).where(MedicationSchedule.patient_id == patient_id)
+def _bulk_patient_medication_and_today_status(
+    session: Session, patient_ids: list[int]
+) -> tuple[dict[int, Literal["active", "paused", "none"]], dict[int, Literal["ok", "missed"]]]:
+    """환자 관리 테이블 "상태"/"오늘 상태" 컬럼용 — 원래는 별개 함수 두 개
+    (_patient_medication_status/_patient_today_status)였지만 둘 다 MedicationSchedule을
+    조회하므로, patient_ids 전체에 대해 스케줄을 한 번만 bulk-select해서 함께 계산한다.
+
+    [perf, N+1 수정] 기존엔 환자별로 "상태" 1쿼리 + "오늘 상태" 최대 2쿼리(활성 일정
+    조회 + missed 조회)가 나갔다. 이제 스케줄 bulk-select 1번 + missed 로그 bulk-select
+    1번(활성 일정이 하나도 없으면 이 쿼리 자체를 스킵)으로 고정된다.
+
+    - 상태: 활성 일정이 하나라도 있으면 "active", 일정은 있는데 전부 비활성이면
+      "paused", 아예 없으면 "none".
+    - 오늘 상태: 오늘 놓친(NotificationLog kind="missed") 활성 일정이 하나라도 있으면
+      "missed", 없으면 "ok"(활성 일정이 아예 없는 환자도 "ok").
+    """
+    medication_status: dict[int, Literal["active", "paused", "none"]] = {}
+    today_status: dict[int, Literal["ok", "missed"]] = {}
+    if not patient_ids:
+        return medication_status, today_status
+
+    schedule_rows = session.exec(
+        select(MedicationSchedule.id, MedicationSchedule.patient_id, MedicationSchedule.active).where(
+            MedicationSchedule.patient_id.in_(patient_ids)
+        )
     ).all()
-    if not schedules:
-        return "none"
-    return "active" if any(schedules) else "paused"
 
+    actives_by_patient: dict[int, list[bool]] = {}
+    active_schedule_ids_by_patient: dict[int, list[int]] = {}
+    for schedule_id, patient_id, active in schedule_rows:
+        actives_by_patient.setdefault(patient_id, []).append(active)
+        if active:
+            active_schedule_ids_by_patient.setdefault(patient_id, []).append(schedule_id)
 
-def _patient_today_status(session: Session, patient_id: int) -> Literal["ok", "missed"]:
-    """환자 관리 테이블 "오늘 상태" 동그라미용 — 여러 환자를 관리할 때 오늘 누가 약을
-    놓쳤는지 한눈에 보기 위함(list_logs가 캘린더/최근기록에 쓰는 것과 동일한 NotificationLog
-    kind="missed" 병합 방식을 재사용). 오늘 놓친 일정이 하나라도 있으면 missed(빨강),
-    없으면 ok(초록) — 활성 일정이 아예 없는 환자도 ok로 둔다(놓칠 일정 자체가 없으므로)."""
-    active_schedule_ids = session.exec(
-        select(MedicationSchedule.id)
-        .where(MedicationSchedule.patient_id == patient_id)
-        .where(MedicationSchedule.active == True)  # noqa: E712
-    ).all()
-    if not active_schedule_ids:
-        return "ok"
-    today_str = date.today().isoformat()
-    missed = session.exec(
-        select(NotificationLog)
-        .where(NotificationLog.kind == "missed")
-        .where(NotificationLog.due_date == today_str)
-        .where(NotificationLog.schedule_id.in_(active_schedule_ids))
-    ).first()
-    return "missed" if missed else "ok"
+    medication_status = {
+        patient_id: ("active" if any(actives) else "paused") for patient_id, actives in actives_by_patient.items()
+    }
+
+    all_active_schedule_ids = [
+        schedule_id for ids in active_schedule_ids_by_patient.values() for schedule_id in ids
+    ]
+    missed_schedule_ids: set[int] = set()
+    if all_active_schedule_ids:
+        today_str = date.today().isoformat()
+        missed_schedule_ids = set(
+            session.exec(
+                select(NotificationLog.schedule_id)
+                .where(NotificationLog.kind == "missed")
+                .where(NotificationLog.due_date == today_str)
+                .where(NotificationLog.schedule_id.in_(all_active_schedule_ids))
+            ).all()
+        )
+
+    for patient_id in patient_ids:
+        active_ids = active_schedule_ids_by_patient.get(patient_id, [])
+        if not active_ids:
+            today_status[patient_id] = "ok"
+        else:
+            today_status[patient_id] = (
+                "missed" if any(sid in missed_schedule_ids for sid in active_ids) else "ok"
+            )
+
+    return medication_status, today_status
 
 
 @router.get("/caregivers/{caregiver_id}/patients", response_model=list[PatientPublic])
@@ -552,7 +595,10 @@ def list_patients_of_caregiver(
     """핵심 기능: 이 보호자가 케어하는 환자 전체 목록 (여러 명 가능)
 
     [2026-07-22 수정] 환자 관리 테이블(Figma 목업)이 진단명·복약상태도 보여줘야 해서,
-    ORM 객체를 그대로 반환하는 대신 PatientPublic으로 변환한 뒤 계산한 값을 채워 넣는다."""
+    ORM 객체를 그대로 반환하는 대신 PatientPublic으로 변환한 뒤 계산한 값을 채워 넣는다.
+
+    [perf, N+1 수정] 환자별로 진단명·복약상태·오늘상태를 각각 조회하던 걸 환자 K명 전체에
+    대해 한 번씩 bulk-select하도록 바꿨다 — 쿼리 수가 K에 비례해 늘어나지 않고 고정된다."""
     if caregiver_id != caregiver.id:
         raise HTTPException(403, "다른 보호자의 환자 목록은 볼 수 없어요")
 
@@ -566,6 +612,12 @@ def list_patients_of_caregiver(
         return []
     links_by_patient = {link.patient_id: link for link in links}
     patients = session.exec(select(Patient).where(Patient.id.in_(patient_ids))).all()
+
+    diagnoses_by_patient = _bulk_patient_diagnoses(session, patient_ids)
+    medication_status_by_patient, today_status_by_patient = _bulk_patient_medication_and_today_status(
+        session, patient_ids
+    )
+
     result = []
     for patient in patients:
         try:
@@ -579,9 +631,9 @@ def list_patients_of_caregiver(
         result.append(
             public.model_copy(
                 update={
-                    "diagnoses": _patient_diagnoses(session, patient.id),
-                    "medication_status": _patient_medication_status(session, patient.id),
-                    "today_status": _patient_today_status(session, patient.id),
+                    "diagnoses": diagnoses_by_patient.get(patient.id),
+                    "medication_status": medication_status_by_patient.get(patient.id, "none"),
+                    "today_status": today_status_by_patient.get(patient.id, "ok"),
                     "notifications_enabled": links_by_patient[patient.id].notifications_enabled,
                 }
             )
