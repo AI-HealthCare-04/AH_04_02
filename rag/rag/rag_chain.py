@@ -160,6 +160,7 @@ def _resolve_disease_codes(diagnosis: str | None) -> list[str]:
 
 _DISEASE_NAME_NOISE_RE = re.compile(r"[^0-9a-zA-Z가-힣]")
 _DIAGNOSIS_STATUS_WORDS = ("진단", "의심", "환자", "있음", "질환자")
+_DIAGNOSIS_SEPARATOR_RE = re.compile(r"\s*(?:,|/|;|·|\n|\b및\b|\band\b)\s*", re.IGNORECASE)
 
 
 def _normalize_disease_name(value: str | None) -> str:
@@ -168,6 +169,16 @@ def _normalize_disease_name(value: str | None) -> str:
     for word in _DIAGNOSIS_STATUS_WORDS:
         normalized = normalized.replace(word, "")
     return normalized
+
+
+def _split_diagnosis_parts(diagnosis: str) -> list[str]:
+    """Split OCR compound diagnoses while preserving their first-seen order."""
+    parts: list[str] = []
+    for value in _DIAGNOSIS_SEPARATOR_RE.split(diagnosis):
+        value = value.strip()
+        if value and value not in parts:
+            parts.append(value)
+    return parts or [diagnosis]
 
 
 def _candidate_kdca_titles(diagnosis: str) -> list[str]:
@@ -347,42 +358,64 @@ def _lifestyle_context_items(diagnosis: str | None) -> list[dict]:
     진단명별로 한 번만 부르는 것은 generate_guides_from_medications의 책임).
     """
     items: list[dict] = []
-    lifestyle_found = False
     if diagnosis:
-        kdca_docs = []
+        kdca_buckets: list[list[Document]] = []
+        curated_codes: list[str] = []
         seen_kdca_ids: set[tuple] = set()
-        for candidate_title in _candidate_kdca_titles(diagnosis):
-            matched_this_title = False
-            for doc in search_kdca_health_info_by_title(candidate_title):
-                doc_id = (
-                    doc.metadata.get("cntnts_sn"),
-                    doc.metadata.get("section_sn"),
-                    doc.metadata.get("index"),
-                )
-                if doc_id in seen_kdca_ids or not _is_lifestyle_kdca_section(
-                    doc.metadata.get("section_name")
-                ):
-                    continue
-                if not _title_matches_diagnosis(doc.metadata.get("title", ""), diagnosis):
-                    continue
-                seen_kdca_ids.add(doc_id)
-                kdca_docs.append(doc)
-                matched_this_title = True
-            if matched_this_title:
-                break
-        if not kdca_docs:
-            # 진단명이 질병관리청 title과 정확히 일치하지 않을 수 있어(예: "고혈압 있음")
-            # 의미기반 검색으로 보강한다 — 다만 다른 질환의 생활습관 섹션이 섞여 들어오는 걸
-            # 막기 위해 title이 diagnosis와 실제로 관련 있는 문서만 남긴다.
-            kdca_docs = [
-                doc
-                for doc in search_kdca_health_info(diagnosis, k=30)
-                if _is_lifestyle_kdca_section(doc.metadata.get("section_name"))
-                and _title_matches_diagnosis(doc.metadata.get("title", ""), diagnosis)
-            ]
+        for diagnosis_part in _split_diagnosis_parts(diagnosis):
+            part_docs: list[Document] = []
+            for candidate_title in _candidate_kdca_titles(diagnosis_part):
+                matched_this_title = False
+                for doc in search_kdca_health_info_by_title(candidate_title):
+                    doc_id = (
+                        doc.metadata.get("cntnts_sn"),
+                        doc.metadata.get("section_sn"),
+                        doc.metadata.get("index"),
+                    )
+                    if doc_id in seen_kdca_ids or not _is_lifestyle_kdca_section(
+                        doc.metadata.get("section_name")
+                    ):
+                        continue
+                    if not _title_matches_diagnosis(doc.metadata.get("title", ""), diagnosis_part):
+                        continue
+                    seen_kdca_ids.add(doc_id)
+                    part_docs.append(doc)
+                    matched_this_title = True
+                if matched_this_title:
+                    break
+            if not part_docs:
+                # 진단명이 질병관리청 title과 정확히 일치하지 않을 수 있어(예: "고혈압 있음")
+                # 의미기반 검색으로 보강하되 다른 질환 문서는 제외한다.
+                for doc in search_kdca_health_info(diagnosis_part, k=30):
+                    doc_id = (
+                        doc.metadata.get("cntnts_sn"),
+                        doc.metadata.get("section_sn"),
+                        doc.metadata.get("index"),
+                    )
+                    if doc_id in seen_kdca_ids:
+                        continue
+                    if _is_lifestyle_kdca_section(doc.metadata.get("section_name")) and (
+                        _title_matches_diagnosis(doc.metadata.get("title", ""), diagnosis_part)
+                    ):
+                        seen_kdca_ids.add(doc_id)
+                        part_docs.append(doc)
+            if part_docs:
+                kdca_buckets.append(part_docs)
+            else:
+                for disease_code in _resolve_disease_codes(diagnosis_part):
+                    if disease_code not in curated_codes:
+                        curated_codes.append(disease_code)
 
-        for doc in kdca_docs[:3]:
-            lifestyle_found = True
+        # 한 질환의 여러 섹션이 3개 한도를 독점하지 않도록 질환별 결과를 round-robin으로 담는다.
+        kdca_docs: list[Document] = []
+        round_index = 0
+        while len(kdca_docs) < 3 and any(round_index < len(bucket) for bucket in kdca_buckets):
+            for bucket in kdca_buckets:
+                if round_index < len(bucket) and len(kdca_docs) < 3:
+                    kdca_docs.append(bucket[round_index])
+            round_index += 1
+
+        for doc in kdca_docs:
             items.append(
                 {
                     "kind": "lifestyle",
@@ -396,8 +429,7 @@ def _lifestyle_context_items(diagnosis: str | None) -> list[dict]:
                 }
             )
 
-    if not lifestyle_found:
-        for disease_code in _resolve_disease_codes(diagnosis):
+        for disease_code in curated_codes:
             for doc in search_by_disease(disease_code):
                 items.append(
                     {

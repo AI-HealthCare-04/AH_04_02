@@ -23,6 +23,21 @@ def _ckd_lifestyle_doc() -> Document:
     )
 
 
+def _lifestyle_doc(title: str, content_id: str) -> Document:
+    return Document(
+        page_content=f"[{title} - 생활습관 관리] {title} 생활습관 안내입니다.",
+        metadata={
+            "doc_type": "kdca_health_info",
+            "cntnts_sn": content_id,
+            "title": title,
+            "section_name": "생활습관 관리",
+            "section_sn": "10",
+            "index": 0,
+            "source": "질병관리청 국가건강정보포털",
+        },
+    )
+
+
 def test_registered_synonyms_match_the_same_disease():
     assert _title_matches_diagnosis("만성콩팥병", "만성 신장병")
     assert _title_matches_diagnosis("이상지질혈증", "고지혈증 환자")
@@ -60,3 +75,20 @@ def test_lifestyle_lookup_finds_kdca_title_through_synonym():
     curated_search.assert_not_called()
     assert items[0]["source_ref"].disease == "만성콩팥병"
     assert items[0]["source_ref"].source == "질병관리청 국가건강정보포털"
+
+
+def test_compound_diagnosis_keeps_lifestyle_guides_for_each_disease():
+    docs = {
+        "고혈압": [_lifestyle_doc("고혈압", "100")],
+        "당뇨병": [_lifestyle_doc("당뇨병", "200")],
+    }
+
+    with (
+        patch("rag.rag_chain.search_kdca_health_info_by_title", side_effect=lambda title: docs.get(title, [])),
+        patch("rag.rag_chain.search_kdca_health_info", return_value=[]),
+        patch("rag.rag_chain.search_by_disease") as curated_search,
+    ):
+        items = _lifestyle_context_items("고혈압, 당뇨병")
+
+    curated_search.assert_not_called()
+    assert {item["source_ref"].disease for item in items} == {"고혈압", "당뇨병"}
