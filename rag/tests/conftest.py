@@ -19,6 +19,9 @@ def _isolate_mfds_disk_cache(tmp_path, monkeypatch):
 
     test_cache = diskcache.Cache(str(tmp_path / "mfds_cache"), timeout=1)
     monkeypatch.setattr(_mfds_client_mod, "_disk_cache", test_cache)
+    # Existing client unit tests exercise the HTTP/cache parser directly.
+    # Master-first behaviour has dedicated tests in test_public_api_master.py.
+    monkeypatch.setattr(_mfds_client_mod.settings, "PUBLIC_API_MASTER_ENABLED", False)
     # dur_master는 _mfds_client_mod._disk_cache를 런타임에 참조하므로 별도 패치 불필요
     yield
     test_cache.close()

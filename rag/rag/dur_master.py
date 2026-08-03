@@ -67,12 +67,22 @@ def _dedupe_taboo(taboos: list[DurTabooInfo]) -> list[DurTabooInfo]:
 # [2026-07-21 추가 → 2026-07-30 디스크 캐시로 전환]
 # mfds_client의 lru_cache와 동일한 이유로 diskcache로 전환한다.
 # _mfds_client_mod._disk_cache는 mfds_client._mfds_client_mod._disk_cache와 동일한 인스턴스를 공유해 캐시 디렉토리를 통일한다.
-def search_usjnt_taboo(item_name: str, num_of_rows: int = 100, page_no: int = 1) -> list[DurTabooInfo]:
+def search_usjnt_taboo(
+    item_name: str, num_of_rows: int = 100, page_no: int = 1, *, use_master: bool = True
+) -> list[DurTabooInfo]:
     """품목명(부분일치)으로 병용금기 상대 목록을 조회합니다.
 
     못 찾으면 빈 리스트 — "이 약은 병용금기가 없다"는 의미가 아니라 "DUR 데이터에 해당
     품목명이 등재돼 있지 않다"는 뜻이므로 호출부에서 그렇게 해석하지 않도록 주의할 것.
     """
+    if use_master and settings.PUBLIC_API_MASTER_ENABLED:
+        from rag.public_api_master import lookup
+
+        mastered = lookup("dur_taboo", item_name)
+        if mastered is not None:
+            return [DurTabooInfo.model_validate(item) for item in mastered][:num_of_rows]
+        if not settings.PUBLIC_API_LIVE_FALLBACK:
+            return []
     key = f"dur.search_usjnt_taboo|{item_name}|{num_of_rows}|{page_no}"
     if _mfds_client_mod._disk_cache is not None:
         try:
@@ -104,12 +114,22 @@ def search_usjnt_taboo(item_name: str, num_of_rows: int = 100, page_no: int = 1)
     return result
 
 
-def search_elderly_caution(item_name: str, num_of_rows: int = 100, page_no: int = 1) -> list[DurCaution]:
+def search_elderly_caution(
+    item_name: str, num_of_rows: int = 100, page_no: int = 1, *, use_master: bool = True
+) -> list[DurCaution]:
     """품목명(부분일치)으로 노인주의 정보를 조회합니다.
 
     [2026-07-14] API 전환 이후 "노인주의(해열진통소염제)" 세부 분류는 더 이상 구분하지
     않는다 — 승인된 API(getOdsnAtentInfoList03)가 전체 노인주의 항목을 하나로 반환한다.
     """
+    if use_master and settings.PUBLIC_API_MASTER_ENABLED:
+        from rag.public_api_master import lookup
+
+        mastered = lookup("dur_elderly", item_name)
+        if mastered is not None:
+            return [DurCaution.model_validate(item) for item in mastered][:num_of_rows]
+        if not settings.PUBLIC_API_LIVE_FALLBACK:
+            return []
     key = f"dur.search_elderly_caution|{item_name}|{num_of_rows}|{page_no}"
     if _mfds_client_mod._disk_cache is not None:
         try:
@@ -140,8 +160,18 @@ def search_elderly_caution(item_name: str, num_of_rows: int = 100, page_no: int 
     return result
 
 
-def search_age_taboo(item_name: str, num_of_rows: int = 100, page_no: int = 1) -> list[DurCaution]:
+def search_age_taboo(
+    item_name: str, num_of_rows: int = 100, page_no: int = 1, *, use_master: bool = True
+) -> list[DurCaution]:
     """품목명(부분일치)으로 연령금기(특정 연령대 사용 금지) 정보를 조회합니다."""
+    if use_master and settings.PUBLIC_API_MASTER_ENABLED:
+        from rag.public_api_master import lookup
+
+        mastered = lookup("dur_age", item_name)
+        if mastered is not None:
+            return [DurCaution.model_validate(item) for item in mastered][:num_of_rows]
+        if not settings.PUBLIC_API_LIVE_FALLBACK:
+            return []
     key = f"dur.search_age_taboo|{item_name}|{num_of_rows}|{page_no}"
     if _mfds_client_mod._disk_cache is not None:
         try:
@@ -172,8 +202,18 @@ def search_age_taboo(item_name: str, num_of_rows: int = 100, page_no: int = 1) -
     return result
 
 
-def search_pregnancy_taboo(item_name: str, num_of_rows: int = 100, page_no: int = 1) -> list[DurCaution]:
+def search_pregnancy_taboo(
+    item_name: str, num_of_rows: int = 100, page_no: int = 1, *, use_master: bool = True
+) -> list[DurCaution]:
     """품목명(부분일치)으로 임부금기 정보를 조회합니다."""
+    if use_master and settings.PUBLIC_API_MASTER_ENABLED:
+        from rag.public_api_master import lookup
+
+        mastered = lookup("dur_pregnancy", item_name)
+        if mastered is not None:
+            return [DurCaution.model_validate(item) for item in mastered][:num_of_rows]
+        if not settings.PUBLIC_API_LIVE_FALLBACK:
+            return []
     key = f"dur.search_pregnancy_taboo|{item_name}|{num_of_rows}|{page_no}"
     if _mfds_client_mod._disk_cache is not None:
         try:

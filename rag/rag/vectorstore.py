@@ -72,6 +72,26 @@ def add_kdca_health_info_documents(documents: list[Document]) -> int:
     return len(documents)
 
 
+def add_public_api_master_documents(documents: list[Document]) -> int:
+    if not documents:
+        return 0
+    store = get_vectorstore()
+    ids = [
+        f"public-api::{doc.metadata['record_type']}::{doc.metadata['lookup_name_normalized']}::{doc.metadata['master_item_index']}"
+        for doc in documents
+    ]
+    for start in range(0, len(documents), _CHROMA_MAX_BATCH_SIZE):
+        store.add_documents(
+            documents[start : start + _CHROMA_MAX_BATCH_SIZE],
+            ids=ids[start : start + _CHROMA_MAX_BATCH_SIZE],
+        )
+    return len(documents)
+
+
+def search_public_api_master(query: str, k: int | None = None) -> list[Document]:
+    return similarity_search(query, k=k, filter={"doc_type": "public_api_master"})
+
+
 def search_kdca_health_info_by_title(title: str) -> list[Document]:
     """제목(질환/주제명)이 정확히 일치하는 건강정보 섹션을 전부 가져옵니다."""
     store = get_vectorstore()

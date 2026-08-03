@@ -128,15 +128,23 @@ DIAGNOSIS_DISEASE_ALIASES: dict[str, str] = {
     "고혈압": "hypertension",
     "당뇨병": "diabetes",
     "당뇨": "diabetes",
+    "당뇨병성 질환": "diabetes",
+    "제1형 당뇨병": "diabetes",
+    "제2형 당뇨병": "diabetes",
     "이상지질혈증": "dyslipidemia",
     "고지혈증": "dyslipidemia",
     "만성콩팥병": "chronic_kidney_disease",
+    "만성 콩팥병": "chronic_kidney_disease",
+    "만성콩팥질환": "chronic_kidney_disease",
+    "만성 콩팥 질환": "chronic_kidney_disease",
     "만성 신장병": "chronic_kidney_disease",
     "만성신장병": "chronic_kidney_disease",
     "만성 신장 질환": "chronic_kidney_disease",
     "만성신부전": "chronic_kidney_disease",
     "콩팥병": "chronic_kidney_disease",
     "신장질환": "chronic_kidney_disease",
+    "신장 질환": "chronic_kidney_disease",
+    "CKD": "chronic_kidney_disease",
 }
 
 
@@ -148,6 +156,28 @@ def _resolve_disease_codes(diagnosis: str | None) -> list[str]:
         if alias in diagnosis and code not in codes:
             codes.append(code)
     return codes
+
+
+_DISEASE_NAME_NOISE_RE = re.compile(r"[^0-9a-zA-Z가-힣]")
+_DIAGNOSIS_STATUS_WORDS = ("진단", "의심", "환자", "있음", "질환자")
+
+
+def _normalize_disease_name(value: str | None) -> str:
+    """Normalize spacing, punctuation and common chart-status suffixes."""
+    normalized = _DISEASE_NAME_NOISE_RE.sub("", (value or "").casefold())
+    for word in _DIAGNOSIS_STATUS_WORDS:
+        normalized = normalized.replace(word, "")
+    return normalized
+
+
+def _candidate_kdca_titles(diagnosis: str) -> list[str]:
+    """Return the entered diagnosis plus every registered synonym title."""
+    candidates = [diagnosis]
+    codes = set(_resolve_disease_codes(diagnosis))
+    for alias, code in DIAGNOSIS_DISEASE_ALIASES.items():
+        if code in codes and alias not in candidates:
+            candidates.append(alias)
+    return candidates
 
 
 # [2026-07-28 버그수정] 질병관리청 원문에는 "이상지질혈증"/"협심증"처럼 흔한 만성질환도
@@ -174,7 +204,17 @@ def _is_lifestyle_kdca_section(section_name: str | None) -> bool:
 
 
 def _title_matches_diagnosis(title: str, diagnosis: str) -> bool:
-    return bool(title) and (title in diagnosis or diagnosis in title)
+    if not title:
+        return False
+    normalized_title = _normalize_disease_name(title)
+    normalized_diagnosis = _normalize_disease_name(diagnosis)
+    if normalized_title and (
+        normalized_title in normalized_diagnosis or normalized_diagnosis in normalized_title
+    ):
+        return True
+    title_codes = set(_resolve_disease_codes(title))
+    diagnosis_codes = set(_resolve_disease_codes(diagnosis))
+    return bool(title_codes & diagnosis_codes)
 
 
 class NoContextFoundError(RuntimeError):
@@ -309,11 +349,27 @@ def _lifestyle_context_items(diagnosis: str | None) -> list[dict]:
     items: list[dict] = []
     lifestyle_found = False
     if diagnosis:
-        kdca_docs = [
-            doc
-            for doc in search_kdca_health_info_by_title(diagnosis)
-            if _is_lifestyle_kdca_section(doc.metadata.get("section_name"))
-        ]
+        kdca_docs = []
+        seen_kdca_ids: set[tuple] = set()
+        for candidate_title in _candidate_kdca_titles(diagnosis):
+            matched_this_title = False
+            for doc in search_kdca_health_info_by_title(candidate_title):
+                doc_id = (
+                    doc.metadata.get("cntnts_sn"),
+                    doc.metadata.get("section_sn"),
+                    doc.metadata.get("index"),
+                )
+                if doc_id in seen_kdca_ids or not _is_lifestyle_kdca_section(
+                    doc.metadata.get("section_name")
+                ):
+                    continue
+                if not _title_matches_diagnosis(doc.metadata.get("title", ""), diagnosis):
+                    continue
+                seen_kdca_ids.add(doc_id)
+                kdca_docs.append(doc)
+                matched_this_title = True
+            if matched_this_title:
+                break
         if not kdca_docs:
             # 진단명이 질병관리청 title과 정확히 일치하지 않을 수 있어(예: "고혈압 있음")
             # 의미기반 검색으로 보강한다 — 다만 다른 질환의 생활습관 섹션이 섞여 들어오는 걸
