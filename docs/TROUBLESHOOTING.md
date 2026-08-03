@@ -1,12 +1,71 @@
 
+| 날짜 | 2026.07.01 |
+|---|---|
+| **작성자** | 권순현 |
+| **이슈** | PyCharm 이름 변경 다이얼로그에 슬래시(`/`) 포함 브랜치명 입력 시 “올바른 식별자가 아닙니다” 오류 |
+| **발생 위치** | PyCharm IDE Rename 다이얼로그 |
+| **원인** | `feature/ocr-day1-setup_soonhyun`은 Git 브랜치명이지 파일시스템 경로가 아니다. PyCharm의 Rename 다이얼로그는 파일·디렉터리 이름을 변경하는 UI이기 때문에, 슬래시(`/`)가 포함된 이름을 유효하지 않은 식별자로 판단한다. |
+| **해결** | 브랜치 생성과 push는 파일 탐색기가 아니라 터미널 Git 명령어로 처리한다. |
+| **핵심 패턴** | PyCharm의 Rename 다이얼로그는 파일명용이다. Git 브랜치는 반드시 터미널에서 `git checkout -b <name>` + `git push -u origin <name>`으로 생성한다. |
+
+```bash
+git checkout -b feature/ocr-day1-setup_soonhyun
+git push -u origin feature/ocr-day1-setup_soonhyun
+```
+
 ---
 
 | 날짜 | 2026.07.02 |
 |---|---|
+| **작성자** | 박소정 |
+| **이슈** | `docker compose up -d --build` 실행 시 모든 환경변수가 빈 값으로 인식됨(`WARN[0000] The "DB_PORT" variable is not set. Defaulting to a blank string. no port specified: :<empty>`) |
+| **발생 위치** | 환경변수 파일 위치가 `envs/.local.env`(프로젝트 루트의 기본 `.env`가 아님) |
+| **원인** | Docker Compose는 기본적으로 프로젝트 루트의 `.env`만 자동으로 읽는다. `envs/.local.env` 자체엔 값이 정상적으로 채워져 있었지만, 그 경로를 compose가 알 방법이 없어 모든 환경변수가 빈 값으로 처리됐다. |
+| **해결** | `docker compose --env-file envs/.local.env up -d --build`로 커스텀 경로를 명시하거나, `ln -s envs/.local.env .env` 심볼릭 링크로 상시 해결. |
+| **핵심 패턴** | Docker Compose는 `--env-file` 플래그로 커스텀 경로의 env 파일을 지정할 수 있다 — 기본 `.env` 경로가 아니면 반드시 명시해야 한다. |
+
+---
+
+| 날짜 | 2026.07.02 |
+|---|---|
+| **작성자** | 박소정 |
+| **이슈** | `fastapi` 컨테이너가 `Restarting` 상태를 반복(`sh: 1: uv: not found`) |
+| **발생 위치** | `docker-compose.yml`의 fastapi 서비스 `command: sh -c "uv run uvicorn app.main:app ..."`, 멀티스테이지 Dockerfile(builder → runtime) |
+| **원인** | `uv` 바이너리를 builder 스테이지에만 복사해뒀고, runtime 스테이지엔 없었다. `docker-compose.yml`의 `command:`가 Dockerfile의 `CMD`를 덮어써서 `uv run`으로 실행되는 구조인데, 정작 실행에 필요한 `uv`가 최종 런타임 이미지엔 없었던 것. |
+| **해결** | runtime 스테이지에도 `uv` 바이너리를 복사: `COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/` |
+| **핵심 패턴** | `docker-compose.yml`의 `command:`가 Dockerfile의 `CMD`를 덮어쓰므로, compose 파일의 실행 방식에 맞춰 런타임 이미지를 구성해야 한다. |
+
+---
+
+| 날짜 | 2026.07.02 |
+|---|---|
+| **작성자** | 박소정 |
+| **이슈** | `ai-worker` 컨테이너가 에러 로그 없이 계속 `Restarting` 상태를 반복 |
+| **발생 위치** | `ai_worker/main.py`, `docker-compose.yml`의 `restart: always` |
+| **원인** | `docker compose logs ai-worker`는 로그가 완전히 비어있었고, `docker compose run --rm ai-worker python -m ai_worker.main`으로 직접 실행해도 출력 없이 즉시 종료됐다. `ls -la ai_worker/`로 확인한 결과 `main.py`가 0 bytes(완전히 빈 파일)였다 — 빈 파일을 실행하면 아무 동작 없이 정상 종료(exit 0)되고, `restart: always` 정책 때문에 종료→재시작이 무한 반복된 것. |
+| **해결** | 실제 로직 구현 전까지 임시 대기 루프(`asyncio.sleep`)로 채워 컨테이너가 죽지 않고 대기하도록 함 — 실제 OCR/RAG 추론 로직은 추후 구현 필요. |
+| **핵심 패턴** | 컨테이너가 에러 없이 재시작만 반복하면, 코드 자체가 비어있거나 즉시 종료되는 경우일 수 있다 — `run --rm`으로 직접 실행해서 확인. |
+
+---
+
+| 날짜 | 2026.07.02 |
+|---|---|
+| **작성자** | 박소정 |
+| **이슈** | 모바일 기기에서 개발 서버 접속 불가 |
+| **발생 위치** | Vite dev server |
+| **원인** | `npm run dev` 기본 실행 시 localhost에만 바인딩된다. |
+| **해결** | `npm run dev -- --host` |
+| **핵심 패턴** | 같은 네트워크의 다른 기기(휴대폰 등)에서 개발 서버에 접속하려면 `--host` 플래그로 모든 인터페이스에 바인딩해야 한다. |
+
+---
+
+| 날짜 | 2026.07.02 |
+|---|---|
+| **작성자** | 박소정 |
 | **이슈** | 토글 버튼 클릭 후 검은 테두리(outline)가 사라지지 않고 잔류 |
 | **발생 위치** | `Check.tsx` 자가진단 버튼, `Dashboard.tsx` 복약 상태 버튼, `Connect.tsx` 관계 유형 버튼 |
 | **원인** | React 인라인 스타일에서 `border` 단축속성과 `borderColor` 개별속성을 **동시에 사용**하면, 상태 전환 시 React가 이전 `border` 값을 제거하면서 브라우저 기본 `outline`(2.85px)이 노출됨. 크롬 DevTools Computed 탭에서 `outline-style: none` 이지만 `outline-width: 2.85714px` 가 남아있는 것으로 확인. 추가로 콘솔에 `"Removing a style property during rerender (borderColor)"` 경고 발생 |
-| **시도한 방법 (실패)** | ① `index.css`에 `button:focus { outline: none }` 추가 → 효과 없음 ② `!important` 추가 → 효과 없음 ③ `onMouseDown={(e) => e.preventDefault()}` 단독 적용 → 효과 없음 ④ `borderWidth/borderStyle/borderColor` 개별속성으로 분리 → 오히려 테두리 두꺼워짐 |
+| **시도한 방법 (실패)** | ① `index.css`에 `button:focus { outline: none }` 추가 → 효과 없음 ② `button:focus-visible`, `button:active`, `!important` 추가 → 효과 없음 ③ `onMouseDown={(e) => e.preventDefault()}` 단독 적용 → 효과 없음 ④ `borderWidth/borderStyle/borderColor` 개별속성으로 분리 → 오히려 테두리 두꺼워짐 ⑤ Grammarly 확장프로그램 비활성화 → 효과 없음 ⑥ Chrome DevTools Computed 탭에서 `outline-style: none`이지만 `outline-width: 2.85714px` 잔류 확인 ⑦ Console 경고 `"Removing a style property during rerender (borderColor)"` 확인 → 원인 특정 |
 | **해결** | `styles` 객체에서 버튼 스타일을 분리하고, JSX 렌더링 시 **`isActive` 조건으로 모든 border 속성을 인라인으로 직접 계산**하여 적용. spread(`...`) 병합 없이 하나의 style 객체로 완성해서 React rerender 시 속성 충돌 원천 차단 |
 | **핵심 패턴** | `border` 단축속성과 개별속성(`borderColor` 등)을 같은 컴포넌트에서 섞지 말 것. 상태에 따라 스타일이 바뀌는 버튼은 반드시 JSX 인라인 계산 방식 사용 |
 
@@ -26,6 +85,39 @@ const styles = {
   outline: "none",
 }}>
 ```
+
+---
+
+| 날짜 | 2026.07.07 |
+|---|---|
+| **작성자** | 박소정 |
+| **이슈** | React 컴포넌트 렌더링 시 `Invalid hook call` 에러, `useRef` null 에러 |
+| **발생 위치** | React + Vite + TypeScript, `react-router-dom` |
+| **원인** | `react-router-dom`이 설치는 되어 있었지만 `package.json`의 `dependencies`에 실제로 등록이 안 되어 있어 React 버전 충돌이 발생한 것으로 확인(같은 날 겪은 다른 셋업 이슈들과 함께 아래 "7/7 문제들" 표 참고 — 근본 원인은 `react-router-dom` 자체가 `package.json`에서 누락된 것). |
+| **해결** | `npm install react-router-dom` 후 전체 재설치. |
+| **핵심 패턴** | "설치돼 있다"(`node_modules`에 존재)와 "`package.json`에 등록돼 있다"는 다르다 — 수동으로 옮기거나 복사한 프로젝트는 `package.json`/`package-lock.json` 정합성을 별도로 확인해야 한다. |
+
+---
+
+| 날짜 | 2026.07.07 |
+|---|---|
+| **작성자** | 박소정 |
+| **이슈** | 프로젝트 초기 셋업 중 하루에 겪은 문제 6건 — Vite 무한 재시작부터 PR 머지 충돌까지 |
+| **발생 위치** | Vite 설정, `react-router-dom` 의존성, `App.tsx`, `pages/`·`components/` 폴더, git merge/PR 흐름 |
+| **원인** | 아래 표 참고 — 하루 안에 서로 다른 원인의 문제 6건이 연달아 발생 |
+| **해결** | 아래 표 참고 |
+
+| 이슈 | 원인 | 해결 |
+| --- | --- | --- |
+| Vite 무한 재시작(livelock) | 프로젝트가 iCloud Drive 동기화 폴더 안에 있어서 `vite.config.ts` 타임스탬프가 계속 갱신됨 | 프로젝트를 `~/dev/`(비동기화 폴더)로 이동 |
+| `node_modules/tapable` 손상, Vite 설정 로드 실패 | iCloud 이동 중 대용량 폴더 손상 | `node_modules`, `package-lock.json` 삭제 후 재설치 |
+| "Invalid hook call" (react-router-dom) | `package.json`에 `react-router-dom` 자체가 누락 | `npm install react-router-dom` 후 전체 재설치 |
+| 화면 위 정체불명 메뉴바, URL과 실제 화면 불일치 | `App.tsx`가 실제로는 Figma Make 프로토타입(state 기반)이었고 react-router 미사용 상태였음 | 라우터 기반 `App.tsx`로 교체 |
+| "Failed to resolve import './pages/Landing'" | `pages/`, `components/` 폴더가 실제 프로젝트에 반영된 적이 없었음 | 전체 프론트 파일 일괄 재적용 |
+| `git merge --abort`가 미커밋 작업까지 되돌림 | OCR 통합 파일들이 커밋 전 상태였는데 merge abort로 함께 소실 | 파일 재적용 후 즉시 커밋하는 방식으로 전환 |
+| PR 머지 시 관련없는 `app/`, `docs/` 파일 대량 충돌 | PR 브랜치가 dev 기준이 아니라 개인 작업폴더(`AH_04_02_soonhyun/`) 기준이었음 | `git merge` 대신 실제 코드 파일을 텍스트로 받아 `backend/`에 직접 포팅 |
+
+**핵심 패턴**: 프로젝트 초기 셋업 단계에서는 iCloud 등 자동 동기화 폴더, 수동으로 옮긴 프론트 파일, 개인 작업폴더 기준 브랜치처럼 "겉보기엔 문제 없어 보이는" 환경 설정이 한꺼번에 여러 문제를 일으킬 수 있다 — `git merge --abort`처럼 되돌리기 쉬운 명령도 미커밋 작업이 있으면 위험하므로, 재적용 후 즉시 커밋하는 습관이 중요하다.
 
 ---
 
@@ -68,6 +160,44 @@ export async function askChat(patientId: number, questionId: string) {
 | **시도한 방법** | `/ocr/drug-info`(적응증 조회용 별도 엔드포인트)와 `drug_matcher.py`/`drug_reference.py`를 먼저 의심했으나, 이 엔드포인트는 처음부터 적응증(효능효과)만 담당하고 부작용/주의사항 필드는 조회하지 않도록 설계돼 있어 관련 없음을 확인. 실제 원인은 이미 응답에 있는 `record.guide.medication_guide.drugs[].precautions`를 화면이 안 읽는 것이었음 |
 | **해결** | `DrugInfo.tsx`에 `MedGuide.tsx`/`Result.tsx`와 동일한 분기 로직 추가: `guideText = guideDrug?.medication_guide ?? guideDrug?.dosage_text`, `cautionText = guideDrug?.precautions?.length ? guideDrug.precautions.join(" ") : guideDrug?.caution` |
 | **핵심 패턴** | stub/실제 두 응답 모양을 처리하는 방어 로직을 한 화면에만 추가하고 끝내지 말 것 — 같은 `GuideDrug`/`LifestyleGuide` 데이터를 읽는 화면이 여러 개(Result/MedGuide/DrugInfo)면 전부 같은 분기를 적용해야 함. 새 화면을 추가할 때마다 "이 필드, stub에만 있는 필드 아닌가?"를 `docs/rag-real-response-sample.md`로 확인하는 습관이 필요 |
+
+---
+
+| 날짜 | 2026.07.15 |
+|---|---|
+| **작성자** | 권순현 |
+| **이슈** | `backend/.env`의 `DATABASE_URL`을 수정하고 `docker compose restart`를 실행했는데, 로그에 여전히 이전 값(`APP_ENV=local`, SQLite)이 출력됨 |
+| **발생 위치** | `docker-compose.yml` backend 서비스 |
+| **원인** | `docker-compose.yml`의 `backend` 서비스에 `env_file`이나 `environment` 지시자가 없었다. 코드가 `load_dotenv()`로 `.env`를 직접 읽는 방식에만 의존하고 있어서 Compose 레벨에서는 이 파일의 존재를 알지 못했다. `docker compose restart`는 기존 컨테이너 프로세스를 그대로 재시작할 뿐이라, `.env` 파일을 수정해도 컨테이너 시작 시점에 이미 로드된 값이 유지된다. |
+| **해결** | `docker compose down` → `docker compose up -d` 로 컨테이너를 완전히 재생성한다. |
+| **검증** | `docker compose logs backend --tail=30 \| grep “\[db\]”` 로 `APP_ENV=development`로 변경됐는지 확인 |
+| **핵심 패턴** | 환경변수 변경 시 `restart`만으로는 반영되지 않는다. `down` → `up` 습관화 필요. 근본 해결은 `docker-compose.yml`에 `env_file: - backend/.env` 추가. |
+
+---
+
+| 날짜 | 2026.07.20 |
+|---|---|
+| **작성자** | 권순현 |
+| **이슈** | OCR이 “메트포르민정500mg”을 정확히 읽어도 `drug_matcher`가 `(“메트포르민정250mg”, score=1.0)`을 반환함 |
+| **발생 위치** | `backend/services/drug_matcher.py` — `match_drug()` |
+| **원인** | `_normalize()` 로직이 용량 표기를 제거하고 성분명만 남긴다. 서로 다른 용량의 약품(250mg / 500mg / 1000mg)이 모두 같은 정규화 키로 축약되는데, `dict[str, str]`로 관리하다 보니 먼저 등록된 값이 나중 값을 덮어써 나머지 후보가 소실됐다. score가 1.0으로 반환되어 “정확히 일치”로 오판되는 점이 더 위험하다. |
+| **영향 범위** | 24개 목업 테스트에서는 충돌 8그룹이 전부 외용제라 미발생. HIRA 약가마스터(30만 건) 적용 시 실제 발생 가능. |
+| **해결** | `dict[str, str]` → `dict[str, list[str]]`로 변경해 모든 후보를 보존하도록 수정(PR #57). 신규 테스트 15건 추가. |
+| **핵심 패턴** | 정규화 키가 충돌할 수 있는 사전은 `dict[str, str]` 대신 `dict[str, list[str]]`로 설계해 덮어쓰기를 방지한다. |
+
+```python
+# ❌ 문제가 된 코드 — 나중에 등록된 용량이 덮어써짐
+norm_to_raw: dict[str, str] = {}
+for raw, norm in zip(raw_pool, norm_pool):
+    if norm in close_norm and norm not in norm_to_raw:
+        norm_to_raw[norm] = raw
+
+# ✅ 수정 — 모든 후보 보존
+norm_to_raws: dict[str, list[str]] = {}
+for raw, norm in zip(raw_pool, norm_pool):
+    if norm in close_norm:
+        norm_to_raws.setdefault(norm, []).append(raw)
+```
 
 ---
 
@@ -286,118 +416,6 @@ retrieve-dur-lookup
 
 ---
 
-| 날짜 | 2026.07.01 |
-|---|---|
-| **작성자** | 권순현 |
-| **이슈** | PyCharm 이름 변경 다이얼로그에 슬래시(`/`) 포함 브랜치명 입력 시 “올바른 식별자가 아닙니다” 오류 |
-| **발생 위치** | PyCharm IDE Rename 다이얼로그 |
-| **원인** | `feature/ocr-day1-setup_soonhyun`은 Git 브랜치명이지 파일시스템 경로가 아니다. PyCharm의 Rename 다이얼로그는 파일·디렉터리 이름을 변경하는 UI이기 때문에, 슬래시(`/`)가 포함된 이름을 유효하지 않은 식별자로 판단한다. |
-| **해결** | 브랜치 생성과 push는 파일 탐색기가 아니라 터미널 Git 명령어로 처리한다. |
-| **핵심 패턴** | PyCharm의 Rename 다이얼로그는 파일명용이다. Git 브랜치는 반드시 터미널에서 `git checkout -b <name>` + `git push -u origin <name>`으로 생성한다. |
-
-```bash
-git checkout -b feature/ocr-day1-setup_soonhyun
-git push -u origin feature/ocr-day1-setup_soonhyun
-```
-
----
-
-| 날짜 | 2026.07.15 |
-|---|---|
-| **작성자** | 권순현 |
-| **이슈** | `backend/.env`의 `DATABASE_URL`을 수정하고 `docker compose restart`를 실행했는데, 로그에 여전히 이전 값(`APP_ENV=local`, SQLite)이 출력됨 |
-| **발생 위치** | `docker-compose.yml` backend 서비스 |
-| **원인** | `docker-compose.yml`의 `backend` 서비스에 `env_file`이나 `environment` 지시자가 없었다. 코드가 `load_dotenv()`로 `.env`를 직접 읽는 방식에만 의존하고 있어서 Compose 레벨에서는 이 파일의 존재를 알지 못했다. `docker compose restart`는 기존 컨테이너 프로세스를 그대로 재시작할 뿐이라, `.env` 파일을 수정해도 컨테이너 시작 시점에 이미 로드된 값이 유지된다. |
-| **해결** | `docker compose down` → `docker compose up -d` 로 컨테이너를 완전히 재생성한다. |
-| **검증** | `docker compose logs backend --tail=30 \| grep “\[db\]”` 로 `APP_ENV=development`로 변경됐는지 확인 |
-| **핵심 패턴** | 환경변수 변경 시 `restart`만으로는 반영되지 않는다. `down` → `up` 습관화 필요. 근본 해결은 `docker-compose.yml`에 `env_file: - backend/.env` 추가. |
-
----
-
-| 날짜 | 2026.07.27 |
-|---|---|
-| **작성자** | 권순현 |
-| **이슈** | Duck DNS 도메인(`yakcong.duckdns.org`) + nginx + HTTPS 적용 후, 기존 IP:포트(`http://52.200.250.115:5173`) 접속에서 잘 되던 로그인이 새 도메인(`https://yakcong.duckdns.org`)에서 네트워크 에러/CORS 에러로 실패함 |
-| **발생 위치** | EC2 서버의 `backend/.env` (`CORS_ALLOWED_ORIGINS`), `frontend/.env` (`VITE_MONITORING_API_URL`) |
-| **원인** | ① `backend/.env`의 `CORS_ALLOWED_ORIGINS`가 예전 IP 기준(`http://52.200.250.115:5173`)으로 남아있어, 새 도메인에서 오는 요청을 CORS가 차단함. ② `frontend/.env`의 `VITE_MONITORING_API_URL`도 예전 IP:포트(`http://52.200.250.115:8000`)를 그대로 가리켜, HTTPS 페이지에서 HTTP로 요청이 나가면서 Mixed Content로 차단되거나 CORS 에러가 발생함 |
-| **해결** | 도메인/HTTPS로 배포 방식이 바뀔 때마다 아래 두 값을 함께 갱신한다. EC2에서 실행: |
-| **재발 방지** | 배포 환경(IP/포트 → 도메인/HTTPS)이 바뀌면 `CORS_ALLOWED_ORIGINS`·`VITE_MONITORING_API_URL` 두 값을 반드시 함께 갱신한다. 회원가입/로그인 데이터는 DB(Aiven MySQL)에 그대로 남아있으므로 데이터 손실 걱정 없음. `backend/.env`·`frontend/.env`는 `.gitignore`로 git에 올라가지 않는 EC2 인스턴스 로컬 파일이라, 인스턴스를 새로 만들거나 재설정할 경우 이 항목을 참고해 다시 세팅해야 함 |
-
-```bash
-sed -i 's|CORS_ALLOWED_ORIGINS=.*|CORS_ALLOWED_ORIGINS=https://yakcong.duckdns.org|' backend/.env
-echo 'VITE_MONITORING_API_URL=https://yakcong.duckdns.org/api' > frontend/.env
-docker compose restart backend frontend
-```
-
-> ⚠️ 주의: 위 sed/echo 명령어는 파일 전체 값을 덮어씁니다. CORS_ALLOWED_ORIGINS에 이미 다른 도메인(예: 스테이징)이 콤마로 함께 등록되어 있거나, frontend/.env에 다른 변수가 있다면 이 명령어 대신 직접 파일을 열어 해당 줄만 수정하세요.
-
----
-
-| 날짜 | 2026.07.20 |
-|---|---|
-| **작성자** | 권순현 |
-| **이슈** | OCR이 “메트포르민정500mg”을 정확히 읽어도 `drug_matcher`가 `(“메트포르민정250mg”, score=1.0)`을 반환함 |
-| **발생 위치** | `backend/services/drug_matcher.py` — `match_drug()` |
-| **원인** | `_normalize()` 로직이 용량 표기를 제거하고 성분명만 남긴다. 서로 다른 용량의 약품(250mg / 500mg / 1000mg)이 모두 같은 정규화 키로 축약되는데, `dict[str, str]`로 관리하다 보니 먼저 등록된 값이 나중 값을 덮어써 나머지 후보가 소실됐다. score가 1.0으로 반환되어 “정확히 일치”로 오판되는 점이 더 위험하다. |
-| **영향 범위** | 24개 목업 테스트에서는 충돌 8그룹이 전부 외용제라 미발생. HIRA 약가마스터(30만 건) 적용 시 실제 발생 가능. |
-| **해결** | `dict[str, str]` → `dict[str, list[str]]`로 변경해 모든 후보를 보존하도록 수정(PR #57). 신규 테스트 15건 추가. |
-| **핵심 패턴** | 정규화 키가 충돌할 수 있는 사전은 `dict[str, str]` 대신 `dict[str, list[str]]`로 설계해 덮어쓰기를 방지한다. |
-
-```python
-# ❌ 문제가 된 코드 — 나중에 등록된 용량이 덮어써짐
-norm_to_raw: dict[str, str] = {}
-for raw, norm in zip(raw_pool, norm_pool):
-    if norm in close_norm and norm not in norm_to_raw:
-        norm_to_raw[norm] = raw
-
-# ✅ 수정 — 모든 후보 보존
-norm_to_raws: dict[str, list[str]] = {}
-for raw, norm in zip(raw_pool, norm_pool):
-    if norm in close_norm:
-        norm_to_raws.setdefault(norm, []).append(raw)
-```
-
----
-
-## 과거 EasyOCR 실험 기록 (참고용, 현재 미사용 — 현재는 CLOVA OCR 사용)
-
-> 아래 항목은 초기 프로토타입 단계에서 EasyOCR을 직접 사용하던 시기의 기록이다. 현재 OCR 처리는 `backend/routers/ocr_router.py`의 CLOVA OCR 인터페이스(`ocr_interface.py`)로 전환됐으며, EasyOCR 의존성은 제거됐다.
-
----
-
-| 날짜 | (EasyOCR 실험 초기) |
-|---|---|
-| **작성자** | 권순현 |
-| **이슈** | 한글이 포함된 처방전 이미지를 OCR에 넣었을 때 한글 부분이 전부 빈 결과로 반환됨 |
-| **발생 위치** | EasyOCR `Reader` 초기화 |
-| **원인** | EasyOCR은 Reader 초기화 시 선언한 언어 코드에 해당하는 모델만 로드한다. `[“en”]`만 선언하면 한국어 모델 자체를 불러오지 않는다. |
-| **해결** | `reader = easyocr.Reader([“en”, “ko”])` |
-| **현재 상태** | CLOVA OCR 전환으로 EasyOCR 미사용. 참고용으로만 보존. |
-
----
-
-| 날짜 | (EasyOCR 실험 초기) |
-|---|---|
-| **작성자** | 권순현 |
-| **이슈** | 한글이 포함된 샘플 이미지를 PIL로 생성했을 때 한글 부분이 깨지거나 빈 박스로 출력됨 |
-| **발생 위치** | PIL(Pillow) 이미지 생성 코드 |
-| **원인** | PIL의 기본 폰트(`ImageFont.load_default()`)는 ASCII 문자만 지원한다. 한글 렌더링에는 시스템에 설치된 한글 폰트 파일 경로를 직접 지정해야 한다. |
-| **해결** | `font = ImageFont.truetype(“/System/Library/Fonts/AppleSDGothicNeo.ttc”, size=24)` (macOS 기준) |
-| **현재 상태** | EasyOCR 테스트용 이미지 생성 코드였으므로 현재 미사용. |
-
----
-
-| 날짜 | (EasyOCR 실험 초기) |
-|---|---|
-| **작성자** | 권순현 |
-| **이슈** | “캡슐500mg” → “캡쑬50Omg” 처럼 약품명과 용량이 동시에 오인식됨 |
-| **발생 위치** | EasyOCR raw 결과 후처리 |
-| **원인** | EasyOCR이 시각적으로 유사한 문자를 혼동한다. 의약품 도메인에서는 한글 받침 혼동(“캡슐”→”캡쑬”)이나 숫자·문자 혼동(`0`→`O`)이 처방 용량이나 약품명 오인식으로 직결된다. |
-| **해결** | 2단계 후처리: ① 자주 혼동되는 패턴 사전 치환(`CHAR_CORRECTIONS`) → ② 의약품 도메인 사전과 유사도 비교(`difflib.get_close_matches`) |
-| **현재 상태** | CLOVA OCR 전환으로 후처리 파이프라인 불필요. 참고용으로만 보존. |
-
----
-
 | 날짜 | 2026.07.23 |
 |---|---|
 | **작성자** | 김영혜 |
@@ -448,6 +466,25 @@ for raw, norm in zip(raw_pool, norm_pool):
 
 | 날짜 | 2026.07.27 |
 |---|---|
+| **작성자** | 권순현 |
+| **이슈** | Duck DNS 도메인(`yakcong.duckdns.org`) + nginx + HTTPS 적용 후, 기존 IP:포트(`http://52.200.250.115:5173`) 접속에서 잘 되던 로그인이 새 도메인(`https://yakcong.duckdns.org`)에서 네트워크 에러/CORS 에러로 실패함 |
+| **발생 위치** | EC2 서버의 `backend/.env` (`CORS_ALLOWED_ORIGINS`), `frontend/.env` (`VITE_MONITORING_API_URL`) |
+| **원인** | ① `backend/.env`의 `CORS_ALLOWED_ORIGINS`가 예전 IP 기준(`http://52.200.250.115:5173`)으로 남아있어, 새 도메인에서 오는 요청을 CORS가 차단함. ② `frontend/.env`의 `VITE_MONITORING_API_URL`도 예전 IP:포트(`http://52.200.250.115:8000`)를 그대로 가리켜, HTTPS 페이지에서 HTTP로 요청이 나가면서 Mixed Content로 차단되거나 CORS 에러가 발생함 |
+| **해결** | 도메인/HTTPS로 배포 방식이 바뀔 때마다 아래 두 값을 함께 갱신한다. EC2에서 실행: |
+| **재발 방지** | 배포 환경(IP/포트 → 도메인/HTTPS)이 바뀌면 `CORS_ALLOWED_ORIGINS`·`VITE_MONITORING_API_URL` 두 값을 반드시 함께 갱신한다. 회원가입/로그인 데이터는 DB(Aiven MySQL)에 그대로 남아있으므로 데이터 손실 걱정 없음. `backend/.env`·`frontend/.env`는 `.gitignore`로 git에 올라가지 않는 EC2 인스턴스 로컬 파일이라, 인스턴스를 새로 만들거나 재설정할 경우 이 항목을 참고해 다시 세팅해야 함 |
+
+```bash
+sed -i 's|CORS_ALLOWED_ORIGINS=.*|CORS_ALLOWED_ORIGINS=https://yakcong.duckdns.org|' backend/.env
+echo 'VITE_MONITORING_API_URL=https://yakcong.duckdns.org/api' > frontend/.env
+docker compose restart backend frontend
+```
+
+> ⚠️ 주의: 위 sed/echo 명령어는 파일 전체 값을 덮어씁니다. CORS_ALLOWED_ORIGINS에 이미 다른 도메인(예: 스테이징)이 콤마로 함께 등록되어 있거나, frontend/.env에 다른 변수가 있다면 이 명령어 대신 직접 파일을 열어 해당 줄만 수정하세요.
+
+---
+
+| 날짜 | 2026.07.27 |
+|---|---|
 | **작성자** | 김영혜 |
 | **이슈** | (1) 처방전 OCR이 정제/캡슐 외 제형(시럽·주사·패치·점안·점이·나잘스프레이 등)을 인식 못해 그 약이 결과에서 통째로 빠짐 (2) 처방약물 정보의 부작용/보관방법이 실제로는 있는데도 "확인하지 못했어요"로 표시됨 (3) 복약가이드 생활습관 안내에 같은 내용이 중복 기재됨 (4) 1일 투약횟수/총 투약일수에 "필요시"(PRN)가 있으면 값이 그냥 비어서 표시됨 (5) 다른 역할로 가입한 계정으로 초대를 수락하면 이유를 알 수 없이 "수락 처리에 실패했어요"만 뜸 |
 | **발생 위치** | `backend/services/parsing_rules.py`, `backend/services/drug_matcher.py`, `backend/services/drug_reference.py`, `backend/routers/ocr_router.py`, `rag/rag/rag_chain.py`, `frontend/src/pages/InviteAccept.tsx` |
@@ -483,6 +520,43 @@ for raw, norm in zip(raw_pool, norm_pool):
 
 ---
 
+| 날짜 | 2026.07.30 |
+|---|---|
+| **작성자** | 박소정 |
+| **이슈** | 여러 환자를 관리하는 보호자·기관 계정이 알림설정 페이지에 들어가면 기기알림설정 섹션만 나오고 그 아래(복약 알림/돌봄 알림 등)는 안 나오다가, 렉이 걸리듯 잠깐 있다 곧바로 환자관리(`/patients`) 화면으로 강제 이동됨 |
+| **발생 위치** | `frontend/src/lib/session.ts`(`useGuardedPatientId`), `frontend/src/pages/Notification.tsx`, `frontend/src/components/PatientContextBanner.tsx`, `frontend/src/components/NavBar.tsx` |
+| **원인** | 같은 페이지 로드 시 NavBar의 안 읽음 배지 계산, `PatientContextBanner`, `Notification.tsx` 자신의 `useGuardedPatientId` 호출이 각자 독립적으로 동시에 `GET /monitoring/caregivers/{id}/patients`를 호출한다. 브라우저 네트워크 탭으로 직접 확인한 결과 이 동시 요청 중 일부가 `net::ERR_ABORTED`로 실패했고, `useGuardedPatientId`가 이 실패를 "케어하는 환자 0명"과 동일하게 취급해 `/patients`로 강제 이동시키고 있었다(실제로는 환자가 여러 명 있었음). |
+| **시도한 방법 (부분 실패)** | 처음엔 `.catch()` 핸들러에 한 번 더 재시도(retry-once)하는 로직을 추가했으나, 재시도 자체가 총 요청 수를 더 늘려 오히려 `net::ERR_ABORTED` 발생 빈도가 늘어나는 것을 재현 확인 — 근본 원인(동시 호출 자체)을 건드리지 않고 증상만 완화하려 한 접근이 실패함을 인지하고 철회. |
+| **해결** | 재시도 로직을 되돌리고, `frontend/src/api/monitoring.ts`의 `getCaregiverPatients()`에 진행 중인 요청을 공유하는 모듈 레벨 캐시(in-flight promise cache)를 추가했다 — 같은 `caregiverId`로 동시에 호출되면 실제 네트워크 요청은 하나만 나가고 나머지 호출자는 그 결과를 공유해서 받는다. 요청이 끝나면 캐시를 비워 다음 호출은 새로 나간다. |
+| **테스트/검증** | 브라우저에서 진짜 fresh 탭으로 재확인 — 수정 전엔 같은 `caregivers/2/patients` 요청이 한 번의 페이지 로드에 4~6개씩(StrictMode 이중 렌더 + 여러 호출자) 동시에 나가고 그중 일부가 aborted였는데, 수정 후엔 정확히 1개의 요청만 나가고 200 OK로 정상 처리됨을 `read_network_requests`로 확인. 환자 전환(다른 환자로 배너에서 전환)까지 포함해 전체 플로우 재검증. |
+| **핵심 패턴** | 한 페이지에서 여러 독립된 컴포넌트/훅이 같은 데이터를 각자 fetch하는 구조라면, 실패를 재시도로 완화하려 하지 말고 API 레이어에서 요청 자체를 공유(dedupe)하는 게 근본 해결이다 — 재시도는 총 요청량을 늘려 경쟁 상태를 악화시킬 수 있다. |
+
+---
+
+| 날짜 | 2026.07.30 |
+|---|---|
+| **작성자** | 박소정 |
+| **이슈** | (위 항목 디버깅 중 재현 목적으로 테스트 환자를 연결하다가 발견한 별개의 실제 버그) 보호자가 관리하는 환자 중 PII 암호화 키가 안 맞는 계정이 단 하나만 있어도 `GET /monitoring/caregivers/{id}/patients` 전체가 500으로 죽어서, 그 보호자의 정상 환자들까지 전부 안 보임 |
+| **발생 위치** | `backend/routers/monitoring_router.py`(`list_patients_of_caregiver`) |
+| **원인** | 이전 세션에서 이미 발견됐던 팀 전체 PII 키 불일치 이슈(팀원마다 로컬 `PII_ENCRYPTION_KEY`가 다른 상태에서 만든 테스트 계정들)로 인해, 한 환자(id=77)의 `name_encrypted`/`phone_encrypted`가 현재 설정된 키로 복호화 불가능한 상태였다. `PatientPublic.model_validate(patient, from_attributes=True)`가 이 환자 한 명을 변환하는 시점에 `InvalidToken`을 던졌는데, 이 예외가 목록 순회 루프 전체를 중단시켜서 나머지 정상 환자들까지 응답에서 사라졌다. |
+| **해결** | 환자별 `model_validate` 호출을 개별 try/except로 감싸, 복호화 실패한 환자 하나만 `continue`로 건너뛰고 나머지는 정상 응답에 포함시키도록 방어 코드 추가. |
+| **테스트/검증** | `backend/tests/test_caregiver_patients_pii_resilience.py` 신규 추가 — `cryptography.fernet.Fernet(Fernet.generate_key())`로 의도적으로 다른 키의 암호문을 주입해 재현, 200 응답에 정상 환자만 포함되는지 검증. 재현에 썼던 임시 연결(caregiver 2 ↔ patient 77)은 검증 직후 삭제해 공유 dev DB를 정리함. |
+| **핵심 패턴** | 목록 조회 API에서 항목 하나의 변환 실패가 전체 목록을 죽이지 않도록, 컬렉션 순회 시 항목별 방어 코드(try/except + skip)를 기본으로 고려한다 — 특히 PII 복호화처럼 외부 요인(키 불일치)으로 실패할 수 있는 변환에서는 필수. |
+
+---
+
+| 날짜 | 2026.07.30 |
+|---|---|
+| **작성자** | 박소정 |
+| **이슈** | 초대 링크로 새 계정(환자 본인/보호자)을 만들면 "수락 성공" 화면은 뜨는데, 실제로는 로그인이 안 된 상태라 다음 화면부터 API 요청이 전부 401로 실패 — 초대 연결 자체가 "제대로 안 되는" 것처럼 보임 |
+| **발생 위치** | `backend/routers/care_router.py`(`accept_invitation`), `frontend/src/pages/InviteAccept.tsx` |
+| **원인** | `POST /care/invitations/{token}/accept`가 새 계정을 만드는 두 분기(환자 신규 가입, 보호자 신규 가입) 모두에서 `{patient_id, status}`/`{caregiver_id, patient_id, status}`만 반환하고 `access_token`을 전혀 발급하지 않았다. 프론트는 이 값만 보고 `patient_id`/`caregiver_id`를 localStorage에 저장한 뒤 로그인된 것처럼 다음 화면으로 넘어갔지만, 실제 인증 토큰이 없어 그 다음 요청부터 전부 401 → 강제 로그아웃으로 이어졌다. |
+| **해결** | `login()`과 동일한 방식(`_issue_login_response`)으로 신규 계정 생성 두 분기 모두에 `access_token` 발급을 추가했다. 기존 로그인 계정으로 초대를 수락한 경우(`payload.caregiver_id`가 이미 있는 경우)는 이미 유효한 토큰이 있으므로 재발급하지 않는다. 기존 테스트들이 `accept_invitation(token, payload, session[, actor[, patient_actor]])` 위치 인자 관례로 직접 호출하고 있어서, 새로 추가한 `response: Response` 파라미터는 기본값과 함께 맨 뒤에 둬서 기존 호출부를 깨지 않게 했다. 프론트(`InviteAccept.tsx`)는 응답의 `access_token`을 저장하고, 환자 계정 생성 시 이 브라우저에 예전에 남아있을 수 있는 `caregiver_id`도 같이 제거하도록 했다(안 지우면 다른 화면이 보호자로 착각해 엉뚱한 API를 호출). |
+| **테스트/검증** | 백엔드 관련 테스트 32개(`-k "invite or invitation"`) 통과, 전체 568개 통과. `tsc --noEmit` 클린. |
+| **핵심 패턴** | 신규 계정을 만드는 인증 관련 엔드포인트는 "계정 생성"과 "로그인"을 별개로 취급하기 쉬운데, 계정을 새로 만드는 모든 경로는 `login()`이 하는 것과 동일하게 즉시 사용 가능한 토큰까지 발급해야 한다 — 그렇지 않으면 "성공 화면은 보이는데 실제로는 로그인이 안 된" 상태가 된다. |
+
+---
+
 | 날짜 | 2026.07.31 |
 |---|---|
 | **작성자** | 김영혜 (Claude 세션) |
@@ -500,46 +574,9 @@ for raw, norm in zip(raw_pool, norm_pool):
 
 ---
 
-| 날짜 | 2026.07.30 |
-|---|---|
-| **작성자** | 박소정 (Claude 세션) |
-| **이슈** | 여러 환자를 관리하는 보호자·기관 계정이 알림설정 페이지에 들어가면 기기알림설정 섹션만 나오고 그 아래(복약 알림/돌봄 알림 등)는 안 나오다가, 렉이 걸리듯 잠깐 있다 곧바로 환자관리(`/patients`) 화면으로 강제 이동됨 |
-| **발생 위치** | `frontend/src/lib/session.ts`(`useGuardedPatientId`), `frontend/src/pages/Notification.tsx`, `frontend/src/components/PatientContextBanner.tsx`, `frontend/src/components/NavBar.tsx` |
-| **원인** | 같은 페이지 로드 시 NavBar의 안 읽음 배지 계산, `PatientContextBanner`, `Notification.tsx` 자신의 `useGuardedPatientId` 호출이 각자 독립적으로 동시에 `GET /monitoring/caregivers/{id}/patients`를 호출한다. 브라우저 네트워크 탭으로 직접 확인한 결과 이 동시 요청 중 일부가 `net::ERR_ABORTED`로 실패했고, `useGuardedPatientId`가 이 실패를 "케어하는 환자 0명"과 동일하게 취급해 `/patients`로 강제 이동시키고 있었다(실제로는 환자가 여러 명 있었음). |
-| **시도한 방법 (부분 실패)** | 처음엔 `.catch()` 핸들러에 한 번 더 재시도(retry-once)하는 로직을 추가했으나, 재시도 자체가 총 요청 수를 더 늘려 오히려 `net::ERR_ABORTED` 발생 빈도가 늘어나는 것을 재현 확인 — 근본 원인(동시 호출 자체)을 건드리지 않고 증상만 완화하려 한 접근이 실패함을 인지하고 철회. |
-| **해결** | 재시도 로직을 되돌리고, `frontend/src/api/monitoring.ts`의 `getCaregiverPatients()`에 진행 중인 요청을 공유하는 모듈 레벨 캐시(in-flight promise cache)를 추가했다 — 같은 `caregiverId`로 동시에 호출되면 실제 네트워크 요청은 하나만 나가고 나머지 호출자는 그 결과를 공유해서 받는다. 요청이 끝나면 캐시를 비워 다음 호출은 새로 나간다. |
-| **테스트/검증** | 브라우저에서 진짜 fresh 탭으로 재확인 — 수정 전엔 같은 `caregivers/2/patients` 요청이 한 번의 페이지 로드에 4~6개씩(StrictMode 이중 렌더 + 여러 호출자) 동시에 나가고 그중 일부가 aborted였는데, 수정 후엔 정확히 1개의 요청만 나가고 200 OK로 정상 처리됨을 `read_network_requests`로 확인. 환자 전환(다른 환자로 배너에서 전환)까지 포함해 전체 플로우 재검증. |
-| **핵심 패턴** | 한 페이지에서 여러 독립된 컴포넌트/훅이 같은 데이터를 각자 fetch하는 구조라면, 실패를 재시도로 완화하려 하지 말고 API 레이어에서 요청 자체를 공유(dedupe)하는 게 근본 해결이다 — 재시도는 총 요청량을 늘려 경쟁 상태를 악화시킬 수 있다. |
-
----
-
-| 날짜 | 2026.07.30 |
-|---|---|
-| **작성자** | 박소정 (Claude 세션) |
-| **이슈** | (위 항목 디버깅 중 재현 목적으로 테스트 환자를 연결하다가 발견한 별개의 실제 버그) 보호자가 관리하는 환자 중 PII 암호화 키가 안 맞는 계정이 단 하나만 있어도 `GET /monitoring/caregivers/{id}/patients` 전체가 500으로 죽어서, 그 보호자의 정상 환자들까지 전부 안 보임 |
-| **발생 위치** | `backend/routers/monitoring_router.py`(`list_patients_of_caregiver`) |
-| **원인** | 이전 세션에서 이미 발견됐던 팀 전체 PII 키 불일치 이슈(팀원마다 로컬 `PII_ENCRYPTION_KEY`가 다른 상태에서 만든 테스트 계정들)로 인해, 한 환자(id=77)의 `name_encrypted`/`phone_encrypted`가 현재 설정된 키로 복호화 불가능한 상태였다. `PatientPublic.model_validate(patient, from_attributes=True)`가 이 환자 한 명을 변환하는 시점에 `InvalidToken`을 던졌는데, 이 예외가 목록 순회 루프 전체를 중단시켜서 나머지 정상 환자들까지 응답에서 사라졌다. |
-| **해결** | 환자별 `model_validate` 호출을 개별 try/except로 감싸, 복호화 실패한 환자 하나만 `continue`로 건너뛰고 나머지는 정상 응답에 포함시키도록 방어 코드 추가. |
-| **테스트/검증** | `backend/tests/test_caregiver_patients_pii_resilience.py` 신규 추가 — `cryptography.fernet.Fernet(Fernet.generate_key())`로 의도적으로 다른 키의 암호문을 주입해 재현, 200 응답에 정상 환자만 포함되는지 검증. 재현에 썼던 임시 연결(caregiver 2 ↔ patient 77)은 검증 직후 삭제해 공유 dev DB를 정리함. |
-| **핵심 패턴** | 목록 조회 API에서 항목 하나의 변환 실패가 전체 목록을 죽이지 않도록, 컬렉션 순회 시 항목별 방어 코드(try/except + skip)를 기본으로 고려한다 — 특히 PII 복호화처럼 외부 요인(키 불일치)으로 실패할 수 있는 변환에서는 필수. |
-
----
-
-| 날짜 | 2026.07.30 |
-|---|---|
-| **작성자** | 박소정 (Claude 세션) |
-| **이슈** | 초대 링크로 새 계정(환자 본인/보호자)을 만들면 "수락 성공" 화면은 뜨는데, 실제로는 로그인이 안 된 상태라 다음 화면부터 API 요청이 전부 401로 실패 — 초대 연결 자체가 "제대로 안 되는" 것처럼 보임 |
-| **발생 위치** | `backend/routers/care_router.py`(`accept_invitation`), `frontend/src/pages/InviteAccept.tsx` |
-| **원인** | `POST /care/invitations/{token}/accept`가 새 계정을 만드는 두 분기(환자 신규 가입, 보호자 신규 가입) 모두에서 `{patient_id, status}`/`{caregiver_id, patient_id, status}`만 반환하고 `access_token`을 전혀 발급하지 않았다. 프론트는 이 값만 보고 `patient_id`/`caregiver_id`를 localStorage에 저장한 뒤 로그인된 것처럼 다음 화면으로 넘어갔지만, 실제 인증 토큰이 없어 그 다음 요청부터 전부 401 → 강제 로그아웃으로 이어졌다. |
-| **해결** | `login()`과 동일한 방식(`_issue_login_response`)으로 신규 계정 생성 두 분기 모두에 `access_token` 발급을 추가했다. 기존 로그인 계정으로 초대를 수락한 경우(`payload.caregiver_id`가 이미 있는 경우)는 이미 유효한 토큰이 있으므로 재발급하지 않는다. 기존 테스트들이 `accept_invitation(token, payload, session[, actor[, patient_actor]])` 위치 인자 관례로 직접 호출하고 있어서, 새로 추가한 `response: Response` 파라미터는 기본값과 함께 맨 뒤에 둬서 기존 호출부를 깨지 않게 했다. 프론트(`InviteAccept.tsx`)는 응답의 `access_token`을 저장하고, 환자 계정 생성 시 이 브라우저에 예전에 남아있을 수 있는 `caregiver_id`도 같이 제거하도록 했다(안 지우면 다른 화면이 보호자로 착각해 엉뚱한 API를 호출). |
-| **테스트/검증** | 백엔드 관련 테스트 32개(`-k "invite or invitation"`) 통과, 전체 568개 통과. `tsc --noEmit` 클린. |
-| **핵심 패턴** | 신규 계정을 만드는 인증 관련 엔드포인트는 "계정 생성"과 "로그인"을 별개로 취급하기 쉬운데, 계정을 새로 만드는 모든 경로는 `login()`이 하는 것과 동일하게 즉시 사용 가능한 토큰까지 발급해야 한다 — 그렇지 않으면 "성공 화면은 보이는데 실제로는 로그인이 안 된" 상태가 된다. |
-
----
-
 | 날짜 | 2026.07.31 |
 |---|---|
-| **작성자** | 박소정 (Claude 세션) |
+| **작성자** | 박소정 |
 | **이슈** | 배포된 사이트에서 이전에 가입한 계정(전화번호 로그인)이 전부 로그인 실패("이메일/전화번호 또는 비밀번호가 올바르지 않습니다") |
 | **발생 위치** | EC2 서버의 `backend/.env`(`PII_HASH_SECRET`), `backend/core/security.py`(`hash_phone`), `backend/routers/auth_router.py`(`_find_by_identifiers`) |
 | **원인** | 전화번호 로그인은 매 요청마다 `hash_phone(identifier)`로 해시를 계산해 DB의 `phone_hash` 컬럼과 비교하는 방식이다. VAPID 키를 EC2 `.env`에 추가한 뒤 `docker compose down && up -d`로 컨테이너를 완전히 재생성했는데, 그 전까지는 오래 떠 있던 컨테이너가 예전에(맞는 값으로) 메모리에 로드해둔 `PII_HASH_SECRET`을 계속 쓰고 있었고, 재생성 과정에서 지금 `.env` 파일에 있던 다른 값을 새로 읽어들이면서 전화번호 해시가 전부 안 맞게 됐다. |
@@ -552,7 +589,7 @@ for raw, norm in zip(raw_pool, norm_pool):
 
 | 날짜 | 2026.07.31 |
 |---|---|
-| **작성자** | 박소정 (Claude 세션) |
+| **작성자** | 박소정 |
 | **이슈** | 위 `PII_HASH_SECRET` 수정을 위해 `docker compose down`까지는 됐는데 `docker compose up -d`가 계속 실패해 사이트가 완전히 다운(`502 Bad Gateway`)된 상태로 이어짐 |
 | **발생 위치** | EC2 인스턴스 디스크(`/dev/nvme0n1p1`), Docker 이미지/빌드캐시/볼륨 |
 | **원인 1 — 디스크 100% 풀** | `df -h` 확인 결과 루트 파티션이 40G 중 40G(99%) 사용 중. `docker system df`로 보니 이미지 4.01GB + 로컬 볼륨 21.18GB(15개, 전부 미사용) + 빌드 캐시 11.86GB, 전부 100% 회수 가능한 상태였다. `docker-compose.yml`이 매 배포마다 `up -d --build`로 새 이미지를 만드는데, CI 배포 스크립트에 정리 단계가 전혀 없어서 예전 이미지·빌드캐시·(컨테이너 재생성마다 새로 생기는) 익명 볼륨이 한 번도 안 지워지고 계속 누적된 것이 원인이었다. |
@@ -566,7 +603,7 @@ for raw, norm in zip(raw_pool, norm_pool):
 
 | 날짜 | 2026.07.31 |
 |---|---|
-| **작성자** | 박소정 (Claude 세션) |
+| **작성자** | 박소정 |
 | **이슈** | 보호자와 기관이 같은 환자에 동시에 연결돼 있을 때, 처방전 수정을 한쪽(예: 기관)이 요청하면 환자에게만 알림이 가고 다른 쪽(보호자)은 화면을 직접 열어봐야만 요청이 있었다는 걸 알 수 있음 |
 | **발생 위치** | `backend/routers/records_router.py`(`request_correction`), `frontend/src/pages/Notifications.tsx` |
 | **원인** | `request_correction`이 `RecordCorrectionNotice(recipient_role="patient", ...)` 하나만 생성하고, 같은 환자에 연결된 다른 caregiver에게는 별도 notice를 만들지 않았다. 반대 방향(환자가 수정을 다 끝내면 연결된 caregiver 전원에게 알림)은 이미 구현돼 있어서 비대칭이었다. |
@@ -577,7 +614,7 @@ for raw, norm in zip(raw_pool, norm_pool):
 
 | 날짜 | 2026.07.31 |
 |---|---|
-| **작성자** | 박소정 (Claude 세션) |
+| **작성자** | 박소정 |
 | **이슈** | 복약가이드/생활습관 화면이 로컬·배포 환경 양쪽에서 간헐적으로 나왔다가 안 나왔다가 함(사용자 제보: "로컬에서도 나왔다가 안 나왔다가, 배포에선 로컬보다 더 자주 안 나옴") |
 | **발생 위치** | `frontend/src/api/records.ts`(`getRecord`), `frontend/src/api/monitoringClient.ts` |
 | **가설 검토(제보자 제시)** | ① 비동기 처리에 wait 누락 — DB write가 덜 끝난 채로 read할 수 있음 ② wait을 넣어도 안 되면 DB 자체 문제(가이드가 실제로 저장 안 됐을 가능성) ③ 비동기 통신 처리가 애초에 없거나, 엉뚱한 레코드를 불러오는 것 아닌지 |
@@ -592,7 +629,7 @@ for raw, norm in zip(raw_pool, norm_pool):
 
 | 날짜 | 2026.07.31 |
 |---|---|
-| **작성자** | 박소정 (Claude 세션) |
+| **작성자** | 박소정 |
 | **이슈** | (위 항목 조사 중 발견한 별개의 잠재적 취약점, 실제 발생 사례는 DB상 확인 안 됨) 생활습관 안내 생성 시 진단명 하나의 LLM 호출만 실패해도 예외가 그대로 전체 요청을 실패시켜, 이미 정상 생성된 약별 가이드까지 전부 날아감 |
 | **발생 위치** | `rag/rag/rag_chain.py`(`generate_guides_from_medications`, `generate_lifestyle_guide_for_diagnosis`) |
 | **원인** | 같은 함수의 약별 가이드 루프는 항목 하나가 실패해도 나머지는 정상 반환하도록 이미 `try/except`로 격리돼 있는데(`review_flags=["generation_error"]`), 바로 아래 진단명 기준 생활습관 안내를 생성하는 부분(`[generate_lifestyle_guide_for_diagnosis(d) for d in seen_diagnoses]`)은 이 보호가 전혀 없이 리스트 컴프리헨션으로 직접 호출되고 있었다. |
@@ -604,7 +641,7 @@ for raw, norm in zip(raw_pool, norm_pool):
 
 | 날짜 | 2026.07.31 |
 |---|---|
-| **작성자** | 박소정 (Claude 세션) |
+| **작성자** | 박소정 |
 | **이슈** | (2026.07.31 EC2 디스크 100% 풀 장애의 재발 방지 조치) CI 배포 파이프라인에 이미지/캐시 정리 단계가 없어 매 배포마다 디스크 사용량이 계속 누적됨 |
 | **발생 위치** | `.github/workflows/ci.yml` |
 | **원인** | 배포 스텝이 `docker compose -f docker-compose.yml up -d --build`만 실행하고 끝나, 매번 새로 만들어지는 이미지 레이어·빌드 캐시·컨테이너 재생성마다 새로 생기는 익명 볼륨이 전혀 정리되지 않았다. |
@@ -612,3 +649,42 @@ for raw, norm in zip(raw_pool, norm_pool):
 | **테스트/검증** | 실제 장애 당시 수동으로 동일한 정리(`docker system prune -af --volumes`)를 적용해 디스크 99%→7%로 복구, 이후 컨테이너 정상 기동을 이미 확인함 — 이 PR은 그 정리를 배포 파이프라인에 자동으로 넣는 것(PR #137). |
 | **재발 방지** | 이미지 정리 외에 로컬 볼륨(익명 볼륨) 누적도 관찰됐으나(21GB), `docker-compose.yml`의 바인드마운트 제외 용도 익명 볼륨은 컨테이너 재생성마다 매번 새로 생기는 구조라 근본적으로는 named volume 전환 등 더 큰 변경이 필요 — 이번엔 가장 빠르고 안전한 이미지 정리만 우선 반영하고, 볼륨 누적이 다시 문제가 되면 별도로 재검토하기로 함. |
 | **핵심 패턴** | 정규식 기반 "이 접미사가 나오면 약품명"류 판별은 그 접미사가 다른 흔한 한국어 단어의 끝 글자와 겹칠 수 있다("환"↔"질환") — 겹치는 게 확인되면 그 특정 단어만 부정 전방탐색으로 제외하는 게 전체 목록을 다시 설계하는 것보다 안전하다. "OCR이 컬럼을 그룹으로 출력한다"고 가정하고 짠 위치(인덱스) 기반 파서는, 실제로는 행 단위로 반복 출력되는 텍스트가 들어오면 뒤쪽 항목일수록 배정이 어긋난다 — 여러 항목을 다루는 파서는 "전체에서 한 번에 배열을 뽑아 인덱스로 매핑"하는 대신 "각 항목 자신의 위치 구간 안에서 값을 찾는" 방식이 더 안전하다(단, 진짜 컬럼-그룹 포맷을 위해 기존 방식도 폴백으로는 남겨둠). PR이 "해소했다"고 보고한 범위가 지금 겪는 문제와 코드 경로 자체가 다를 수 있으니, 재현이 안 되면 먼저 "같은 함수/같은 조건을 타는 게 맞는지"부터 확인할 것. |
+
+---
+
+## 과거 EasyOCR 실험 기록 (참고용, 현재 미사용 — 현재는 CLOVA OCR 사용)
+
+> 아래 항목은 초기 프로토타입 단계에서 EasyOCR을 직접 사용하던 시기의 기록이다. 현재 OCR 처리는 `backend/routers/ocr_router.py`의 CLOVA OCR 인터페이스(`ocr_interface.py`)로 전환됐으며, EasyOCR 의존성은 제거됐다.
+
+---
+
+| 날짜 | (EasyOCR 실험 초기) |
+|---|---|
+| **작성자** | 권순현 |
+| **이슈** | 한글이 포함된 처방전 이미지를 OCR에 넣었을 때 한글 부분이 전부 빈 결과로 반환됨 |
+| **발생 위치** | EasyOCR `Reader` 초기화 |
+| **원인** | EasyOCR은 Reader 초기화 시 선언한 언어 코드에 해당하는 모델만 로드한다. `[“en”]`만 선언하면 한국어 모델 자체를 불러오지 않는다. |
+| **해결** | `reader = easyocr.Reader([“en”, “ko”])` |
+| **현재 상태** | CLOVA OCR 전환으로 EasyOCR 미사용. 참고용으로만 보존. |
+
+---
+
+| 날짜 | (EasyOCR 실험 초기) |
+|---|---|
+| **작성자** | 권순현 |
+| **이슈** | 한글이 포함된 샘플 이미지를 PIL로 생성했을 때 한글 부분이 깨지거나 빈 박스로 출력됨 |
+| **발생 위치** | PIL(Pillow) 이미지 생성 코드 |
+| **원인** | PIL의 기본 폰트(`ImageFont.load_default()`)는 ASCII 문자만 지원한다. 한글 렌더링에는 시스템에 설치된 한글 폰트 파일 경로를 직접 지정해야 한다. |
+| **해결** | `font = ImageFont.truetype(“/System/Library/Fonts/AppleSDGothicNeo.ttc”, size=24)` (macOS 기준) |
+| **현재 상태** | EasyOCR 테스트용 이미지 생성 코드였으므로 현재 미사용. |
+
+---
+
+| 날짜 | (EasyOCR 실험 초기) |
+|---|---|
+| **작성자** | 권순현 |
+| **이슈** | “캡슐500mg” → “캡쑬50Omg” 처럼 약품명과 용량이 동시에 오인식됨 |
+| **발생 위치** | EasyOCR raw 결과 후처리 |
+| **원인** | EasyOCR이 시각적으로 유사한 문자를 혼동한다. 의약품 도메인에서는 한글 받침 혼동(“캡슐”→”캡쑬”)이나 숫자·문자 혼동(`0`→`O`)이 처방 용량이나 약품명 오인식으로 직결된다. |
+| **해결** | 2단계 후처리: ① 자주 혼동되는 패턴 사전 치환(`CHAR_CORRECTIONS`) → ② 의약품 도메인 사전과 유사도 비교(`difflib.get_close_matches`) |
+| **현재 상태** | CLOVA OCR 전환으로 후처리 파이프라인 불필요. 참고용으로만 보존. |
