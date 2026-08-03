@@ -62,7 +62,7 @@ export default function MyPage() {
     { label: "처방전 목록", icon: ClipboardList, to: "/records" },
     { label: "모니터링", icon: BarChart3, to: "/monitoring" },
     { label: "연결관리", icon: Users, to: "/connect" },
-    { label: "화면·챗봇 설정", icon: Settings, to: "/settings" },
+    { label: "설정", icon: Settings, to: "/settings" },
   ];
   const caregiverMenu: MenuItem[] = [
     { label: "내 정보", icon: IdCard, to: "/mypage/info" },
@@ -70,7 +70,7 @@ export default function MyPage() {
     { label: "알림함", icon: Inbox, to: "/notifications" },
     { label: "모니터링", icon: BarChart3, to: "/monitoring" },
     { label: "연결관리", icon: Users, to: "/connect" },
-    { label: "화면·챗봇 설정", icon: Settings, to: "/settings" },
+    { label: "설정", icon: Settings, to: "/settings" },
   ];
   const menu = caregiverId ? caregiverMenu : patientMenu;
 
