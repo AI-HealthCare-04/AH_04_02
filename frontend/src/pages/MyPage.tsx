@@ -60,7 +60,7 @@ export default function MyPage() {
     { label: "알림 설정", icon: Bell, to: "/notification" },
     { label: "알림함", icon: Inbox, to: "/notifications" },
     { label: "등록내역", icon: ClipboardList, to: "/records" },
-    { label: "모니터링 대시보드", icon: BarChart3, to: "/monitoring" },
+    { label: "모니터링", icon: BarChart3, to: "/monitoring" },
     { label: "연결관리", icon: Users, to: "/connect" },
     { label: "화면·챗봇 설정", icon: Settings, to: "/settings" },
   ];
