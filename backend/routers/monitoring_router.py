@@ -1240,6 +1240,12 @@ def get_today(
     반환 형태 (Dashboard.tsx의 Medication[] 그대로):
     [{ "id": "1", "name": "암로디핀 5mg", "time": "아침", "note": "", "status": "pending" }]
     오늘 체크 기록이 없으면 status는 자동으로 "pending"
+
+    [perf, N+1 수정] schedule마다 MedicationRecord/NotificationLog를 따로 조회하던 걸
+    list_notifications(위 GET /patients/{id}/notifications)와 동일한 "ID 모아서
+    bulk-select" 패턴으로 교체했다. schedule 10개 기준 쿼리 수: 기존 1(schedules) +
+    최대 2×10(record+missed) = 최대 21회 → 개선 후 1(schedules) + 1(records) +
+    1(missed) = 3회로 고정(스케줄 수와 무관하게 항상 3회).
     """
     require_actor_patient_access(patient_id, actor, session)
 
@@ -1250,28 +1256,41 @@ def get_today(
         .where(MedicationSchedule.active == True)  # noqa: E712
         .order_by(MedicationSchedule.time_slot)  # [2026-07-21 추가] 프론트가 시간대별로 그룹핑해서 보여줌
     ).all()
+    if not schedules:
+        return []
+
+    schedule_ids = [s.id for s in schedules]
+
+    records = session.exec(
+        select(MedicationRecord)
+        .where(MedicationRecord.schedule_id.in_(schedule_ids))
+        .where(MedicationRecord.status.in_(["taken", "skipped"]))
+        .where(func.date(MedicationRecord.taken_at) == today_str)
+    ).all()
+    # setdefault로 스케줄당 처음 만난 행만 채택 — 기존의 스케줄별 `.first()`와 동일한 의도
+    # (recheck는 같은 행을 갱신하므로 스케줄당 이 조건에 맞는 행은 정상적으로 최대 1개).
+    record_by_schedule: dict[int, MedicationRecord] = {}
+    for r in records:
+        record_by_schedule.setdefault(r.schedule_id, r)
+
+    # [2026-07-19 추가, REQ-037 Phase1] 오늘자 체크가 없으면, 스케줄러가 이미 "놓침"으로
+    # 판정해뒀는지 NotificationLog에서 확인한다(MedicationRecord 스키마는 안 건드리는
+    # read-side 병합).
+    missed_logs = session.exec(
+        select(NotificationLog)
+        .where(NotificationLog.schedule_id.in_(schedule_ids))
+        .where(NotificationLog.due_date == today_str)
+        .where(NotificationLog.kind == "missed")
+    ).all()
+    missed_schedule_ids = {log.schedule_id for log in missed_logs}
 
     result = []
     for s in schedules:
-        record = session.exec(
-            select(MedicationRecord)
-            .where(MedicationRecord.schedule_id == s.id)
-            .where(MedicationRecord.status.in_(["taken", "skipped"]))
-            .where(func.date(MedicationRecord.taken_at) == today_str)
-        ).first()
+        record = record_by_schedule.get(s.id)
         if record:
             status = record.status
         else:
-            # [2026-07-19 추가, REQ-037 Phase1] 오늘자 체크가 없으면, 스케줄러가 이미
-            # "놓침"으로 판정해뒀는지 NotificationLog에서 확인한다(MedicationRecord 스키마는
-            # 안 건드리는 read-side 병합).
-            missed = session.exec(
-                select(NotificationLog)
-                .where(NotificationLog.schedule_id == s.id)
-                .where(NotificationLog.due_date == today_str)
-                .where(NotificationLog.kind == "missed")
-            ).first()
-            status = "missed" if missed else "pending"
+            status = "missed" if s.id in missed_schedule_ids else "pending"
         result.append(
             {
                 "id": str(s.id),
