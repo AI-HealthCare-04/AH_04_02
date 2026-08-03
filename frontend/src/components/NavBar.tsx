@@ -66,8 +66,8 @@ const PATIENT_NAV_ITEMS: NavItem[] = [
 // [2026-08-04 정리, 사용자 요청 — 환자 쪽과 동일한 방식] 환자 내비바처럼 "모니터링"을
 // 그 출발점이었던 "환자 관리" 하위로 다시 묶었다(원래 /patients 목록의 버튼이었다가
 // 최상위로 승격된 이력 — 위 주석 참고).
-// [2026-08-04 추가 조정, 사용자 요청] 연결관리도 "설정" 하위로 옮겼다 — 최상위 항목
-// 3개→2개(환자 관리/설정)로 줄었다.
+// [2026-08-04 추가 조정, 사용자 요청] 연결관리도 "설정" 하위로 옮기고, 라벨도
+// "보호자 설정"으로 바꿨다 — 최상위 항목 3개→2개(환자 관리/설정)로 줄었다.
 const CAREGIVER_NAV_ITEMS: NavItem[] = [
   {
     label: "환자 관리",
@@ -80,7 +80,7 @@ const CAREGIVER_NAV_ITEMS: NavItem[] = [
     children: [
       { label: "알림 설정", to: "/notification" },
       { label: "알림 관리", to: "/notification-management" },
-      { label: "연결관리", to: "/connect" },
+      { label: "보호자 설정", to: "/connect" },
     ],
   },
 ];
