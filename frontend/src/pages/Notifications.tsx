@@ -1,10 +1,16 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, AlertTriangle, FileEdit, CheckCircle2, Link2, Unlink } from "lucide-react";
+import { Bell, AlertTriangle, FileEdit, CheckCircle2, Link2, Trash2, Unlink } from "lucide-react";
 import NavBar from "../components/NavBar";
 import Skeleton from "../components/Skeleton";
 import EmptyState from "../components/EmptyState";
-import { acknowledgeNotifications, getNotifications, type NotificationLogEntry } from "../api/monitoring";
+import {
+  acknowledgeNotifications,
+  clearAcknowledgedNotifications,
+  deleteNotification,
+  getNotifications,
+  type NotificationLogEntry,
+} from "../api/monitoring";
 import { listCorrectionNotices, markCorrectionNoticeRead, type RecordCorrectionNotice } from "../api/records";
 import { listRelationNotices, markRelationNoticeRead, type RelationNotice } from "../api/care";
 import { getCurrentCaregiverId, getCurrentUserName, isLoggedIn, useGuardedPatientId } from "../lib/session";
@@ -49,6 +55,26 @@ export default function Notifications() {
   const [relationNotices, setRelationNotices] = useState<RelationNotice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [clearing, setClearing] = useState(false);
+
+  const handleDeleteReminder = async (id: number) => {
+    if (patientId == null) return;
+    await deleteNotification(patientId, id);
+    setReminders((prev) => prev.filter((r) => r.id !== id));
+  };
+
+  const handleClearRead = async () => {
+    if (patientId == null || clearing) return;
+    setClearing(true);
+    try {
+      await clearAcknowledgedNotifications(patientId);
+      setReminders(await getNotifications(patientId));
+    } catch {
+      setError("확인한 알림을 정리하지 못했어요.");
+    } finally {
+      setClearing(false);
+    }
+  };
 
   useEffect(() => {
     if (patientId == null) return;
@@ -104,7 +130,14 @@ export default function Notifications() {
     <div className="min-h-screen" style={{ background: C.ivory }}>
       <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
-        <h1 className="text-[26px] font-black mb-1" style={{ color: C.dark }}>알림함</h1>
+        <div className="flex items-center justify-between gap-4 mb-1">
+          <h1 className="text-[26px] font-black" style={{ color: C.dark }}>알림함</h1>
+          {patientId != null && reminders.length > 0 && (
+            <button onClick={handleClearRead} disabled={clearing} className="text-[13px] font-bold disabled:opacity-50" style={{ color: C.muted }}>
+              {clearing ? "정리 중..." : "확인한 복약 알림 모두 정리"}
+            </button>
+          )}
+        </div>
         <p className="text-[14px] mb-7" style={{ color: C.muted }}>
           복약 알림·놓침 감지부터 처방전 검토·수정, 환자 연결 소식까지 한눈에 모아 봐요.
         </p>
@@ -155,6 +188,14 @@ export default function Notifications() {
                         {r.status === "suppressed" && " · 알림 꺼짐(발송 안 됨)"}
                       </p>
                     </div>
+                    <button
+                      onClick={() => handleDeleteReminder(r.id).catch(() => setError("알림을 삭제하지 못했어요."))}
+                      aria-label={`${r.drug_name} 알림 삭제`}
+                      className="p-2 rounded-lg hover:opacity-60"
+                      style={{ color: C.muted }}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
                 );
               }

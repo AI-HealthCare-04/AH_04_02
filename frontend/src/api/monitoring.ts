@@ -452,3 +452,14 @@ export const getNotifications = dedupeInFlight(
 export async function acknowledgeNotifications(patientId: number) {
   await monitoringClient.post(`/monitoring/patients/${patientId}/notifications/acknowledge`);
 }
+
+export async function deleteNotification(patientId: number, notificationId: number) {
+  await monitoringClient.delete(`/monitoring/patients/${patientId}/notifications/${notificationId}`);
+}
+
+export async function clearAcknowledgedNotifications(patientId: number) {
+  const { data } = await monitoringClient.delete<{ deleted: number }>(
+    `/monitoring/patients/${patientId}/notifications`
+  );
+  return data;
+}
