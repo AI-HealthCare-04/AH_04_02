@@ -78,3 +78,14 @@ export async function verifyPassword(password: string) {
   const { data } = await monitoringClient.post<{ verified: boolean }>("/auth/verify-password", { password });
   return data;
 }
+
+/** [2026-08-03 추가, REQ-035] 회원 탈퇴 요청 — 즉시 비활성화하고 30일 뒤 개인정보가 영구
+ * 삭제된다(백엔드 purge_expired_accounts.py). 현재 세션(access_token)으로 인증하고,
+ * 확인 절차로 비밀번호만 다시 받는다. */
+export async function withdrawAccount(password: string) {
+  const { data } = await monitoringClient.post<{ message: string; deletion_scheduled_at: string }>(
+    "/auth/withdraw",
+    { password }
+  );
+  return data;
+}
