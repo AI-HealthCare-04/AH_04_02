@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createPortal } from "react-dom";
-import { Bell, Check, Lock, Mail, MessageSquare } from "lucide-react";
+import { AlertTriangle, Bell, Check, CheckCircle2, Lock, Mail, MessageSquare } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import NavBar from "../components/NavBar";
 import Skeleton from "../components/Skeleton";
@@ -399,13 +399,22 @@ export default function MyInfo() {
             onClick={() => { setShowWithdraw(false); setWithdrawPassword(""); setWithdrawError(""); }}
           >
             <div
-              className="w-full max-w-sm rounded-2xl p-6"
+              className="w-full max-w-sm rounded-2xl p-7 text-center"
               style={{ background: C.surface, boxShadow: C.shadowDropdown }}
               onClick={(e) => e.stopPropagation()}
             >
-              <p className="text-[15px] font-bold mb-2 text-center" style={{ color: C.danger }}>정말 탈퇴하시겠어요?</p>
-              <p className="text-[13px] mb-4 text-center" style={{ color: C.muted }}>
-                탈퇴하면 지금까지 등록한 처방전, 복약 기록, 생활 습관 가이드 등 모든 정보가 삭제되어 더 이상 확인할 수 없고, 이 앱을 계속 이용하실 수 없어요.
+              <div
+                className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4"
+                style={{ background: `${C.danger}15` }}
+              >
+                <AlertTriangle className="w-6 h-6" style={{ color: C.danger }} />
+              </div>
+              <p className="text-[17px] font-black mb-2" style={{ color: C.dark }}>정말 탈퇴하시겠어요?</p>
+              <p className="text-[13px] leading-relaxed mb-1" style={{ color: C.muted }}>
+                탈퇴하면 지금까지 등록한 처방전, 복약 기록, 생활 습관 가이드 등 모든 정보가 삭제되어 더 이상 확인할 수 없어요.
+              </p>
+              <p className="text-[13px] leading-relaxed mb-5" style={{ color: C.muted }}>
+                탈퇴 후에는 이 앱을 계속 이용하실 수 없으니 신중하게 결정해 주세요.
               </p>
               <input
                 type="password"
@@ -442,7 +451,10 @@ export default function MyInfo() {
 
       <InfoModal
         open={withdrawDone}
-        message="탈퇴가 완료됐어요. 그동안 건강동행을 이용해 주셔서 감사합니다. 항상 건강하시고, 언제든 다시 찾아주세요."
+        icon={CheckCircle2}
+        iconColor={C.successText}
+        title="탈퇴가 완료됐어요"
+        message={"그동안 건강동행을 이용해 주셔서 감사합니다.\n항상 건강하시고, 언제든 다시 찾아주세요."}
         onClose={handleWithdrawDone}
       />
     </div>
