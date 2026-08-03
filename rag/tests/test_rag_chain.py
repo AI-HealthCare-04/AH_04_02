@@ -894,6 +894,43 @@ def test_generate_guides_from_medications_generates_lifestyle_once_per_unique_di
     assert [lg.diagnosis for lg in lifestyle_guides] == ["고혈압", "당뇨병"]
 
 
+def test_generate_guides_from_medications_isolates_lifestyle_generation_failure():
+    """[2026-07-31 추가] 약별 가이드 루프(test_batch_isolates_failure)와 동일한 실패 격리를
+    생활습관 생성에도 적용한다 — 여러 진단명 중 하나의 LLM 호출이 실패해도(타임아웃/레이트리밋/
+    손상된 JSON 등) 나머지 진단명의 결과와 이미 생성된 약별 가이드는 영향받지 않아야 한다."""
+    medications = [
+        {"drug_name": "암로디핀", "diagnosis": "고혈압"},
+        {"drug_name": "메트포르민", "diagnosis": "당뇨병"},
+    ]
+
+    def fake_generate_lifestyle(diagnosis):
+        if diagnosis == "당뇨병":
+            raise RuntimeError("LLM 타임아웃")
+        return LifestyleGuideResult(diagnosis=diagnosis or "", other=LifestyleCategoryGuide(recommended=[f"{diagnosis} 생활습관 안내"]))
+
+    with (
+        patch("rag.rag_chain.generate_guide_from_medication") as mock_generate_guide,
+        patch("rag.rag_chain.generate_lifestyle_guide_for_diagnosis", side_effect=fake_generate_lifestyle),
+    ):
+        mock_generate_guide.side_effect = lambda medication, other_drug_names=None: _base_guide(
+            drug_name=medication["drug_name"]
+        )
+        guides, lifestyle_guides = generate_guides_from_medications(medications)
+
+    assert len(guides) == 2
+    assert all(g.review_flags == [] for g in guides)  # 약별 가이드는 생활습관 실패와 무관하게 정상
+
+    assert len(lifestyle_guides) == 2
+    ok, failed = lifestyle_guides[0], lifestyle_guides[1]
+    assert ok.diagnosis == "고혈압"
+    assert ok.review_required is False
+
+    assert failed.diagnosis == "당뇨병"
+    assert failed.review_required is True
+    assert failed.review_flags == ["generation_error"]
+    assert "LLM 타임아웃" in failed.review_reason
+
+
 def _caution(**overrides) -> DurCaution:
     defaults = dict(item_name="솔리페나신", category="노인주의", detail="항콜린 부작용 증가")
     defaults.update(overrides)

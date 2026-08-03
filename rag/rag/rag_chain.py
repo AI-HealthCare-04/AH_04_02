@@ -1001,10 +1001,29 @@ def generate_guides_from_medications(medications: list) -> tuple[list[GuideRespo
         if diagnosis and diagnosis not in seen_diagnoses:
             seen_diagnoses.append(diagnosis)
 
-    if seen_diagnoses:
-        lifestyle_guides = [generate_lifestyle_guide_for_diagnosis(d) for d in seen_diagnoses]
-    else:
-        lifestyle_guides = [generate_lifestyle_guide_for_diagnosis(None)]
+    # [2026-07-31 추가] 위 약별 가이드 루프는 항목별로 실패를 격리하는데, 이 생활습관
+    # 생성은 그 보호가 전혀 없어서 진단명 하나의 LLM 호출만 실패해도(타임아웃/레이트리밋/
+    # 손상된 JSON 등) 예외가 그대로 여기를 빠져나가 confirm_medications 전체를 실패시켰다
+    # (이미 저장된 약별 가이드까지 통째로 날아감). 같은 실패 격리 패턴을 적용한다.
+    diagnoses_to_generate = seen_diagnoses or [None]
+    lifestyle_guides: list[LifestyleGuideResult] = []
+    for diagnosis in diagnoses_to_generate:
+        try:
+            lifestyle_guides.append(generate_lifestyle_guide_for_diagnosis(diagnosis))
+        except Exception as exc:
+            logger.exception("생활습관 안내 생성 실패: diagnosis=%s", diagnosis)
+            lifestyle_guides.append(
+                LifestyleGuideResult(
+                    diagnosis=diagnosis or "",
+                    other=LifestyleCategoryGuide(
+                        recommended=["생활습관 안내를 생성하지 못했어요. 잠시 후 다시 확인해주세요."]
+                    ),
+                    source_refs=[],
+                    review_required=True,
+                    review_reason=f"생활습관 안내 생성 실패: {exc}",
+                    review_flags=["generation_error"],
+                )
+            )
 
     return guides, lifestyle_guides
 

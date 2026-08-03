@@ -24,12 +24,13 @@ from core.dependencies import Actor, get_current_actor, require_actor_patient_ac
 from core.push import send_push_to_recipient
 from core.schedule_alerts import caregiver_wants_notifications
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from models import (
     Caregiver,
     CaregiverPatient,
     GuideResult,
     MedicalRecord,
+    MedicalRecordImage,
     MedicationFieldFlag,
     MedicationSchedule,
     OcrResult,
@@ -231,7 +232,7 @@ def _build_record_response(
         "caregiver_review_status": record.caregiver_review_status,
         # [2026-07-25 추가] 원본 사진 보기 버튼을 보여줄지 — 수동 입력이거나 이 기능
         # 이전에 등록된 처방전은 사진이 없다.
-        "has_image": bool(record.image_path and record.image_path.startswith("uploads/prescriptions/")),
+        "has_image": bool(record.image_path == "database" or (record.image_path and record.image_path.startswith("uploads/prescriptions/"))),
         "medications": [
             {
                 "id": item.id,  # [7/8 추가] 처방전확인 화면에서 항목별 수정 시 식별용
@@ -535,7 +536,7 @@ def list_records(
                 "uploaded_by_name": uploader.name if uploader else None,
                 "pinned": r.pinned,
                 "caregiver_review_status": r.caregiver_review_status,
-                "has_image": bool(r.image_path and r.image_path.startswith("uploads/prescriptions/")),
+                "has_image": bool(r.image_path == "database" or (r.image_path and r.image_path.startswith("uploads/prescriptions/"))),
             }
         )
     return summaries
@@ -590,6 +591,11 @@ def delete_record(
 
     record.deleted_at = datetime.now()
     session.add(record)
+
+    # DB에 저장된 민감한 처방전 원본은 등록내역 삭제 시 실제로 제거한다.
+    stored_image = session.get(MedicalRecordImage, record_id)
+    if stored_image is not None:
+        session.delete(stored_image)
 
     schedules = session.exec(
         select(MedicationSchedule).where(MedicationSchedule.record_id == record_id)
@@ -809,6 +815,33 @@ async def request_correction(
             title="처방전 수정 요청이 왔어요", body="보호자·기관이 확인해달라는 칸이 있어요.",
             url=f"/records/{rec.id}/review?mode=correction",
         )
+        # [2026-07-31 추가] 지금까지는 환자한테만 알림이 갔다 — 같은 환자를 같이 보는 다른
+        # 보호자·기관(예: 기관이 요청했는데 보호자는 목록을 직접 열어봐야만 알 수 있던 것)은
+        # 상태값(caregiver_review_status)이 바뀐 걸로만 간접적으로 알 수 있었다. 요청을 보낸
+        # 사람 본인은 빼고, 같은 환자에 연결된 나머지 caregiver 전원에게도 알린다.
+        acting_caregiver_id = actor[1].id
+        other_caregiver_ids = session.exec(
+            select(CaregiverPatient.caregiver_id)
+            .where(CaregiverPatient.patient_id == rec.patient_id)
+            .where(CaregiverPatient.status != "revoked")
+            .where(CaregiverPatient.caregiver_id != acting_caregiver_id)
+        ).all()
+        for other_caregiver_id in other_caregiver_ids:
+            session.add(
+                RecordCorrectionNotice(
+                    recipient_role="caregiver",
+                    recipient_id=other_caregiver_id,
+                    record_id=rec.id,
+                    event="correction_requested",
+                )
+            )
+            if caregiver_wants_notifications(other_caregiver_id, rec.patient_id, session):
+                send_push_to_recipient(
+                    session, "caregiver", other_caregiver_id,
+                    title="처방전 수정 요청이 왔어요",
+                    body="다른 보호자·기관이 확인해달라는 칸이 있어요.",
+                    url=f"/records/{rec.id}/guide",
+                )
         session.commit()
         session.refresh(rec)
         return rec
@@ -977,7 +1010,8 @@ def list_correction_notices(
     actor: Actor = Depends(get_current_actor),
     session: Session = Depends(get_session),
 ):
-    """읽지 않은 처방전 검토 알림 — 환자는 "수정 요청"을, 보호자·기관은 "수정 완료"를 받는다.
+    """읽지 않은 처방전 검토 알림 — 환자는 "수정 요청"을, 보호자·기관은 "검토 요청"/"수정 완료"와
+    (요청한 사람 본인 제외) 다른 보호자·기관이 보낸 "수정 요청"을 받는다.
     Dashboard.tsx/MonitoringDashboard.tsx가 배너로 보여주고 record_id로 바로 이동시킨다."""
     role, subject = actor
     notices = session.exec(
@@ -1038,6 +1072,15 @@ def get_record_image(
         raise HTTPException(404, "해당 기록을 찾을 수 없어요")
     require_actor_patient_access(record.patient_id, actor, session)
 
+    stored_image = session.get(MedicalRecordImage, record_id)
+    if stored_image is not None:
+        return Response(
+            content=stored_image.content,
+            media_type=stored_image.content_type,
+            headers={"Content-Length": str(stored_image.byte_size)},
+        )
+
+    # 마이그레이션 이전에 로컬 디스크에 저장된 기존 기록은 계속 조회할 수 있게 유지한다.
     if not record.image_path or not record.image_path.startswith("uploads/prescriptions/"):
         raise HTTPException(404, "저장된 처방전 사진이 없어요")
     image_file = _ROOT / record.image_path

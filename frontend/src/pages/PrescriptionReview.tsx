@@ -50,8 +50,12 @@ function expandInterval(startTime: string, intervalHours: number): string[] {
 // 같은 단위가 정상 사용량이므로 parsing_rules.py의 DOSE_QTY_UNITS/DOSE_QTY_VOLUME_UNITS와
 // 맞춰 허용한다.
 const USAGE_RE = /(\d+\.?\d*)\s*(정|캡슐|캅셀|포|병|환|스틱|앰플|바이알|시린지|개|매|ml|mL|방울|분무|분사|퍼프|g|단위)/i;
-function isUsageValid(dosage: string) {
-  return USAGE_RE.test(dosage.trim());
+const TOPICAL_FORM_RE = /(연고|크림|로션|겔)/i;
+const TOPICAL_USAGE_LITERAL_RE = /^(소량|적량)$/;
+function isUsageValid(dosage: string, drugName: string) {
+  const normalized = dosage.trim();
+  return USAGE_RE.test(normalized)
+    || (TOPICAL_FORM_RE.test(drugName) && TOPICAL_USAGE_LITERAL_RE.test(normalized));
 }
 
 // [2026-07-25 추가] 1회 투여량 — mg/ml 등 질량·부피 단위. 1회 사용량(개수 단위)과
@@ -73,8 +77,8 @@ function computeIssues(m: OcrMedication, drugNameOk: boolean | undefined, nameOv
   } else if (!m.drug_name.trim()) {
     issues.push({ field: "drug_name", message: "약품명이 비어있어요. 입력해주세요." });
   }
-  if (m.dosage.trim() && !isUsageValid(m.dosage)) {
-    issues.push({ field: "dosage", message: "1회 사용량 형식이 잘못됐어요 (예: 1정, 2캡슐, 5mL처럼 단위를 함께 입력)." });
+  if (m.dosage.trim() && !isUsageValid(m.dosage, m.drug_name)) {
+    issues.push({ field: "dosage", message: "1회 사용량 형식이 잘못됐어요 (예: 1정, 2캡슐, 5mL, 연고 소량처럼 입력)." });
   } else if (!m.dosage.trim()) {
     issues.push({ field: "dosage", message: "1회 사용량이 비어있어요. 입력해주세요." });
   }

@@ -124,6 +124,33 @@ class TestRequestCorrection:
         )
         assert r.status_code == 403
 
+    # [2026-07-31 추가] 같은 환자에 보호자·기관이 여러 명 연결돼 있을 때, 요청을 보낸
+    # 사람이 아닌 나머지에게도 알림이 가야 한다(요청한 사람 본인에게는 자기 요청에 대한
+    # 알림이 또 갈 필요 없음).
+    def test_notifies_other_linked_caregivers_but_not_requester(self, client: TestClient, session: Session):
+        institution = _make_caregiver(session, "행복요양원")
+        guardian = _make_caregiver(session, "보호자")
+        pt = _make_patient(session)
+        _link(session, institution, pt)
+        _link(session, guardian, pt)
+        rec, ocr = _make_completed_record(session, pt.id)
+
+        r = client.post(
+            f"/records/{rec.id}/request-correction",
+            json={"flags": [{"ocr_result_id": ocr.id, "field_name": "dosage", "reason": "1정이 아니라 2정이에요", "suggested_value": "2정"}]},
+            headers={"Authorization": f"Bearer {_token(institution.id, 'caregiver')}"},
+        )
+        assert r.status_code == 200
+
+        notices = session.exec(select(RecordCorrectionNotice)).all()
+        assert len(notices) == 2
+        recipients = {(n.recipient_role, n.recipient_id) for n in notices}
+        assert ("patient", pt.id) in recipients
+        assert ("caregiver", guardian.id) in recipients
+        assert ("caregiver", institution.id) not in recipients
+        caregiver_notice = next(n for n in notices if n.recipient_role == "caregiver")
+        assert caregiver_notice.event == "correction_requested"
+
     def test_unrelated_caregiver_403(self, client: TestClient, session: Session):
         pt = _make_patient(session)
         other = _make_caregiver(session, "타인")
