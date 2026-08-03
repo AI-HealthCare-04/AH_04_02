@@ -35,7 +35,8 @@ Day 2에 각자 자기 테이블을 검토하고 필요하면 컬럼을 고쳐�
 from datetime import datetime
 
 from core.security import decrypt_pii, encrypt_pii, hash_phone
-from sqlalchemy import Column, Text, UniqueConstraint
+from sqlalchemy import Column, LargeBinary, Text, UniqueConstraint
+from sqlalchemy.dialects.mysql import MEDIUMBLOB
 from sqlmodel import Field, SQLModel
 
 
@@ -328,6 +329,23 @@ class MedicalRecord(SQLModel, table=True):
     # "needs_correction": 보호자·기관이 특정 칸에 수정을 요청함(환자 응답 대기)
     # "reviewed": 보호자·기관이 최종 확인 완료
     caregiver_review_status: str = "none"
+
+
+# 처방전 원본 이미지는 애플리케이션 서버의 로컬 파일시스템이 아니라 DB에 저장한다.
+# 별도 테이블로 분리해 등록내역 목록을 조회할 때마다 큰 BLOB까지 함께 읽지 않도록 한다.
+# MySQL에서는 일반 BLOB(64 KiB)이 아닌 MEDIUMBLOB(16 MiB)을 사용하고, 테스트용
+# SQLite에서는 호환되는 LargeBinary(BLOB)로 생성한다.
+_PRESCRIPTION_IMAGE_BINARY = LargeBinary().with_variant(MEDIUMBLOB(), "mysql")
+
+
+class MedicalRecordImage(SQLModel, table=True):
+    __tablename__ = "medical_record_images"
+
+    record_id: int = Field(primary_key=True, foreign_key="medical_records.id")
+    content: bytes = Field(sa_column=Column(_PRESCRIPTION_IMAGE_BINARY, nullable=False))
+    content_type: str = Field(default="application/octet-stream", max_length=100)
+    byte_size: int
+    created_at: datetime = Field(default_factory=datetime.now)
 
 
 # ── OCR 추출 결과 (약품 1개 = 1행, 담당: 권순현) ──

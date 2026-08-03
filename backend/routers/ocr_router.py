@@ -16,7 +16,6 @@ import json
 import os
 import sys
 import tempfile
-import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -33,7 +32,7 @@ load_dotenv(_ROOT / ".env")
 
 from core.database import get_session
 from core.dependencies import Actor, get_current_actor, require_actor_patient_access
-from models import MedicalRecord, OcrResult
+from models import MedicalRecord, MedicalRecordImage, OcrResult
 from services.drug_matcher import MATCH_THRESHOLD, match_drug
 from services.drug_reference import get_drug_info
 from services.langfuse_scoring import score_drug_info_detail, score_ocr_extraction
@@ -60,12 +59,15 @@ if _RAG_DIR.is_dir() and str(_RAG_DIR) not in sys.path:
 router = APIRouter(prefix="/ocr", tags=["OCR"])
 
 _ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
-
-# [2026-07-25 추가] 처방전 원본 사진 저장 — 지금까지는 OCR 텍스트만 남기고 사진 자체는
-# 버렸는데(image_path에 원본 파일명만 기록), 보호자·기관이 수정을 요청할 때 원본을
-# 참고할 방법이 없었다. 로컬 디스크에 record별로 저장하고, image_path에는 실제 경로를
-# 남긴다. 클라우드 저장소 전환은 나중에(팀 논의) — 지금은 가장 단순한 형태로 우선 연결.
-_UPLOAD_DIR = _ROOT / "uploads" / "prescriptions"
+_MAX_IMAGE_BYTES = 10 * 1024 * 1024
+_IMAGE_CONTENT_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".bmp": "image/bmp",
+    ".tiff": "image/tiff",
+    ".tif": "image/tiff",
+}
 
 
 @router.get("/ping")
@@ -427,20 +429,13 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
 
     if not content:
         raise HTTPException(status_code=400, detail="사진 파일이 비어있어요. 다시 찍어서 올려주시겠어요?")
-
-    # [2026-07-25 추가] 원본 사진을 record별로 저장 — 파일명은 patient_id/원본 파일명이
-    # 그대로 노출되지 않도록 uuid로 새로 만든다(개인정보가 파일 경로에 남지 않게).
-    stored_name = f"{uuid.uuid4().hex}{ext.lower()}"
-
-    def _save_image() -> None:
-        _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        (_UPLOAD_DIR / stored_name).write_bytes(content)
-
-    await asyncio.to_thread(_save_image)
+    if len(content) > _MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="처방전 사진은 10MB 이하만 올릴 수 있어요.")
 
     record = MedicalRecord(
         patient_id=patient_id,
-        image_path=f"uploads/prescriptions/{stored_name}",
+        # 기존 NOT NULL 컬럼과 API 호환을 유지하면서 DB 저장 여부를 가볍게 판별하는 표식.
+        image_path="database",
         status="processing",
     )
 
@@ -451,12 +446,21 @@ async def run_ocr(patient_id: int, file: UploadFile, session: Session) -> Medica
         session.add(rec)
         session.commit()
 
-    def _persist_and_refresh(rec: MedicalRecord) -> None:
+    def _persist_record_and_image(rec: MedicalRecord) -> None:
         session.add(rec)
+        session.flush()
+        session.add(
+            MedicalRecordImage(
+                record_id=rec.id,
+                content=content,
+                content_type=_IMAGE_CONTENT_TYPES.get(ext.lower(), "application/octet-stream"),
+                byte_size=len(content),
+            )
+        )
         session.commit()
         session.refresh(rec)
 
-    await asyncio.to_thread(_persist_and_refresh, record)
+    await asyncio.to_thread(_persist_record_and_image, record)
 
     tmp_path: str | None = None
     try:
