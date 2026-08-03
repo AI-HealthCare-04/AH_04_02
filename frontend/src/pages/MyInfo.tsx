@@ -220,7 +220,7 @@ export default function MyInfo() {
   };
 
   const handleWithdraw = async () => {
-    if (!withdrawPassword) return;
+    if (!withdrawPassword || withdrawing) return;
     setWithdrawing(true);
     setWithdrawError("");
     try {

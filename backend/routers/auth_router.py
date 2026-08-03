@@ -697,14 +697,23 @@ def withdraw(
     role, account = actor
     if not account.hashed_password or not verify_password(payload.password, account.hashed_password):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "비밀번호가 올바르지 않습니다.")
-    if account.deactivated_at is not None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "이미 탈퇴 처리된 계정입니다.")
 
+    # [2026-08-03 버그수정, 팀원 리뷰(fkmc10101-hub) 지적 반영] 예전엔 deactivated_at을
+    # 읽어서 None인지 확인한 다음 따로 값을 쓰는 2단계였는데, Enter 연타 등으로 같은
+    # 요청이 동시에 들어오면 둘 다 None을 읽고 둘 다 통과해서 PrivacyPurgeAudit이 중복
+    # 생성되는 레이스가 있었다(_rotate_refresh_token_or_401과 동일한 문제). UPDATE ...
+    # WHERE deactivated_at IS NULL을 원자적으로 실행해서 실제로 이 요청이 값을 쓴
+    # 행이 있는지(rowcount)로 판단한다.
     now = datetime.now()
     scheduled_purge_at = now + timedelta(days=WITHDRAWAL_GRACE_DAYS)
-    account.deactivated_at = now
-    account.deletion_scheduled_at = scheduled_purge_at
-    session.add(account)
+    result = session.execute(
+        update(type(account))
+        .where(type(account).id == account.id)
+        .where(type(account).deactivated_at.is_(None))
+        .values(deactivated_at=now, deletion_scheduled_at=scheduled_purge_at)
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "이미 탈퇴 처리된 계정입니다.")
     session.add(
         PrivacyPurgeAudit(
             subject_type=role,
