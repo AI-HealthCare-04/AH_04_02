@@ -83,7 +83,12 @@ DRUG_NAME_RE = re.compile(
     # 누락된 제형을 마저 추가한다 — 과립/세립(고형제), 엘릭서/드링크(액제),
     # 앰플/바이알/시린지(주사제), 페이스트(반고형제), 좌제/좌약, 필름, 트로키/로젠지, 껌.
     r"(?<![가-힣\d])([가-힣A-Za-z]{2,}(?:\d+(?!연질)[가-힣A-Za-z]{2,})?(?:\d+)?(?:연질)?"
-    r"(?:정|캡슐|주|산|시럽|액|크림|연고|로션|겔|패취|패치|점안|점이|환|스프레이"
+    # [2026-07-31 버그수정] "환"(알약) 접미사가 "질환"("심혈관질환" 등 진단명에 흔히
+    # 나오는 단어)의 마지막 글자와 겹쳐서, 처방전 상단 진단명 줄의 "질환"까지 약품명으로
+    # 오인식됐다(실사용 재현: "고혈압, 심혈관질환 예방"에서 "심혈관질" + "환"이 가짜
+    # 약품명으로 잡힘) — "질" 바로 뒤의 "환"만 제외한다("우황청심환"처럼 실제 "환"제형
+    # 약품명은 그대로 매칭됨).
+    r"(?:정|캡슐|주|산|시럽|액|크림|연고|로션|겔|패취|패치|점안|점이|(?<!질)환|스프레이"
     r"|과립|세립|엘릭서|드링크|앰플|바이알|시린지|페이스트|좌제|좌약|필름|트로키|로젠지|껌)(?![가-힣])"
     # [2026-07-28 추가] "글루코파지XR"/"디아미크롱MR"처럼 한글 브랜드명 뒤에 영문 방출제어
     # 접미사(서방정 계열 SR/XR/ER/CR/MR/IR/LA/CD/SA)만 붙고 정/캡슐 같은 한글 제형어가
@@ -959,6 +964,44 @@ def _parse_table_format(text: str) -> list:
         dosage = dose_quantities[i] if i < len(dose_quantities) else ""
         if has_dose_amount_column:
             dosage = reconcile_dose_fields("", dose_amount, drug_name) or dosage
+        frequency = frequencies[i] if i < len(frequencies) else ""
+        seg_end = drug_spans[i + 1][0] if i + 1 < len(drug_spans) else len(text)
+        # [2026-07-31 버그수정] "흉통 시 혀 밑에 1회 분무"/"필요시"처럼, 이 약만 PRN(필요시)
+        # 표기라 위치 기반 배열(frequencies)에 아예 안 잡히는 경우가 있다 — BARE_FREQ_RE는
+        # "1회" 뒤에 한글이 바로 오면("1회 분무") 매칭을 포기한다. 비어있을 때만, 이 약과
+        # 다음 약 사이 구간에서 PRN 인식이 포함된 extract_frequency로 한 번 더 확인한다
+        # (이미 채워진 값은 안 건드림).
+        if not frequency:
+            frequency = extract_frequency(text[dm.end():seg_end])
+
+        # [2026-07-31 버그수정] day_nums는 "마지막 1일 N회 매치 이후" 텍스트에서만 일수를
+        # 찾는데, 실제로는 컬럼이 아니라 "약품명 1일 N회 ... N일"이 약마다 한 행씩
+        # 반복되는 구조인 처방전도 많다(mock_prescription_* 재현 — "1 노바스크정 1일 1회
+        # 아침 1정 30일 2 리피토정 1일 1회 저녁 1정 30일 3 ..."). 이러면 마지막 행 이전
+        # 약들의 "30일"은 전부 day_nums 탐색 범위(마지막 매치 이후) 밖이라, 엉뚱한
+        # 인덱스(주로 헤더/각주의 숫자)가 대신 배정됐다 — 이 약 자신의 "1일 N회" 매치
+        # 뒤부터 다음 약 시작 전까지만 떼어 "N일" 패턴을 직접 찾고, 없으면 PRN을, 그래도
+        # 없으면(진짜 컬럼-그룹 포맷 등) 기존 위치 기반 값으로 폴백한다.
+        row_days_start = drug_spans[i][1]
+        if i < len(freq_entries):
+            row_days_start = max(row_days_start, freq_entries[i][1])
+        row_tail = text[row_days_start:seg_end]
+        day_m = re.search(r"(\d+)\s*일(?!분)", row_tail)
+        if day_m:
+            total_days = _format_total_days(day_m.group(1))
+        else:
+            # [2026-07-31 버그수정] "회"(횟수)도 제외 대상에 넣지 않으면, BARE_FREQ_RE가
+            # 이미 포기한("1회 분무"처럼 뒤에 한글이 오는) "1회"의 "1"이 이 bare-number
+            # 폴백에 다시 걸려 엉뚱하게 "1일"로 잘못 채워진다(니트로링구알스프레이 재현).
+            bare_days = [
+                n for n in re.findall(r"(?<![.\d])(\d+)(?![.\d]|mg|g|ml|일|분|회)", row_tail)
+                if _format_total_days(n)
+            ]
+            total_days = _format_total_days(bare_days[0]) if bare_days else ""
+        if not total_days and PRN_RE.search(row_tail):
+            total_days = "필요시"
+        if not total_days:
+            total_days = _format_total_days(day_nums[i]) if i < len(day_nums) else ""
         results.append({
             "drug_name":   drug_name,
             "drug_code":   "",
@@ -967,8 +1010,8 @@ def _parse_table_format(text: str) -> list:
             # 신뢰도 있게 "1회 투여량" 문구를 찾기 어렵다 — 약품명에 붙어 나오는 단위당
             # 함량(_dm_dosage)만 폴백으로 쓴다.
             "dose_amount": dose_amount,
-            "frequency":   frequencies[i] if i < len(frequencies) else "",
-            "total_days":  _format_total_days(day_nums[i]) if i < len(day_nums) else "",
+            "frequency":   frequency,
+            "total_days":  total_days,
             "drug_class":  lookup_drug_class(drug_name),
         })
     return results

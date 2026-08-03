@@ -113,18 +113,24 @@ self.addEventListener("notificationclick", (event) => {
     const scheduleId = data.scheduleId;
     const status = event.action;
     event.waitUntil(
-      checkScheduleInBackground(scheduleId, status).then((ok) => {
+      // ponytail: showNotification()은 Promise<void>, openOrFocus()는
+      // Promise<WindowClient | null>라 .then() 콜백의 반환 타입이 갈려 tsc가 통합을
+      // 못 했다 — async IIFE로 감싸 두 분기 다 반환값 없이 await만 하면 항상
+      // Promise<void>로 통일된다.
+      (async () => {
+        const ok = await checkScheduleInBackground(scheduleId, status);
         if (ok) {
           // 앱을 안 열었으니, 처리됐다는 걸 알 수 있게 알림을 하나 더 띄운다.
-          return self.registration.showNotification("처리 완료", {
+          await self.registration.showNotification("처리 완료", {
             body: status === "taken" ? "복용 처리했어요." : "건너뛰기로 처리했어요.",
             icon: "/pwa-192.png",
             tag: `med-check-${scheduleId}`,
           });
+          return;
         }
         // 실패(로그아웃·네트워크 오류 등) 시엔 기존 방식대로 앱을 열어서 직접 처리하게 한다.
-        return openOrFocus(`/dashboard?highlight=${scheduleId}&action=${status}`);
-      })
+        await openOrFocus(`/dashboard?highlight=${scheduleId}&action=${status}`);
+      })()
     );
     return;
   }
