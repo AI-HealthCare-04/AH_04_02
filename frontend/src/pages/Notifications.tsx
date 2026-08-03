@@ -6,8 +6,8 @@ import Skeleton from "../components/Skeleton";
 import EmptyState from "../components/EmptyState";
 import {
   acknowledgeNotifications,
-  clearAcknowledgedNotifications,
   deleteNotification,
+  deleteNotifications,
   getNotifications,
   type NotificationLogEntry,
 } from "../api/monitoring";
@@ -56,19 +56,46 @@ export default function Notifications() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [clearing, setClearing] = useState(false);
+  const [selectedReminderIds, setSelectedReminderIds] = useState<Set<number>>(new Set());
 
   const handleDeleteReminder = async (id: number) => {
     if (patientId == null) return;
     await deleteNotification(patientId, id);
     setReminders((prev) => prev.filter((r) => r.id !== id));
+    setSelectedReminderIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  };
+
+  const handleDeleteSelected = async (ids: number[]) => {
+    if (patientId == null || clearing || ids.length === 0) return;
+    setClearing(true);
+    setError("");
+    try {
+      await deleteNotifications(patientId, ids);
+      const deletedIds = new Set(ids);
+      setReminders((prev) => prev.filter((r) => !deletedIds.has(r.id)));
+      setSelectedReminderIds((prev) => {
+        const next = new Set(prev);
+        ids.forEach((id) => next.delete(id));
+        return next;
+      });
+    } catch {
+      setError("선택한 알림을 삭제하지 못했어요. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setClearing(false);
+    }
   };
 
   const handleClearRead = async () => {
     if (patientId == null || clearing) return;
     setClearing(true);
     try {
-      await clearAcknowledgedNotifications(patientId);
-      setReminders(await getNotifications(patientId));
+      await deleteNotifications(patientId, reminders.map((reminder) => reminder.id));
+      setReminders([]);
+      setSelectedReminderIds(new Set());
     } catch {
       setError("확인한 알림을 정리하지 못했어요.");
     } finally {
@@ -79,11 +106,18 @@ export default function Notifications() {
   useEffect(() => {
     if (patientId == null) return;
     getNotifications(patientId)
-      .then(setReminders)
+      .then(async (items) => {
+        setReminders(items);
+        await acknowledgeNotifications(patientId);
+        const acknowledgedAt = new Date().toISOString();
+        setReminders((current) => current.map((item) => ({
+          ...item,
+          acknowledged_at: item.acknowledged_at ?? acknowledgedAt,
+        })));
+      })
       // [2026-07-30 추가] 이 화면에 목록이 실제로 표시된 시점 = "읽음" 처리 기준.
       // 개별 항목이 클릭 대상이 없는 단순 로그라, 목록을 성공적으로 불러온 직후
       // 그 시점까지 안 읽었던 것 전부를 한 번에 표시 처리한다(실패해도 무시).
-      .then(() => acknowledgeNotifications(patientId).catch(() => {}))
       .catch(() => {});
   }, [patientId]);
 
@@ -142,6 +176,30 @@ export default function Notifications() {
           복약 알림·놓침 감지부터 처방전 검토·수정, 환자 연결 소식까지 한눈에 모아 봐요.
         </p>
 
+        {patientId != null && reminders.length > 0 && (
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <label className="flex items-center gap-2 text-[13px] font-bold cursor-pointer" style={{ color: C.dark }}>
+              <input
+                type="checkbox"
+                checked={selectedReminderIds.size === reminders.length}
+                onChange={(event) => setSelectedReminderIds(
+                  event.target.checked ? new Set(reminders.map((reminder) => reminder.id)) : new Set()
+                )}
+                className="w-4 h-4"
+              />
+              복약 알림 전체 선택
+            </label>
+            <button
+              onClick={() => handleDeleteSelected([...selectedReminderIds])}
+              disabled={clearing || selectedReminderIds.size === 0}
+              className="px-3 py-2 rounded-lg text-[13px] font-bold disabled:opacity-40"
+              style={{ background: `${C.terracotta}18`, color: C.terracotta }}
+            >
+              선택 삭제 ({selectedReminderIds.size})
+            </button>
+          </div>
+        )}
+
         {error && <p className="text-[13px] mb-4" style={{ color: "#D94F4F" }}>{error}</p>}
 
         {loading ? (
@@ -168,6 +226,18 @@ export default function Notifications() {
                 const meta = KIND_META[r.kind];
                 return (
                   <div key={entry.id} className="flex items-start gap-3 px-5 py-4" style={border}>
+                    <input
+                      type="checkbox"
+                      checked={selectedReminderIds.has(r.id)}
+                      onChange={(event) => setSelectedReminderIds((prev) => {
+                        const next = new Set(prev);
+                        if (event.target.checked) next.add(r.id);
+                        else next.delete(r.id);
+                        return next;
+                      })}
+                      aria-label={`${r.drug_name} 알림 선택`}
+                      className="w-4 h-4 mt-2.5 shrink-0"
+                    />
                     <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: meta.bg }}>
                       {r.kind === "missed" ? (
                         <AlertTriangle className="w-4 h-4" style={{ color: meta.color }} />
