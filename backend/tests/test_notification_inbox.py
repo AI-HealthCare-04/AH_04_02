@@ -270,3 +270,30 @@ def test_clear_notifications_preserves_unacknowledged_logs(client: TestClient, s
     assert response.json() == {"deleted": 1}
     assert session.get(NotificationLog, acknowledged.id) is None
     assert session.get(NotificationLog, unread.id) is not None
+
+
+def test_bulk_delete_notifications_removes_only_selected_owned_logs(client: TestClient, session: Session):
+    pt = _make_patient(session)
+    other_pt = _make_patient(session)
+    schedules = []
+    for patient, name in ((pt, "first"), (pt, "second"), (other_pt, "other")):
+        schedule = MedicationSchedule(patient_id=patient.id, drug_name=name, time_slot="08:00")
+        session.add(schedule)
+        session.commit()
+        session.refresh(schedule)
+        schedules.append(schedule)
+    first = _make_log(session, pt.id, schedules[0].id)
+    second = _make_log(session, pt.id, schedules[1].id)
+    other = _make_log(session, other_pt.id, schedules[2].id)
+
+    response = client.post(
+        f"/monitoring/patients/{pt.id}/notifications/delete",
+        headers=_headers(pt.id),
+        json={"notification_ids": [first.id, other.id, first.id]},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 1}
+    assert session.get(NotificationLog, first.id) is None
+    assert session.get(NotificationLog, second.id) is not None
+    assert session.get(NotificationLog, other.id) is not None

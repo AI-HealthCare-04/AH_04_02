@@ -457,6 +457,14 @@ export async function deleteNotification(patientId: number, notificationId: numb
   await monitoringClient.delete(`/monitoring/patients/${patientId}/notifications/${notificationId}`);
 }
 
+export async function deleteNotifications(patientId: number, notificationIds: number[]) {
+  const { data } = await monitoringClient.post<{ deleted: number }>(
+    `/monitoring/patients/${patientId}/notifications/delete`,
+    { notification_ids: notificationIds }
+  );
+  return data;
+}
+
 export async function clearAcknowledgedNotifications(patientId: number) {
   const { data } = await monitoringClient.delete<{ deleted: number }>(
     `/monitoring/patients/${patientId}/notifications`

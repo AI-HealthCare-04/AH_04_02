@@ -1222,6 +1222,10 @@ class NotificationLogEntry(BaseModel):
     acknowledged_at: datetime | None = None
 
 
+class NotificationBulkDeleteRequest(BaseModel):
+    notification_ids: list[int]
+
+
 @router.get("/patients/{patient_id}/notifications", response_model=list[NotificationLogEntry])
 def list_notifications(
     patient_id: int,
@@ -1298,6 +1302,32 @@ def delete_notification(
     session.delete(log)
     session.commit()
     return {"deleted": notification_id}
+
+
+@router.post("/patients/{patient_id}/notifications/delete")
+def delete_notifications(
+    patient_id: int,
+    payload: NotificationBulkDeleteRequest,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """사용자가 선택한 복약 알림을 환자 소유권 범위 안에서 한 번에 삭제한다."""
+    require_actor_patient_access(patient_id, actor, session)
+    notification_ids = list(dict.fromkeys(payload.notification_ids))
+    if not notification_ids:
+        return {"deleted": 0}
+    if len(notification_ids) > 500:
+        raise HTTPException(422, "한 번에 최대 500개의 알림을 삭제할 수 있어요.")
+
+    logs = session.exec(
+        select(NotificationLog)
+        .where(NotificationLog.patient_id == patient_id)
+        .where(NotificationLog.id.in_(notification_ids))
+    ).all()
+    for log in logs:
+        session.delete(log)
+    session.commit()
+    return {"deleted": len(logs)}
 
 
 @router.delete("/patients/{patient_id}/notifications")
