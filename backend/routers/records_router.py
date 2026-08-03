@@ -521,11 +521,27 @@ def list_records(
         # [2026-07-21 추가] 고정(pinned)한 항목을 맨 위로 — 같은 고정 여부 안에서는 최신순 유지
         .order_by(MedicalRecord.pinned.desc(), MedicalRecord.created_at.desc())  # ty: ignore[unresolved-attribute]
     ).all()
+    if not records:
+        return []
+
+    # [perf, N+1 수정] 기록마다 OcrResult/Caregiver를 따로 조회하던 걸 /monitoring/today,
+    # /monitoring/caregivers/{id}/patients와 동일한 "ID 모아서 bulk-select" 패턴으로
+    # 바꿨다. 기록 수와 무관하게 쿼리 수가 고정된다.
+    record_ids = [r.id for r in records]
+    ocr_items_by_record: dict[int, list[OcrResult]] = {}
+    for item in session.exec(select(OcrResult).where(OcrResult.record_id.in_(record_ids))).all():
+        ocr_items_by_record.setdefault(item.record_id, []).append(item)
+
+    caregiver_ids = {r.uploaded_by_caregiver_id for r in records if r.uploaded_by_caregiver_id}
+    uploader_names_by_id = (
+        {c.id: c.name for c in session.exec(select(Caregiver).where(Caregiver.id.in_(caregiver_ids)))}
+        if caregiver_ids
+        else {}
+    )
 
     summaries = []
     for r in records:
-        ocr_items = session.exec(select(OcrResult).where(OcrResult.record_id == r.id)).all()
-        uploader = session.get(Caregiver, r.uploaded_by_caregiver_id) if r.uploaded_by_caregiver_id else None
+        ocr_items = ocr_items_by_record.get(r.id, [])
         summaries.append(
             {
                 "record_id": r.id,
@@ -533,7 +549,7 @@ def list_records(
                 "created_at": r.created_at.isoformat(),
                 "diagnosis": ocr_items[0].diagnosis if ocr_items else "",
                 "drug_names": [item.drug_name for item in ocr_items],
-                "uploaded_by_name": uploader.name if uploader else None,
+                "uploaded_by_name": uploader_names_by_id.get(r.uploaded_by_caregiver_id),
                 "pinned": r.pinned,
                 "caregiver_review_status": r.caregiver_review_status,
                 "has_image": bool(r.image_path == "database" or (r.image_path and r.image_path.startswith("uploads/prescriptions/"))),
