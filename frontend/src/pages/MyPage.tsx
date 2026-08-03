@@ -61,7 +61,7 @@ export default function MyPage() {
     { label: "알림함", icon: Inbox, to: "/notifications" },
     { label: "처방전 목록", icon: ClipboardList, to: "/records" },
     { label: "모니터링", icon: BarChart3, to: "/monitoring" },
-    { label: "연결관리", icon: Users, to: "/connect" },
+    { label: "보호자 설정", icon: Users, to: "/connect" },
     { label: "설정", icon: Settings, to: "/settings" },
   ];
   const caregiverMenu: MenuItem[] = [

@@ -58,7 +58,7 @@ const PATIENT_NAV_ITEMS: NavItem[] = [
     children: [
       { label: "알림 설정", to: "/notification" },
       { label: "식사시간 설정", to: "/meal-check" },
-      { label: "연결관리", to: "/connect" },
+      { label: "보호자 설정", to: "/connect" },
     ],
   },
 ];
