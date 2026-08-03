@@ -1,3 +1,4 @@
+import { dedupeInFlight } from "../lib/dedupeInFlight";
 import { monitoringClient } from "./monitoringClient";
 
 // ── 타입 정의 (monitoring_router.py 응답 형태 그대로) ──
@@ -431,13 +432,19 @@ export interface NotificationLogEntry {
   acknowledged_at: string | null;
 }
 
-export async function getNotifications(patientId: number, days = 30) {
-  const { data } = await monitoringClient.get<NotificationLogEntry[]>(
-    `/monitoring/patients/${patientId}/notifications`,
-    { params: { days } }
-  );
-  return data;
-}
+// [2026-08-03 추가] NavBar(뱃지)와 이 API를 쓰는 화면(예: Notifications.tsx 목록)이 같은
+// 페이지에서 동시에 마운트되면 같은 patientId로 이 함수를 동시에 호출한다 — getCaregiverPatients와
+// 동일하게 진행 중인 요청을 공유해 중복 네트워크 호출을 없앤다.
+export const getNotifications = dedupeInFlight(
+  async (patientId: number, days = 30) => {
+    const { data } = await monitoringClient.get<NotificationLogEntry[]>(
+      `/monitoring/patients/${patientId}/notifications`,
+      { params: { days } }
+    );
+    return data;
+  },
+  (patientId, days = 30) => `${patientId}:${days}`
+);
 
 /** [2026-07-30 추가] 알림함이 복약 알림 목록을 화면에 띄우는 시점에 호출 — 그 시점까지
  * 안 읽었던 것 전부를 "표시함"으로 처리한다(개별 클릭 대상이 없는 단순 로그라 목록

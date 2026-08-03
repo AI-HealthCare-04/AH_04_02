@@ -1,3 +1,4 @@
+import { dedupeInFlight } from "../lib/dedupeInFlight";
 import { monitoringClient } from "./monitoringClient";
 
 // ── 1. 보호자 초대 (Invitation) ──
@@ -173,10 +174,13 @@ export interface RelationNotice {
   read_at: string | null;
 }
 
-export async function listRelationNotices() {
+// [2026-08-03 추가] NavBar(뱃지)와 알림함 화면(Notifications.tsx)이 같은 페이지에서 동시에
+// 이 함수를 호출한다 — api/monitoring.ts의 getCaregiverPatients와 동일한 in-flight 캐시
+// 패턴(dedupeInFlight)으로 중복 네트워크 호출을 없앤다.
+export const listRelationNotices = dedupeInFlight(async () => {
   const { data } = await monitoringClient.get<RelationNotice[]>("/trust/relations/notices");
   return data;
-}
+});
 
 export async function markRelationNoticeRead(noticeId: number) {
   const { data } = await monitoringClient.post<RelationNotice>(

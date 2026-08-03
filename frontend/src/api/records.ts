@@ -1,3 +1,4 @@
+import { dedupeInFlight } from "../lib/dedupeInFlight";
 import { monitoringClient } from "./monitoringClient";
 
 // ── 타입 정의 (records_router.py 응답 형태 그대로) ──
@@ -442,11 +443,15 @@ export interface RecordCorrectionNotice {
   read_at: string | null;
 }
 
-/** 읽지 않은 처방전 검토 알림 — 환자는 "수정 요청"/"검토 완료"를, 보호자·기관은 "수정 완료"를 받는다. */
-export async function listCorrectionNotices() {
+/** 읽지 않은 처방전 검토 알림 — 환자는 "수정 요청"/"검토 완료"를, 보호자·기관은 "수정 완료"를 받는다.
+ *
+ * [2026-08-03 추가] NavBar(뱃지)와 알림함 화면(Notifications.tsx)이 같은 페이지에서 동시에
+ * 이 함수를 호출한다 — api/monitoring.ts의 getCaregiverPatients와 동일한 in-flight 캐시
+ * 패턴(dedupeInFlight)으로 중복 네트워크 호출을 없앤다. */
+export const listCorrectionNotices = dedupeInFlight(async () => {
   const { data } = await monitoringClient.get<RecordCorrectionNotice[]>("/records/notices");
   return data;
-}
+});
 
 export async function markCorrectionNoticeRead(noticeId: number) {
   await monitoringClient.post(`/records/notices/${noticeId}/read`);
