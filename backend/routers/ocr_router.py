@@ -360,7 +360,23 @@ def drug_info(drug_name: str):
         # _fetch_rag_drug_detail이 이미 null/빈 값으로 조용히 폴백).
         _, score = match_drug(drug_name)
         matched_name = drug_name if score >= MATCH_THRESHOLD else None
-        rag_detail = _fetch_rag_drug_detail(drug_name)
+        with optional_observation(
+            as_type="retriever",
+            name="drug-info-rag-retrieval",
+            input={"drug_name": mask_for_langfuse(drug_name)},
+        ) as retrieval:
+            rag_detail = _fetch_rag_drug_detail(drug_name)
+            update_observation(
+                retrieval,
+                output={
+                    "has_precautions": bool(rag_detail.get("precautions")),
+                    "has_side_effects": bool(rag_detail.get("side_effects")),
+                    "has_interactions": bool(rag_detail.get("interactions")),
+                    "has_storage": bool(rag_detail.get("storage")),
+                    "has_live_indication": bool(rag_detail.get("live_indication")),
+                    "dur_caution_count": len(rag_detail.get("dur_cautions") or []),
+                },
+            )
         # [2026-07-30 추가, 이슈 #107] get_drug_info()는 HIRA로 매칭되면 efficacy를 항상
         # 빈 문자열로 반환한다(적응증 텍스트는 로컬 e약은요 xlsx 매칭 결과에만 있음) —
         # 그 경우 live API(_fetch_eyakeun_info)로 보강 조회한 효능효과로 대체한다.

@@ -553,6 +553,50 @@ def test_generate_lifestyle_guide_for_diagnosis_dry_run_uses_context_text():
     assert "dry_run" in result.review_flags
 
 
+def test_lifestyle_guide_records_langfuse_retrieval_and_generation():
+    from contextlib import contextmanager
+
+    observation_names: list[str] = []
+    outputs: list[dict] = []
+
+    @contextmanager
+    def fake_observation(**kwargs):
+        observation_names.append(kwargs["name"])
+        yield object()
+
+    class FakeResponse:
+        content = json.dumps(
+            {
+                "diet": {"recommended": ["guide"], "avoid": []},
+                "exercise": {"recommended": [], "avoid": []},
+                "other": {"recommended": [], "avoid": []},
+                "source_refs": [1],
+            }
+        )
+
+    class FakeChat:
+        def invoke(self, _messages):
+            return FakeResponse()
+
+    with (
+        patch("rag.rag_chain.search_kdca_health_info_by_title", return_value=[FAKE_KDCA_DOC]),
+        patch("rag.rag_chain.settings.OPENAI_API_KEY", "test-key"),
+        patch("rag.rag_chain.settings.SELF_CONSISTENCY_SAMPLES", 1),
+        patch("rag.rag_chain.optional_observation", side_effect=fake_observation),
+        patch("rag.rag_chain.update_observation", side_effect=lambda _obs, **kw: outputs.append(kw["output"])),
+        patch("rag.rag_chain.flush_langfuse"),
+        patch("langchain_openai.ChatOpenAI", return_value=FakeChat()),
+    ):
+        generate_lifestyle_guide_for_diagnosis("hypertension")
+
+    assert observation_names == [
+        "lifestyle-guide-rag-retrieval",
+        "lifestyle-guide-llm-generation",
+    ]
+    assert outputs[0]["retrieved_count"] == 1
+    assert outputs[1]["status"] == "ok"
+
+
 def test_generate_lifestyle_guide_falls_back_to_context_when_llm_returns_empty_text():
     """LLM이 diet/exercise/other를 전부 비워 보내도 검색된 생활지침 문구를 화면에 표시한다."""
 

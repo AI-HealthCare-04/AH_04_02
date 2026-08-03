@@ -1283,6 +1283,42 @@ def acknowledge_notifications(
     return {"acknowledged": len(unacknowledged)}
 
 
+@router.delete("/patients/{patient_id}/notifications/{notification_id}")
+def delete_notification(
+    patient_id: int,
+    notification_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """알림함에서 복약 알림 한 건을 직접 정리한다."""
+    require_actor_patient_access(patient_id, actor, session)
+    log = session.get(NotificationLog, notification_id)
+    if not log or log.patient_id != patient_id:
+        raise HTTPException(404, "알림을 찾을 수 없어요")
+    session.delete(log)
+    session.commit()
+    return {"deleted": notification_id}
+
+
+@router.delete("/patients/{patient_id}/notifications")
+def clear_acknowledged_notifications(
+    patient_id: int,
+    actor: Actor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """확인한 복약 알림을 한꺼번에 정리한다. 아직 확인하지 않은 알림은 보존한다."""
+    require_actor_patient_access(patient_id, actor, session)
+    logs = session.exec(
+        select(NotificationLog)
+        .where(NotificationLog.patient_id == patient_id)
+        .where(NotificationLog.acknowledged_at != None)  # noqa: E711
+    ).all()
+    for log in logs:
+        session.delete(log)
+    session.commit()
+    return {"deleted": len(logs)}
+
+
 # ── Dashboard.tsx가 그대로 쓸 수 있는 오늘자 통합 조회 [7/6: patient_id 필수로 변경] ──
 @router.get("/today")
 def get_today(

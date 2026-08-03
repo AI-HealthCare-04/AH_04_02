@@ -3,6 +3,7 @@ import logging
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 
 from langchain_core.documents import Document
 from rag.chunking import drugs_to_documents
@@ -43,6 +44,26 @@ from rag.vectorstore import (
 )
 
 logger = logging.getLogger(__name__)
+
+try:
+    from services.langfuse_tracing import (
+        flush_langfuse,
+        mask_for_langfuse,
+        optional_observation,
+        update_observation,
+    )
+except Exception:  # noqa: BLE001 - standalone RAG execution must keep working without backend services
+    def optional_observation(**_kwargs):
+        return nullcontext(None)
+
+    def update_observation(_observation, **_kwargs) -> None:
+        return None
+
+    def flush_langfuse() -> None:
+        return None
+
+    def mask_for_langfuse(value):
+        return value
 
 # OpenAI API rate limit 대응 — 동시 LLM 호출 수를 전역으로 제한한다.
 # SELF_CONSISTENCY_SAMPLES × 약 수 × 진단명 수가 모두 병렬로 쏠릴 때 사용.
@@ -110,6 +131,9 @@ DIAGNOSIS_DISEASE_ALIASES: dict[str, str] = {
     "이상지질혈증": "dyslipidemia",
     "고지혈증": "dyslipidemia",
     "만성콩팥병": "chronic_kidney_disease",
+    "만성 신장병": "chronic_kidney_disease",
+    "만성신장병": "chronic_kidney_disease",
+    "만성 신장 질환": "chronic_kidney_disease",
     "만성신부전": "chronic_kidney_disease",
     "콩팥병": "chronic_kidney_disease",
     "신장질환": "chronic_kidney_disease",
@@ -688,7 +712,25 @@ def generate_lifestyle_guide_for_diagnosis(diagnosis: str | None) -> LifestyleGu
             review_flags=["no_diagnosis"],
         )
 
-    context_items = _lifestyle_context_items(diagnosis)
+    with optional_observation(
+        as_type="retriever",
+        name="lifestyle-guide-rag-retrieval",
+        input={"diagnosis": mask_for_langfuse(diagnosis)},
+    ) as retrieval:
+        context_items = _lifestyle_context_items(diagnosis)
+        update_observation(
+            retrieval,
+            output={
+                "retrieved_count": len(context_items),
+                "sources": sorted(
+                    {
+                        str(item["source_ref"].source)
+                        for item in context_items
+                        if item.get("source_ref") is not None
+                    }
+                ),
+            },
+        )
     for idx, item in enumerate(context_items, start=1):
         item["idx"] = idx
 
@@ -728,16 +770,35 @@ def generate_lifestyle_guide_for_diagnosis(diagnosis: str | None) -> LifestyleGu
         model_kwargs={"response_format": {"type": "json_object"}},
     )
 
-    with ThreadPoolExecutor(max_workers=settings.SELF_CONSISTENCY_SAMPLES) as pool:
-        futs = [
-            pool.submit(_lifestyle_llm_invoke_once, chat, LIFESTYLE_SYSTEM_PROMPT, user_prompt)
-            for _ in range(settings.SELF_CONSISTENCY_SAMPLES)
-        ]
-        raw_candidates = [f.result() for f in futs]
-
-    candidate_texts = [_flatten_lifestyle_candidate(c) for c in raw_candidates]
-    best_idx, avg_similarity = pick_consistent_answer(candidate_texts)
-    best = raw_candidates[best_idx]
+    with optional_observation(
+        as_type="generation",
+        name="lifestyle-guide-llm-generation",
+        input={
+            "diagnosis": mask_for_langfuse(diagnosis),
+            "context_count": len(context_items),
+            "sample_count": settings.SELF_CONSISTENCY_SAMPLES,
+            "model": settings.OPENAI_MODEL,
+        },
+    ) as generation:
+        with ThreadPoolExecutor(max_workers=settings.SELF_CONSISTENCY_SAMPLES) as pool:
+            futs = [
+                pool.submit(_lifestyle_llm_invoke_once, chat, LIFESTYLE_SYSTEM_PROMPT, user_prompt)
+                for _ in range(settings.SELF_CONSISTENCY_SAMPLES)
+            ]
+            raw_candidates = [f.result() for f in futs]
+        candidate_texts = [_flatten_lifestyle_candidate(c) for c in raw_candidates]
+        best_idx, avg_similarity = pick_consistent_answer(candidate_texts)
+        best = raw_candidates[best_idx]
+        update_observation(
+            generation,
+            output={
+                "status": "ok",
+                "selected_candidate": best_idx,
+                "self_consistency_score": round(avg_similarity, 4),
+                "source_ref_count": len(best.get("source_refs") or []),
+            },
+        )
+    flush_langfuse()
 
     raw_refs = best.get("source_refs") or []
     if not isinstance(raw_refs, list):

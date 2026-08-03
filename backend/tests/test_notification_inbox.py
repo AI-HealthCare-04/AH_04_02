@@ -223,3 +223,50 @@ def test_acknowledge_forbidden_for_unrelated_caregiver(client: TestClient, sessi
         headers={"Authorization": f"Bearer {create_access_token(outsider.id, 'caregiver')}"},
     )
     assert r.status_code == 403
+
+
+def test_delete_notification_removes_only_requested_log(client: TestClient, session: Session):
+    pt = _make_patient(session)
+    sched = MedicationSchedule(patient_id=pt.id, drug_name="test-drug", time_slot="08:00")
+    other_sched = MedicationSchedule(patient_id=pt.id, drug_name="other-drug", time_slot="20:00")
+    session.add(sched)
+    session.add(other_sched)
+    session.commit()
+    session.refresh(sched)
+    session.refresh(other_sched)
+    target = _make_log(session, pt.id, sched.id)
+    remaining = _make_log(session, pt.id, other_sched.id)
+
+    response = client.delete(
+        f"/monitoring/patients/{pt.id}/notifications/{target.id}", headers=_headers(pt.id)
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": target.id}
+    assert session.get(NotificationLog, target.id) is None
+    assert session.get(NotificationLog, remaining.id) is not None
+
+
+def test_clear_notifications_preserves_unacknowledged_logs(client: TestClient, session: Session):
+    pt = _make_patient(session)
+    sched = MedicationSchedule(patient_id=pt.id, drug_name="test-drug", time_slot="08:00")
+    other_sched = MedicationSchedule(patient_id=pt.id, drug_name="other-drug", time_slot="20:00")
+    session.add(sched)
+    session.add(other_sched)
+    session.commit()
+    session.refresh(sched)
+    session.refresh(other_sched)
+    acknowledged = _make_log(session, pt.id, sched.id)
+    unread = _make_log(session, pt.id, other_sched.id)
+    acknowledged.acknowledged_at = datetime.now()
+    session.add(acknowledged)
+    session.commit()
+
+    response = client.delete(
+        f"/monitoring/patients/{pt.id}/notifications", headers=_headers(pt.id)
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 1}
+    assert session.get(NotificationLog, acknowledged.id) is None
+    assert session.get(NotificationLog, unread.id) is not None
