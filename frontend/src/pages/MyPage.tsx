@@ -3,8 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { ChevronRight, IdCard, Pill, Bell, Inbox, ClipboardList, BarChart3, Users, Settings, Stethoscope } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import NavBar from "../components/NavBar";
-import InfoModal from "../components/InfoModal";
-import { withdrawAccount } from "../api/auth";
 import { getCaregivers, getPatients, type Caregiver, type Patient } from "../api/monitoring";
 import { computeAge, GENDER_LABEL } from "../lib/age";
 import { getCurrentCaregiverId, getCurrentPatientId, isLoggedIn } from "../lib/session";
@@ -23,14 +21,6 @@ export default function MyPage() {
   const [caregiver, setCaregiver] = useState<Caregiver | null>(null);
   const [patient, setPatient] = useState<Patient | null>(null);
   const [loading, setLoading] = useState(true);
-
-  // [2026-08-03 추가, REQ-035] 회원 탈퇴 — "로그아웃"과 같은 자리(카드 밖, 가운데)에
-  // 텍스트 버튼만 있다가, 누르면 경고 문구 + 비밀번호 입력이 그 자리에 펼쳐진다.
-  const [showWithdraw, setShowWithdraw] = useState(false);
-  const [withdrawPassword, setWithdrawPassword] = useState("");
-  const [withdrawing, setWithdrawing] = useState(false);
-  const [withdrawError, setWithdrawError] = useState("");
-  const [withdrawDone, setWithdrawDone] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -92,29 +82,6 @@ export default function MyPage() {
 
   const logout = () => {
     if (!window.confirm("로그아웃할까요?")) return;
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("patient_id");
-    localStorage.removeItem("caregiver_id");
-    localStorage.removeItem("user_name");
-    navigate("/");
-  };
-
-  const handleWithdraw = async () => {
-    if (!withdrawPassword) return;
-    setWithdrawing(true);
-    setWithdrawError("");
-    try {
-      await withdrawAccount(withdrawPassword);
-      setWithdrawDone(true);
-    } catch (e) {
-      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setWithdrawError(detail || "탈퇴 처리하지 못했어요. 잠시 후 다시 시도해 주세요.");
-      setWithdrawing(false);
-    }
-  };
-
-  // [2026-08-03 추가] 탈퇴 완료 안내를 닫으면 그제서야 로그아웃 — logout()과 동일한 키만 지운다.
-  const handleWithdrawDone = () => {
     localStorage.removeItem("access_token");
     localStorage.removeItem("patient_id");
     localStorage.removeItem("caregiver_id");
@@ -195,57 +162,7 @@ export default function MyPage() {
         >
           로그아웃
         </button>
-
-        {!showWithdraw ? (
-          <button
-            onClick={() => setShowWithdraw(true)}
-            className="w-full py-3 font-bold text-[14px] transition-opacity hover:opacity-70"
-            style={{ color: C.danger }}
-          >
-            회원 탈퇴
-          </button>
-        ) : (
-          <div className="rounded-2xl p-6 mt-3" style={{ background: C.surface, boxShadow: "0 2px 20px rgba(30,26,23,0.07)" }}>
-            <p className="text-[14px] font-bold mb-2" style={{ color: C.danger }}>정말 탈퇴하시겠어요?</p>
-            <p className="text-[13px] mb-4" style={{ color: C.muted }}>
-              탈퇴하면 지금까지 등록한 처방전, 복약 기록, 생활 습관 가이드 등 모든 정보가 삭제되어 더 이상 확인할 수 없고, 이 앱을 계속 이용하실 수 없어요.
-            </p>
-            <input
-              type="password"
-              value={withdrawPassword}
-              onChange={(e) => setWithdrawPassword(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleWithdraw()}
-              placeholder="현재 비밀번호"
-              className="w-full px-4 py-3.5 rounded-xl border text-[15px] outline-none mb-3 text-center"
-              style={{ borderColor: "rgba(30,26,23,0.12)", color: C.dark, background: C.ivory }}
-              autoFocus
-            />
-            {withdrawError && <p className="text-[13px] mb-3" style={{ color: C.danger }}>{withdrawError}</p>}
-            <div className="flex gap-3">
-              <button
-                onClick={() => { setShowWithdraw(false); setWithdrawPassword(""); setWithdrawError(""); }}
-                className="flex-1 py-3 rounded-full font-bold text-[14px] border-2"
-                style={{ borderColor: "rgba(30,26,23,0.15)", color: C.dark }}
-              >
-                취소
-              </button>
-              <button
-                onClick={handleWithdraw}
-                disabled={!withdrawPassword || withdrawing}
-                className="flex-1 py-3 rounded-full font-black text-[14px] text-white disabled:opacity-50"
-                style={{ background: C.danger }}
-              >
-                {withdrawing ? "처리 중..." : "탈퇴하기"}
-              </button>
-            </div>
-          </div>
-        )}
       </main>
-      <InfoModal
-        open={withdrawDone}
-        message="탈퇴가 완료됐어요. 그동안 건강동행을 이용해 주셔서 감사합니다. 항상 건강하시고, 언제든 다시 찾아주세요."
-        onClose={handleWithdrawDone}
-      />
     </div>
   );
 }
