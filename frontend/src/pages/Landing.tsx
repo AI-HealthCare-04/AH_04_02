@@ -139,7 +139,7 @@ export default function Landing() {
     <div style={{ fontFamily: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" }}>
       <div className="min-h-screen flex flex-col" style={{ background: "radial-gradient(ellipse at center, #3A2A1E 0%, #1C1410 70%)" }}>
         <NavBar isLoggedIn={loggedIn} userName={getCurrentUserName()} variant="dark" />
-        <div className="flex flex-col sm:flex-row sm:justify-between gap-2 px-5 pt-6 md:px-10 md:pt-10">
+        <div className="flex flex-col sm:flex-row gap-2 px-5 pt-6 md:px-10 md:pt-10">
           <span className="text-[13px] border rounded-[20px] px-4 py-2 w-fit" style={{ color: "#D9C8B8", borderColor: "#4A3B2E" }}>수도권 독거노인 맞춤 건강 관리</span>
           <span className="text-[13px] border rounded-[20px] px-4 py-2 w-fit" style={{ color: "#D9C8B8", borderColor: "#4A3B2E" }}>독거노인 및 거동 불편 사용자를 위한 안전한 서비스</span>
         </div>
