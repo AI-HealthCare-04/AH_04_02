@@ -197,6 +197,11 @@ def test_prescription_guide_records_coverage_scores_and_failure_diagnosis(monkey
     assert scores["drug_coverage"] == 0.5
     assert "citation_coverage" in scores
     assert result["diagnosis"]["gate_status"] == "needs_experiment"
+    assert len(observation.updates) == 1
+    output = observation.updates[0]["output"]
+    assert output["auto_scores"]["drug_coverage"] == 0.5
+    assert output["auto_score_method"] == "heuristic_v1_rag_weighted"
+    assert output["quality_gate"] == result["diagnosis"]
 
 
 def test_drug_info_detail_patient_summary_improves_clarity(monkeypatch):

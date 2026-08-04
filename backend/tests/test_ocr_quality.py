@@ -67,7 +67,19 @@ def test_exclusion_diagnostic_records_reason_and_candidate():
 
     assert diagnostic == {
         "ocr_text": "sample OCR",
-        "reason": "non_drug_instruction",
+        "reason": "human_review_required",
         "best_candidate": "sample drug",
         "similarity": 0.57,
     }
+
+
+def test_exclusion_diagnostic_checks_display_name_noise():
+    item = SimpleNamespace(
+        drug_name="valid drug",
+        matched_drug_name="valid drug",
+        display_name="sample OCR",
+        match_score=1.0,
+        needs_review=False,
+    )
+
+    assert explain_auto_guide_exclusion(item)["reason"] == "non_drug_instruction"

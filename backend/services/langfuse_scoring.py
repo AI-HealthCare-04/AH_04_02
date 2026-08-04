@@ -104,20 +104,25 @@ def _score_current_trace(
         logger.warning("Langfuse 자동 점수(%s) 기록에 실패했습니다.", name, exc_info=True)
 
 
-def _record_score_summary(observation: Any, scores: dict[str, float], *, metadata: dict[str, Any]) -> None:
+def _record_score_summary(
+    observation: Any,
+    scores: dict[str, float],
+    *,
+    metadata: dict[str, Any],
+    extra_output: dict[str, Any] | None = None,
+) -> None:
     """Attach score values to the trace output as a visible fallback.
 
     Langfuse numeric scores are stored through score_current_trace(). If that SDK call
     fails or the UI is opened before scores are indexed, this output block still makes
     the scoring result visible inside the trace detail.
     """
-    update_observation(
-        observation,
-        output={
-            "auto_scores": {name: round(_clamp(value), 2) for name, value in scores.items()},
-            "auto_score_method": metadata.get("scoring_method"),
-        },
-    )
+    output = {
+        "auto_scores": {name: round(_clamp(value), 2) for name, value in scores.items()},
+        "auto_score_method": metadata.get("scoring_method"),
+    }
+    output.update(extra_output or {})
+    update_observation(observation, output=output)
 
 
 def _medical_safety_score(answer: str) -> float:
@@ -280,7 +285,13 @@ def score_prescription_guide(
         "drug_source_match": drug_source_match,
         "required_section_coverage": required_section_coverage,
     }
-    _record_score_summary(observation, scores, metadata=metadata)
+    diagnosis = build_quality_diagnosis(scores, excluded_items=excluded_items)
+    _record_score_summary(
+        observation,
+        scores,
+        metadata=metadata,
+        extra_output={"quality_gate": diagnosis},
+    )
     _score_current_trace(
         "groundedness",
         scores["groundedness"],
@@ -323,8 +334,6 @@ def score_prescription_guide(
         ("required_section_coverage", "약별 필수 안내 항목의 채움 비율입니다."),
     ):
         _score_current_trace(name, scores[name], comment=comment, metadata=metadata, observation=observation)
-    diagnosis = build_quality_diagnosis(scores, excluded_items=excluded_items)
-    update_observation(observation, output={"quality_gate": diagnosis})
     return {"scores": scores, "diagnosis": diagnosis}
 
 

@@ -70,11 +70,16 @@ def explain_auto_guide_exclusion(item: Any) -> dict[str, Any] | None:
         return None
     raw_name = getattr(item, "drug_name", "") or ""
     matched_name = getattr(item, "matched_drug_name", "") or ""
+    display_name = getattr(item, "display_name", raw_name) or raw_name
     score = float(getattr(item, "match_score", 0.0) or 0.0)
-    if is_obvious_ocr_noise(raw_name) or is_obvious_ocr_noise(matched_name):
-        reason = "non_drug_instruction"
-    elif getattr(item, "needs_review", False):
+    if getattr(item, "needs_review", False):
         reason = "human_review_required"
+    elif (
+        is_obvious_ocr_noise(raw_name)
+        or is_obvious_ocr_noise(matched_name)
+        or is_obvious_ocr_noise(display_name)
+    ):
+        reason = "non_drug_instruction"
     elif score and score < MATCH_THRESHOLD:
         reason = "drug_master_not_matched"
     else:
