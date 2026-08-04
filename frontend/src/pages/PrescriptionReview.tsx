@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { AlertCircle, Check, MessageCircle, Pill, Plus, X } from "lucide-react";
 import NavBar from "../components/NavBar";
 import Skeleton from "../components/Skeleton";
@@ -109,8 +109,17 @@ const LOADING_STAGES = [
 
 export default function PrescriptionReview() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { recordId } = useParams<{ recordId: string }>();
-  const [record, setRecord] = useState<RecordResult | null>(null);
+  // [2026-08-04 추가] Processing.tsx가 OCR 직후 같은 데이터(레코드 + 약품명 검증)를
+  // 이미 만들어뒀으면 navigate state로 받아서 그대로 쓴다 — 여기서 또 getRecord()/
+  // getDrugIndication()을 부르면 "분석 화면을 벗어났는데 또 한참 기다려야" 하는
+  // 체감 지연이 생긴다. state가 없으면(새로고침·직접 진입·뒤로가기 등) 기존처럼
+  // 이 화면이 직접 조회한다.
+  const prefetched = location.state as
+    | { record?: RecordResult; drugNameOk?: Record<number, boolean> }
+    | null;
+  const [record, setRecord] = useState<RecordResult | null>(prefetched?.record ?? null);
   const [edited, setEdited] = useState<Record<number, OcrMedication>>({});
   // [2026-07-21 추가] 항목별 복용시간(공복/아침 식후 등) 다중 선택 — 순서가 곧 하루 중 순서.
   // 같은 항목을 여러 번 고를 수 있어서(중복 허용) Set이 아니라 배열 그대로 유지.
@@ -124,7 +133,7 @@ export default function PrescriptionReview() {
   // match_drug()가 다 잡아내진 못한다 — 사용자가 직접 확인했다고 재확인한 항목은
   // drugNameOk=false여도 막지 않는다. 이름을 다시 수정하면(handleBlur) 새로 검증하도록 해제.
   const [nameOverride, setNameOverride] = useState<Record<number, boolean>>({});
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!prefetched?.record);
   const [error, setError] = useState("");
   const [addingItem, setAddingItem] = useState(false);
   const [removingId, setRemovingId] = useState<number | null>(null);
@@ -141,19 +150,38 @@ export default function PrescriptionReview() {
 
   useEffect(() => {
     if (!recordId) return;
+
+    // 문제 없는 항목은 바로 "확인 완료"(초록)로 시작 — 사용자가 다시 볼 필요 없게.
+    const applyData = (data: RecordResult, nameOkMap: Record<number, boolean>) => {
+      setRecord(data);
+      const initial: Record<number, OcrMedication> = {};
+      data.medications.forEach((m) => (initial[m.id] = { ...m }));
+      setEdited(initial);
+
+      const initialTimings: Record<number, string[]> = {};
+      data.medications.forEach((m) => {
+        initialTimings[m.id] = DOSE_TIMING_GUESS[m.frequency.trim()] ?? [];
+      });
+      setDoseTimings(initialTimings);
+
+      setDrugNameOk(nameOkMap);
+
+      const doneIds = data.medications
+        .filter((m) => computeIssues(m, nameOkMap[m.id]).length === 0)
+        .map((m) => m.id);
+      setConfirmed(new Set(doneIds));
+    };
+
+    // Processing.tsx가 OCR 직후 같은 검증을 이미 끝내고 넘겨준 값이 있으면 그걸
+    // 그대로 쓴다 — 이 화면에서 또 조회·검증하면서 한 번 더 기다리게 하지 않기 위함.
+    if (prefetched?.record) {
+      applyData(prefetched.record, prefetched.drugNameOk ?? {});
+      setLoading(false);
+      return;
+    }
+
     getRecord(Number(recordId))
       .then(async (data) => {
-        setRecord(data);
-        const initial: Record<number, OcrMedication> = {};
-        data.medications.forEach((m) => (initial[m.id] = { ...m }));
-        setEdited(initial);
-
-        const initialTimings: Record<number, string[]> = {};
-        data.medications.forEach((m) => {
-          initialTimings[m.id] = DOSE_TIMING_GUESS[m.frequency.trim()] ?? [];
-        });
-        setDoseTimings(initialTimings);
-
         // [7/9] 신뢰도와 무관하게 항상 모든 항목의 약품명을 검증한다 (예전엔 review_required
         // 항목만 검증했음 — 그래서 신뢰도가 높으면 오타가 있어도 그냥 넘어갔었다).
         const nameOkEntries = await Promise.all(
@@ -168,16 +196,11 @@ export default function PrescriptionReview() {
         );
         const nameOkMap: Record<number, boolean> = {};
         nameOkEntries.forEach(([id, ok]) => { nameOkMap[id] = ok; });
-        setDrugNameOk(nameOkMap);
-
-        // 문제 없는 항목은 바로 "확인 완료"(초록)로 시작 — 사용자가 다시 볼 필요 없게.
-        const doneIds = data.medications
-          .filter((m) => computeIssues(m, nameOkMap[m.id]).length === 0)
-          .map((m) => m.id);
-        setConfirmed(new Set(doneIds));
+        applyData(data, nameOkMap);
       })
       .catch(() => setError("처방전 정보를 불러오지 못했어요."))
       .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recordId]);
 
   const update = (id: number, field: keyof OcrMedication, value: string) => {
@@ -404,7 +427,7 @@ export default function PrescriptionReview() {
         <NavBar isLoggedIn={isLoggedIn()} userName={getCurrentUserName()} />
         <div className="flex-1 flex flex-col items-center justify-center px-8">
         <div className="relative mb-8 flex items-center justify-center">
-          {/* 진행률이 90%에서 API 응답까지(최대 1분) 멈춰있어도 계속 도는 링 —
+          {/* 진행률이 90%에서 API 응답까지(최대 30초) 멈춰있어도 계속 도는 링 —
               멈춘 것처럼 보이지 않게 진행률과 무관하게 항상 회전한다 */}
           <div
             className="absolute animate-spin rounded-full"
@@ -439,7 +462,7 @@ export default function PrescriptionReview() {
           <br />
           맞춤 복약 가이드를 생성 중이에요
           <br />
-          <span style={{ fontWeight: 600 }}>보통 1분 정도 걸려요. 조금만 기다려 주세요</span>
+          <span style={{ fontWeight: 600 }}>보통 30초 이내에 완료돼요. 조금만 기다려 주세요</span>
         </p>
         <div className="w-72 mb-6">
           <div className="h-2.5 rounded-full overflow-hidden mb-2" style={{ background: "rgba(30,26,23,0.10)" }}>

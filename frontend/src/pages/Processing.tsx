@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { TriangleAlert } from "lucide-react";
 import NavBar from "../components/NavBar";
 import yakkongMascot from "../assets/yakkong-mascot.png";
-import { createRecord } from "../api/records";
+import { createRecord, getDrugIndication } from "../api/records";
 import { C } from "../theme";
 import { getCurrentUserName, isLoggedIn } from "../lib/session";
 
@@ -43,10 +43,31 @@ export default function Processing() {
 
     try {
       const result = await createRecord(patientId, file, caregiverId);
+      // [2026-08-04 추가, 사용자 지적 반영] PrescriptionReview.tsx가 마운트되자마자
+      // getRecord() 재조회 + 약품명당 getDrugIndication() 검증을 또 해서, 이 화면을
+      // 벗어난 뒤에도 눈에 띄게 한 번 더 기다려야 했다 — 여기서 미리 다 끝내고
+      // navigate state로 넘기면 도착하자마자 바로 렌더링된다(리뷰 쪽은 state가
+      // 없을 때만 기존처럼 자기가 다시 불러온다 — 새로고침/직접 진입 대비).
+      const nameOkEntries = await Promise.all(
+        result.medications.map(async (m) => {
+          try {
+            const info = await getDrugIndication(m.drug_name);
+            return [m.id, info.matched_name !== null] as const;
+          } catch {
+            return [m.id, true] as const;
+          }
+        })
+      );
+      const drugNameOk: Record<number, boolean> = {};
+      nameOkEntries.forEach(([id, ok]) => { drugNameOk[id] = ok; });
+
       if (visualRef.current) clearInterval(visualRef.current);
       setCurrent(steps.length - 1);
       // [7/9 변경] OCR 신뢰도와 무관하게 항상 확인 화면을 거치므로 /result 인터스티셜 없이 바로 이동
-      setTimeout(() => navigate(`/records/${result.record_id}/review`), 400);
+      setTimeout(
+        () => navigate(`/records/${result.record_id}/review`, { state: { record: result, drugNameOk } }),
+        400
+      );
     } catch (err: unknown) {
       if (visualRef.current) clearInterval(visualRef.current);
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data
@@ -75,7 +96,7 @@ export default function Processing() {
         >
           <img src={yakkongMascot} alt="" className="w-16 h-16 sm:w-20 sm:h-20 mx-auto mb-4 sm:mb-5" />
           <h1 className="text-[22px] sm:text-[26px] font-bold mb-2 sm:mb-2.5" style={{ color: C.dark }}>분석을 시작할게요</h1>
-          <p className="text-[14px] sm:text-[15px] mb-8 sm:mb-10" style={{ color: C.muted }}>잠시만 기다려 주세요. 보통 10초 이내에 완료돼요.</p>
+          <p className="text-[14px] sm:text-[15px] mb-8 sm:mb-10" style={{ color: C.muted }}>잠시만 기다려 주세요. 보통 1분 정도 걸려요.</p>
 
           <div className="flex flex-col gap-3 sm:gap-4 text-left mb-8 sm:mb-9">
             {steps.map((step, i) => {
