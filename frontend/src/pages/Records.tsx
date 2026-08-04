@@ -61,14 +61,14 @@ export default function Records() {
     try {
       setRecords(await listRecords(patientId));
     } catch {
-      setError("등록내역을 불러오지 못했어요.");
+      setError("처방전 목록을 불러오지 못했어요.");
     } finally {
       setLoading(false);
     }
   };
 
   const handleDelete = async (recordId: number) => {
-    if (deletingId !== null || !window.confirm("이 등록내역을 삭제할까요? 되돌릴 수 없어요.")) return;
+    if (deletingId !== null || !window.confirm("이 처방전을 삭제할까요? 되돌릴 수 없어요.")) return;
     setDeletingId(recordId);
     try {
       await deleteRecord(recordId);
@@ -149,7 +149,7 @@ export default function Records() {
       <main className="max-w-2xl mx-auto px-6 sm:px-8 py-10">
         <PatientContextBanner />
         <div className="flex items-start justify-between mb-1">
-          <h1 className="text-[26px] font-black" style={{ color: C.dark }}>등록내역</h1>
+          <h1 className="text-[26px] font-black" style={{ color: C.dark }}>처방전 목록</h1>
           {records.length > 0 && (
             <button
               onClick={toggleSelectMode}
@@ -320,7 +320,7 @@ export default function Records() {
                             handleDelete(r.record_id);
                           }}
                           disabled={deletingId === r.record_id}
-                          aria-label="등록내역 삭제"
+                          aria-label="처방전 삭제"
                           className="w-9 h-9 rounded-xl flex items-center justify-center disabled:opacity-50"
                           style={{ background: "rgba(217,79,79,0.10)" }}
                         >

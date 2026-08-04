@@ -27,6 +27,16 @@ type NavItem = { label: string; to: string; children?: { label: string; to: stri
 // 마우스를 올리면 그 메뉴 바로 아래로 관련 하위 항목이 드롭다운되도록 변경 — 알림류는
 // 오늘의 복약 아래, 기록류는 등록내역 아래로 그룹 분리. 복약 가이드는 하위 항목에서
 // 상단 메뉴로 승격, 처방 약 등록은 맨 왼쪽으로 이동.
+// [2026-08-03 정리, 사용자 지적 반영] 라벨이 실제 화면 제목/마이페이지 메뉴와 따로 놀던
+// 것들을 통일하고(복약기록→모니터링, 보호자 등록→연결관리, 식사시간 등록→식사시간 설정),
+// "등록내역"(처방전 기록 목록) 밑에 성격이 다른 화면(연결관리·설정류)이 끼어있던 걸 정리 —
+// 환자에게도 보호자와 동일하게 "설정"(화면·챗봇 설정 + 관련 항목) 최상위 메뉴를 새로
+// 만들었다(이전엔 마이페이지에서만 갈 수 있고 내비바엔 아예 없었음).
+// [2026-08-04 추가 조정, 사용자 요청] 복약 가이드를 "오늘의 복약" 하위로, 연결관리를
+// "설정" 하위로 다시 묶었다 — 최상위 항목 6개→4개로 줄어 내비바 폭도 더 여유로워졌다.
+// [2026-08-04] "등록내역"은 처방전을 등록한다는 뜻인지 뭔가를 등록한 이력인지 모호하다는
+// 지적 반영 — 실제로는 업로드한 처방전과 그 복약가이드 결과를 모아 보는 화면이라
+// "처방전 목록"으로 이름을 바꿨다(Records.tsx 화면 제목도 함께 변경).
 const PATIENT_NAV_ITEMS: NavItem[] = [
   { label: "처방 약 등록", to: "/upload" },
   {
@@ -34,45 +44,43 @@ const PATIENT_NAV_ITEMS: NavItem[] = [
     to: "/dashboard",
     children: [
       { label: "복약 알림", to: "/schedule" },
-      { label: "알림 설정", to: "/notification" },
+      { label: "복약 가이드", to: "/guides" },
     ],
   },
-  { label: "복약 가이드", to: "/guides" },
   {
-    label: "등록내역",
+    label: "처방전 목록",
     to: "/records",
+    children: [{ label: "모니터링", to: "/monitoring" }],
+  },
+  {
+    label: "설정",
+    to: "/settings",
     children: [
-      { label: "복약기록", to: "/monitoring" },
-      // [2026-07-21 추가] 보호자 초대/연결 화면(Connect.tsx) — 지금까진 대시보드
-      // 배너에서만 들어갈 수 있었음. 이미 만든 페이지를 내비바에서도 바로 접근 가능하게.
-      { label: "보호자 등록", to: "/connect" },
-      // [2026-07-21 추가] 식사시간 설정(MealTimeCheck.tsx) — 지금까진 회원가입 직후에만
-      // 들어올 수 있었음. 복용시간(식전/식후) 계산 기준이라 나중에도 고칠 수 있어야 한다.
-      { label: "식사시간 등록", to: "/meal-check" },
+      { label: "알림 설정", to: "/notification" },
+      { label: "식사시간 설정", to: "/meal-check" },
+      { label: "보호자 설정", to: "/connect" },
     ],
   },
 ];
 
+// [2026-08-04 정리, 사용자 요청 — 환자 쪽과 동일한 방식] 환자 내비바처럼 "모니터링"을
+// 그 출발점이었던 "환자 관리" 하위로 다시 묶었다(원래 /patients 목록의 버튼이었다가
+// 최상위로 승격된 이력 — 위 주석 참고).
+// [2026-08-04 추가 조정, 사용자 요청] 연결관리도 "설정" 하위로 옮기고, 라벨도
+// "보호자 설정"으로 바꿨다 — 최상위 항목 3개→2개(환자 관리/설정)로 줄었다.
 const CAREGIVER_NAV_ITEMS: NavItem[] = [
-  { label: "환자 관리", to: "/patients" },
-  // [2026-07-24 추가] 지금까지 환자 관리 목록의 "모니터링" 버튼으로만 들어갈 수 있어서
-  // 여러 환자를 관리하는 보호자·기관 입장에서 진입점이 너무 깊었다 — 다중 환자 요약형으로
-  // 바뀐 대시보드를 내비바 최상위 메뉴로 승격.
-  { label: "모니터링", to: "/monitoring" },
-  { label: "연결관리", to: "/connect" },
-  // [2026-07-30 버그수정] Notification.tsx(이 기기로 알림 받기 + 환자 알림 설정)는
-  // PatientContextBanner 주석에 이미 보호자·기관용으로 설계돼 있었는데, 여기 메뉴에
-  // 링크가 아예 없어서 보호자·기관 계정은 진입 자체를 못 하고 있었다 — 환자 쪽처럼
-  // "설정" 하위로 넣는다.
-  // [2026-07-30 추가] "알림 관리"(NotificationManagement.tsx) — 여러 환자를 관리할 때
-  // 환자별로 이 기기 알림을 켜고 끌 수 있는 화면. 환자 계정은 자기 자신만 관리해서
-  // 의미가 없으니 보호자·기관 메뉴에만 넣는다.
+  {
+    label: "환자 관리",
+    to: "/patients",
+    children: [{ label: "모니터링", to: "/monitoring" }],
+  },
   {
     label: "설정",
     to: "/settings",
     children: [
       { label: "알림 설정", to: "/notification" },
       { label: "알림 관리", to: "/notification-management" },
+      { label: "보호자 설정", to: "/connect" },
     ],
   },
 ];
@@ -227,6 +235,8 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
           </Link>
 
           {isLoggedIn && (
+            /* [2026-08-03] 항목이 4개→6개로 늘어 gap-6(24px)이면 lg 경계(1024px)에서
+               로고와 겹쳤다 — gap-4로 줄여 그 폭에서도 겹치지 않게 맞춘다. */
             <nav className="hidden lg:flex flex-1 items-center justify-center gap-6 min-w-0">
               {navItems.map((item) => (
                 <div
@@ -371,7 +381,7 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
                       className="px-3 py-2 rounded-xl text-left text-[13px] font-medium transition-opacity hover:opacity-60"
                       style={{ color: C.terracotta }}
                     >
-                      등록내역에서 "{trimmedQuery}" 검색
+                      처방전 목록에서 "{trimmedQuery}" 검색
                     </button>
                   </div>
                 </div>
@@ -547,7 +557,7 @@ export default function NavBar({ isLoggedIn = false, userName = "", variant = "l
                   className="px-3 py-2.5 rounded-xl text-left text-[14px] font-medium transition-opacity hover:opacity-60"
                   style={{ color: C.terracotta }}
                 >
-                  등록내역에서 "{trimmedQuery}" 검색
+                  처방전 목록에서 "{trimmedQuery}" 검색
                 </button>
               </div>
             )}

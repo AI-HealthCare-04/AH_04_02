@@ -39,7 +39,7 @@ export default function PrescriptionDetail() {
           className="flex items-center gap-1 text-[13px] font-bold mb-5 hover:opacity-60 transition-opacity"
           style={{ color: C.muted }}
         >
-          <ChevronLeft className="w-3.5 h-3.5" /> 등록내역으로
+          <ChevronLeft className="w-3.5 h-3.5" /> 처방전 목록으로
         </button>
 
         {duplicateDrugNames.length > 0 && (

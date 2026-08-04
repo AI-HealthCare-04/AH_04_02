@@ -56,20 +56,21 @@ export default function MyPage() {
 
   const patientMenu: MenuItem[] = [
     { label: "내 정보", icon: IdCard, to: "/mypage/info" },
-    { label: "복약 일정", icon: Pill, to: "/schedule" },
+    { label: "복약 알림", icon: Pill, to: "/schedule" },
     { label: "알림 설정", icon: Bell, to: "/notification" },
     { label: "알림함", icon: Inbox, to: "/notifications" },
-    { label: "등록내역", icon: ClipboardList, to: "/records" },
-    { label: "모니터링 대시보드", icon: BarChart3, to: "/monitoring" },
-    { label: "연결관리", icon: Users, to: "/connect" },
-    { label: "화면·챗봇 설정", icon: Settings, to: "/settings" },
+    { label: "처방전 목록", icon: ClipboardList, to: "/records" },
+    { label: "모니터링", icon: BarChart3, to: "/monitoring" },
+    { label: "보호자 설정", icon: Users, to: "/connect" },
+    { label: "설정", icon: Settings, to: "/settings" },
   ];
   const caregiverMenu: MenuItem[] = [
     { label: "내 정보", icon: IdCard, to: "/mypage/info" },
     { label: "환자 관리", icon: Stethoscope, to: "/patients" },
     { label: "알림함", icon: Inbox, to: "/notifications" },
-    { label: "연결관리", icon: Users, to: "/connect" },
-    { label: "화면·챗봇 설정", icon: Settings, to: "/settings" },
+    { label: "모니터링", icon: BarChart3, to: "/monitoring" },
+    { label: "보호자 설정", icon: Users, to: "/connect" },
+    { label: "설정", icon: Settings, to: "/settings" },
   ];
   const menu = caregiverId ? caregiverMenu : patientMenu;
 
