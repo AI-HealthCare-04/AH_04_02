@@ -37,6 +37,15 @@ class Settings(BaseSettings):
     MFDS_CACHE_DIR: str = str(BASE_DIR.parent / "mfds_cache")
     MFDS_CACHE_TTL_SECONDS: int = 60 * 60 * 48  # 48시간 — 식약처/DUR 고시 수시 개정 대응
 
+    # Compact offline snapshot. Runtime network fallback is opt-in so normal
+    # requests remain fast and deterministic.
+    PUBLIC_API_MASTER_PATH: str = str(BASE_DIR / "data" / "public_api_master.jsonl")
+    PUBLIC_API_MASTER_ENABLED: bool = True
+    # The compact master is intentionally partial. A miss must fall back to
+    # the official API so an unknown medicine never becomes a silent
+    # "no DUR warning" result.
+    PUBLIC_API_LIVE_FALLBACK: bool = True
+
     OPENAI_API_KEY: str | None = None
     OPENAI_MODEL: str = "gpt-4o-mini"
 

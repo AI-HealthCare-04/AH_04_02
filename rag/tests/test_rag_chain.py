@@ -578,8 +578,11 @@ def test_lifestyle_guide_records_langfuse_retrieval_and_generation():
         def invoke(self, _messages):
             return FakeResponse()
 
+    def exact_title_search(title: str):
+        return [FAKE_KDCA_DOC] if title == "고혈압" else []
+
     with (
-        patch("rag.rag_chain.search_kdca_health_info_by_title", return_value=[FAKE_KDCA_DOC]),
+        patch("rag.rag_chain.search_kdca_health_info_by_title", side_effect=exact_title_search),
         patch("rag.rag_chain.settings.OPENAI_API_KEY", "test-key"),
         patch("rag.rag_chain.settings.SELF_CONSISTENCY_SAMPLES", 1),
         patch("rag.rag_chain.optional_observation", side_effect=fake_observation),
@@ -587,7 +590,7 @@ def test_lifestyle_guide_records_langfuse_retrieval_and_generation():
         patch("rag.rag_chain.flush_langfuse"),
         patch("langchain_openai.ChatOpenAI", return_value=FakeChat()),
     ):
-        generate_lifestyle_guide_for_diagnosis("hypertension")
+        generate_lifestyle_guide_for_diagnosis("고혈압")
 
     assert observation_names == [
         "lifestyle-guide-rag-retrieval",

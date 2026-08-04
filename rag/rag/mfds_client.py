@@ -68,8 +68,18 @@ def _request(params: dict, base_url: str | None = None, retries: int = 2, timeou
 # 한 번 조회된 결과를 서버 재시작 후에도 재사용한다(TTL=48시간, settings.MFDS_CACHE_TTL_SECONDS).
 # Pydantic 모델은 model_dump()/model_validate()로 명시적 JSON 직렬화해서 pickle 의존 없이
 # Pydantic 버전 변경에도 안전하게 처리한다. 캐시 장애 시에도 API 직접 호출로 폴백된다.
-def search_by_name(item_name: str, num_of_rows: int = 10, page_no: int = 1) -> list[DrugInfo]:
+def search_by_name(
+    item_name: str, num_of_rows: int = 10, page_no: int = 1, *, use_master: bool = True
+) -> list[DrugInfo]:
     """품목명(부분 일치)으로 의약품 정보를 검색합니다."""
+    if use_master and settings.PUBLIC_API_MASTER_ENABLED:
+        from rag.public_api_master import lookup
+
+        mastered = lookup("drug_info", item_name)
+        if mastered is not None:
+            return [DrugInfo.model_validate(item) for item in mastered][:num_of_rows]
+        if not settings.PUBLIC_API_LIVE_FALLBACK:
+            return []
     key = f"mfds.search_by_name|{item_name}|{num_of_rows}|{page_no}"
     if _disk_cache is not None:
         try:
@@ -111,12 +121,22 @@ def fetch_first_match(item_name: str) -> DrugInfo | None:
 
 # [2026-07-14] 활용신청 승인되어 재활성화. item_name 쿼리 파라미터, 응답 필드 전부
 # 실제 API 호출로 재확인 완료(schemas.DrugPermitInfo 참고).
-def search_permit_info(item_name: str, num_of_rows: int = 10, page_no: int = 1) -> list[DrugPermitInfo]:
+def search_permit_info(
+    item_name: str, num_of_rows: int = 10, page_no: int = 1, *, use_master: bool = True
+) -> list[DrugPermitInfo]:
     """식약처_의약품제품허가정보(DrugPrdtPrmsnInfoService07)로 품목명(부분 일치) 허가 상태를 조회합니다.
 
     e약은요(search_by_name)와 별개 API — 효능효과 등 설명문은 없고, 허가번호·허가일자·
     허가/신고 구분·취소여부(정상 허가 의약품인지) 같은 규제 메타데이터만 돌려준다.
     """
+    if use_master and settings.PUBLIC_API_MASTER_ENABLED:
+        from rag.public_api_master import lookup
+
+        mastered = lookup("permit_info", item_name)
+        if mastered is not None:
+            return [DrugPermitInfo.model_validate(item) for item in mastered][:num_of_rows]
+        if not settings.PUBLIC_API_LIVE_FALLBACK:
+            return []
     key = f"mfds.search_permit_info|{item_name}|{num_of_rows}|{page_no}"
     if _disk_cache is not None:
         try:
@@ -152,12 +172,22 @@ def is_officially_approved(item_name: str) -> bool | None:
 
 # [2026-07-14 추가] 사용자가 "제품허가정보로 사용상의 주의사항 조회 가능한지" 확인 요청 —
 # 목록 조회(getDrugPrdtPrmsnInq07)에는 없고, 상세정보(getDrugPrdtPrmsnDtlInq06)에만 있다.
-def search_permit_detail(item_name: str, num_of_rows: int = 10, page_no: int = 1) -> list[DrugPermitDetail]:
+def search_permit_detail(
+    item_name: str, num_of_rows: int = 10, page_no: int = 1, *, use_master: bool = True
+) -> list[DrugPermitDetail]:
     """식약처_의약품제품허가정보 상세정보(getDrugPrdtPrmsnDtlInq06)를 품목명(부분 일치)으로 조회합니다.
 
     효능효과/용법용량/사용상의주의사항/임부수유부주의사항 원문(XX_DOC_DATA, 구조화 XML)을
     담고 있다 — parse_doc_sections()로 사람이 읽을 텍스트로 변환해야 한다.
     """
+    if use_master and settings.PUBLIC_API_MASTER_ENABLED:
+        from rag.public_api_master import lookup
+
+        mastered = lookup("permit_detail", item_name)
+        if mastered is not None:
+            return [DrugPermitDetail.model_validate(item) for item in mastered][:num_of_rows]
+        if not settings.PUBLIC_API_LIVE_FALLBACK:
+            return []
     key = f"mfds.search_permit_detail|{item_name}|{num_of_rows}|{page_no}"
     if _disk_cache is not None:
         try:
