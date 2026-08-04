@@ -9,7 +9,8 @@
 - 인증이 필요한 요청은 `Authorization: Bearer <access_token>`을 사용한다. refresh token은 HttpOnly 쿠키로 전달한다.
 - `patient`는 복약관리 대상자, `caregiver`는 보호자·지원인력·기관 계정을 뜻한다.
 - 보호자·지원인력 계정은 활성 연결 관계가 있는 복약관리 대상자의 정보만 조회·변경할 수 있다.
-- 날짜·시간은 ISO 8601 형식을 사용한다. 개인 식별 정보는 암호화해 저장하고 전화번호 검색에는 해시를 사용한다.
+- 날짜·시간은 ISO 8601 형식을 사용한다. 다만 코드 전역의 UTC/KST 저장 정책은 아직 하나로 통일되지 않았다. 대부분의 업무 시각은 서버 로컬 시각 기반 `datetime.now()`를 사용하고, 복약 알림 스케줄러는 `_now_kst()`로 한국 시각을 명시한다. 시간대 오프셋이 없는 응답을 모든 API에서 동일한 시간대로 간주해서는 안 된다.
+- 이름·전화번호 등 암호화 저장 대상 PII는 API 응답을 만들 때 평문으로 복호화된다. 따라서 응답 구간은 HTTPS로 보호해야 한다. 기관 담당자 필드 `manager_name`, `manager_phone`은 현재 암호화 저장 대상에 포함되지 않는다.
 - 삭제된 처방전, 복용 의약품, 알림함 기록은 `deleted_at`이 설정되며 일반 조회에서 제외된다.
 
 ### 공통 오류 응답
@@ -66,20 +67,20 @@
 | POST | `/invitations/{token}/accept` | 초대 수락 및 관계 생성 |
 | POST | `/invitations/{token}/reject` | 초대 거절 |
 | DELETE | `/invitations/{invitation_id}` | 대기 중 초대 취소 |
-| GET | `/care/pending-invitations` | 받은 초대 조회 |
-| GET | `/care/relations/notices` | 연결·해제 결과 알림 조회 |
-| POST | `/care/relations/notices/{notice_id}/read` | 관계 알림 읽음 처리 |
-| GET/PUT | `/care/patients/{patient_id}/notification-settings` | 복약 알림·돌봄 알림·전체 Push 설정 조회/변경 |
-| GET | `/care/patients/{patient_id}/pending-revocations` | 승인 대기 중인 연결 해제 요청 조회 |
-| POST | `/care/relations/{relation_id}/revocation-approval` | 연결 해제 승인 또는 거절 |
-| GET | `/push/public-key` | Web Push 공개키 조회 |
-| POST/DELETE | `/push/subscriptions` | 현재 계정·기기의 Web Push 구독 등록/해제 |
+| GET | `/caregivers/{caregiver_id}/pending-invitations` | 받은 초대 조회 |
+| GET | `/trust/relations/notices` | 연결·해제 결과 알림 조회 |
+| POST | `/trust/relations/notices/{notice_id}/read` | 관계 알림 읽음 처리 |
+| GET/PUT | `/notification-settings` | 인증된 현재 계정의 복약 알림·돌봄 알림·전체 Push 설정 조회/변경 |
+| GET | `/trust/relations/pending` | 승인 대기 중인 연결 해제 요청 조회 |
+| POST | `/trust/relations/{trust_id}/revocation-approval` | 연결 해제 승인 또는 거절 |
+| GET | `/push/vapid-public-key` | Web Push 공개키 조회 |
+| POST/DELETE | `/push-subscriptions` | 현재 계정·기기의 Web Push 구독 등록/해제 |
 
 ## 5. 처방전 목록·OCR·검토
 
 | Method | Path | 설명 |
 |---|---|---|
-| POST | `/records/upload` | 처방전 사진 저장 및 OCR 처리 시작 |
+| POST | `/records` | 처방전 사진 저장 및 OCR 처리 시작 |
 | POST | `/records/manual` | 처방전 직접 등록 |
 | GET | `/records` | 권한 범위의 처방전 목록 조회 |
 | GET | `/records/{record_id}` | 처방전 상세 조회 |
@@ -88,12 +89,12 @@
 | POST | `/records/{record_id}/medications` | 처방전 의약품 추가 |
 | PATCH/DELETE | `/records/{record_id}/medications/{medication_id}` | 처방전 의약품 수정/삭제 |
 | POST | `/records/{record_id}/confirm` | OCR 결과 사용자 확인 |
-| POST | `/records/{record_id}/correction-request` | 보호자·지원인력의 수정 요청 |
-| POST | `/records/{record_id}/review` | 검토 완료 처리 |
-| POST | `/records/{record_id}/correct` | 수정 내용 반영 |
-| POST | `/records/{record_id}/pin` | 즐겨찾기 설정/해제 |
-| GET | `/record-notices` | 처방전 수정 관련 알림 조회 |
-| POST | `/record-notices/{notice_id}/read` | 처방전 알림 읽음 처리 |
+| POST | `/records/{record_id}/request-correction` | 보호자·지원인력의 수정 요청 |
+| POST | `/records/{record_id}/mark-reviewed` | 검토 완료 처리 |
+| PATCH | `/records/{record_id}/medications/{medication_id}/correct` | 특정 의약품의 수정 내용 반영 |
+| PATCH | `/records/{record_id}/pin` | 즐겨찾기 설정/해제 |
+| GET | `/records/notices` | 처방전 수정 관련 알림 조회 |
+| POST | `/records/notices/{notice_id}/read` | 처방전 알림 읽음 처리 |
 | GET | `/ocr/ping` | OCR 서비스 상태 확인 |
 | GET | `/ocr/drug-info` | 의약품 정보 검색 |
 
@@ -104,7 +105,7 @@ OCR 결과는 사용자가 확인하기 전 확정 정보로 취급하지 않는
 | Method | Path | 설명 |
 |---|---|---|
 | GET | `/rag/ping` | RAG 서비스 상태 확인 |
-| GET | `/rag/test/{record_id}` | 처방전 기준 가이드 생성·조회 |
+| POST | `/rag/test/{record_id}` | 처방전 기준 가이드 생성·조회 |
 
 - 입력은 처방전의 진단명과 확정 의약품이다.
 - 의약품 정보는 공공 API에서 구축한 마스터 데이터와 벡터 저장소를 검색한다.
@@ -129,14 +130,14 @@ OCR 결과는 사용자가 확인하기 전 확정 정보로 취급하지 않는
 |---|---|---|
 | POST/GET | `/patients/{patient_id}/medications` | 복용 의약품 등록/목록 조회 |
 | GET/PATCH/DELETE | `/patients/{patient_id}/medications/{medication_id}` | 복용 의약품 상세/수정/논리 삭제 |
-| POST | `/patients/{patient_id}/medications/{medication_id}/schedule` | 의약품 기준 복약 일정 생성 |
+| POST | `/patients/{patient_id}/medications/{medication_id}/schedules` | 의약품 기준 복약 일정 생성 |
 | POST/GET | `/patients/{patient_id}/medication-records` | 복약 수행 기록 생성/조회 |
 | POST/GET | `/monitoring/schedules` | 복약 일정 생성/조회 |
 | PATCH/DELETE | `/monitoring/schedules/{schedule_id}` | 복약 일정 수정/삭제 |
 | POST/DELETE | `/monitoring/schedules/{schedule_id}/check` | 복약 완료 표시/취소 |
 | GET | `/monitoring/logs` | 복약 기록 조회 |
 | GET | `/monitoring/today` | 오늘의 복약 일정과 수행 상태 조회 |
-| GET | `/monitoring/known-drugs` | 등록된 의약품명 자동완성 |
+| GET | `/monitoring/patients/{patient_id}/known-drugs` | 등록된 의약품명 자동완성 |
 
 ## 9. 알림함
 
