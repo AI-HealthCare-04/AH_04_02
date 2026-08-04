@@ -177,6 +177,11 @@ class CaregiverPatient(SQLModel, table=True):
     __tablename__ = "caregiver_patients"
 
     id: int | None = Field(default=None, primary_key=True)
+    # [2026-08-03 확인, perf] caregiver_id/patient_id 둘 다 명시적 index=True는 없지만
+    # MySQL(InnoDB)이 FOREIGN KEY 컬럼에 자동으로 인덱스를 만들어줘서(SHOW CREATE TABLE로
+    # 확인) require_actor_patient_access 등 이 컬럼들로 필터링하는 조회가 이미 인덱스를
+    # 탄다 — 추가로 index=True를 붙이면 같은 컬럼에 중복 인덱스가 생겨 쓰기 비용만
+    # 늘어난다(SQLite 로컬 개발 DB는 FK에 자동 인덱스를 안 만들지만, 실제 배포 DB는 MySQL).
     caregiver_id: int = Field(foreign_key="caregivers.id")
     patient_id: int = Field(foreign_key="patients.id")
     created_at: datetime = Field(default_factory=datetime.now)
@@ -425,6 +430,8 @@ class MedicationSchedule(SQLModel, table=True):
     __tablename__ = "medication_schedules"
 
     id: int | None = Field(default=None, primary_key=True)
+    # [2026-08-03 확인, perf] index=True를 안 붙인 이유는 CaregiverPatient.patient_id 주석 참고
+    # (MySQL이 FK 컬럼에 이미 자동으로 인덱스를 만들어줌).
     patient_id: int = Field(foreign_key="patients.id")  # [7/6 변경] 고정값 1 → 실제 환자 FK
     drug_name: str
     time_slot: str  # [7/8 변경] "08:00" 같은 실제 시각 문자열 (기존 "아침"/"점심"/"저녁"에서 변경)
@@ -503,14 +510,17 @@ class NotificationLog(SQLModel, table=True):
     patient_id: int = Field(foreign_key="patients.id", index=True)
     due_date: str = Field(index=True)  # "2026-07-19" — date.isoformat(), MedicationLog와 동일 관례
     time_slot: str  # 발생 시점의 schedule.time_slot 스냅샷 (나중에 스케줄이 바뀌어도 기록은 안 바뀜)
-    kind: str = "reminder"  # reminder(정시 알림) / missed(놓침 판정)
+    # [2026-08-03 추가, perf] list_logs(GET /monitoring/logs)가 이 컬럼으로 필터링한다 —
+    # 인덱스 없이는 notification_logs 전체를 스캔해야 했다.
+    kind: str = Field(default="reminder", index=True)  # reminder(정시 알림) / missed(놓침 판정)
     # [2026-07-19] "성공적으로 보냈다"와 "이 스케줄은 알림이 꺼져 있어서 일부러 안 보냈다"를
     # 구분해야 한다 — NotificationSetting.medication_reminder_enabled가 꺼져 있으면
     # suppressed로 남기고 이메일은 실제로 보내지 않는다(사용자가 끈 알림을 무시하고
     # 보내면 REQ-026a의 opt-out을 어기는 것이 된다).
     status: str = "pending"  # pending / sent / suppressed / failed
     channels: str = "[]"  # JSON 배열, 예: '["inapp","email:patient","email:caregiver:3"]'
-    fired_at: datetime = Field(default_factory=datetime.now)
+    # [2026-08-03 추가, perf] list_logs가 "최근 N일"을 이 컬럼으로 필터링한다.
+    fired_at: datetime = Field(default_factory=datetime.now, index=True)
     acknowledged_at: datetime | None = None  # 환자가 인앱 알림을 확인 처리하면 채워짐
 
 
@@ -563,9 +573,13 @@ class MedicationRecord(SQLModel, table=True):
     patient_medication_id: int | None = Field(
         default=None, foreign_key="patient_medications.id", index=True
     )
+    # [2026-08-03 확인, perf] index=True를 안 붙인 이유는 CaregiverPatient.patient_id 주석 참고
+    # (MySQL이 FK 컬럼에 이미 자동으로 인덱스를 만들어줌).
     schedule_id: int | None = Field(default=None, foreign_key="medication_schedules.id")
     scheduled_at: datetime | None = None
-    taken_at: datetime | None = None  # 실제 복용 시간, 아직 안 먹었으면 None
+    # [2026-08-03 추가, perf] list_logs/get_today가 이 컬럼을 WHERE + ORDER BY에 함께 쓴다 —
+    # 인덱스가 없어 정렬이 filesort로 처리되고 있었다.
+    taken_at: datetime | None = Field(default=None, index=True)  # 실제 복용 시간, 아직 안 먹었으면 None
     status: str = "scheduled"  # scheduled / taken / missed / skipped / duplicate_suspected
     verification_method: str = "self_report"  # self_report / caregiver / photo / device
     evidence_image_url: str | None = None
