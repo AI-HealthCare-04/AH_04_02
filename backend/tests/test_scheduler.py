@@ -551,6 +551,25 @@ class TestPushIntegration:
         assert called_targets == {("patient", pt.id), ("caregiver", cg_on.id)}
 
 
+def test_soft_deleted_notification_still_prevents_duplicate_delivery(session: Session):
+    """알림함 정리는 화면에서만 숨기며 동일 일정의 재발송 근거는 보존한다."""
+    pt = _make_patient(session)
+    schedule = _make_schedule(session, pt, "08:00")
+    log = NotificationLog(
+        schedule_id=schedule.id,
+        patient_id=pt.id,
+        due_date="2026-08-04",
+        time_slot="08:00",
+        kind="reminder",
+        status="sent",
+        deleted_at=datetime(2026, 8, 4, 9, 0),
+    )
+    session.add(log)
+    session.commit()
+
+    assert scheduler._already_logged(session, schedule.id, "2026-08-04", "08:00", "reminder") is True
+
+
 class TestSchedulerEnabledGate:
     def test_defaults_false_in_test_env(self, monkeypatch):
         monkeypatch.delenv("SCHEDULER_ENABLED", raising=False)

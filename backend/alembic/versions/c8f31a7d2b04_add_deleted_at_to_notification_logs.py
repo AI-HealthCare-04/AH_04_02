@@ -19,13 +19,13 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     op.add_column("notification_logs", sa.Column("deleted_at", sa.DateTime(), nullable=True))
     op.create_index(
-        op.f("ix_notification_logs_deleted_at"),
+        "ix_notification_logs_patient_deleted",
         "notification_logs",
-        ["deleted_at"],
+        ["patient_id", "deleted_at"],
         unique=False,
     )
 
 
 def downgrade() -> None:
-    op.drop_index(op.f("ix_notification_logs_deleted_at"), table_name="notification_logs")
+    op.drop_index("ix_notification_logs_patient_deleted", table_name="notification_logs")
     op.drop_column("notification_logs", "deleted_at")
