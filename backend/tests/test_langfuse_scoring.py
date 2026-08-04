@@ -176,6 +176,29 @@ def test_prescription_guide_scores_source_refs_and_lifestyle_completeness(monkey
     assert scores["completeness"] >= 0.9
 
 
+def test_prescription_guide_records_coverage_scores_and_failure_diagnosis(monkeypatch):
+    client = FakeLangfuseClient()
+    observation = FakeObservation()
+    monkeypatch.setattr(scoring, "get_langfuse_client", lambda: client)
+
+    result = score_prescription_guide(
+        medication_guide={"drugs": [{"drug_name": "약A", "precautions": "주의"}]},
+        lifestyle_guide={"guides": []},
+        source_refs=[],
+        from_cache=False,
+        rag_available=True,
+        ocr_item_count=4,
+        eligible_drug_count=2,
+        excluded_items=[{"ocr_text": "약B", "reason": "drug_master_not_matched"}],
+        observation=observation,
+    )
+
+    scores = _score_map(observation)
+    assert scores["drug_coverage"] == 0.5
+    assert "citation_coverage" in scores
+    assert result["diagnosis"]["gate_status"] == "needs_experiment"
+
+
 def test_drug_info_detail_patient_summary_improves_clarity(monkeypatch):
     with_summary = FakeLangfuseClient()
     monkeypatch.setattr(scoring, "get_langfuse_client", lambda: with_summary)

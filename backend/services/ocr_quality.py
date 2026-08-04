@@ -62,3 +62,26 @@ def is_auto_guide_eligible_ocr_item(item: Any) -> bool:
     if matched_name and _compact(raw_name) != _compact(matched_name) and 0 < match_score < AUTO_GUIDE_MATCH_THRESHOLD:
         return False
     return True
+
+
+def explain_auto_guide_exclusion(item: Any) -> dict[str, Any] | None:
+    """Return a non-PII diagnostic when an OCR row is excluded from auto guidance."""
+    if is_auto_guide_eligible_ocr_item(item):
+        return None
+    raw_name = getattr(item, "drug_name", "") or ""
+    matched_name = getattr(item, "matched_drug_name", "") or ""
+    score = float(getattr(item, "match_score", 0.0) or 0.0)
+    if is_obvious_ocr_noise(raw_name) or is_obvious_ocr_noise(matched_name):
+        reason = "non_drug_instruction"
+    elif getattr(item, "needs_review", False):
+        reason = "human_review_required"
+    elif score and score < MATCH_THRESHOLD:
+        reason = "drug_master_not_matched"
+    else:
+        reason = "ambiguous_drug_mapping"
+    return {
+        "ocr_text": raw_name,
+        "reason": reason,
+        "best_candidate": matched_name or None,
+        "similarity": round(score, 4),
+    }
