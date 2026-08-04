@@ -823,6 +823,45 @@ def test_batch_isolates_failure():
     assert "no_diagnosis" in lifestyle_guides[0].review_flags
 
 
+def test_batch_splits_compound_diagnosis_into_separate_lifestyle_guides():
+    """복합 진단명은 질환별 생활습관 카드로 분리해 서로 다른 근거가 섞이지 않아야 한다."""
+    generated_diagnoses = []
+
+    def fake_lifestyle(diagnosis):
+        generated_diagnoses.append(diagnosis)
+        return LifestyleGuideResult(diagnosis=diagnosis)
+
+    with (
+        patch("rag.rag_chain.generate_guide_from_medication", return_value=_base_guide()),
+        patch("rag.rag_chain.generate_lifestyle_guide_for_diagnosis", side_effect=fake_lifestyle),
+    ):
+        _, lifestyle_guides = generate_guides_from_medications(
+            [{"drug_name": "예시약", "diagnosis": "이상지질혈증, 요통"}]
+        )
+
+    assert generated_diagnoses == ["이상지질혈증", "요통"]
+    assert [guide.diagnosis for guide in lifestyle_guides] == ["이상지질혈증", "요통"]
+
+
+def test_batch_dedupes_diagnoses_after_splitting_compound_values():
+    """복합/단일 입력에 같은 진단명이 반복돼도 생활습관 생성은 질환별 한 번만 수행한다."""
+    with (
+        patch("rag.rag_chain.generate_guide_from_medication", return_value=_base_guide()),
+        patch(
+            "rag.rag_chain.generate_lifestyle_guide_for_diagnosis",
+            side_effect=lambda diagnosis: LifestyleGuideResult(diagnosis=diagnosis),
+        ) as mock_lifestyle,
+    ):
+        generate_guides_from_medications(
+            [
+                {"drug_name": "예시약1", "diagnosis": "이상지질혈증, 요통"},
+                {"drug_name": "예시약2", "diagnosis": "이상지질혈증"},
+            ]
+        )
+
+    assert [call.args[0] for call in mock_lifestyle.call_args_list] == ["이상지질혈증", "요통"]
+
+
 def _dur_entry(**overrides) -> DurTabooInfo:
     defaults = dict(item_name="와파린정", mixture_item_name="아스피린정", prohbt_content="출혈 위험 증가")
     defaults.update(overrides)
