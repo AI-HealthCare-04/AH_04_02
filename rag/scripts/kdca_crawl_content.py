@@ -2,7 +2,7 @@
 대해 healthInfoNew API를 호출해 본문을 수집하고 JSONL로 정규화 저장한다.
 
 토큰은 환경변수 KDCA_TOKEN으로 전달한다(포털 Open API 신청 승인 후 발급되는 값,
-코드에 하드코딩하지 않음). 사용법은 rag/README_rag.md의 "질병관리청 건강정보 수집" 절 참고.
+코드에 하드코딩하지 않음). 사용법은 rag/README.md의 "질병관리청 건강정보 수집" 절 참고.
 """
 import csv
 import json

@@ -277,7 +277,7 @@ def _generate_via_rag(ocr_items: Sequence[OcrResult]) -> tuple[dict, dict, list]
     ] + [
         # [7/10] DUR 병용금기 경고 — 같은 처방전의 다른 약과 실제로 금기 관계일 때만 존재.
         # [7/14] 식약처 Open API 연동으로 전환(dur_master.py) — API 조회 실패 시 이 리스트는
-        # 조용히 빈 상태로 남는다(CONTRACT.md §7).
+        # 조용히 빈 상태로 남는다(rag/contract.md §7).
         {
             "drug_name": g.drug_name,
             "mixture_item_name": w.mixture_item_name,

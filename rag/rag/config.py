@@ -23,7 +23,7 @@ class Settings(BaseSettings):
 
     # [2026-07-14] 식약처_의약품안전사용서비스(DUR) 활용신청이 승인되어(신청유형: 개발계정,
     # 처리상태: 승인) 로컬 CSV 조회를 폐기하고 다시 API 연동으로 전환했다. 같은
-    # DATA_GO_KR_SERVICE_KEY를 재사용한다. CONTRACT.md §7 참고.
+    # DATA_GO_KR_SERVICE_KEY를 재사용한다. contract.md §7 참고.
     DUR_USJNT_TABOO_BASE_URL: str = "https://apis.data.go.kr/1471000/DURPrdlstInfoService03/getUsjntTabooInfoList03"
     DUR_ODSN_ATENT_BASE_URL: str = "https://apis.data.go.kr/1471000/DURPrdlstInfoService03/getOdsnAtentInfoList03"
     DUR_AGE_TABOO_BASE_URL: str = (

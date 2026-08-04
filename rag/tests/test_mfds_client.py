@@ -67,7 +67,7 @@ def test_search_by_name_raises_on_error_code():
             search_by_name("활명수")
 
 # DUR 병용금기 관련 테스트는 API가 아니라 로컬 CSV 조회(dur_master.py)로 옮겨졌다 —
-# test_dur_master.py 참고 (CONTRACT.md §7).
+# test_dur_master.py 참고 (contract.md §7).
 
 
 # [2026-07-14] 활용신청 승인되어 재활성화 — 실제 API 호출로 필드명 재확인 완료.
