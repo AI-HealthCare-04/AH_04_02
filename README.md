@@ -3,7 +3,7 @@
 > AI 헬스케어 4기 파이널 프로젝트 · 2팀 · Uponati(어포나티) 참여기업 주제
 
 [![Python](https://img.shields.io/badge/Python-3.12+-blue)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-SQLite-009688)](https://fastapi.tiangolo.com/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-MySQL-009688)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React-Vite-61DAFB)](https://react.dev/)
 [![License](https://img.shields.io/badge/status-in--progress-yellow)]()
 
@@ -76,13 +76,19 @@
 ## 🛠 기술 스택
 
 ### Backend
-`FastAPI` `Uvicorn` `Python 3.13+` `SQLModel` `SQLite` `uv`
+`FastAPI` `Uvicorn` `Python 3.13+` `SQLModel` `Alembic` `Aiven MySQL`(팀 공용 개발·운영) / `SQLite`(개인 로컬 전용) `uv`
 
 ### AI / LLM
 `LangChain` `OpenAI API (gpt-4o-mini)` `CLOVA OCR` `sentence-transformers` `ChromaDB`
 
 ### Frontend
-`React` `TypeScript` `Vite`
+`React` `TypeScript` `Vite` `PWA`(Web Push)
+
+### 인프라 / 배포
+`AWS EC2` `Docker Compose` `Nginx`(호스트 직접 설치, HTTPS + Duck DNS) `GitHub Actions`
+
+### 관측
+`Langfuse`(LLM 호출 추적·평가)
 
 ### 협업 도구
 `Git / GitHub` `Notion` `Discord`
@@ -95,9 +101,14 @@
 
 3인 소규모 팀 체제에 맞춰, 별도 메시지 브로커/워커 없이 **FastAPI 단일 프로세스가 동기 방식으로 처리**하는 단순한 구조로 운영 중입니다. 응답이 느린 외부 호출(CLOVA OCR, OpenAI)은 `asyncio.to_thread`로 감싸 이벤트 루프를 막지 않도록만 처리합니다.
 
+> ⚠️ 배포(EC2) 환경에는 **Nginx가 호스트에 직접 설치**돼 있습니다(Duck DNS 도메인 `yakcong.duckdns.org` + HTTPS, 2026-07-27 도입). `docker-compose.yml`에는 없는 구성이라 저장소만 봐서는 안 보이고, EC2 인스턴스에 수동으로 설정돼 있어 **git으로 관리되지 않습니다** — 인스턴스를 새로 만들면 재설정이 필요합니다(다음 과제).
+
 ```
 Client (React + Vite, 사용자 / 보호자)
-       │  HTTP (axios)
+       │  HTTPS
+       ▼
+Nginx (EC2 호스트에 직접 설치, docker-compose 밖)
+       │  /api/* → :8000, 그 외 → :5173
        ▼
 FastAPI (backend/main.py)
        │
@@ -105,25 +116,30 @@ FastAPI (backend/main.py)
        ├─ records_router    처방전 업로드 → OCR 실행 → RAG 가이드 생성까지 한 요청에서 처리
        ├─ ocr_router        CLOVA OCR 연동 (asyncio.to_thread로 감싼 동기 호출)
        ├─ rag_router        복약·생활습관 가이드 생성 (rag/ 연동, asyncio.to_thread)
-       ├─ chat_router       환자 처방·가이드 컨텍스트 기반 GPT 챗봇
-       ├─ monitoring_router 보호자용 환자 목록·복약 모니터링
+       ├─ chat_router       환자 처방·가이드 컨텍스트 기반 GPT 챗봇 (SSE 스트리밍)
+       ├─ monitoring_router 보호자용 환자 목록·복약 모니터링, 알림함
        └─ care_router       보호자-환자 연결, 알림 설정, 돌봄 등급 평가
        │
+       ├─ (같은 프로세스 내) 알림 스케줄러 — 60초 주기 asyncio 루프, 복약 알림/놓침 감지
+       │
        ▼
-   SQLite (backend/app.db)
+   Aiven MySQL (팀 공용 개발·운영) / SQLite (개인 로컬 전용, backend/app.db)
 ```
 
-- **FastAPI**: 요청을 받아 그 자리에서 처리 후 바로 응답 (별도 작업 큐·SSE 스트리밍 없음)
-- **SQLite**: 환자/보호자/처방전/가이드/알림설정 등 전체 데이터 저장 — 설치 없이 파일 하나로 동작
+- **FastAPI**: 요청을 받아 그 자리에서 처리 후 바로 응답 (작업 큐 없음). 단, 챗봇 답변(`/chat/ask/stream`)만 SSE로 스트리밍
+- **Aiven MySQL**: 팀 공용 개발 DB이자 운영 DB(SSL 접속). 개인이 혼자 로컬에서만 돌릴 때는 `DATABASE_URL` 미설정 시 SQLite로 자동 대체됨
+- **Alembic**: 스키마 변경은 마이그레이션으로 관리(`backend/alembic/versions/`) — 배포 시 `alembic upgrade head`를 실행해야 반영됨(누락 시 실제 장애로 이어진 적 있음, [PR #157](https://github.com/pecs0310/AH_04_02/pull/157) 참고)
+- **알림 스케줄러**: Redis/Celery 없이 FastAPI 프로세스 안 asyncio 루프로 60초마다 복약 알림·놓침을 확인해 이메일/Web Push 발송. 여러 서버가 같은 알림을 중복 처리하지 않도록 DB `UniqueConstraint`를 선점 기준으로 사용
 - **rag/**: RAG(LangChain + ChromaDB + OpenAI) 로직은 별도 디렉터리에서 개발되어 `backend`가 `RAG_PROVIDER=real`/`CHAT_PROVIDER=real`일 때 그대로 import해서 사용 (저장소 루트 `pyproject.toml`/`uv.lock`으로 backend와 같은 가상환경을 공유)
 - **OCR**: CLOVA OCR(`OCR_PROVIDER=clova`) 또는 로컬 목업(`OCR_PROVIDER=mock`)으로 전환 가능
 
 ### 데이터 흐름
 
-1. **업로드** — 보호자/환자가 처방전 이미지를 업로드하면 `records_router`가 OCR을 실행하고, 필요 시 RAG 가이드 생성까지 이어서 처리한 뒤 결과를 그대로 응답으로 반환
-2. **OCR 저신뢰 항목 재확인** — OCR 인식 신뢰도가 낮으면 `review_required` 상태로 남기고, 보호자가 화면에서 직접 수정·확정(`confirm`)하면 그 값으로 RAG 가이드를 생성
-3. **RAG·가이드생성** — 식약처 e약은요/HIRA 약가마스터/DUR 데이터를 검색해 복약·생활습관 가이드를 생성하고, 인용 출처(source_refs)와 병용금기·주의사항 경고를 함께 반환
-4. **챗봇 질의응답** — 환자의 최근 처방·가이드 결과를 컨텍스트로 GPT가 답변을 생성, 하단 면책 고지 자동 표시
+1. **업로드** — 보호자/환자가 처방전 이미지를 업로드하면 `records_router`가 OCR을 실행하고 결과를 즉시 응답으로 반환(`review_required` 상태)
+2. **OCR 저신뢰 항목 재확인** — 보호자가 화면에서 직접 수정·확정(`confirm`)하면 그 요청 안에서 RAG 가이드 생성까지 동기로 이어서 처리
+3. **RAG·가이드생성** — 식약처 e약은요/HIRA 약가마스터/DUR 데이터를 검색해 복약·생활습관 가이드를 생성하고, 인용 출처(source_refs)와 병용금기·주의사항 경고를 함께 반환. 같은 약 조합이면 캐시를 재사용해 LLM을 다시 호출하지 않음
+4. **챗봇 질의응답** — 환자의 최근 처방·가이드 결과를 컨텍스트로 GPT가 SSE로 실시간 스트리밍 응답, 하단 면책 고지 자동 표시
+5. **복약 알림** — 스케줄러가 정시/놓침 알림을 판단해 이메일·Web Push로 발송
 
 ---
 
@@ -131,10 +147,11 @@ FastAPI (backend/main.py)
 
 ```
 .
-├── backend/                 # FastAPI 백엔드 (SQLite)
-│   ├── core/                 # 인프라·횡단 관심사 — auth(JWT), security(PII 암복호화), database(엔진/세션), dependencies(인증 의존성)
+├── backend/                 # FastAPI 백엔드 (Aiven MySQL / 로컬 SQLite)
+│   ├── core/                 # 인프라·횡단 관심사 — auth(JWT), security(PII 암복호화), database(엔진/세션), dependencies(인증 의존성), scheduler(알림)
 │   ├── services/              # 도메인 로직 — drug_reference, drug_matcher, parsing_rules, ocr_interface
 │   ├── routers/             # auth/records/ocr/rag/chat/monitoring/care 라우터
+│   ├── alembic/versions/     # DB 스키마 마이그레이션
 │   ├── data/                # HIRA·DUR 등 대용량 로컬 참고 데이터 (git 미추적)
 │   ├── tests/
 │   ├── models.py            # SQLModel 테이블 정의
@@ -166,7 +183,9 @@ FastAPI (backend/main.py)
 
 ### 실제 스택
 
-`FastAPI`(동기, SQLite) + `React`(Vite) — Redis/PostgreSQL/S3/Nginx 없음.
+`FastAPI`(동기, Aiven MySQL — 개인 로컬 단독 실행 시엔 SQLite) + `React`(Vite) — Redis/PostgreSQL/S3 없음.
+
+로컬 개발 환경(이 섹션 기준)엔 Nginx도 없이 프론트(5173)·백엔드(8000)에 직접 접속합니다. **배포된 EC2에는 Nginx가 호스트에 직접 설치**돼 있어 HTTPS+도메인으로 접속되지만, 이건 `docker-compose.yml` 밖의 EC2 인스턴스 설정이라 로컬 실행 방법과는 무관합니다 — 자세한 내용은 [시스템 아키텍처](#-시스템-아키텍처)/[배포](#-배포) 참고.
 
 ### 사전 요구사항
 
@@ -364,12 +383,13 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 
 > [2026-07-28 갱신] 아래 "후보 배포 방식 미검토" 내용은 실제 배포 전에 작성된 초안이 그대로 남아있던 것입니다 — 현재는 EC2 + GitHub Actions로 실제 배포되어 있습니다.
 
-- **현재 상태**: `dev` 브랜치에 push되면 `.github/workflows/ci.yml`의 `deploy` job이 SSH로 EC2에 접속해 `git pull origin dev && docker compose up -d --build`를 실행 — **자동 배포됨.**
-- **구성**: FastAPI + React(Vite) 컨테이너 2개(`docker-compose.yml`), DB는 팀 공용 Aiven MySQL(`DATABASE_URL`) — 로컬 개발과 동일한 구성을 그대로 씀
+- **현재 상태**: `dev` 브랜치에 push되면 `.github/workflows/ci.yml`의 `deploy` job이 SSH로 EC2에 접속해 최신 코드를 받고, **마이그레이션을 적용한 뒤(`alembic upgrade head`) 컨테이너를 강제로 재생성(`--force-recreate`)** — **자동 배포됨.**
+  - [2026-08-04] 예전엔 `docker compose up -d --build`만 실행했는데, `backend/Dockerfile`이 코드를 이미지에 안 넣고 바인드마운트로만 받는 구조라 코드만 바뀌면 이미지 해시가 그대로라 **컨테이너가 재생성되지 않고, 스키마 마이그레이션도 안 걸리는** 실제 장애가 있었습니다(배포 7회·20시간 동안 최신 코드가 반영 안 됨). [PR #157](https://github.com/pecs0310/AH_04_02/pull/157)로 수정 — 배포 전 반드시 이 흐름을 유지해야 합니다.
+- **구성**: FastAPI + React(Vite) 컨테이너 2개(`docker-compose.yml`), DB는 팀 공용 Aiven MySQL(`DATABASE_URL`). **로컬 개발과 다른 점**: EC2에는 호스트에 직접 설치한 **Nginx**가 두 컨테이너 앞에서 HTTPS(Duck DNS 도메인)와 `/api` 경로 라우팅을 담당 — 이 설정은 저장소에 없고 EC2 인스턴스에만 있음
 
 ### 배포 시 로컬 개발과 다른 점 — 특히 `.env`
 
-배포 스텝은 코드만 `git pull`하고 **`.env`는 절대 건드리지 않습니다** (`.gitignore`돼 있어 git에 없음). 즉 EC2의 `backend/.env`는 로컬 `.env`와 별개로, 필요할 때 **직접 SSH로 들어가 손으로** 갱신해야 합니다 — 특히 `CORS_ALLOWED_ORIGINS`(프론트 도메인 추가)나 `VITE_MONITORING_API_URL`(백엔드 도메인) 같은 값이 바뀌었는데 EC2 쪽을 안 고치면 로그인부터 막힙니다. 체크리스트는 [`docs/env-var-checklist.md`](./docs/env-var-checklist.md) 참고.
+배포 스텝은 코드만 받아오고 **`.env`는 절대 건드리지 않습니다** (`.gitignore`돼 있어 git에 없음). 즉 EC2의 `backend/.env`는 로컬 `.env`와 별개로, 필요할 때 **직접 SSH로 들어가 손으로** 갱신해야 합니다 — 특히 `CORS_ALLOWED_ORIGINS`(프론트 도메인 추가)나 `VITE_MONITORING_API_URL`(백엔드 도메인) 같은 값이 바뀌었는데 EC2 쪽을 안 고치면 로그인부터 막힙니다. 체크리스트는 [`docs/env-var-checklist.md`](./docs/env-var-checklist.md) 참고.
 
 `VITE_*` 값처럼 프론트 **빌드 시점**에 박히는 값을 바꿨다면, 컨테이너 재시작(`restart`)만으로는 반영되지 않고 재빌드(`up -d --build`)가 필요합니다.
 
