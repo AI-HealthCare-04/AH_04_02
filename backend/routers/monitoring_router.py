@@ -35,7 +35,11 @@ from core.dependencies import (
     require_patient_access,
 )
 from core.relation_notices import create_relation_notice
-from core.schedule_alerts import effective_alert_caregiver_ids, linked_caregiver_ids
+from core.schedule_alerts import (
+    bulk_effective_alert_caregiver_ids,
+    effective_alert_caregiver_ids,
+    linked_caregiver_ids,
+)
 from core.security import hash_phone, normalize_email
 from fastapi import APIRouter, Depends, HTTPException
 from models import (
@@ -939,7 +943,14 @@ def list_schedules(
     if active_only:
         query = query.where(MedicationSchedule.active == True)  # noqa: E712
     schedules = session.exec(query).all()
-    return [_to_schedule_public(s, session) for s in schedules]
+    # [perf, N+1 수정] 스케줄마다 effective_alert_caregiver_ids를 호출하면 스케줄당
+    # ScheduleCaregiverAlert 조회 1번 + (명시적 선택이 없으면) linked_caregiver_ids 조회
+    # 1번이 반복됐다 — bulk_effective_alert_caregiver_ids로 한 번에 계산한다.
+    alert_ids_by_schedule = bulk_effective_alert_caregiver_ids(schedules, session)
+    return [
+        SchedulePublic(**s.model_dump(), alert_caregiver_ids=alert_ids_by_schedule.get(s.id, []))
+        for s in schedules
+    ]
 
 
 @router.patch("/schedules/{schedule_id}", response_model=SchedulePublic)

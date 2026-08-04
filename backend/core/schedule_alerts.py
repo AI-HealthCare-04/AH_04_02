@@ -53,6 +53,46 @@ def effective_alert_caregiver_ids(schedule: MedicationSchedule, session: Session
     return linked_caregiver_ids(schedule.patient_id, session)
 
 
+def bulk_effective_alert_caregiver_ids(
+    schedules: list[MedicationSchedule], session: Session
+) -> dict[int, list[int]]:
+    """effective_alert_caregiver_ids의 배치 버전 — GET /monitoring/schedules처럼 스케줄
+    목록 전체를 한 번에 내려줄 때 쓴다. 스케줄마다 ScheduleCaregiverAlert/linked_caregiver_ids를
+    반복 조회하던 걸 없애고, 로직(우선순위: kill switch → 명시적 선택 → 환자 단위
+    linked_caregiver_ids 폴백)은 effective_alert_caregiver_ids와 완전히 동일하게 유지한다.
+
+    [perf, N+1 수정] ScheduleCaregiverAlert는 전체 스케줄 id를 모아 한 번만 bulk-select하고,
+    linked_caregiver_ids는 같은 환자의 스케줄이 여러 건이어도 그 환자에 대해 한 번만
+    계산해서 재사용한다(스케줄이 아니라 환자 단위 캐시)."""
+    result: dict[int, list[int]] = {}
+    if not schedules:
+        return result
+
+    schedule_ids = [s.id for s in schedules]
+    selected_by_schedule: dict[int, list[int]] = {}
+    for schedule_id, caregiver_id in session.exec(
+        select(ScheduleCaregiverAlert.schedule_id, ScheduleCaregiverAlert.caregiver_id).where(
+            ScheduleCaregiverAlert.schedule_id.in_(schedule_ids)
+        )
+    ):
+        selected_by_schedule.setdefault(schedule_id, []).append(caregiver_id)
+
+    linked_by_patient: dict[int, list[int]] = {}
+    for schedule in schedules:
+        if not schedule.caregiver_alert:
+            result[schedule.id] = []
+            continue
+        selected = selected_by_schedule.get(schedule.id)
+        if selected:
+            result[schedule.id] = selected
+            continue
+        if schedule.patient_id not in linked_by_patient:
+            linked_by_patient[schedule.patient_id] = linked_caregiver_ids(schedule.patient_id, session)
+        result[schedule.id] = linked_by_patient[schedule.patient_id]
+
+    return result
+
+
 def caregiver_wants_notifications(caregiver_id: int, patient_id: int, session: Session) -> bool:
     """[2026-07-30 추가] 여러 환자를 관리하는 보호자·기관이 (이 보호자, 이 환자) 관계
     단위로 알림을 꺼뒀는지 — CaregiverPatient.notifications_enabled. 연결 자체가 없거나
