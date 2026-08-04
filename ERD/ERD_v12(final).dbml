@@ -41,13 +41,13 @@ Table patients {
   dinner_time varchar [null]
   dinner_regular bool [null]
   caregiver_alert_dismissed_at datetime [null, note: 'REQ-007a, 30일간 재표시 억제']
-  gender varchar [null, note: '[v11] male/female — 평문(PII 암호화 대상 아님)']
+  gender varchar [null, note: 'male/female — 평문(PII 암호화 대상 아님)']
 }
 
 Table caregivers {
   id int [pk, increment]
   name_encrypted varchar [note: 'Fernet 암호화']
-  email varchar [null, note: '[v11] unique 제약 제거 — 앱 레벨에서 relation_type끼리만 중복 검사']
+  email varchar [null, note: 'unique 제약 없음 — 앱 레벨에서 relation_type끼리만 중복 검사']
   hashed_password varchar [null]
   relation_type varchar [note: 'guardian/caregiver/life_support_worker/social_worker/organization']
   phone_encrypted varchar [null]
@@ -77,8 +77,8 @@ Table caregiver_patients {
   revoked_at datetime [null]
   revocation_requested_by int [null, note: 'FK 없음(caregivers.id 또는 patients.id, 앱 레벨 검증)']
   requested_by_role varchar [null, note: "'caregiver'|'patient' — 자기승인 방지 가드"]
-  revocation_reason varchar [null, note: '[v11] organization 계정 해제 요청 시 필수 입력 사유']
-  revocation_requested_at datetime [null, note: '[v11] 14일 무응답 자동확정 기준시각']
+  revocation_reason varchar [null, note: 'organization 계정 해제 요청 시 필수 입력 사유']
+  revocation_requested_at datetime [null, note: '14일 무응답 자동확정 기준시각']
   notifications_enabled bool [default: true, note: "(보호자,환자) 관계 단위 알림 on/off — patients-notification_settings(환자 단위, 전체 공유)과 별개"]
 }
 
@@ -107,16 +107,16 @@ Table privacy_purge_audits {
 Table medical_records {
   id int [pk, increment]
   patient_id int [ref: > patients.id]
-  image_path varchar [note: '[v11] 실제 저장됨(uploads/prescriptions/{uuid4}.ext) — REQ-064']
+  image_path varchar [note: '실제 저장 경로: uploads/prescriptions/{uuid4}.ext — REQ-064']
   status varchar [note: 'processing/review_required/completed/failed']
   raw_text varchar [null, note: 'TEXT, OCR 원문']
   failure_reason varchar [null]
   created_at datetime
   uploaded_by_caregiver_id int [ref: > caregivers.id, null, note: '대리 업로드일 때만']
   deleted_at datetime [null, note: '소프트 삭제(등록내역 삭제)']
-  pinned bool [default: false, note: '[v11 신규, REQ-074] 즐겨찾기']
-  prescription_date varchar [null, note: '[v11 신규] OCR 원문에서 추출한 처방일자 — 재처방 판단 기준']
-  caregiver_review_status varchar [default: 'none', note: '[v11 신규, REQ-063] none/pending/needs_correction/reviewed']
+  pinned bool [default: false, note: 'REQ-074, 즐겨찾기']
+  prescription_date varchar [null, note: 'OCR 원문에서 추출한 처방일자 — 재처방 판단 기준']
+  caregiver_review_status varchar [default: 'none', note: 'REQ-063, none/pending/needs_correction/reviewed']
 }
 
 Table ocr_results {
@@ -125,7 +125,7 @@ Table ocr_results {
   drug_name varchar
   drug_code varchar [default: '']
   dosage varchar [default: '', note: '1회 사용량(정/캡슐 등 단위 수량)']
-  dose_amount varchar [default: '', note: '[v11 신규] 1회 투여량(mg/ml 등 함량)']
+  dose_amount varchar [default: '', note: '1회 투여량(mg/ml 등 함량)']
   frequency varchar [default: '']
   total_days varchar [default: '', note: '총 투약일수']
   diagnosis varchar [default: '']
@@ -238,9 +238,9 @@ Table invitations {
   patient_id int [ref: > patients.id, null, note: '보호자→환자 초대는 수락 전까지 계정 자체가 없음']
   inviter_caregiver_id int [ref: > caregivers.id, null]
   relation_type varchar [default: 'guardian', note: 'guardian/caregiver/life_support_worker/social_worker/patient']
-  invited_phone_encrypted varchar [null, note: 'Fernet 암호화(2026-07-15 보안 리뷰로 전환)']
-  invited_phone_hash varchar [null, note: 'indexed, 조회용 HMAC 해시(2026-07-22 추가)']
-  token_hash varchar [unique, note: 'indexed — 2026-07-15 보안 리뷰로 해시 전환(원문 token 아님)']
+  invited_phone_encrypted varchar [null, note: 'Fernet 암호화']
+  invited_phone_hash varchar [null, note: 'indexed, 조회용 HMAC 해시']
+  token_hash varchar [unique, note: 'indexed — 원문 token 아님, 해시만 저장']
   status varchar [note: 'pending/accepted/rejected/expired/cancelled']
   created_at datetime
   accepted_at datetime [null]
@@ -287,7 +287,7 @@ Table guide_cache {
 
 Table revocation_notices {
   id int [pk, increment]
-  recipient_role varchar [note: '[v11 신규, REQ-066/067] caregiver/patient']
+  recipient_role varchar [note: 'REQ-066/067, caregiver/patient']
   recipient_id int [note: 'FK 없음(다형 참조)']
   patient_id int [note: 'FK 없음(표시용 스냅샷)']
   patient_name varchar
