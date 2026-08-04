@@ -1249,6 +1249,7 @@ def list_notifications(
     logs = session.exec(
         select(NotificationLog)
         .where(NotificationLog.patient_id == patient_id)
+        .where(NotificationLog.deleted_at == None)  # noqa: E711
         .where(NotificationLog.fired_at >= since)
         .order_by(NotificationLog.fired_at.desc())
     ).all()
@@ -1289,6 +1290,7 @@ def acknowledge_notifications(
         select(NotificationLog)
         .where(NotificationLog.patient_id == patient_id)
         .where(NotificationLog.acknowledged_at == None)  # noqa: E711
+        .where(NotificationLog.deleted_at == None)  # noqa: E711
     ).all()
     now = datetime.now()
     for log in unacknowledged:
@@ -1310,7 +1312,9 @@ def delete_notification(
     log = session.get(NotificationLog, notification_id)
     if not log or log.patient_id != patient_id:
         raise HTTPException(404, "알림을 찾을 수 없어요")
-    session.delete(log)
+    if log.deleted_at is None:
+        log.deleted_at = datetime.now()
+        session.add(log)
     session.commit()
     return {"deleted": notification_id}
 
@@ -1334,9 +1338,11 @@ def delete_notifications(
         select(NotificationLog)
         .where(NotificationLog.patient_id == patient_id)
         .where(NotificationLog.id.in_(notification_ids))
+        .where(NotificationLog.deleted_at == None)  # noqa: E711
     ).all()
     for log in logs:
-        session.delete(log)
+        log.deleted_at = datetime.now()
+        session.add(log)
     session.commit()
     return {"deleted": len(logs)}
 
@@ -1353,9 +1359,11 @@ def clear_acknowledged_notifications(
         select(NotificationLog)
         .where(NotificationLog.patient_id == patient_id)
         .where(NotificationLog.acknowledged_at != None)  # noqa: E711
+        .where(NotificationLog.deleted_at == None)  # noqa: E711
     ).all()
     for log in logs:
-        session.delete(log)
+        log.deleted_at = datetime.now()
+        session.add(log)
     session.commit()
     return {"deleted": len(logs)}
 

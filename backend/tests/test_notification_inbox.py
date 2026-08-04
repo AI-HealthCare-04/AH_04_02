@@ -225,7 +225,7 @@ def test_acknowledge_forbidden_for_unrelated_caregiver(client: TestClient, sessi
     assert r.status_code == 403
 
 
-def test_delete_notification_removes_only_requested_log(client: TestClient, session: Session):
+def test_delete_notification_hides_only_requested_log(client: TestClient, session: Session):
     pt = _make_patient(session)
     sched = MedicationSchedule(patient_id=pt.id, drug_name="test-drug", time_slot="08:00")
     other_sched = MedicationSchedule(patient_id=pt.id, drug_name="other-drug", time_slot="20:00")
@@ -243,8 +243,14 @@ def test_delete_notification_removes_only_requested_log(client: TestClient, sess
 
     assert response.status_code == 200
     assert response.json() == {"deleted": target.id}
-    assert session.get(NotificationLog, target.id) is None
-    assert session.get(NotificationLog, remaining.id) is not None
+    deleted = session.get(NotificationLog, target.id)
+    assert deleted is not None
+    assert deleted.deleted_at is not None
+    assert session.get(NotificationLog, remaining.id).deleted_at is None
+
+    inbox = client.get(f"/monitoring/patients/{pt.id}/notifications", headers=_headers(pt.id))
+    assert inbox.status_code == 200
+    assert [item["id"] for item in inbox.json()] == [remaining.id]
 
 
 def test_clear_notifications_preserves_unacknowledged_logs(client: TestClient, session: Session):
@@ -268,8 +274,8 @@ def test_clear_notifications_preserves_unacknowledged_logs(client: TestClient, s
 
     assert response.status_code == 200
     assert response.json() == {"deleted": 1}
-    assert session.get(NotificationLog, acknowledged.id) is None
-    assert session.get(NotificationLog, unread.id) is not None
+    assert session.get(NotificationLog, acknowledged.id).deleted_at is not None
+    assert session.get(NotificationLog, unread.id).deleted_at is None
 
 
 def test_bulk_delete_notifications_removes_only_selected_owned_logs(client: TestClient, session: Session):
@@ -294,6 +300,6 @@ def test_bulk_delete_notifications_removes_only_selected_owned_logs(client: Test
 
     assert response.status_code == 200
     assert response.json() == {"deleted": 1}
-    assert session.get(NotificationLog, first.id) is None
-    assert session.get(NotificationLog, second.id) is not None
-    assert session.get(NotificationLog, other.id) is not None
+    assert session.get(NotificationLog, first.id).deleted_at is not None
+    assert session.get(NotificationLog, second.id).deleted_at is None
+    assert session.get(NotificationLog, other.id).deleted_at is None
