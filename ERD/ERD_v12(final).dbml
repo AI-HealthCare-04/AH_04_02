@@ -1,4 +1,4 @@
-// 진료기록 기반 복약·생활습관 안내 시스템 — DBML (ERD_v12(final).md 기준, 2026-08-03)
+// 진료기록 기반 복약·생활습관 안내 시스템 — DBML (ERD_v12(final).md 기준)
 // dbdiagram.io(https://dbdiagram.io/d)의 왼쪽 편집창에 이 파일 내용을 그대로 붙여넣으면
 // 오른쪽에 ERD가 바로 렌더링됩니다. drawSQL 등 DBML 호환 도구에서도 동일하게 사용 가능합니다.
 //
@@ -186,6 +186,7 @@ Table notification_logs {
   channels varchar [default: '[]', note: 'JSON 배열']
   fired_at datetime
   acknowledged_at datetime [null]
+  deleted_at datetime [null, note: '알림함 논리 삭제 시각; 목록·확인·후속 삭제 조회에서 제외']
 
   indexes {
     (schedule_id, due_date, time_slot, kind) [unique]

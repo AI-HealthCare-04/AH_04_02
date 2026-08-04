@@ -1,29 +1,25 @@
-# ERD 수정 검토 기록 — v11 → v12
+# ERD v11 → v12(final) Revision Log
 
-> 버전: v11 → v12 · 날짜: 2026-08-03 · 작성자: 김영혜(Claude 세션)
+## 기준
 
-## 변경 배경
+- 코드 기준: `dev` 7f4fcd1
+- 병합 전 최종 반영 범위: PR #153 `notification_logs.deleted_at`
+- v12(final)의 Markdown과 DBML을 같은 데이터 모델로 맞췄다.
 
-API명세서_v12(final)와 동일한 근거(v11 이후 dev 100개 커밋)로 스키마를 재검토했다. `models.py` 전체 diff와 alembic 신규 마이그레이션 diff를 교차 확인해, 이번 100개 커밋 동안 스키마 변경이 정확히 1건뿐임을 확인했다.
+## 변경 사항
 
-## 주요 변경
+1. 테이블을 계정, 연결, 처방전, 가이드, 복약, 알림, 챗봇, 감사 영역으로 다시 분류했다.
+2. `caregiver_patients.notifications_enabled`를 관계별 기기 알림 수신 설정으로 설명하고 `notification_settings`와의 차이를 명확히 했다.
+3. `medical_records`와 `patient_medications`의 `deleted_at`을 **논리 삭제**로 용어 통일하고 일반 조회 제외 규칙을 명시했다.
+4. PR #153을 반영해 `notification_logs.deleted_at`을 Markdown과 DBML에 추가했다. 알림함에서 삭제한 행은 목록·확인·후속 삭제 조회에서 제외하되 감사와 장애 분석을 위해 보존한다.
+5. 공공 데이터 마스터 자체는 애플리케이션 파일·벡터 저장소로 관리되므로 업무 DB 테이블로 표현하지 않는다는 경계를 유지했다. 생성 결과와 캐시는 `guide_results`, `guide_cache`에 저장한다.
+6. 변경 과정 설명과 요구사항별 구현 상태표를 본문에서 제거하고 최종 데이터 구조와 제약만 남겼다.
 
-- **신규 테이블**: 없음. 테이블 수 24개 그대로 유지.
-- **신규 컬럼**: `caregiver_patients.notifications_enabled`(bool, NOT NULL, 기본값 true) 1개뿐 — (보호자,환자) 관계 단위 push 알림 on/off. 기존 환자 단위 `notification_settings`(모든 보호자 공유)와는 별개 개념(커밋 `24dbb8f`).
-- **변경된 컬럼**: 없음(타입/제약/nullable/이름 변경 전부 없음).
-- **관계선(mermaid erDiagram)**: `notifications_enabled`는 FK가 없어 관계선 추가 불필요 — 필드 블록에 한 줄만 추가.
-- **v11 자체 문서 갭 보정**: `invitations.invited_phone_hash`(2026-07-22 추가, v11 당시 head보다도 이전 마이그레이션)가 v11 필드 블록에서 누락돼 있던 것을 이번에 추가.
-- **alembic head**: `46e60aff6632`(부모 `48230e8ff2b4`=v11 당시 head) — v11 이후 순수 신규 마이그레이션 정확히 1개. 전체 마이그레이션 파일 37개.
-- **삭제된 테이블**: 없음(`care_level_assessments`는 v11에서 이미 삭제된 상태 유지).
+## 구현 취소로 삭제한 개념
 
-## 검증
+- REQ-005~REQ-007의 자가진단 및 care level 테이블·관계
+- REQ-040~REQ-044의 교육 콘텐츠·교육 추적 테이블
+- REQ-028~REQ-029의 별도 건강 측정 장치·측정값 테이블
+- REQ-026d의 음성 알림 설정 데이터
 
-- `backend/models.py` 전체(24개 테이블 클래스 전부)를 v11 mermaid 블록과 1:1 재대조.
-- `cd backend && uv run alembic heads` — 단일 head 확인.
-- 정확성 비평(alembic 마이그레이션 생성일과 엔드포인트 구현 커밋일 분리 서술, `notification_settings` 표기 casing 등)을 1라운드 반영.
-
-## 남은 후속 과제
-
-- `caregiver_patients.notifications_enabled`를 실제로 읽고 쓰는 라우터 핸들러·알림 발송 로직·프론트 "알림 관리 페이지" 라우팅은 이번 감사가 스키마 레벨(models.py+alembic)로만 확인한 것이라, 엔드투엔드 동작 확인은 API명세서_v12(final)/요구사항_정의서_v12(final)(REQ-082)에서 별도로 참고할 것.
-- 이번 v12는 ERD 감사 1건 + 정확성/일관성 비평 1라운드만 거쳤다(원래 계획한 3라운드 중 세션 한도 문제로 1라운드만 완주). 다음 버전에서 추가 검증 라운드를 거치는 것을 권장한다.
-- REQ-048(챗봇 진입버튼 항상노출) 관련 문서-코드 모순은 API명세서_v12(final)·요구사항_정의서_v12(final)에서 플래그했다 — ERD 자체에는 영향 없음.
+이 개념들은 최종 업무 데이터 모델에 포함하지 않으며 v12(final) 본문과 DBML에 빈 테이블이나 예정 구조로 남기지 않았다.

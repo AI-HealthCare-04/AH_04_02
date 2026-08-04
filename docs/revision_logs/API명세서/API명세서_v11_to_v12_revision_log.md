@@ -1,37 +1,31 @@
-# API 명세서 수정 검토 기록 — v11 → v12
+# API 명세서 v11 → v12(final) Revision Log
 
-> 버전: v11 → v12 · 날짜: 2026-08-03 · 작성자: 김영혜(Claude 세션)
+## 기준
 
-## 변경 배경
+- 코드 기준: `dev` 7f4fcd1
+- 병합 전 최종 반영 범위: PR #153 알림함 논리 삭제
+- v12(final) 파일명과 버전은 유지하고 본문만 최종 구현 범위로 정리했다.
 
-v11(2026-07-28, 커밋 `15a23f6`) 작성 이후 dev에 100개 커밋(`15a23f6`..`2f95b07`)이 머지됐다. 전수 코드 감사(라우터 8개 전체 재확인 + 관련 테스트 재실행)를 근거로 실제 엔드포인트·스키마 변경사항을 문서에 반영한다. 초안 작성 → 정확성/일관성 2인 비평 → 수정 1라운드를 거쳤다.
+## 변경 사항
 
-## 주요 변경
+1. 전체 엔드포인트를 현재 라우터 기준으로 재분류하고 공통 인증·인가·오류 규칙을 첫 절에 배치했다.
+2. 사용자 화면과 동일하게 `등록내역`을 `처방전 목록`, `환자`를 `복약관리 대상자`, `알림 관리`를 `알림함`으로 통일했다.
+3. 계정 탈퇴를 즉시 비활성화, 30일 삭제 예약, 유예 기간 취소, 만료 계정 정리와 감사 기록의 흐름으로 명확히 기술했다.
+4. OCR에서 연고제 용량 표현 `소량`을 유효 값으로 처리하는 확인 규칙을 추가했다.
+5. 생활습관 가이드와 복약 주의사항은 공공 데이터 마스터 및 질병관리청 출처 기반 RAG 검색, 유의어 정규화, 캐시, Langfuse 추적 흐름으로 정리했다.
+6. 챗봇은 최근 처방전을 기본 기준으로 사용하고, 시스템 프롬프트 관련 질문에는 RAG 조회를 실행하지 않는 규칙을 명시했다.
+7. 알림함 한 건 삭제, 선택 삭제, 확인 알림 삭제, 전체 삭제 API를 추가했다. PR #153에 따라 삭제는 `notification_logs.deleted_at`을 기록하는 논리 삭제이며 후속 조회에서 제외된다.
 
-| 구분 | v11 | v12 |
+## 구현 취소로 본문에서 삭제한 범위
+
+| 요구사항 | 삭제한 설계 | 사유 |
 |---|---|---|
-| 계정 전환(REQ-065) | 미문서화 | `POST /auth/switch`(저장된 계정 전환)·`POST /auth/switch/forget`(자동 로그인 해제) 신규 문서화 — 코드 자체는 2026-07-22부터 있었으나 v11까지 누락됐던 기존 갭 |
-| 알림 on/off(REQ-082, 신규) | 없음 | `PATCH /monitoring/caregivers/{cid}/patients/{pid}/notifications` 신설 — (보호자,환자) 관계 단위 push 토글(커밋 `24dbb8f`) |
-| 알림함 일괄확인 | 없음 | `POST /monitoring/patients/{patient_id}/notifications/acknowledge` 신설 |
-| 초대 발급 중복 검증 | 미문서화 | `POST /invitations`가 이미 연결된 사용자에 409 반환(커밋 `40393a2`) |
-| 초대 수락 응답(PR #131) | 신규 계정 생성 경로도 토큰 없이 `{caregiver_id/patient_id, status}`만 반환 | 신규 계정 생성 경로는 로그인 payload(`access_token` 등)가 병합됨 — 수락 직후 강제 로그아웃되던 실제 장애 수정(커밋 `d550239`/`2784856`/`bac9b9c`/`2f95b07`). 기존 로그인 계정 재사용 경로는 변경 없음 |
-| 받은 초대 목록 | 이미 연결된 환자의 초대도 노출 | 이미 연결된 환자의 초대는 목록에서 제외(커밋 `40393a2`) |
-| `GET /invitations/{token}` | `expires_at` 누락(v11 자체 문서 갭) | `expires_at` 추가 |
-| RAG 가이드 생성 실패 | "OCR 결과 없음" 케이스만 문서화 | 자동 가이드 생성 가능한 약이 하나도 없으면 `status="failed"`(신규 실패 시나리오, `GUIDE_DATA_VERSION` v1.2→v1.3) |
-| e약은요/HIRA 조회 | 부분 매칭 시 즉시 반환 | 부작용·보관법 둘 다 채워진 히트를 찾을 때까지 후보 재시도(이슈 #107/#108 수정) |
-| Push 발송 | 필터링 없음 | `caregiver_wants_notifications()`로 관계 단위 알림 끄기 반영, payload에 `schedule_id` 추가(서비스워커 액션버튼용), 알림 URL이 `/schedule`→`/dashboard?highlight=...`로 변경 |
-| 용어 매핑 | AUTO_GUIDE_MATCH_THRESHOLD/자동가이드 적격 개념 없음 | 두 용어 신규 추가(기존 MATCH_THRESHOLD와의 차이 명시) |
+| REQ-005, REQ-006, REQ-007 | 복약 가능 여부 자가진단과 3단계 care level | 최종 서비스 범위에서 제외하고 관련 API·테이블을 사용하지 않음 |
+| REQ-026d | 음성 기반 알림 설정 | 최종 제공 채널에 포함하지 않음 |
+| REQ-028, REQ-029 | 별도 측정 인프라와 실시간 건강 측정 연계 | 프로젝트 규모와 최종 제공 범위에서 제외 |
+| REQ-034 | 별도 재생성 전용 기능 | 처방전 확정·가이드 조회 흐름으로 제공 범위를 한정 |
+| REQ-040~REQ-044 | 교육 콘텐츠·교육 추적 관리 | 최종 제품 범위에서 제외 |
+| REQ-046 | 별도 사용자 프로필 조회 API | 현재 등록·수정·연결 API로 계정 정보를 관리 |
+| REQ-049 | 별도 의약품 상세 설명 API | RAG 가이드와 처방전 상세 흐름으로 제공 범위를 한정 |
 
-**삭제된 엔드포인트·필드는 없다.**
-
-## 검증
-
-- 전체 라우터(`auth_router.py`, `care_router.py`, `chat_router.py`, `monitoring_router.py`, `ocr_router.py`, `rag_router.py`, `records_router.py`, `patient_medications_router.py`) 전문을 다시 읽어 v11 서술과 대조.
-- `test_care_router_invitations.py`, `test_caregiver_patient_notifications.py`, `test_invitation_accept_existing_patient.py`, `test_auth_switch_account.py`, `test_notification_inbox.py` 등 관련 테스트 재실행(56/57 통과 — 1개는 무관한 기존 flaky 테스트).
-- alembic head `46e60aff6632`(부모 `48230e8ff2b4`=v11 당시 head) — v11 이후 순수 신규 마이그레이션 1개만 확인.
-
-## 남은 후속 과제
-
-- `care_router` prefix 부재는 이번에도 경로 변경 없이 유지(REST 개선 후보로 계속 이월).
-- REQ-082(알림 음소거)는 요구사항_정의서에 이번에 처음 배정한 가번호 — 팀 확인 후 정식 번호 확정 필요.
-- 이번 v12는 API 감사 1건 + 정확성/일관성 비평 1라운드만 거쳤다(원래 계획한 3라운드 중 세션 한도 문제로 1라운드만 완주). 다음 버전에서 추가 검증 라운드를 거치는 것을 권장한다.
+위 항목은 v12(final) 본문에 상태나 빈 엔드포인트로 남기지 않았다. 과거 설계의 제외 근거는 이 revision log에서만 관리한다.
