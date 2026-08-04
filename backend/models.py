@@ -35,7 +35,7 @@ Day 2에 각자 자기 테이블을 검토하고 필요하면 컬럼을 고쳐�
 from datetime import datetime
 
 from core.security import decrypt_pii, encrypt_pii, hash_phone
-from sqlalchemy import Column, LargeBinary, Text, UniqueConstraint
+from sqlalchemy import Column, Index, LargeBinary, Text, UniqueConstraint
 from sqlalchemy.dialects.mysql import MEDIUMBLOB
 from sqlmodel import Field, SQLModel
 
@@ -503,6 +503,7 @@ class NotificationLog(SQLModel, table=True):
     __tablename__ = "notification_logs"
     __table_args__ = (
         UniqueConstraint("schedule_id", "due_date", "time_slot", "kind", name="uq_notification_instance"),
+        Index("ix_notification_logs_patient_deleted", "patient_id", "deleted_at"),
     )
 
     id: int | None = Field(default=None, primary_key=True)
@@ -522,6 +523,7 @@ class NotificationLog(SQLModel, table=True):
     # [2026-08-03 추가, perf] list_logs가 "최근 N일"을 이 컬럼으로 필터링한다.
     fired_at: datetime = Field(default_factory=datetime.now, index=True)
     acknowledged_at: datetime | None = None  # 환자가 인앱 알림을 확인 처리하면 채워짐
+    deleted_at: datetime | None = None  # 알림함에서 정리한 시각; 중복 발송 판정 기록은 보존
 
 
 # ── 환자 의약품 등록 [2026-07-14 추가, 담당: 김영혜] ──

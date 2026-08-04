@@ -11,6 +11,7 @@ import re
 from typing import Any
 
 from services.langfuse_tracing import get_langfuse_client, mask_for_langfuse, update_observation
+from services.rag_quality_gate import build_quality_diagnosis
 
 logger = logging.getLogger(__name__)
 
@@ -103,20 +104,25 @@ def _score_current_trace(
         logger.warning("Langfuse 자동 점수(%s) 기록에 실패했습니다.", name, exc_info=True)
 
 
-def _record_score_summary(observation: Any, scores: dict[str, float], *, metadata: dict[str, Any]) -> None:
+def _record_score_summary(
+    observation: Any,
+    scores: dict[str, float],
+    *,
+    metadata: dict[str, Any],
+    extra_output: dict[str, Any] | None = None,
+) -> None:
     """Attach score values to the trace output as a visible fallback.
 
     Langfuse numeric scores are stored through score_current_trace(). If that SDK call
     fails or the UI is opened before scores are indexed, this output block still makes
     the scoring result visible inside the trace detail.
     """
-    update_observation(
-        observation,
-        output={
-            "auto_scores": {name: round(_clamp(value), 2) for name, value in scores.items()},
-            "auto_score_method": metadata.get("scoring_method"),
-        },
-    )
+    output = {
+        "auto_scores": {name: round(_clamp(value), 2) for name, value in scores.items()},
+        "auto_score_method": metadata.get("scoring_method"),
+    }
+    output.update(extra_output or {})
+    update_observation(observation, output=output)
 
 
 def _medical_safety_score(answer: str) -> float:
@@ -219,8 +225,11 @@ def score_prescription_guide(
     source_refs: list[dict] | None,
     from_cache: bool,
     rag_available: bool,
+    ocr_item_count: int | None = None,
+    eligible_drug_count: int | None = None,
+    excluded_items: list[dict[str, Any]] | None = None,
     observation: Any = None,
-) -> None:
+) -> dict[str, Any]:
     """Score prescription guide generation traces."""
     drugs = (medication_guide or {}).get("drugs") or []
     lifestyle_guides = (lifestyle_guide or {}).get("guides") or []
@@ -228,6 +237,24 @@ def score_prescription_guide(
     review_required_count = sum(1 for drug in drugs if drug.get("review_required"))
     drugs_with_precautions = sum(1 for drug in drugs if drug.get("precautions") or drug.get("caution"))
     rag_signal = _ratio(ref_count, max(1, len(drugs) + len(lifestyle_guides)))
+    valid_ocr_count = max(1, ocr_item_count or eligible_drug_count or len(drugs))
+    drug_coverage = _ratio(
+        eligible_drug_count if eligible_drug_count is not None else len(drugs), valid_ocr_count
+    )
+    # Score the required fields in the actual medication_guide.drugs schema.
+    # DUR/duplication data lives in source_refs, so citation/source metrics cover it.
+    required_sections = (("medication_guide",), ("precautions", "caution"))
+    required_section_coverage = _ratio(
+        sum(any(drug.get(field) for field in aliases) for drug in drugs for aliases in required_sections),
+        max(1, len(drugs) * len(required_sections)),
+    )
+    citation_coverage = _ratio(ref_count, max(1, len(drugs) + len(lifestyle_guides)))
+    drug_names = {str(drug.get("drug_name") or drug.get("name") or "").strip() for drug in drugs}
+    matching_refs = sum(
+        str(ref.get("item_name") or ref.get("drug_name") or "").strip() in drug_names
+        for ref in source_refs or []
+    )
+    drug_source_match = _ratio(matching_refs, max(1, len(drug_names)))
 
     metadata = {
         "from_cache": from_cache,
@@ -236,6 +263,9 @@ def score_prescription_guide(
         "lifestyle_guide_count": len(lifestyle_guides),
         "source_ref_count": ref_count,
         "review_required_count": review_required_count,
+        "ocr_item_count": ocr_item_count,
+        "eligible_drug_count": eligible_drug_count,
+        "excluded_ocr_count": len(excluded_items or []),
         "scoring_method": "heuristic_v1_rag_weighted",
     }
     scores = {
@@ -250,8 +280,18 @@ def score_prescription_guide(
         ),
         "medical_safety": _clamp(0.90 - _ratio(review_required_count, max(1, len(drugs))) * 0.20),
         "patient_clarity": 0.82 if drugs or lifestyle_guides else 0.35,
+        "drug_coverage": drug_coverage,
+        "citation_coverage": citation_coverage,
+        "drug_source_match": drug_source_match,
+        "required_section_coverage": required_section_coverage,
     }
-    _record_score_summary(observation, scores, metadata=metadata)
+    diagnosis = build_quality_diagnosis(scores, excluded_items=excluded_items)
+    _record_score_summary(
+        observation,
+        scores,
+        metadata=metadata,
+        extra_output={"quality_gate": diagnosis},
+    )
     _score_current_trace(
         "groundedness",
         scores["groundedness"],
@@ -287,6 +327,14 @@ def score_prescription_guide(
         metadata=metadata,
         observation=observation,
     )
+    for name, comment in (
+        ("drug_coverage", "자동 안내 대상 약품 수를 유효 OCR 약품 수와 비교한 점수입니다."),
+        ("citation_coverage", "생성 결과 항목 대비 연결된 출처 수를 본 점수입니다."),
+        ("drug_source_match", "생성 약품명과 검색 출처 약품명의 일치 점수입니다."),
+        ("required_section_coverage", "약별 필수 안내 항목의 채움 비율입니다."),
+    ):
+        _score_current_trace(name, scores[name], comment=comment, metadata=metadata, observation=observation)
+    return {"scores": scores, "diagnosis": diagnosis}
 
 
 def score_drug_info_detail(

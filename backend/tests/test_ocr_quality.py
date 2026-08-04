@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from services.ocr_quality import is_auto_guide_eligible_ocr_item, requires_drug_name_review
+from services.ocr_quality import (
+    explain_auto_guide_exclusion,
+    is_auto_guide_eligible_ocr_item,
+    requires_drug_name_review,
+)
 
 
 def test_obvious_sample_text_requires_review():
@@ -48,3 +52,34 @@ def test_already_review_required_item_is_excluded():
     )
 
     assert is_auto_guide_eligible_ocr_item(item) is False
+
+
+def test_exclusion_diagnostic_records_reason_and_candidate():
+    item = SimpleNamespace(
+        drug_name="sample OCR",
+        matched_drug_name="sample drug",
+        display_name="sample drug",
+        match_score=0.57,
+        needs_review=True,
+    )
+
+    diagnostic = explain_auto_guide_exclusion(item)
+
+    assert diagnostic == {
+        "ocr_text": "sample OCR",
+        "reason": "human_review_required",
+        "best_candidate": "sample drug",
+        "similarity": 0.57,
+    }
+
+
+def test_exclusion_diagnostic_checks_display_name_noise():
+    item = SimpleNamespace(
+        drug_name="valid drug",
+        matched_drug_name="valid drug",
+        display_name="sample OCR",
+        match_score=1.0,
+        needs_review=False,
+    )
+
+    assert explain_auto_guide_exclusion(item)["reason"] == "non_drug_instruction"

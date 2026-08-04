@@ -44,7 +44,7 @@ from services.langfuse_tracing import (
     optional_observation,
     update_observation,
 )
-from services.ocr_quality import is_auto_guide_eligible_ocr_item
+from services.ocr_quality import explain_auto_guide_exclusion, is_auto_guide_eligible_ocr_item
 from sqlmodel import Session, select
 
 router = APIRouter(prefix="/rag", tags=["RAG"])
@@ -330,7 +330,12 @@ async def run_rag(record_id: int, session: Session) -> tuple[GuideResult, bool, 
             raise ValueError("해당 record_id의 OCR 결과가 없어요. 먼저 OCR이 실행되어야 합니다.")
 
         eligible_ocr_items = [item for item in ocr_items if is_auto_guide_eligible_ocr_item(item)]
-        excluded_ocr_count = len(ocr_items) - len(eligible_ocr_items)
+        excluded_items = [
+            diagnostic
+            for item in ocr_items
+            if (diagnostic := explain_auto_guide_exclusion(item)) is not None
+        ]
+        excluded_ocr_count = len(excluded_items)
         if not eligible_ocr_items:
             update_observation(
                 trace,
@@ -353,6 +358,9 @@ async def run_rag(record_id: int, session: Session) -> tuple[GuideResult, bool, 
                 "ocr_item_count": len(ocr_items),
                 "auto_guide_drug_count": len(eligible_ocr_items),
                 "excluded_ocr_count": excluded_ocr_count,
+                "excluded_items": [
+                    {**item, "ocr_text": mask_for_langfuse(item["ocr_text"])} for item in excluded_items
+                ],
                 "drug_names": [mask_for_langfuse(item.display_name) for item in eligible_ocr_items],
                 "diagnoses": [
                     mask_for_langfuse(item.diagnosis or "") for item in eligible_ocr_items if item.diagnosis
@@ -426,14 +434,28 @@ async def run_rag(record_id: int, session: Session) -> tuple[GuideResult, bool, 
                 "cache_expires_at": cache_expires_at.isoformat() if cache_expires_at else None,
             },
         )
-        score_prescription_guide(
-            medication_guide=medication_guide,
-            lifestyle_guide=lifestyle_guide,
-            source_refs=source_refs,
-            from_cache=from_cache,
-            rag_available=_RAG_AVAILABLE,
-            observation=trace,
-        )
+        with optional_observation(
+            as_type="span",
+            name="rag-quality-gate",
+            input={
+                "ocr_item_count": len(ocr_items),
+                "eligible_drug_count": len(eligible_ocr_items),
+                "excluded_ocr_count": excluded_ocr_count,
+            },
+        ) as quality_span:
+            score_prescription_guide(
+                medication_guide=medication_guide,
+                lifestyle_guide=lifestyle_guide,
+                source_refs=source_refs,
+                from_cache=from_cache,
+                rag_available=_RAG_AVAILABLE,
+                ocr_item_count=len(ocr_items),
+                eligible_drug_count=len(eligible_ocr_items),
+                excluded_items=[
+                    {**item, "ocr_text": mask_for_langfuse(item["ocr_text"])} for item in excluded_items
+                ],
+                observation=quality_span,
+            )
         flush_langfuse()
         return guide, from_cache, cache_expires_at
 
