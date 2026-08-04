@@ -1146,9 +1146,13 @@ def generate_guides_from_medications(medications: list) -> tuple[list[GuideRespo
         raw_diagnosis = (
             medication.get("diagnosis") if isinstance(medication, dict) else getattr(medication, "diagnosis", "")
         ) or ""
-        diagnosis = raw_diagnosis.strip()
-        if diagnosis and diagnosis not in seen_diagnoses:
-            seen_diagnoses.append(diagnosis)
+        # OCR/사용자 입력은 한 약의 diagnosis 필드에 여러 진단명을 쉼표 등으로 묶어
+        # 저장할 수 있다(예: "이상지질혈증, 요통"). 검색 단계만 이를 분리하고 생성은
+        # 합친 문자열로 한 번 호출하면 서로 다른 질환의 근거가 한 카드에 섞여 한 질환의
+        # 문단만 대표 안내처럼 노출된다. 생성 단위도 실제 진단명 단위로 맞춘다.
+        for diagnosis in _split_diagnosis_parts(raw_diagnosis.strip()) if raw_diagnosis.strip() else []:
+            if diagnosis not in seen_diagnoses:
+                seen_diagnoses.append(diagnosis)
 
     # [2026-07-31 추가] 위 약별 가이드 루프는 항목별로 실패를 격리하는데, 이 생활습관
     # 생성은 그 보호가 전혀 없어서 진단명 하나의 LLM 호출만 실패해도(타임아웃/레이트리밋/
