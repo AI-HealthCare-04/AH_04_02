@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -56,6 +57,8 @@ _RAG_DIR = Path(__file__).resolve().parent.parent.parent / "rag"
 if _RAG_DIR.is_dir() and str(_RAG_DIR) not in sys.path:
     sys.path.insert(0, str(_RAG_DIR))
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/ocr", tags=["OCR"])
 
 _ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
@@ -96,7 +99,9 @@ def _fetch_permit_precautions(candidates: list[str]) -> list[str]:
                     precaution_parts.append(f"[사용상의 주의사항 - {title}] {text}" if title else text)
                 break
     except Exception:  # noqa: BLE001 — 키 미설정/네트워크 실패/미등재 약품명 등 어떤 이유로든 조용히 폴백
-        pass
+        # [버그수정] pass만 하면 실제 운영에서 왜 특정 약만 정보가 안 나오는지 로그로
+        # 추적할 방법이 없었다 — 화면은 그대로 조용히 폴백시키되 원인은 로그에 남긴다.
+        logger.warning("허가정보 사용상의 주의사항 조회 실패: candidates=%s", candidates, exc_info=True)
     return precaution_parts
 
 
@@ -141,8 +146,14 @@ def _fetch_eyakeun_info(candidates: list[str]) -> dict:
             # efficacy를 못 채운 경우(효능·효과 필드가 로컬 e약은요 xlsx 매칭에만 존재해서
             # HIRA 매칭 시 항상 빈 문자열이었던 문제)의 안전한 보강 소스로 쓴다.
             indication = best_hit.efcy_qesitm.strip() if best_hit.efcy_qesitm else None
+        elif not candidates:
+            logger.warning("e약은요 조회 후보 이름이 비어 있음")
+        else:
+            logger.warning("e약은요 조회 결과 없음: candidates=%s", candidates)
     except Exception:  # noqa: BLE001 — 키 미설정/네트워크 실패/미등재 약품명 등 어떤 이유로든 조용히 폴백
-        pass
+        # [버그수정] pass만 하면 보관법/부작용 등이 왜 비어있는지(키 미설정 vs 네트워크
+        # 실패 vs 오매칭) 운영에서 전혀 구분할 수 없었다 — 로그로 원인 추적 가능하게 한다.
+        logger.warning("e약은요 조회 실패: candidates=%s", candidates, exc_info=True)
     return {
         "precaution_parts": precaution_parts,
         "side_effects": side_effects,
@@ -170,7 +181,7 @@ def _fetch_dur_cautions(candidates: list[str]) -> list[dict]:
             {"category": c.category, "detail": c.detail, "extra": c.extra} for c in raw_cautions
         ]
     except Exception:  # noqa: BLE001
-        pass
+        logger.warning("DUR 주의사항 조회 실패: candidates=%s", candidates, exc_info=True)
     return dur_cautions
 
 
@@ -198,6 +209,7 @@ def _fetch_rag_drug_detail(drug_name: str) -> dict:
 
         candidates = resolve_drug_name_candidates(drug_name)
     except Exception:  # noqa: BLE001 — 후보 생성 실패 시 원문 하나만으로 폴백
+        logger.warning("약품명 후보 생성 실패, 원문으로 폴백: drug_name=%s", drug_name, exc_info=True)
         candidates = [drug_name]
 
     with ThreadPoolExecutor(max_workers=3) as executor:
