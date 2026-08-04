@@ -1,8 +1,8 @@
-"""GET /monitoring/patients/{patient_id}/notifications — 알림함(웹 인박스) 테스트
-(2026-07-23 신규).
+"""GET /monitoring/patients/{patient_id}/notifications ? ???(? ???) ???
+(2026-07-23 ??).
 
-복약 알림/놓침 감지는 이미 NotificationLog에 쌓이고 있었지만, 웹에서 모아 볼 화면이
-없었다(푸시만 전제한 설계) — 이 엔드포인트가 그 원본 로그를 그대로 노출한다.
+?? ??/?? ??? ?? NotificationLog? ??? ????, ??? ?? ? ???
+???(??? ??? ??) ? ? ?????? ? ?? ??? ??? ????.
 """
 from datetime import date, datetime, timedelta
 
@@ -34,7 +34,7 @@ def client_fixture(session: Session):
 
 def _make_patient(session: Session) -> Patient:
     pt = Patient(hashed_password="x")
-    pt.name = "환자"
+    pt.name = "??"
     session.add(pt)
     session.commit()
     session.refresh(pt)
@@ -47,16 +47,16 @@ def _headers(patient_id: int) -> dict:
 
 def test_lists_notifications_with_drug_name_newest_first(client: TestClient, session: Session):
     pt = _make_patient(session)
-    sched = MedicationSchedule(patient_id=pt.id, drug_name="암로디핀정5mg", time_slot="08:00")
+    sched = MedicationSchedule(patient_id=pt.id, drug_name="?????5mg", time_slot="08:00")
     session.add(sched)
     session.commit()
     session.refresh(sched)
 
-    # [2026-07-31 버그수정] 절대 날짜(2026-07-01 등)로 하드코딩돼 있어서, 기본 조회
-    # 윈도우(days=30)가 "오늘" 기준으로 계속 움직이며 언젠가는 이 값이 그 윈도우 밖으로
-    # 밀려나 실패하는 time-bomb이었다(실제로 CI에서 재현됨) — 아래
-    # test_excludes_notifications_outside_days_window처럼 datetime.now() 기준 상대
-    # 오프셋으로 바꿔서, 실행 시점과 무관하게 항상 윈도우 안에 들어오게 한다.
+    # [2026-07-31 ????] ?? ??(2026-07-01 ?)? ????? ???, ?? ??
+    # ???(days=30)? "??" ???? ?? ???? ???? ? ?? ? ??? ???
+    # ??? ???? time-bomb???(??? CI?? ???) ? ??
+    # test_excludes_notifications_outside_days_window?? datetime.now() ?? ??
+    # ????? ???, ?? ??? ???? ?? ??? ?? ???? ??.
     older_fired_at = datetime.now() - timedelta(days=20)
     newer_fired_at = datetime.now() - timedelta(days=5)
     older = NotificationLog(
@@ -75,14 +75,14 @@ def test_lists_notifications_with_drug_name_newest_first(client: TestClient, ses
     assert r.status_code == 200
     body = r.json()
     assert len(body) == 2
-    assert body[0]["kind"] == "missed"  # 최신순
-    assert body[0]["drug_name"] == "암로디핀정5mg"
+    assert body[0]["kind"] == "missed"  # ???
+    assert body[0]["drug_name"] == "?????5mg"
     assert body[1]["kind"] == "reminder"
 
 
 def test_excludes_notifications_outside_days_window(client: TestClient, session: Session):
     pt = _make_patient(session)
-    sched = MedicationSchedule(patient_id=pt.id, drug_name="약A", time_slot="08:00")
+    sched = MedicationSchedule(patient_id=pt.id, drug_name="?A", time_slot="08:00")
     session.add(sched)
     session.commit()
     session.refresh(sched)
@@ -103,7 +103,7 @@ def test_excludes_notifications_outside_days_window(client: TestClient, session:
 def test_unrelated_caregiver_forbidden(client: TestClient, session: Session):
     pt = _make_patient(session)
     outsider = Caregiver(hashed_password="x")
-    outsider.name = "무관자"
+    outsider.name = "???"
     session.add(outsider)
     session.commit()
     session.refresh(outsider)
@@ -118,14 +118,14 @@ def test_unrelated_caregiver_forbidden(client: TestClient, session: Session):
 def test_linked_caregiver_can_view(client: TestClient, session: Session):
     pt = _make_patient(session)
     cg = Caregiver(hashed_password="x")
-    cg.name = "보호자"
+    cg.name = "???"
     session.add(cg)
     session.commit()
     session.refresh(cg)
     session.add(CaregiverPatient(caregiver_id=cg.id, patient_id=pt.id))
     session.commit()
 
-    sched = MedicationSchedule(patient_id=pt.id, drug_name="약B", time_slot="08:00")
+    sched = MedicationSchedule(patient_id=pt.id, drug_name="?B", time_slot="08:00")
     session.add(sched)
     session.commit()
     session.refresh(sched)
@@ -145,9 +145,9 @@ def test_linked_caregiver_can_view(client: TestClient, session: Session):
     assert len(r.json()) == 1
 
 
-# ── POST /monitoring/patients/{patient_id}/notifications/acknowledge [2026-07-30 신규] ──
-# NavBar 종 아이콘 배지가 "알림함에 한 번도 표시된 적 없는" 복약 알림만 안 읽음으로
-# 세도록, acknowledged_at을 응답에 노출하고 일괄 표시 처리하는 엔드포인트를 검증한다.
+# ?? POST /monitoring/patients/{patient_id}/notifications/acknowledge [2026-07-30 ??] ??
+# NavBar ? ??? ??? "???? ? ?? ??? ? ??" ?? ??? ? ????
+# ???, acknowledged_at? ??? ???? ?? ?? ???? ?????? ????.
 
 def _make_log(session: Session, patient_id: int, sched_id: int) -> NotificationLog:
     log = NotificationLog(
@@ -162,7 +162,7 @@ def _make_log(session: Session, patient_id: int, sched_id: int) -> NotificationL
 
 def test_new_log_is_unacknowledged_by_default(client: TestClient, session: Session):
     pt = _make_patient(session)
-    sched = MedicationSchedule(patient_id=pt.id, drug_name="약C", time_slot="08:00")
+    sched = MedicationSchedule(patient_id=pt.id, drug_name="?C", time_slot="08:00")
     session.add(sched)
     session.commit()
     session.refresh(sched)
@@ -174,8 +174,8 @@ def test_new_log_is_unacknowledged_by_default(client: TestClient, session: Sessi
 
 def test_acknowledge_marks_all_unread_logs(client: TestClient, session: Session):
     pt = _make_patient(session)
-    sched1 = MedicationSchedule(patient_id=pt.id, drug_name="약D-1", time_slot="08:00")
-    sched2 = MedicationSchedule(patient_id=pt.id, drug_name="약D-2", time_slot="20:00")
+    sched1 = MedicationSchedule(patient_id=pt.id, drug_name="?D-1", time_slot="08:00")
+    sched2 = MedicationSchedule(patient_id=pt.id, drug_name="?D-2", time_slot="20:00")
     session.add(sched1)
     session.add(sched2)
     session.commit()
@@ -195,11 +195,11 @@ def test_acknowledge_marks_all_unread_logs(client: TestClient, session: Session)
 
 
 def test_acknowledge_does_not_touch_already_acknowledged_logs(client: TestClient, session: Session):
-    # 이미 표시된 로그의 acknowledged_at을 새 시각으로 덮어쓰지 않는지까지는 별도로 보진
-    # 않지만(현재 구현은 where acknowledged_at is null만 대상으로 삼아 자동으로 보장됨),
-    # 두 번째 호출이 이번엔 셀 게 없다는 것만 확인한다.
+    # ?? ??? ??? acknowledged_at? ? ???? ???? ?????? ??? ??
+    # ???(?? ??? where acknowledged_at is null? ???? ?? ???? ???),
+    # ? ?? ??? ??? ? ? ??? ?? ????.
     pt = _make_patient(session)
-    sched = MedicationSchedule(patient_id=pt.id, drug_name="약E", time_slot="08:00")
+    sched = MedicationSchedule(patient_id=pt.id, drug_name="?E", time_slot="08:00")
     session.add(sched)
     session.commit()
     session.refresh(sched)
@@ -213,7 +213,7 @@ def test_acknowledge_does_not_touch_already_acknowledged_logs(client: TestClient
 def test_acknowledge_forbidden_for_unrelated_caregiver(client: TestClient, session: Session):
     pt = _make_patient(session)
     outsider = Caregiver(hashed_password="x")
-    outsider.name = "무관자"
+    outsider.name = "???"
     session.add(outsider)
     session.commit()
     session.refresh(outsider)
@@ -225,7 +225,7 @@ def test_acknowledge_forbidden_for_unrelated_caregiver(client: TestClient, sessi
     assert r.status_code == 403
 
 
-def test_delete_notification_removes_only_requested_log(client: TestClient, session: Session):
+def test_delete_notification_hides_only_requested_log(client: TestClient, session: Session):
     pt = _make_patient(session)
     sched = MedicationSchedule(patient_id=pt.id, drug_name="test-drug", time_slot="08:00")
     other_sched = MedicationSchedule(patient_id=pt.id, drug_name="other-drug", time_slot="20:00")
@@ -243,8 +243,16 @@ def test_delete_notification_removes_only_requested_log(client: TestClient, sess
 
     assert response.status_code == 200
     assert response.json() == {"deleted": target.id}
-    assert session.get(NotificationLog, target.id) is None
-    assert session.get(NotificationLog, remaining.id) is not None
+    deleted = session.get(NotificationLog, target.id)
+    assert deleted is not None
+    assert deleted.deleted_at is not None
+    assert session.get(NotificationLog, remaining.id).deleted_at is None
+
+    inbox = client.get(
+        f"/monitoring/patients/{pt.id}/notifications", headers=_headers(pt.id)
+    )
+    assert inbox.status_code == 200
+    assert [item["id"] for item in inbox.json()] == [remaining.id]
 
 
 def test_clear_notifications_preserves_unacknowledged_logs(client: TestClient, session: Session):
@@ -268,8 +276,8 @@ def test_clear_notifications_preserves_unacknowledged_logs(client: TestClient, s
 
     assert response.status_code == 200
     assert response.json() == {"deleted": 1}
-    assert session.get(NotificationLog, acknowledged.id) is None
-    assert session.get(NotificationLog, unread.id) is not None
+    assert session.get(NotificationLog, acknowledged.id).deleted_at is not None
+    assert session.get(NotificationLog, unread.id).deleted_at is None
 
 
 def test_bulk_delete_notifications_removes_only_selected_owned_logs(client: TestClient, session: Session):
@@ -294,6 +302,6 @@ def test_bulk_delete_notifications_removes_only_selected_owned_logs(client: Test
 
     assert response.status_code == 200
     assert response.json() == {"deleted": 1}
-    assert session.get(NotificationLog, first.id) is None
-    assert session.get(NotificationLog, second.id) is not None
-    assert session.get(NotificationLog, other.id) is not None
+    assert session.get(NotificationLog, first.id).deleted_at is not None
+    assert session.get(NotificationLog, second.id).deleted_at is None
+    assert session.get(NotificationLog, other.id).deleted_at is None
