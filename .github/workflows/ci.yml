@@ -69,6 +69,26 @@ jobs:
               git reset --hard origin/dev
             }
             docker compose -f docker-compose.yml up -d --build
+            # [2026-08-04 추가, 실제 재현된 장애] backend/Dockerfile은 코드를 이미지에
+            # COPY하지 않고 바인드마운트로만 받는다(pyproject.toml/uv.lock만 이미지에
+            # 들어감) — 그래서 코드만 바뀌면 이미지 해시가 그대로라 위 --build가 아무
+            # 컨테이너도 재생성하지 않고, uvicorn 워커는 맨 처음 뜬 시점에 import해둔
+            # 모듈을 계속 메모리에 붙든 채로 돈다. git은 최신을 받아오는데 실행 중인
+            # 프로세스는 옛 코드 그대로인 상태가 배포마다 조용히(exit 0으로) 반복됐다
+            # (실제 사고: 2026-08-03 11:39 배포 이후 20시간·배포 7회 동안 알림함 삭제
+            # API가 전부 404, 복약 알림 스케줄러는 60초마다 계속 예외를 내며 발송이
+            # 멈춤 — 그런데도 GitHub Actions는 매번 success로 표시됨).
+            #
+            # 마이그레이션을 먼저 적용한다 — backend/alembic/versions/는 바인드마운트라
+            # 컨테이너를 아직 재시작하지 않은 지금도 방금 git이 받아온 최신 파일을 그대로
+            # 본다. 컨테이너를 재생성하기 전에 스키마부터 맞춰야, "새 코드가 옛 스키마를
+            # 조회해서 500"이 되는 창구 자체가 생기지 않는다.
+            docker compose -f docker-compose.yml exec -T backend sh -c \
+              "cd /workspace/backend && /workspace/.venv/bin/python3 -m alembic upgrade head"
+            # 스키마를 맞췄으니 이제 --force-recreate로 매 배포마다 컨테이너를 무조건
+            # 새로 띄운다 — 위 근본 원인(이미지 해시 불변으로 재생성 안 되던 문제)의
+            # 직접적인 수정.
+            docker compose -f docker-compose.yml up -d --build --force-recreate
             # [2026-07-31 추가, 리뷰 지적 반영] 매 배포마다 --build로 새 이미지를 만들면서
             # 예전 이미지가 계속 쌓여 EC2 디스크를 채운다(실제로 40G 중 40G까지 차서 배포
             # 자체가 실패하는 장애로 재현됨) — 배포마다 정리한다. `-a`는 dangling(태그 없는)
