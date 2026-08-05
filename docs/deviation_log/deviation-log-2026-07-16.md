@@ -22,7 +22,7 @@ REQ-030/031·REQ-039·REQ-035 작업(PR #46·#47·#48) 및 그 검증 과정에�
 확인. 실제 값은 gitignore 대상인 `backend/.env`로 이전.
 
 **예방조치** — ⬜ 앞으로 해결해야 함: 비밀값이 들어갈 수 있는 파일(`.env.example` 등)을
-편집하기 전 "이게 커밋 대상인가"를 확인하는 절차를 팀 문서에 명문화할 것. → `docs/etc/team-rules.md`
+편집하기 전 "이게 커밋 대상인가"를 확인하는 절차를 팀 문서에 명문화할 것. → `docs/Team Members' Notes/team-rules.md`
 §11에 반영(이 커밋에 포함).
 
 ---
@@ -61,7 +61,7 @@ REQ-030/031·REQ-039·REQ-035 작업(PR #46·#47·#48) 및 그 검증 과정에�
 확인. PR #48 병합 완료.
 
 **예방조치** — ✅ 실행됨: 인증/계정 상태 변경 엔드포인트용 악용 경로 점검 체크리스트를
-`docs/etc/security-checklist.md`로 실제 작성(이 커밋에 포함) — 다음 유사 기능부터 바로 참고 가능.
+`docs/Team Members' Notes/security-checklist.md`로 실제 작성(이 커밋에 포함) — 다음 유사 기능부터 바로 참고 가능.
 
 ---
 
@@ -78,7 +78,7 @@ forward 방향만 테스트함.
 (커밋 `825c417`), 재검증 통과.
 
 **예방조치** — ✅ 실행됨: `upgrade → downgrade → upgrade` 왕복 테스트를 신규 마이그레이션
-작성 시 필수 절차로 `docs/etc/team-rules.md`에 명문화(이 커밋에 포함).
+작성 시 필수 절차로 `docs/Team Members' Notes/team-rules.md`에 명문화(이 커밋에 포함).
 
 ---
 
@@ -96,7 +96,7 @@ head 2개로 인식해 `upgrade head`가 막히는 상태였음.
 전체 체인 up/down 재검증 후 병합, 단일 선형 체인 확인됨.
 
 **예방조치** — ✅ 실행됨: "공용 DB에 여러 명이 동시에 마이그레이션 작업 중일 때 머지 순서를
-먼저 정하고 나중 순번이 리베이스한다"는 규칙을 `docs/etc/team-rules.md`에 명문화(이 커밋에 포함).
+먼저 정하고 나중 순번이 리베이스한다"는 규칙을 `docs/Team Members' Notes/team-rules.md`에 명문화(이 커밋에 포함).
 
 ---
 
@@ -116,7 +116,7 @@ head 2개로 인식해 `upgrade head`가 막히는 상태였음.
 아니라 "지금은 안 건드리기"를 선택한 것 — 초대 기능은 이 로컬 서버에서 여전히 깨져 있다.
 
 **예방조치** — ✅ 실행됨: 공유 DB에 스키마 변경을 적용하기 전 로컬 실행 환경 동기화 여부를
-먼저 확인하는 절차를 `docs/etc/shared-dev-db-setup.md`에 신규 섹션으로 작성(이 커밋에 포함).
+먼저 확인하는 절차를 `docs/Team Members' Notes/shared-dev-db-setup.md`에 신규 섹션으로 작성(이 커밋에 포함).
 
 ---
 
@@ -131,5 +131,5 @@ head 2개로 인식해 `upgrade head`가 막히는 상태였음.
 
 - [요구사항 구현 격차 분석 아티팩트](https://claude.ai/code/artifact/2711c7e2-be14-48f4-b6fe-fb6c63489a82) —
   이 일탈 로그와 함께 REQ별 구현 현황·우선순위가 정리돼 있다.
-- `docs/etc/security-checklist.md`, `docs/etc/team-rules.md` §11–13, `docs/etc/shared-dev-db-setup.md` §13 —
+- `docs/Team Members' Notes/security-checklist.md`, `docs/Team Members' Notes/team-rules.md` §11–13, `docs/Team Members' Notes/shared-dev-db-setup.md` §13 —
   이 문서에서 "실행됨"으로 표시한 예방조치들의 실제 산출물.

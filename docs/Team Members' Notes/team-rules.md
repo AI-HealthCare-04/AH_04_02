@@ -44,7 +44,7 @@
   "이 파일이 커밋 대상인가"부터 확인한다 — 템플릿 파일에 실제 키를 채워 테스트하지 않기
   (2026-07-16, `docs/deviation_log/deviation-log-2026-07-16.md` DEV-01)
 - 인증/계정 상태 변경 기능(로그인, 비밀번호 재설정, 탈퇴, 계정 잠금 등)을 구현하면 코드
-  리뷰 전에 `docs/etc/security-checklist.md`로 자체 점검한다 (2026-07-16, DEV-03)
+  리뷰 전에 `docs/Team Members' Notes/security-checklist.md`로 자체 점검한다 (2026-07-16, DEV-03)
 
 ## 12. Alembic 마이그레이션
 - 신규 마이그레이션은 병합 전 반드시 `upgrade head → downgrade -1 → upgrade head` 왕복
@@ -56,11 +56,11 @@
   순서를 먼저 정하고, 나중에 머지되는 쪽이 `down_revision`을 재배치(리베이스)한다
   (2026-07-16, DEV-05)
 - 공유 DB에 스키마 변경을 실제로 적용하기 전 로컬 실행 환경 동기화 여부를 확인하는
-  절차는 `docs/etc/shared-dev-db-setup.md` 참고 (2026-07-16, DEV-06)
+  절차는 `docs/Team Members' Notes/shared-dev-db-setup.md` 참고 (2026-07-16, DEV-06)
 
 ## 13. 환경변수 변경
 
 - 배포는 `git pull + docker compose up -d --build`만 하고 `.env`는 절대 안 건드린다 —
   `CORS_ALLOWED_ORIGINS`/`VITE_MONITORING_API_URL` 같은 값이 바뀌면 EC2 서버의 `.env`도
-  직접 갱신해야 한다. 체크리스트는 `docs/etc/env-var-checklist.md` 참고
+  직접 갱신해야 한다. 체크리스트는 `docs/Team Members' Notes/env-var-checklist.md` 참고
   (2026-07-28, 도메인 변경 후 로그인 불가 사고)

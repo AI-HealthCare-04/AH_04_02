@@ -3,7 +3,7 @@
 - **날짜**: 2026-07-06
 - **작성자**: 김영혜 (RAG 담당)
 - **관련 브랜치**: RAG는 `feature/frontend-setup_yunghye`, OCR은 `origin/feature/ocr-day1-setup_soonhyun` (`AH_04_02_soonhyun/ocr_interface.py`, 담당: 순현)
-- **관련 문서**: `rag/contract.md` (필드 계약 정본), `docs/troubleshooting_log/troubleshooting-log-2026-07-06-ocr-confidence-review-required.md` (D2 상세 재현 기록)
+- **관련 문서**: `rag/contract.md` (필드 계약 정본), `docs/troubleshooting_log/troubleshooting-log.md`(2026.07.06 항목, D2 상세 재현 기록)
 
 ## 목적 — 무엇을 위해서
 
@@ -40,7 +40,7 @@
 
 - **무엇**: `MedicationItem.confidence=0.78`(OCR 자체 기준 0.80 미만 → 검토 필요)인 약을 실제 OpenAI 키로
   생성했더니 `GuideResponse.review_required=False`가 나옴. 상세 재현 과정은
-  `docs/troubleshooting_log/troubleshooting-log-2026-07-06-ocr-confidence-review-required.md` 참고.
+  `docs/troubleshooting_log/troubleshooting-log.md`(2026.07.06 항목) 참고.
 - **원인**: `MedicationInput.confidence` 필드는 존재했지만 `generate_guide_from_medication()`/`generate_guide()`
   어디에서도 읽지 않았음. 게다가 OCR 자체의 `review_required`도 `overall_confidence`(전체 평균)만 보기 때문에
   평균이 임계값을 넘으면 그 안의 개별 저신뢰 약을 놓친다 (예: 아스피린 0.92 + 로자탄 0.78 → 평균 0.85 →

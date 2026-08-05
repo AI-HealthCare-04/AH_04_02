@@ -173,8 +173,9 @@ FastAPI (backend/main.py)
 │   ├── deviation_log/          # 팀 간 편차·CAPA 로그 (날짜별)
 │   ├── troubleshooting_log/    # 트러블슈팅 로그
 │   ├── validation_summary/     # 검증 요약 보고서
-│   ├── mentoringreport/        # 멘토링 보고서
-│   └── etc/                    # 그 외 문서 (team-rules.md 등)
+│   ├── mentoring_report/       # 멘토링 보고서
+│   ├── Team Members' Notes/    # 작업 내용 중 팀원이 숙지해야 할 문서 (team-rules.md 등)
+│   └── etc/                    # 그 외 참고 문서 (기술 가이드, 계정 정보, 1주차 기획 등)
 └── README.md
 ```
 
@@ -245,7 +246,7 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 
 ## 🤝 협업 규칙
 
-자세한 내용은 [`docs/etc/team-rules.md`](./docs/etc/team-rules.md) 참고.
+자세한 내용은 [`docs/Team Members' Notes/team-rules.md`](./docs/Team%20Members%27%20Notes/team-rules.md) 참고.
 
 ### 브랜치 전략
 
@@ -394,7 +395,7 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 
 ### 배포 시 로컬 개발과 다른 점 — 특히 `.env`
 
-배포 스텝은 코드만 받아오고 **`.env`는 절대 건드리지 않습니다** (`.gitignore`돼 있어 git에 없음). 즉 EC2의 `backend/.env`는 로컬 `.env`와 별개로, 필요할 때 **직접 SSH로 들어가 손으로** 갱신해야 합니다 — 특히 `CORS_ALLOWED_ORIGINS`(프론트 도메인 추가)나 `VITE_MONITORING_API_URL`(백엔드 도메인) 같은 값이 바뀌었는데 EC2 쪽을 안 고치면 로그인부터 막힙니다. 체크리스트는 [`docs/etc/env-var-checklist.md`](./docs/etc/env-var-checklist.md) 참고.
+배포 스텝은 코드만 받아오고 **`.env`는 절대 건드리지 않습니다** (`.gitignore`돼 있어 git에 없음). 즉 EC2의 `backend/.env`는 로컬 `.env`와 별개로, 필요할 때 **직접 SSH로 들어가 손으로** 갱신해야 합니다 — 특히 `CORS_ALLOWED_ORIGINS`(프론트 도메인 추가)나 `VITE_MONITORING_API_URL`(백엔드 도메인) 같은 값이 바뀌었는데 EC2 쪽을 안 고치면 로그인부터 막힙니다. 체크리스트는 [`docs/Team Members' Notes/env-var-checklist.md`](./docs/Team%20Members%27%20Notes/env-var-checklist.md) 참고.
 
 `VITE_*` 값처럼 프론트 **빌드 시점**에 박히는 값을 바꿨다면, 컨테이너 재시작(`restart`)만으로는 반영되지 않고 재빌드(`up -d --build`)가 필요합니다.
 
@@ -402,5 +403,5 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 
 ## 📄 참고 문서
 
-- [팀 협업 규칙 (team-rules.md)](./docs/etc/team-rules.md)
+- [팀 협업 규칙 (team-rules.md)](./docs/Team%20Members%27%20Notes/team-rules.md)
 - [요구사항 정의서](./docs/요구사항_정의서/) / [ERD](./docs/ERD/) / [API 명세서](./docs/API명세서/) — 버전별 문서, 변경 이력은 각 폴더의 `revision_log/` 참고

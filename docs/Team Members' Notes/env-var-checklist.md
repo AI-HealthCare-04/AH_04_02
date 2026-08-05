@@ -1,6 +1,6 @@
 # 환경변수 변경 체크리스트
 
-`.env`를 커밋하지 않는다는 규칙(`docs/etc/team-rules.md` 11번)은 있지만, "값이 바뀌면
+`.env`를 커밋하지 않는다는 규칙(`docs/Team Members' Notes/team-rules.md` 11번)은 있지만, "값이 바뀌면
 서버에도 반영하라"는 절차가 없어서 실제로 문제가 반복됐다 — 2026-07-28, 도메인을
 바꾸면서 서버 쪽 `CORS_ALLOWED_ORIGINS`를 업데이트하지 않아 로그인이 갑자기 안 되던
 사고가 그 예다.
@@ -34,7 +34,7 @@
       함께 바꾸고, 기존에 구독된 기기는 재구독이 필요할 수 있음을 공지한다.
 - [ ] **DB 관련 값(`DATABASE_URL`, `DATABASE_SSL_REQUIRED`, `DATABASE_SSL_CA`)** — 팀
       공용 Aiven MySQL 자격 정보가 바뀌면 로컬 각자 `.env` + EC2 `.env` 전부 갱신 필요
-      (`docs/etc/shared-dev-db-setup.md` 참고).
+      (`docs/Team Members' Notes/shared-dev-db-setup.md` 참고).
 - [ ] **⚠️ `PII_ENCRYPTION_KEY` / `PII_HASH_SECRET`** — 절대 임의로 재발급(로테이션)하면
       안 됩니다. 이 값이 바뀌면 기존에 암호화되어 저장된 개인정보(이름, 전화번호 등)를
       영영 복호화할 수 없게 됩니다. 서버 인스턴스를 새로 만들거나 재설정할 때는 반드시

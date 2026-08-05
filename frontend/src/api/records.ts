@@ -34,7 +34,7 @@ export interface OcrMedication {
  * [7/9] RAG_PROVIDER=stub(기본값)과 RAG_PROVIDER=real이 서로 다른 모양을 반환한다.
  * 두 모드를 전환하며 테스트해야 하는 과도기라 필드를 전부 optional로 두고,
  * Result.tsx/MedGuide.tsx에서 어느 필드가 있는지 보고 어느 모드인지
- * 판단해서 렌더링한다. (실제 응답 샘플: docs/etc/rag-real-response-sample.md)
+ * 판단해서 렌더링한다. (실제 응답 샘플: docs/Team Members' Notes/rag-real-response-sample.md)
  */
 export interface GuideDrug {
   drug_name: string;
