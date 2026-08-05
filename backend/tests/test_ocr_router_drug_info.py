@@ -563,3 +563,98 @@ class TestSummarizePrecautionsCache:
             assert len(list(fresh_cache)) == 0, "실패 결과가 캐시에 남으면 안 된다"
         finally:
             fresh_cache.close()
+
+
+class TestDrugInfoConcurrencyLock:
+    """[2026-08-05 추가, perf 회귀 테스트] POST /records의 백그라운드 사전조회와
+    PrescriptionReview.tsx의 실시간 조회가 같은 약을 동시에 조회할 수 있다 —
+    drug_name별 Lock(ocr_router._drug_info_lock_for)이 실제로 중복 실행을 막고
+    직렬화하는지 검증한다(캐시 미스 상태에서 정부 API/LLM이 중복 호출되는 걸 방지)."""
+
+    def test_lock_for_same_name_returns_same_lock_object(self):
+        from routers.ocr_router import _drug_info_lock_for
+
+        assert _drug_info_lock_for("동일약") is _drug_info_lock_for("동일약")
+
+    def test_lock_for_different_names_returns_different_lock_objects(self):
+        from routers.ocr_router import _drug_info_lock_for
+
+        assert _drug_info_lock_for("약A") is not _drug_info_lock_for("약B")
+
+    def test_concurrent_calls_for_same_drug_never_overlap(self):
+        """같은 약을 동시에 두 번 조회하면(캐시 미스 상황), Lock이 없다면 정부 API가
+        동시에 중복 호출된다 — 직접 재현해 확인한 문제(check_race.py). Lock을 걸면
+        두 호출의 실제 조회 구간이 절대 겹치지 않아야 한다(최대 동시 실행 수 == 1)."""
+        import threading
+        import time
+        from concurrent.futures import ThreadPoolExecutor
+
+        from routers.ocr_router import drug_info
+
+        state = {"active": 0, "max_active": 0}
+        state_lock = threading.Lock()
+
+        def slow_search_by_name(item_name, num_of_rows=10, page_no=1, **_kwargs):
+            with state_lock:
+                state["active"] += 1
+                state["max_active"] = max(state["max_active"], state["active"])
+            time.sleep(0.2)
+            with state_lock:
+                state["active"] -= 1
+            return [_drug_info_hit()]
+
+        with (
+            patch("rag.mfds_client.search_permit_detail", return_value=[]),
+            patch("rag.mfds_client.search_by_name", side_effect=slow_search_by_name),
+            patch("rag.dur_master.search_elderly_caution", return_value=[]),
+            patch("rag.dur_master.search_age_taboo", return_value=[]),
+            patch("rag.dur_master.search_pregnancy_taboo", return_value=[]),
+            patch("routers.ocr_router._summarize_precautions_for_patient", return_value=None),
+        ):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                f1 = executor.submit(drug_info, "락동시성테스트약")
+                f2 = executor.submit(drug_info, "락동시성테스트약")
+                r1, r2 = f1.result(), f2.result()
+
+        assert r1["drug_name"] == r2["drug_name"] == "락동시성테스트약"
+        assert state["max_active"] == 1, (
+            "drug_name별 Lock이 걸려 있으면 같은 약에 대한 두 호출의 실제 조회 구간이 "
+            "절대 겹치지 않아야 한다(순차 실행)"
+        )
+
+    def test_concurrent_calls_for_different_drugs_still_run_in_parallel(self):
+        """Lock은 drug_name 단위라 다른 약끼리는 여전히 동시에 조회돼야 한다 —
+        백그라운드 사전조회가 여러 약을 병렬로 처리하는 이점이 이 Lock 때문에 없어지면
+        안 된다."""
+        import threading
+        import time
+        from concurrent.futures import ThreadPoolExecutor
+
+        from routers.ocr_router import drug_info
+
+        state = {"active": 0, "max_active": 0}
+        state_lock = threading.Lock()
+
+        def slow_search_by_name(item_name, num_of_rows=10, page_no=1, **_kwargs):
+            with state_lock:
+                state["active"] += 1
+                state["max_active"] = max(state["max_active"], state["active"])
+            time.sleep(0.2)
+            with state_lock:
+                state["active"] -= 1
+            return [_drug_info_hit()]
+
+        with (
+            patch("rag.mfds_client.search_permit_detail", return_value=[]),
+            patch("rag.mfds_client.search_by_name", side_effect=slow_search_by_name),
+            patch("rag.dur_master.search_elderly_caution", return_value=[]),
+            patch("rag.dur_master.search_age_taboo", return_value=[]),
+            patch("rag.dur_master.search_pregnancy_taboo", return_value=[]),
+            patch("routers.ocr_router._summarize_precautions_for_patient", return_value=None),
+        ):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                f1 = executor.submit(drug_info, "병렬테스트약A")
+                f2 = executor.submit(drug_info, "병렬테스트약B")
+                f1.result(), f2.result()
+
+        assert state["max_active"] == 2, "다른 약끼리는 Lock에 걸리지 않고 동시에 조회돼야 한다"

@@ -18,6 +18,7 @@ import logging
 import os
 import sys
 import tempfile
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -362,6 +363,23 @@ def _summarize_precautions_for_patient(
             return None
 
 
+# [2026-08-05 추가, perf] POST /records의 백그라운드 사전조회(records_router.py의
+# _prefetch_drug_info)와 PrescriptionReview.tsx의 실시간 조회가 같은 약을 동시에 호출할
+# 수 있다 — diskcache 자체는 동시 read/write에 안전하지만(캐시 미스 상태에서 두 호출이
+# 동시에 들어오면 각자 라이브 API/LLM을 중복 호출한 뒤 마지막 write가 이긴다, 데이터
+# 손상은 없음 — 직접 재현해 확인함), 정부 API/LLM 호출이 그만큼 낭비된다. drug_name별
+# Lock으로 직렬화해서, 두 번째 호출은 첫 호출이 캐시를 채운 뒤 캐시 히트로 곧바로
+# 끝나게 한다. 약품명은 유한한 실물 집합이라 앱 수명 동안 조회된 고유 이름 수만큼만
+# Lock 객체가 쌓인다(장시간 운영 시 무시할 수준의 메모리 — 별도 정리 로직은 과함).
+_drug_info_call_locks: dict[str, threading.Lock] = {}
+_drug_info_call_locks_guard = threading.Lock()
+
+
+def _drug_info_lock_for(drug_name: str) -> threading.Lock:
+    with _drug_info_call_locks_guard:
+        return _drug_info_call_locks.setdefault(drug_name, threading.Lock())
+
+
 @router.get("/drug-info")
 def drug_info(drug_name: str):
     """
@@ -372,8 +390,11 @@ def drug_info(drug_name: str):
     [2026-07-20 추가] DrugDetail.tsx(복약 일정 기반, OCR 기록과 연결 안 됨)가 주의사항
     등을 표시할 방법이 아예 없었던 문제 — rag/ 패키지 live API로 보강 조회한 필드들을
     함께 내려준다(_fetch_rag_drug_detail 참고).
+
+    [2026-08-05 추가, perf] drug_name별 Lock으로 동시 호출을 직렬화한다 — 백그라운드
+    사전조회/실시간 조회 경쟁 시 캐시 미스 중복 호출을 막는다(_drug_info_lock_for 참고).
     """
-    with optional_observation(
+    with _drug_info_lock_for(drug_name), optional_observation(
         as_type="span",
         name="drug-info-detail",
         input={"drug_name": mask_for_langfuse(drug_name)},
