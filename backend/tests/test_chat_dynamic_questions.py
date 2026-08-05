@@ -16,6 +16,7 @@ DB에서 조회하지 않는다 — 호출부(Chat.tsx)가 넘겨준 drug_name �
 _patient_registered_drug_names(patient_id, session)로 옮겨갔다(여전히 LLM 컨텍스트
 구성에 쓰인다) — 세 갈래 폴백 테스트는 그 함수를 직접 검증하도록 옮겼다.
 """
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -28,6 +29,7 @@ from main import app
 from models import (
     Caregiver,
     CaregiverPatient,
+    GuideResult,
     MedicalRecord,
     OcrResult,
     Patient,
@@ -175,6 +177,50 @@ class TestPatientRegisteredDrugNamesFallback:
         assert _patient_registered_drug_names(pt.id, session) == ["타이레놀정500mg"]
 
 
+class TestPatientContextExposesRegisteredDrugDurRefs:
+    """[2026-08-05 추가, 실제 배포 사고 재현] 환자가 이미 등록한 처방의 DUR 경고
+    ([DUR 임부금기] 등)가 챗봇 프롬프트 텍스트에는 들어가지만, 화면 "참고 자료"에
+    "식약처 DUR 데이터" 출처로는 안 뜨던 문제 — _build_patient_context()가 텍스트만
+    반환하고 구조화된 refs는 버렸던 게 원인이었다(Langfuse trace
+    a963db7359bc3f3dc119e8b77d7f138f, source_ref_count=0인데 dur_context_count=1)."""
+
+    def test_pregnancy_dur_warning_is_returned_as_structured_ref(self, session: Session):
+        pt = _make_patient(session, "durRefPat")
+        record = MedicalRecord(patient_id=pt.id, image_path="x.jpg", status="completed")
+        session.add(record)
+        session.commit()
+        session.refresh(record)
+        session.add(
+            GuideResult(
+                record_id=record.id,
+                medication_guide="[]",
+                lifestyle_guide="{}",
+                source_refs=json.dumps(
+                    [
+                        {
+                            "drug_name": "자누비아정50밀리그램",
+                            "dur_category": "임부금기",
+                            "dur_detail": "태아 발육에 필수적인 콜레스테롤의 생합성 감소 가능성.",
+                        }
+                    ],
+                    ensure_ascii=False,
+                ),
+            )
+        )
+        session.commit()
+
+        context_text, dur_refs = _build_patient_context(pt.id, session)
+
+        assert "[DUR 임부금기] 자누비아정50밀리그램" in context_text
+        assert dur_refs == [
+            {
+                "drug_name": "자누비아정50밀리그램",
+                "dur_category": "임부금기",
+                "dur_detail": "태아 발육에 필수적인 콜레스테롤의 생합성 감소 가능성.",
+            }
+        ]
+
+
 class TestQuestionsEndpointAuth:
     def test_owner_caregiver_ok(self, client: TestClient, session: Session):
         cg = _make_caregiver(session, "qOwnerCg")
@@ -304,7 +350,7 @@ class TestPatientContextIncludesRegisteredMeds:
         )
         session.commit()
 
-        context = _build_patient_context(pt.id, session)
+        context, _dur_refs = _build_patient_context(pt.id, session)
         assert "로수바스타틴정10mg" in context
         assert context != "아직 등록된 처방전 정보가 없습니다."
 
