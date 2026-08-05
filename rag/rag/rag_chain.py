@@ -4,6 +4,7 @@ import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
+from functools import lru_cache
 
 from langchain_core.documents import Document
 from rag.chunking import drugs_to_documents
@@ -15,6 +16,7 @@ from rag.dur_master import (
     search_usjnt_taboo,
 )
 from rag.hira_master import search_by_product_name as search_hira_by_product_name
+from rag.kdca_health_info_data import load_kdca_health_info_sections
 from rag.mfds_client import (
     parse_doc_sections,
     search_by_name,
@@ -228,6 +230,20 @@ def _title_matches_diagnosis(title: str, diagnosis: str) -> bool:
     return bool(title_codes & diagnosis_codes)
 
 
+@lru_cache(maxsize=1)
+def _all_kdca_titles() -> tuple[str, ...]:
+    """질병관리청 건강정보 jsonl에 등록된 모든 제목(중복 제거).
+
+    [2026-08-05 추가] DIAGNOSIS_DISEASE_ALIASES는 4개 질환(고혈압/당뇨병/이상지질혈증/
+    만성콩팥병)만 수동으로 동의어를 등록해뒀는데, 그 외 659개 질환(천식 등)은 진단명
+    표기가 KDCA title과 정확히 일치하지 않으면(예: "기관지 천식" vs "천식") 매칭 안전망이
+    전혀 없었다 — 이 함수는 663개 전체 제목을 대상으로 _title_matches_diagnosis()의
+    기존 정규화·부분일치 로직을 그대로 재사용해, 질환마다 손으로 동의어를 등록할 필요
+    없이 일반적으로 표기 변형에 대응한다.
+    """
+    return tuple(sorted({section.title for section in load_kdca_health_info_sections()}))
+
+
 class NoContextFoundError(RuntimeError):
     pass
 
@@ -383,6 +399,29 @@ def _lifestyle_context_items(diagnosis: str | None) -> list[dict]:
                     matched_this_title = True
                 if matched_this_title:
                     break
+            if not part_docs:
+                # [2026-08-05 추가] DIAGNOSIS_DISEASE_ALIASES에 등록 안 된 질환(예: 천식)은
+                # 위 exact-candidate 단계가 원문 그대로만 시도해서, 표기가 조금만 달라도
+                # (예: "기관지 천식") 못 찾는다. 임베딩이 필요한 의미기반 검색으로 바로
+                # 넘어가기 전에, 663개 등록된 제목 전체를 _title_matches_diagnosis로
+                # 대조해 결정적으로(임베딩 없이) 먼저 찾아본다 — 정확히 일치하는 진단명
+                # (예: "고혈압")은 위 단계에서 이미 찾았을 것이므로 여기 도달하지 않고,
+                # 그래서 기존 동작에는 영향이 없다.
+                for title in _all_kdca_titles():
+                    if not _title_matches_diagnosis(title, diagnosis_part):
+                        continue
+                    for doc in search_kdca_health_info_by_title(title):
+                        doc_id = (
+                            doc.metadata.get("cntnts_sn"),
+                            doc.metadata.get("section_sn"),
+                            doc.metadata.get("index"),
+                        )
+                        if doc_id in seen_kdca_ids or not _is_lifestyle_kdca_section(
+                            doc.metadata.get("section_name")
+                        ):
+                            continue
+                        seen_kdca_ids.add(doc_id)
+                        part_docs.append(doc)
             if not part_docs:
                 # 진단명이 질병관리청 title과 정확히 일치하지 않을 수 있어(예: "고혈압 있음")
                 # 의미기반 검색으로 보강하되 다른 질환 문서는 제외한다.

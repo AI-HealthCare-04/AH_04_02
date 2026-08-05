@@ -92,3 +92,51 @@ def test_compound_diagnosis_keeps_lifestyle_guides_for_each_disease():
 
     curated_search.assert_not_called()
     assert {item["source_ref"].disease for item in items} == {"고혈압", "당뇨병"}
+
+
+def test_unregistered_disease_matches_full_title_list_through_variant_spelling():
+    """DIAGNOSIS_DISEASE_ALIASES에 없는 질환(천식)도, 표기가 KDCA title과 정확히
+    같지 않으면(예: "기관지 천식") 663개 제목 전체 대조를 통해 찾아진다 —
+    질환마다 동의어를 수동 등록하지 않아도 되는 게 이 일반화의 핵심이다."""
+    calls = []
+
+    def exact_title_search(title: str):
+        calls.append(title)
+        return [_lifestyle_doc("천식", "6784")] if title == "천식" else []
+
+    with (
+        patch("rag.rag_chain._all_kdca_titles", return_value=("천식", "당뇨병")),
+        patch("rag.rag_chain.search_kdca_health_info_by_title", side_effect=exact_title_search),
+        patch("rag.rag_chain.search_kdca_health_info") as semantic_search,
+        patch("rag.rag_chain.search_by_disease") as curated_search,
+    ):
+        items = _lifestyle_context_items("기관지 천식")
+
+    assert "천식" in calls
+    semantic_search.assert_not_called()
+    curated_search.assert_not_called()
+    assert items[0]["source_ref"].disease == "천식"
+
+
+def test_exact_title_match_skips_full_title_list_scan():
+    """진단명이 이미 KDCA title과 정확히 일치하면(예: "고혈압"), 663개 전체 스캔
+    단계는 실행되지 않는다 — 기존 정확 매칭 동작에 이번 일반화가 영향을 주지 않음을
+    보장하는 회귀 테스트다."""
+    calls = []
+
+    def exact_title_search(title: str):
+        calls.append(title)
+        return [_lifestyle_doc("고혈압", "100")] if title == "고혈압" else []
+
+    with (
+        patch("rag.rag_chain._all_kdca_titles", return_value=("고혈압", "노인 고혈압")),
+        patch("rag.rag_chain.search_kdca_health_info_by_title", side_effect=exact_title_search),
+        patch("rag.rag_chain.search_kdca_health_info") as semantic_search,
+    ):
+        items = _lifestyle_context_items("고혈압")
+
+    # "노인 고혈압"은 _title_matches_diagnosis("노인 고혈압", "고혈압")이 True더라도,
+    # 정확 매칭(1단계)에서 이미 찾았으므로 전체 스캔(2단계)까지 안 가서 조회되지 않는다.
+    assert calls == ["고혈압"]
+    semantic_search.assert_not_called()
+    assert items[0]["source_ref"].disease == "고혈압"
