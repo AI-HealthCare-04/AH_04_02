@@ -584,6 +584,11 @@ def pin_record(
 @router.delete("/{record_id}")
 def delete_record(
     record_id: int,
+    # [2026-08-05 추가] 처방전만 지우고 이미 등록해서 계속 복용 중인 약은 그대로 두고
+    # 싶은 경우가 있다(예: 중복 업로드/오인식 처방전 정리) — 프론트가 삭제 전에
+    # "등록된 약도 함께 제거할까요?" 팝업으로 물어보고 그 답을 이 값으로 넘긴다.
+    # 기본값 True는 기존 동작(항상 같이 비활성화) 그대로 유지.
+    deactivate_medications: bool = True,
     actor: Actor = Depends(get_current_actor),
     session: Session = Depends(get_session),
 ):
@@ -613,32 +618,33 @@ def delete_record(
     if stored_image is not None:
         session.delete(stored_image)
 
-    schedules = session.exec(
-        select(MedicationSchedule).where(MedicationSchedule.record_id == record_id)
-    ).all()
-    for schedule in schedules:
-        schedule.active = False
-        session.add(schedule)
-
-    medications = session.exec(
-        select(PatientMedication)
-        .where(PatientMedication.prescription_id == record_id)
-        .where(PatientMedication.deleted_at.is_(None))
-    ).all()
-    medication_ids = [medication.id for medication in medications if medication.id is not None]
-    for medication in medications:
-        medication.deleted_at = datetime.now()
-        medication.is_active = False
-        medication.updated_at = datetime.now()
-        session.add(medication)
-
-    if medication_ids:
-        linked_schedules = session.exec(
-            select(MedicationSchedule).where(MedicationSchedule.patient_medication_id.in_(medication_ids))
+    if deactivate_medications:
+        schedules = session.exec(
+            select(MedicationSchedule).where(MedicationSchedule.record_id == record_id)
         ).all()
-        for schedule in linked_schedules:
+        for schedule in schedules:
             schedule.active = False
             session.add(schedule)
+
+        medications = session.exec(
+            select(PatientMedication)
+            .where(PatientMedication.prescription_id == record_id)
+            .where(PatientMedication.deleted_at.is_(None))
+        ).all()
+        medication_ids = [medication.id for medication in medications if medication.id is not None]
+        for medication in medications:
+            medication.deleted_at = datetime.now()
+            medication.is_active = False
+            medication.updated_at = datetime.now()
+            session.add(medication)
+
+        if medication_ids:
+            linked_schedules = session.exec(
+                select(MedicationSchedule).where(MedicationSchedule.patient_medication_id.in_(medication_ids))
+            ).all()
+            for schedule in linked_schedules:
+                schedule.active = False
+                session.add(schedule)
 
     session.commit()
     return {"message": "삭제됐어요"}
