@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -23,7 +25,7 @@ from core.database import get_session
 from core.dependencies import Actor, get_current_actor, require_actor_patient_access
 from core.push import send_push_to_recipient
 from core.schedule_alerts import caregiver_wants_notifications
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from models import (
     Caregiver,
@@ -43,10 +45,50 @@ from services.drug_matcher import MATCH_THRESHOLD, match_drug
 from services.ocr_quality import requires_drug_name_review
 from sqlmodel import Session, select
 
-from routers.ocr_router import run_ocr
+from routers.ocr_router import drug_info, run_ocr
 from routers.rag_router import run_rag
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/records", tags=["Records"])
+
+# [2026-08-05 추가, perf] 처방전 확인 화면(PrescriptionReview.tsx)이 약마다 GET
+# /ocr/drug-info를 순서대로 부르면 그만큼 API 부하가 커진다 — 백그라운드 사전조회도
+# 동시에 몰리는 요청 수를 여기서 제한한다(정부 공공데이터포털 API/LLM 호출을 무제한
+# 동시 실행하지 않도록).
+_DRUG_INFO_PREFETCH_MAX_WORKERS = 4
+
+
+def _prefetch_drug_info(record_id: int, drug_names: list[str]) -> None:
+    """[2026-08-05 추가, perf] POST /records 응답을 받고 사용자가 확인 화면
+    (PrescriptionReview.tsx)을 거치는 동안(보통 몇 초~수십 초) 이 처방전의 약들에 대해
+    GET /ocr/drug-info와 동일한 조회(drug_info())를 미리 실행해 diskcache를 채워둔다.
+    사용자가 실제로 확인 화면에서 조회할 때는 캐시 히트라 콜드 상태의 지연(주의사항
+    LLM 요약 등)을 체감하지 않는다.
+
+    BackgroundTasks로 등록돼 POST /records 응답이 이미 클라이언트로 전송된 뒤 실행되므로,
+    여기서 나는 어떤 예외도 그 응답에는 영향을 줄 수 없다 — 그래도 한 약의 실패가 나머지
+    약 조회를 막지 않도록 개별 try/except로 감싼다.
+    """
+    logger.info(
+        "약물 상세정보 백그라운드 사전조회 시작: record_id=%s, drug_count=%d, drug_names=%s",
+        record_id, len(drug_names), drug_names,
+    )
+    with ThreadPoolExecutor(max_workers=_DRUG_INFO_PREFETCH_MAX_WORKERS) as executor:
+        futures = {executor.submit(drug_info, name): name for name in drug_names}
+        for future in futures:
+            name = futures[future]
+            try:
+                future.result()
+            except Exception:  # noqa: BLE001 — 사전조회 실패는 사용자 화면에 영향 없어야 함(로그만 남김)
+                logger.warning(
+                    "약물 상세정보 백그라운드 사전조회 실패: record_id=%s, drug_name=%s",
+                    record_id, name, exc_info=True,
+                )
+    logger.info(
+        "약물 상세정보 백그라운드 사전조회 완료: record_id=%s, drug_count=%d, drug_names=%s",
+        record_id, len(drug_names), drug_names,
+    )
 
 # [2026-07-25 추가] ocr_router.py가 저장한 처방전 원본 사진(image_path, backend 루트
 # 기준 상대경로)을 절대경로로 풀 때 쓴다.
@@ -279,6 +321,7 @@ def _build_record_response(
 @router.post("")
 async def create_record(
     patient_id: int,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     caregiver_id: int | None = None,
     actor: Actor = Depends(get_current_actor),
@@ -329,7 +372,19 @@ async def create_record(
         session.refresh(record)
 
     await asyncio.to_thread(_finalize_status)
-    return await asyncio.to_thread(_build_record_response, record, session, None)
+    response = await asyncio.to_thread(_build_record_response, record, session, None)
+
+    # [2026-08-05 추가, perf] 확인 화면(PrescriptionReview.tsx)에서 약마다 GET
+    # /ocr/drug-info를 부르기 전에, 응답을 돌려준 뒤 백그라운드에서 미리 조회해 캐시를
+    # 채워둔다 — BackgroundTasks는 응답이 클라이언트로 전송된 뒤 실행되므로 이 응답
+    # 자체에는 영향이 없다.
+    drug_names = list(
+        dict.fromkeys(name for m in response["medications"] if (name := m["drug_name"]))
+    )
+    if drug_names:
+        background_tasks.add_task(_prefetch_drug_info, record.id, drug_names)
+
+    return response
 
 
 @router.post("/manual")
