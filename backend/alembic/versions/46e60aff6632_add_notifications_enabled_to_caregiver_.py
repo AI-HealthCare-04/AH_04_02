@@ -20,7 +20,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Upgrade schema."""
     # server_default를 직접 채운다 — autogenerate가 안 채워줘서 기존 행에 NOT NULL 컬럼을
-    # 추가하면 실패한다(docs/shared-dev-db-setup.md 관례). 기존 관계는 전부 알림 받는 중이던
+    # 추가하면 실패한다(docs/etc/shared-dev-db-setup.md 관례). 기존 관계는 전부 알림 받는 중이던
     # 걸로 취급(True)한다 — 이 기능이 생기기 전이라 실제로도 다 받고 있었음.
     op.add_column(
         'caregiver_patients',

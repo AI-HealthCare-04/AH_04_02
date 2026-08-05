@@ -537,7 +537,7 @@ class PatientMedication(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     patient_id: int = Field(foreign_key="patients.id", index=True)
     # 의약품 마스터 테이블 자체가 이 프로젝트에 아직 없다(rag/의 CSV·정부 API 실시간 조회로
-    # 대체 중 — CONTRACT.md 참고). 그래서 FK를 걸 대상이 없어 drug_id는 제약 없는 컬럼으로
+    # 대체 중 — rag/contract.md 참고). 그래서 FK를 걸 대상이 없어 drug_id는 제약 없는 컬럼으로
     # 남겨둔다 — 나중에 마스터 테이블이 생기면 그때 foreign_key를 추가한다. 검색 결과가
     # 하나로 확정되지 않으면 drug_id/item_seq를 null로 두고 원문(source_raw_text)만 남긴다.
     drug_id: int | None = Field(default=None, index=True)

@@ -2,7 +2,7 @@
 
 OCR의 ocr_interface.py는 다른 브랜치에 있어 이 저장소에서 직접 import할 수 없으므로,
 실제 산출물을 ocr_sample_output.json으로 복사해 픽스처로 고정한다. 두 브랜치가 dev로
-머지되면 이 파일을 producer(OCR) 정본을 직접 읽는 방식으로 전환할 것 (CONTRACT.md 참고).
+머지되면 이 파일을 producer(OCR) 정본을 직접 읽는 방식으로 전환할 것 (contract.md 참고).
 
 pydantic의 MedicationInput은 기본 extra="ignore"라 값만 비교해서는 OCR 쪽 필드
 rename/삭제를 못 잡는다. 그래서 값 검증과 별개로 "RAG가 필요로 하는 필드 키 집합이
