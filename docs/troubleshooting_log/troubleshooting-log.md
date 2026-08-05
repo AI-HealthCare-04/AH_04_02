@@ -726,3 +726,20 @@ docker compose restart backend frontend
 | **원인** | EasyOCR이 시각적으로 유사한 문자를 혼동한다. 의약품 도메인에서는 한글 받침 혼동(“캡슐”→”캡쑬”)이나 숫자·문자 혼동(`0`→`O`)이 처방 용량이나 약품명 오인식으로 직결된다. |
 | **해결** | 2단계 후처리: ① 자주 혼동되는 패턴 사전 치환(`CHAR_CORRECTIONS`) → ② 의약품 도메인 사전과 유사도 비교(`difflib.get_close_matches`) |
 | **현재 상태** | CLOVA OCR 전환으로 후처리 파이프라인 불필요. 참고용으로만 보존. |
+
+---
+
+| 날짜 | 2026.08.05 |
+|---|---|
+| **작성자** | 김영혜 |
+| **이슈** | EC2 배포 환경에서 천식 등 KDCA 기반 질환(약 659개)의 생활습관 가이드가 계속 비어 있음(`review_required: true`, `review_reason: "'천식'에 대한 생활지침 검색 결과 없음"`) |
+| **발생 위치** | EC2 `rag/.venv` — `python -m rag.cli ingest-kdca-health-info` 재인제스트 시도 중 |
+| **원인** | EC2 호스트에 별도로 구성된 `rag/.venv`의 파이썬 버전이 3.9.25였다(프로젝트 요구사항은 `pyproject.toml`/`uv.lock` 기준 3.13+). `str \| None` 같은 최신 타입힌트 문법이 3.9에서 `TypeError`를 냈고, 이를 여러 파일에 `from __future__ import annotations`를 수동으로 삽입해 대응하는 과정에서 배포 서버 소스 411개 파일이 로컬 변경 상태로 남았다(대부분 `chown`/`chmod -R`로 인한 권한 변경, `.py` 181개는 실제 내용 변경). 더 근본적인 원인은 벡터DB(`rag/chroma_db/`)가 `.gitignore`돼 있고 EC2에서도 bind mount로 유지되는 순수 로컬 상태라, jsonl 원본(천식 포함 663개 질환이 처음부터 존재)과 조용히 어긋날 수 있었던 것 — KDCA 인제스트(`rag ingest-kdca-health-info`)가 CI/배포 어디에도 자동 연결되지 않은, 개발자가 수동으로 돌려야 하는 명령이었다. |
+| **해결** | 1) `git status`로 EC2 워킹트리 오염 확인 후 `git reset --hard origin/dev`로 복구(참고: `.github/workflows/ci.yml`의 배포 스크립트가 fast-forward 실패 시 이미 같은 방식으로 자동 복구하게 돼 있어, 다음 정상 배포 때는 어차피 정리됐을 상황). 2) 손상된 호스트 venv 대신, 이미 Python 3.13으로 정상 구성된 backend Docker 컨테이너 **안에서** 재인제스트: `docker compose exec -T backend sh -c 'cd /workspace/rag && uv run --project /workspace python -m rag.cli ingest-kdca-health-info'` → 섹션 11204건 → 청크 8207건 저장(순수 이미지 등 텍스트 없는 섹션 2997건 제외, jsonl 원본 기대치와 완전히 일치). |
+| **핵심 패턴** | ① 배포 환경에 프로젝트 표준과 다른 버전의 venv가 별도로 있으면 최신 문법에서 조용히 깨질 수 있다 — 항상 이미 올바른 버전으로 고정된 Docker 컨테이너 안에서 실행하고, 호스트 venv는 직접 손대지 않는다. ② `.gitignore`된 로컬 상태(벡터DB 등)를 수동 명령으로만 갱신하는 구조는 git으로는 절대 안 보이는 채로 소스와 조용히 어긋날 수 있다 — 재현·검증 스크립트(`rag/scripts/inspect_kdca_coverage.py`, PR #163)로 실제 벡터DB와 원본 jsonl 건수를 주기적으로 대조하는 습관이 필요하다. |
+
+```bash
+git status
+git reset --hard origin/dev
+docker compose exec -T backend sh -c 'cd /workspace/rag && uv run --project /workspace python -m rag.cli ingest-kdca-health-info'
+```
