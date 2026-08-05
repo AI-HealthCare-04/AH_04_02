@@ -97,7 +97,7 @@ if [[ -f "$ENV_LOCAL" ]]; then
     if [[ -f "$CA_PATH" ]]; then
       echo "  → $CA_PATH 존재 ✓"
     else
-      echo "  → $CA_PATH 없음 ✗ (aiven-ca.pem 복사 필요 — docs/etc/local-files-checklist.md 참고)"
+      echo "  → $CA_PATH 없음 ✗ (aiven-ca.pem 복사 필요 — docs/Team Members' Notes/local-files-checklist.md 참고)"
     fi
   fi
 else

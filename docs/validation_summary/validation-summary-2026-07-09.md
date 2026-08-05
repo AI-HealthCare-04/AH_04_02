@@ -11,7 +11,7 @@
 | RAG 파이프라인 | `pytest`(rag-prototype) | **29/29 통과** | `cd rag-prototype && pytest -v` |
 | OCR 파싱 회귀 | `batch_regression.py`(24개 목업) | **포맷 인식 24/24(100%), 검증조건 39/40(97.5%)** | `cd backend && python scripts/batch_regression.py` (스크립트 내 `BACKEND` 경로를 본인 환경에 맞게 수정 필요 — 순현님 로컬 경로로 하드코딩돼 있음) |
 | drug_class 분류 정확도 | 위 회귀 스크립트 포함 | **8/9(88.9%)** — 잔여 1건은 HIRA/e약은요 데이터 없을 때 알려진 폴백 한계 | 〃 |
-| drug_code 매칭(실 파이프라인) | CLOVA OCR e2e 1건 | **4/4(100%)** | `docs/etc/results_soonhyun.md` §11 참고 |
+| drug_code 매칭(실 파이프라인) | CLOVA OCR e2e 1건 | **4/4(100%)** | `docs/Team Members' Notes/ocr_test_results_2026-07-03.md` §11 참고 |
 | review_required 오탐율 | 〃 | **0/4(0%)** | 〃 |
 | 백엔드 PII/보안(신규, PR #18) | `pytest`(backend/tests) | **14/14 통과** | `cd backend && pytest tests/ -v` (PR #18 병합 전엔 해당 브랜치에서만 실행 가능) |
 | 챗봇·약물상세 버그(PR #19) | 코드 분석 + `TestClient` 재현 | **원인 확정·수정 완료**, 실제 real 환경 재현은 소정님 확인 대기 | `docs/troubleshooting_log/troubleshooting-log.md` 하단 2건 참고 |
@@ -40,7 +40,7 @@
 - D7: HIRA CSV 중복 제거, `backend/data/` 한 곳으로 통일(PR #14).
 
 **Preventive(재발 방지)**
-- `docs/etc/rag-real-response-sample.md`에 stub vs 실제 응답 모양 차이표 유지 — 새 화면 추가 시 이 표로 "이 필드 stub 전용 아닌가?" 확인하는 걸 습관화(D8/D9 재발 원인이 "새 화면이 이 문서를 안 보고 만들어짐"이었음).
+- `docs/Team Members' Notes/rag-real-response-sample.md`에 stub vs 실제 응답 모양 차이표 유지 — 새 화면 추가 시 이 표로 "이 필드 stub 전용 아닌가?" 확인하는 걸 습관화(D8/D9 재발 원인이 "새 화면이 이 문서를 안 보고 만들어짐"이었음).
 - `rag/contract.md`에 데이터 소스 3종(e약은요/허가정보/HIRA)의 원천·용도·중복 관계 명시(D5).
 - 외부 API(LLM 등)를 동기 호출로 감싸는 엔드포인트는 공용 클라이언트의 전역 타임아웃에 의존하지 않고 개별 타임아웃을 지정하는 걸 관례로 삼음(D10).
 - rag-prototype↔backend처럼 스키마와 소비 코드가 물리적으로 분리된 구조에서는, 스키마에 필드 추가 시 소비 지점 grep으로 확인하는 걸 체크리스트화(D6 재발 원인).
@@ -56,6 +56,6 @@
 
 - `rag-prototype/docs/deviation_log/deviation-log-2026-07-06-ocr-rag-integration.md`
 - `rag-prototype/docs/deviation_log/deviation-log-2026-07-08-medication-data-source-capa.md`
-- `docs/etc/results_soonhyun.md` (OCR 정확도, e2e 통합테스트)
+- `docs/Team Members' Notes/ocr_test_results_2026-07-03.md` (OCR 정확도, e2e 통합테스트)
 - `docs/troubleshooting_log/troubleshooting-log.md` (UI 버그 로그, 챗봇/약물상세 건 포함)
 - PR #14, #16, #18, #19

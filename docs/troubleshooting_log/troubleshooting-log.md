@@ -88,6 +88,30 @@ const styles = {
 
 ---
 
+| 날짜 | 2026.07.06 |
+|---|---|
+| **작성자** | 김영혜 |
+| **이슈** | OCR 개별 신뢰도가 RAG의 `review_required` 판정에 전혀 반영되지 않음 — 오인식 가능성이 있는 약이 "검토 불필요"로 나갈 수 있었음(환자 안전 관련, 심각도 높음) |
+| **발생 위치** | `rag_prototype/schemas.py`의 `MedicationInput.confidence`, `rag_chain.generate_guide_from_medication()` / `generate_guide()` |
+| **원인** | ① `MedicationInput.confidence` 필드는 있었지만 실제로 쓰는 코드가 없었음. ② `GuideResponse.review_required`는 LLM 인용 여부·self-consistency 점수만으로 결정돼 "OCR이 애초에 얼마나 확신하고 읽었는가"와는 무관했음. ③ OCR 쪽 `review_required`도 처방전 전체 평균 confidence만 봐서, 평균이 임계값을 넘기면(아스피린 0.92 + 로자탄 0.78 → 평균 0.85) 개별 저신뢰 약이 있어도 OCR·RAG 양쪽 다 걸러내지 못하는 이중 사각지대였음. |
+| **해결** | `config.py`에 `OCR_CONFIDENCE_REVIEW_THRESHOLD=0.80` 신설, `rag_chain.py`에 `_merge_ocr_confidence()`를 추가해 어댑터(`generate_guide_from_medication`) 안에서 후처리로 병합(코어 `generate_guide()` 시그니처는 안 건드림). `confidence==0.0`(미제공)과 `0.0<confidence<0.80`(저신뢰)을 구분해 `ocr_confidence_unavailable`/`ocr_low_confidence` 플래그 부여, `GuideResponse`에 `review_flags`/`ocr_confidence` 필드 추가. 회귀 테스트 3건(저신뢰/미제공/고신뢰) 추가. |
+| **핵심 패턴** | OCR과 RAG가 서로 다른 브랜치에서 독립 개발되면 "필드는 있는데 아무도 안 쓴다" 같은 계약 불일치가 조용히 생길 수 있다 — `rag/contract.md`(OCR↔RAG 필드 매핑·계약 테스트)를 신설해 재발을 방지함. 관련 편차 로그: `docs/deviation_log/deviation-log-2026-07-06-ocr-rag-integration.md`(D2). |
+
+```python
+# 수정 전
+guide = generate_guide_from_medication(
+    MedicationItem(drug_name="로자탄", confidence=0.78, diagnosis="고혈압", ...)
+)
+guide.review_required   # False  <- 기대: True
+
+# 수정 후
+guide.review_required        # True
+guide.review_flags           # ["ocr_low_confidence"]
+guide.ocr_confidence          # 0.78
+```
+
+---
+
 | 날짜 | 2026.07.07 |
 |---|---|
 | **작성자** | 박소정 |
@@ -159,7 +183,7 @@ export async function askChat(patientId: number, questionId: string) {
 | **원인** | `RAG_PROVIDER=real`일 때 백엔드가 내려주는 실제 응답 모양은 `medication_guide`/`precautions`(배열) 필드를 쓰고, `dosage_text`/`caution`(stub 전용 필드)는 아예 안 내려줌(`rag_prototype/schemas.py`의 `GuideResponse`엔 `caution` 필드 자체가 없음). `MedGuide.tsx`/`Result.tsx`는 PR #16에서 이미 두 모양을 다 처리하도록 고쳤지만, `DrugInfo.tsx`는 그 작업 대상에서 빠져서 여전히 `guideDrug?.dosage_text`/`guideDrug?.caution`만 읽고 있었음 — 실제 모드에서는 항상 `undefined`라 "정보 없음"으로 표시됨. 즉 데이터는 이미 같은 `record.guide`에 들어있는데 화면이 잘못된 필드명을 읽고 있던 것 |
 | **시도한 방법** | `/ocr/drug-info`(적응증 조회용 별도 엔드포인트)와 `drug_matcher.py`/`drug_reference.py`를 먼저 의심했으나, 이 엔드포인트는 처음부터 적응증(효능효과)만 담당하고 부작용/주의사항 필드는 조회하지 않도록 설계돼 있어 관련 없음을 확인. 실제 원인은 이미 응답에 있는 `record.guide.medication_guide.drugs[].precautions`를 화면이 안 읽는 것이었음 |
 | **해결** | `DrugInfo.tsx`에 `MedGuide.tsx`/`Result.tsx`와 동일한 분기 로직 추가: `guideText = guideDrug?.medication_guide ?? guideDrug?.dosage_text`, `cautionText = guideDrug?.precautions?.length ? guideDrug.precautions.join(" ") : guideDrug?.caution` |
-| **핵심 패턴** | stub/실제 두 응답 모양을 처리하는 방어 로직을 한 화면에만 추가하고 끝내지 말 것 — 같은 `GuideDrug`/`LifestyleGuide` 데이터를 읽는 화면이 여러 개(Result/MedGuide/DrugInfo)면 전부 같은 분기를 적용해야 함. 새 화면을 추가할 때마다 "이 필드, stub에만 있는 필드 아닌가?"를 `docs/etc/rag-real-response-sample.md`로 확인하는 습관이 필요 |
+| **핵심 패턴** | stub/실제 두 응답 모양을 처리하는 방어 로직을 한 화면에만 추가하고 끝내지 말 것 — 같은 `GuideDrug`/`LifestyleGuide` 데이터를 읽는 화면이 여러 개(Result/MedGuide/DrugInfo)면 전부 같은 분기를 적용해야 함. 새 화면을 추가할 때마다 "이 필드, stub에만 있는 필드 아닌가?"를 `docs/Team Members' Notes/rag-real-response-sample.md`로 확인하는 습관이 필요 |
 
 ---
 
@@ -583,7 +607,7 @@ docker compose restart backend frontend
 | **시도한 방법 (진단)** | 사용자가 알려준 전화번호 2개를 로컬 DB에서 직접 조회 — 계정 존재/미잠김 확인(로컬 `PII_HASH_SECRET`으로는 정상 조회됨, 즉 로컬 값은 맞는 값). 이것만으로는 EC2의 실제 값을 알 수 없어, 진단용 테스트 계정을 직접 만들어(`hashed_password`, `phone`, `email` 모두 실제 헬퍼로 설정) 배포된 API에 curl로 직접 로그인 요청 — 전화번호 로그인은 실패, 같은 계정·같은 비밀번호로 이메일 로그인은 성공. 이메일 로그인은 평문 비교(시크릿 무관)라 이 차이가 `PII_HASH_SECRET` 불일치를 확정적으로 증명했다. |
 | **해결** | EC2에 SSH로 접속해 `docker compose exec backend env \| grep PII_HASH_SECRET`으로 실제 값을 확인, 로컬 `.env`의 원래 값과 다름을 확인 → `sed -i`로 정정 → `docker compose down && up -d`로 재생성 → 값 반영 확인 → 새 진단 계정으로 전화번호 로그인 재시도해 성공 확인. `PII_ENCRYPTION_KEY`는 다행히 일치해 개인정보 복호화 불가 문제(더 심각한 사고)는 없었음을 별도로 확인. |
 | **테스트/검증** | 진단용으로 만든 테스트 계정(로컬 DB, EC2 API 양쪽)은 검증 직후 모두 삭제해 공유 DB에 남기지 않음. |
-| **재발 방지** | `PII_HASH_SECRET`/`PII_ENCRYPTION_KEY`/`VAPID_*`처럼 "팀 전체가 항상 같은 값을 써야 하는" 시크릿은, 오래 떠 있던 컨테이너를 재생성하는 작업(`.env` 변경이 목적이 아니어도) 전에 반드시 현재 EC2 값과 로컬/팀 기준값이 일치하는지 먼저 확인한다. `docs/etc/env-var-checklist.md`에 이미 이 값들이 "동기화 필요" 항목으로 명시돼 있었음에도 실제로 어긋난 채로 오래(정확한 시점 불명) 있었다는 것 자체가, 컨테이너를 오래 재생성하지 않고 두면 이런 어긋남이 겉으로 드러나지 않고 누적될 수 있음을 보여준다. |
+| **재발 방지** | `PII_HASH_SECRET`/`PII_ENCRYPTION_KEY`/`VAPID_*`처럼 "팀 전체가 항상 같은 값을 써야 하는" 시크릿은, 오래 떠 있던 컨테이너를 재생성하는 작업(`.env` 변경이 목적이 아니어도) 전에 반드시 현재 EC2 값과 로컬/팀 기준값이 일치하는지 먼저 확인한다. `docs/Team Members' Notes/env-var-checklist.md`에 이미 이 값들이 "동기화 필요" 항목으로 명시돼 있었음에도 실제로 어긋난 채로 오래(정확한 시점 불명) 있었다는 것 자체가, 컨테이너를 오래 재생성하지 않고 두면 이런 어긋남이 겉으로 드러나지 않고 누적될 수 있음을 보여준다. |
 
 ---
 

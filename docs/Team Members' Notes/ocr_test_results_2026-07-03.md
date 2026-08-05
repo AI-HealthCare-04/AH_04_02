@@ -1,5 +1,6 @@
 # OCR 실측 결과 보고서
 
+> 작성자: 권순현  
 > 측정일: 2026-07-03  
 > 엔진: CLOVA OCR (primary) / Tesseract 5.5.2 (fallback)  
 > `review_required` 기준: `overall_confidence < 0.80`
