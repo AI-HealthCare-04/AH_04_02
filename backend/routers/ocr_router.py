@@ -12,6 +12,7 @@ records_router.py(실제 업로드→OCR→가이드 한 번에 처리) 양쪽�
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -278,6 +279,23 @@ def _summarize_precautions_for_patient(
         ]
         if part
     )
+
+    # [2026-08-05 추가, perf] mfds_client.py의 diskcache 패턴과 동일하게 — 매 요청마다
+    # LLM을 새로 호출하면 /ocr/drug-info가 캐시 warm 상태에서도 3~4초씩 고정으로 걸렸다.
+    # 약품명 + 원문 내용(raw_text) 해시를 키로 써서, 같은 약의 같은 원문에 대해서는
+    # 한 번 요약한 결과를 재사용한다(원문이 갱신되면 해시가 달라져 자동으로 다시 요약됨).
+    cache_key = f"ocr.patient_summary|{drug_name}|{hashlib.sha256(raw_text.encode('utf-8')).hexdigest()}"
+    from rag.mfds_client import _disk_cache as summary_disk_cache
+
+    if summary_disk_cache is not None:
+        try:
+            cached = summary_disk_cache.get(cache_key)
+        except Exception:  # noqa: BLE001 — 캐시 조회 실패는 LLM 호출로 폴백
+            cached = None
+        if cached is not None:
+            logger.info("복약 주의사항 요약 캐시 히트: drug_name=%s", drug_name)
+            return cached
+
     with optional_observation(
         as_type="generation",
         name="drug-info-patient-summary",
@@ -332,6 +350,11 @@ def _summarize_precautions_for_patient(
                 },
             )
             flush_langfuse()
+            if summary_disk_cache is not None:
+                try:
+                    summary_disk_cache.set(cache_key, summary, expire=rag_settings.MFDS_CACHE_TTL_SECONDS)
+                except Exception:  # noqa: BLE001 — 캐시 저장 실패는 이번 요청 결과에 영향 없음
+                    pass
             return summary
         except Exception as exc:  # noqa: BLE001 — LLM 실패/키 미설정/JSON 파싱 실패 등 어떤 이유로든 원문 폴백
             update_observation(generation, output={"status": "fallback", "error_type": type(exc).__name__})

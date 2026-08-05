@@ -443,3 +443,123 @@ class TestSummarizePrecautionsForPatient:
             result = _summarize_precautions_for_patient("테스트약", "주의사항 원문", None, None)
 
         assert result is None
+
+
+class TestSummarizePrecautionsCache:
+    """[2026-08-05 추가, perf 회귀 테스트] _summarize_precautions_for_patient()가
+    mfds_client.py와 동일한 diskcache 패턴으로 결과를 캐싱하는지 검증한다. 실제 개발
+    환경의 mfds_cache/를 오염시키지 않도록(그리고 그 반대로 이전 테스트 실행이 남긴
+    캐시에 이 테스트가 영향받지 않도록) 매 테스트마다 임시 디렉터리의 새 diskcache.Cache로
+    rag.mfds_client._disk_cache를 갈아치운 뒤 원복한다."""
+
+    def _fake_chat(self, call_log: list, must_check: str = "복용 후 두통이 있으면 병원에 가세요."):
+        response = SimpleNamespace(
+            content=json.dumps({"must_check": [must_check], "tell_doctor": [], "avoid_together": []})
+        )
+
+        def _invoke(*_a, **_kw):
+            call_log.append(1)
+            return response
+
+        return SimpleNamespace(invoke=_invoke)
+
+    def test_second_call_with_identical_input_hits_cache_and_skips_llm(self, tmp_path):
+        import diskcache
+        import rag.mfds_client as mfds_client_mod
+        from routers.ocr_router import _summarize_precautions_for_patient
+
+        fresh_cache = diskcache.Cache(str(tmp_path))
+        call_log: list = []
+        try:
+            with (
+                patch.object(mfds_client_mod, "_disk_cache", fresh_cache),
+                patch("rag.config.settings.OPENAI_API_KEY", "fake-key"),
+                patch("langchain_openai.ChatOpenAI", return_value=self._fake_chat(call_log)),
+            ):
+                first = _summarize_precautions_for_patient(
+                    "캐시테스트약", "주의사항 원문", "부작용 원문", None
+                )
+                second = _summarize_precautions_for_patient(
+                    "캐시테스트약", "주의사항 원문", "부작용 원문", None
+                )
+        finally:
+            fresh_cache.close()
+
+        assert first == second
+        assert len(call_log) == 1, "두 번째 호출은 캐시 히트라 LLM(chat.invoke)이 다시 호출되면 안 된다"
+
+    def test_different_precautions_text_is_a_cache_miss_and_calls_llm_again(self, tmp_path):
+        """캐시 키가 drug_name뿐 아니라 원문 내용도 반영하는지 — 원문이 다르면 같은
+        약이어도 다시 요약해야 한다(원문이 갱신됐는데 옛 요약을 그대로 돌려주면 안 됨)."""
+        import diskcache
+        import rag.mfds_client as mfds_client_mod
+        from routers.ocr_router import _summarize_precautions_for_patient
+
+        fresh_cache = diskcache.Cache(str(tmp_path))
+        call_log: list = []
+        try:
+            with (
+                patch.object(mfds_client_mod, "_disk_cache", fresh_cache),
+                patch("rag.config.settings.OPENAI_API_KEY", "fake-key"),
+                patch("langchain_openai.ChatOpenAI", return_value=self._fake_chat(call_log)),
+            ):
+                _summarize_precautions_for_patient("캐시테스트약", "주의사항 원문 A", None, None)
+                _summarize_precautions_for_patient("캐시테스트약", "주의사항 원문 B", None, None)
+        finally:
+            fresh_cache.close()
+
+        assert len(call_log) == 2, "원문이 다르면 캐시 키도 달라져서 매번 새로 요약해야 한다"
+
+    def test_cached_entry_expires_with_mfds_cache_ttl(self, tmp_path):
+        """다른 diskcache 캐시(mfds_client.py)와 동일한 TTL(MFDS_CACHE_TTL_SECONDS)로
+        저장되는지 확인 — 이 캐시만 별도 만료 정책을 갖지 않도록."""
+        import diskcache
+        import rag.mfds_client as mfds_client_mod
+        from rag.config import settings as rag_settings
+        from routers.ocr_router import _summarize_precautions_for_patient
+
+        fresh_cache = diskcache.Cache(str(tmp_path))
+        call_log: list = []
+        try:
+            with (
+                patch.object(mfds_client_mod, "_disk_cache", fresh_cache),
+                patch("rag.config.settings.OPENAI_API_KEY", "fake-key"),
+                patch("langchain_openai.ChatOpenAI", return_value=self._fake_chat(call_log)),
+            ):
+                _summarize_precautions_for_patient("캐시테스트약", "주의사항 원문", None, None)
+
+            keys = list(fresh_cache)
+            assert len(keys) == 1
+            _, expire_time = fresh_cache.get(keys[0], expire_time=True)
+            assert expire_time is not None
+            # TTL이 MFDS_CACHE_TTL_SECONDS로 설정됐는지 — 초 단위 오차만 허용.
+            import time
+
+            remaining = expire_time - time.time()
+            assert abs(remaining - rag_settings.MFDS_CACHE_TTL_SECONDS) < 5
+        finally:
+            fresh_cache.close()
+
+    def test_llm_failure_is_not_cached_so_retry_can_succeed_later(self, tmp_path):
+        """LLM 실패(exc_info)나 키 미설정으로 인한 None은 캐시하지 않는다 — 캐시했다면
+        일시적 장애가 TTL(최대 48시간) 동안 재시도 자체를 막아버렸을 것이다."""
+        import diskcache
+        import rag.mfds_client as mfds_client_mod
+        from routers.ocr_router import _summarize_precautions_for_patient
+
+        fresh_cache = diskcache.Cache(str(tmp_path))
+
+        def _raise(*_a, **_kw):
+            raise RuntimeError("openai down")
+
+        try:
+            with (
+                patch.object(mfds_client_mod, "_disk_cache", fresh_cache),
+                patch("rag.config.settings.OPENAI_API_KEY", "fake-key"),
+                patch("langchain_openai.ChatOpenAI", return_value=SimpleNamespace(invoke=_raise)),
+            ):
+                result = _summarize_precautions_for_patient("캐시테스트약", "주의사항 원문", None, None)
+            assert result is None
+            assert len(list(fresh_cache)) == 0, "실패 결과가 캐시에 남으면 안 된다"
+        finally:
+            fresh_cache.close()
