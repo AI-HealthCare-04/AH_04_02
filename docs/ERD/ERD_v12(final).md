@@ -18,6 +18,7 @@ erDiagram
     CAREGIVERS ||--o{ CAREGIVER_PATIENTS : "관리함"
     PATIENTS ||--o{ MEDICAL_RECORDS : "처방전 보유"
     CAREGIVERS ||--o{ MEDICAL_RECORDS : "대리 등록"
+    MEDICAL_RECORDS ||--|| MEDICAL_RECORD_IMAGES : "원본 이미지"
     MEDICAL_RECORDS ||--o{ OCR_RESULTS : "OCR 결과"
     OCR_RESULTS ||--o{ MEDICATION_FIELD_FLAGS : "수정 지적"
     MEDICAL_RECORDS ||--o{ GUIDE_RESULTS : "가이드 결과"
@@ -46,7 +47,8 @@ erDiagram
 | 연결 | `caregiver_patients` | 계정 간 다대다 연결, 해제 상태, 관계별 알림 수신 설정 |
 | 연결 | `invitations` | 전화번호 기반 연결 초대와 만료·수락 상태 |
 | 연결 | `revocation_notices` | 연결·해제·승인 결과 알림 |
-| 처방전 | `medical_records` | 처방전 사진 경로, 처리·검토·즐겨찾기·논리 삭제 상태 |
+| 처방전 | `medical_records` | 처방전 처리·검토·즐겨찾기·논리 삭제 상태 |
+| 처방전 | `medical_record_images` | 처방전 원본 이미지 바이너리(DB 저장, `medical_records`와 1:1) |
 | 처방전 | `ocr_results` | OCR로 추출한 의약품·용법·진단 정보와 확인 상태 |
 | 처방전 | `medication_field_flags` | 보호자·지원인력이 제안한 OCR 필드 수정 내용 |
 | 처방전 | `record_correction_notices` | 처방전 수정 요청·완료 알림 |

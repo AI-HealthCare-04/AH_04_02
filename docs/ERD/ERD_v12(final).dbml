@@ -107,7 +107,7 @@ Table privacy_purge_audits {
 Table medical_records {
   id int [pk, increment]
   patient_id int [ref: > patients.id]
-  image_path varchar [note: '실제 저장 경로: uploads/prescriptions/{uuid4}.ext — REQ-064']
+  image_path varchar [note: "'database' sentinel(신규 업로드) — 실제 이미지 바이너리는 medical_record_images에 저장. 로컬 파일 경로(uploads/prescriptions/{uuid4}.ext)는 과거 데이터용 레거시 폴백 — REQ-064"]
   status varchar [note: 'processing/review_required/completed/failed']
   raw_text varchar [null, note: 'TEXT, OCR 원문']
   failure_reason varchar [null]
@@ -117,6 +117,14 @@ Table medical_records {
   pinned bool [default: false, note: 'REQ-074, 즐겨찾기']
   prescription_date varchar [null, note: 'OCR 원문에서 추출한 처방일자 — 재처방 판단 기준']
   caregiver_review_status varchar [default: 'none', note: 'REQ-063, none/pending/needs_correction/reviewed']
+}
+
+Table medical_record_images {
+  record_id int [pk, ref: - medical_records.id, note: '1:1, medical_records와 동일 PK 공유']
+  content varchar [note: 'MEDIUMBLOB(MySQL)/BLOB(SQLite) — 처방전 원본 이미지 바이너리']
+  content_type varchar [default: 'application/octet-stream']
+  byte_size int
+  created_at datetime
 }
 
 Table ocr_results {
