@@ -529,16 +529,19 @@ def delete_pending_invitation(
     """보낸 대기중 초대 삭제.
 
     초대 링크를 이미 전달했을 수 있으므로 행을 지우지 않고 cancelled로 바꿔 토큰 수락도 막는다.
+
+    [2026-08-05 버그수정] 예전엔 만료된(is_expired) pending 초대를 먼저 "expired"로
+    자동 전환·커밋한 뒤, 바로 다음 줄에서 "status != pending"을 이유로 409를 던졌다 —
+    즉 자기가 방금 바꿔놓은 상태를 근거로 자기 자신을 막는 자기모순이라, 만료된 초대는
+    사용자가 목록에서 지우려고 삭제를 눌러도 항상 실패했다(실제 배포 DB의 대기중 초대
+    11건 중 9건이 만료 상태였음). "이미 다른 경로로 처리됨"(accepted/rejected/cancelled)만
+    막아야 하는 게 원래 의도이므로, 자동 만료 전환 없이 원래 status만으로 판단한다.
     """
     invitation = session.get(Invitation, invitation_id)
     if not invitation:
         raise HTTPException(404, "초대를 찾을 수 없어요")
     _require_invitation_delete_owner(invitation, actor, session)
 
-    if invitation.status == "pending" and invitation.is_expired:
-        invitation.status = "expired"
-        session.add(invitation)
-        session.commit()
     if invitation.status != "pending":
         raise HTTPException(409, f"이미 {invitation.status} 처리된 초대예요")
 

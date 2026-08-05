@@ -137,6 +137,38 @@ def test_delete_pending_guardian_invitation_cancels_token():
         assert invitation.status == "cancelled"
 
 
+def test_delete_expired_pending_invitation_still_succeeds():
+    """[2026-08-05 추가, 실제 배포 DB 재현] 만료된(is_expired=True) pending 초대를
+    삭제하려 하면, 예전 코드가 먼저 status를 "expired"로 바꿔 커밋해놓고 바로 다음 줄
+    "status != pending" 체크에서 그걸 이유로 409를 던져 항상 실패했다. 사용자가 만료된
+    초대를 목록에서 지우려는 정상적인 시도가 매번 막히는 버그였다."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        patient = models.Patient()
+        patient.name = "테스트 환자"
+        session.add(patient)
+        session.commit()
+        session.refresh(patient)
+
+        create_invitation(
+            InvitationCreate(patient_id=patient.id, relation_type="guardian"),
+            ("patient", patient),
+            session,
+        )
+        invitation = session.exec(select(models.Invitation)).one()
+        invitation.expires_at = datetime.now() - timedelta(days=1)
+        session.add(invitation)
+        session.commit()
+        assert invitation.is_expired is True
+
+        result = delete_pending_invitation(invitation.id, ("patient", patient), session)
+
+        session.refresh(invitation)
+        assert result == {"deleted": invitation.id, "status": "cancelled"}
+        assert invitation.status == "cancelled"
+
+
 def test_delete_pending_patient_invitation_requires_inviter_caregiver():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)

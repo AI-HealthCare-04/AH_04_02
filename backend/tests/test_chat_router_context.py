@@ -173,6 +173,30 @@ def test_extract_dur_candidate_handles_ingredient_name_without_hardcoded_alias()
     assert "심바스타틴" in names
 
 
+def test_extract_dur_candidate_ignores_conjugated_verbs_not_drug_names():
+    """[2026-08-05 추가, 실제 배포 사고 재현] "나 임신했는데 지금 처방 받은 의약품
+    먹으면 안되는거야?" 질문에서 "임신했는데"/"안되는거야"가 약 이름 후보로 뽑혀
+    DUR API에 그대로 넘어갔고, 결과가 없으니 "찾지 못했습니다" 메시지가 만들어져
+    이미 있던 [DUR 임부금기] 데이터를 챗봇이 무시하는 원인이 됐다(Langfuse trace
+    a963db7359bc3f3dc119e8b77d7f138f)."""
+    names = _extract_dur_candidate_drug_names(
+        "나 임신했는데 지금 처방 받은 의약품 먹으면 안되는거야?",
+        ["자누비아정50밀리그램", "페브릭정80밀리그램", "훼로바-유서방정"],
+    )
+
+    assert "임신했는데" not in names
+    assert "안되는거야" not in names
+
+
+def test_extract_dur_candidate_still_finds_real_drug_alongside_conjugated_verbs():
+    """어미 활용형 필터가 진짜 약 이름까지 같이 걸러내면 안 된다."""
+    names = _extract_dur_candidate_drug_names("타이레놀 먹었는데 괜찮은거야?", [])
+
+    assert "타이레놀" in names
+    assert "먹었는데" not in names
+    assert "괜찮은거야" not in names
+
+
 def test_dur_lookup_modes_avoid_unneeded_caution_apis_for_taboo_question():
     needs_taboo, needs_cautions = _dur_lookup_modes("노바스크정5밀리그람과 타이레놀 병용 가능해?")
 

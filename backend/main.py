@@ -32,6 +32,15 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+# [2026-08-05 추가] 아무도 로깅 레벨을 설정한 적이 없어 root logger가 기본값(WARNING)을
+# 그대로 써서, 앱 전역의 logger.info() 호출(예: ocr_router.py의 캐시 히트 로그,
+# records_router.py의 백그라운드 사전조회 시작/완료 로그)이 처음부터 전부 조용히
+# 버려지고 있었다 — 실제로 PR #164 배포 후 records/369에 대해 사전조회가 실제로 동작
+# 했는지 이 로그로 확인할 방법이 없었다. uvicorn 자체 로그(uvicorn/uvicorn.access/
+# uvicorn.error)는 uvicorn이 자기 로거에 이미 handlers + propagate=False로 별도
+# 설정해두므로(root와 완전히 분리) 이 설정과 무관하게 그대로 동작한다.
+logging.basicConfig(level=logging.INFO)
+
 # [7/11] .env 로드가 ocr_router.py 안에만 있어서, auth_router(→models→security.py가
 # 기동 시점에 PII_ENCRYPTION_KEY를 요구함)가 먼저 임포트되면 .env가 아직 안 읽힌
 # 상태로 실패했다. 라우터 임포트보다 먼저, 여기 한 곳에서만 로드한다.

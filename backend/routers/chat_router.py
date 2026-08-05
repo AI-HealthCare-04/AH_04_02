@@ -322,6 +322,30 @@ def _summarize_source_refs(source_refs_json: str) -> list[str]:
     return lines
 
 
+def _registered_drug_dur_source_refs(source_refs_json: str) -> list[dict]:
+    """_summarize_source_refs()와 같은 데이터(GuideResult.source_refs)에서, 프롬프트용
+    텍스트가 아니라 화면 "참고 자료"에 표시할 구조화된 DUR 인용만 추린다.
+
+    [2026-08-05 추가] _build_on_demand_dur_context()는 질문 문장에 나온 약(온디맨드 조회)에
+    한해서만 구조화된 refs를 프론트로 내려보내도록 2026-07-24에 고쳐졌다(주석 참고) — 그런데
+    환자가 이미 등록한 처방 자체의 DUR 경고([DUR 임부금기] 등, _summarize_source_refs가
+    프롬프트 텍스트로만 써오던 바로 그 데이터)는 여전히 구조화된 인용으로 안 내려가서,
+    챗봇이 실제로 이 DUR 데이터를 근거로 답해도 화면 출처에 "식약처 DUR 데이터"가
+    안 뜨는 문제가 있었다. rag_router.py가 이미 만들어두는 ref 모양(drug_name +
+    mixture_item_name/prohbt_content 또는 dur_category/dur_detail/dur_extra)을 그대로
+    재사용한다."""
+    try:
+        refs = json.loads(source_refs_json)
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+    return [
+        ref
+        for ref in refs
+        if isinstance(ref, dict) and (ref.get("mixture_item_name") or ref.get("dur_category"))
+    ]
+
+
 def _summarize_lifestyle_category(category: object, label: str) -> str:
     if not isinstance(category, dict):
         return ""
@@ -380,14 +404,19 @@ def _summarize_lifestyle_guide(lifestyle_guide_json: str) -> list[str]:
     return lines
 
 
-def _build_patient_context(patient_id: int, session: Session) -> str:
-    """환자의 가장 최근 처방전(OcrResult/GuideResult)을 텍스트로 요약합니다.
+def _build_patient_context(patient_id: int, session: Session) -> tuple[str, list[dict]]:
+    """환자의 가장 최근 처방전(OcrResult/GuideResult)을 텍스트로 요약하고, 등록된 처방
+    자체의 DUR 경고는 프론트 인용용 구조화 데이터로도 함께 반환합니다.
 
     [버그 수정] 처방전 사진 없이 '내 약 등록'(PatientMedication)만 한 환자는 예전엔
     MedicalRecord가 없어 "아직 등록된 처방전 정보가 없습니다"만 나갔다 — 질문 문구엔
     약 이름이 있는데 정작 LLM 컨텍스트엔 빠지는 사각지대였다. 그래서 처방전 유무와
-    무관하게 환자가 직접 등록한 약 이름(_patient_registered_drug_names)을 함께 넣는다."""
+    무관하게 환자가 직접 등록한 약 이름(_patient_registered_drug_names)을 함께 넣는다.
+
+    [2026-08-05 추가] 반환값에 dur_refs를 추가 — 자세한 이유는
+    _registered_drug_dur_source_refs() 참고."""
     lines: list[str] = []
+    dur_refs: list[dict] = []
 
     record = session.exec(
         select(MedicalRecord)
@@ -407,12 +436,14 @@ def _build_patient_context(patient_id: int, session: Session) -> str:
             lines.extend(_summarize_medication_guide(guide.medication_guide))
             lines.extend(_summarize_lifestyle_guide(guide.lifestyle_guide))
             lines.extend(_summarize_source_refs(guide.source_refs))
+            dur_refs = _registered_drug_dur_source_refs(guide.source_refs)
 
     registered_drug_names = _patient_registered_drug_names(patient_id, session)
     if registered_drug_names:
         lines.append(f"환자가 직접 등록한 약: {', '.join(registered_drug_names)}")
 
-    return "\n".join(lines) if lines else "아직 등록된 처방전 정보가 없습니다."
+    context_text = "\n".join(lines) if lines else "아직 등록된 처방전 정보가 없습니다."
+    return context_text, dur_refs
 
 
 def _latest_ocr_drug_names(patient_id: int, session: Session) -> list[str]:
@@ -544,6 +575,25 @@ _DRUG_PARTICLE_SUFFIXES = (
 
 _DRUG_TOKEN_RE = re.compile(r"[가-힣A-Za-z0-9]+(?:정|캡슐|주|시럽|액|산|겔|크림|연고|패치)?")
 
+# [2026-08-05 추가] 실제 배포 사고 재현: "나 임신했는데 지금 처방 받은 의약품 먹으면
+# 안되는거야?" 질문에서 _DRUG_TOKEN_RE가 "임신했는데"/"안되는거야"를 그대로 토큰으로
+# 뽑았고, _DUR_QUERY_STOPWORDS는 정확히 일치하는 문자열만 걸러내서(활용형은 못 거름)
+# 이 두 단어가 "약 이름 후보"로 DUR API까지 넘어갔다. 결과가 없으니 "찾지 못했습니다"
+# 메시지가 만들어졌고, 정작 이미 있던 [DUR 임부금기] 데이터를 챗봇이 무시하는 원인이 됐다.
+# 약 이름은 명사이고 이런 종결/연결 어미로 끝나지 않으므로, 어미로 끝나는 토큰은
+# 약 이름 후보에서 제외한다. (test_on_demand_dur_context_queries_drug_mentioned_in_question
+# 등 기존 테스트가 요구하는 대로, "타이레놀"처럼 e약은요/허가정보 검증이 실패해도 살아남아야
+# 하는 진짜 약 이름은 이 필터에 안 걸린다 — 활용형 어미가 아니기 때문.)
+_KOREAN_VERB_ENDING_RE = re.compile(
+    r"(는데|던데|겠는데|거야|거든|잖아|나요|까요|어도|여도|해도|니까|므로|다면|더라|"
+    r"했는데|했다|한다|된다|되는지|되나요|이에요|예요|이에요|해요|이야|이네|네요|"
+    r"군요|구나|을까|ㄹ까)$"
+)
+
+
+def _is_plausible_drug_token(candidate: str) -> bool:
+    return not _KOREAN_VERB_ENDING_RE.search(candidate)
+
 
 def _should_answer_from_dur_only(question_text: str) -> bool:
     normalized = question_text.lower().replace(" ", "")
@@ -605,7 +655,11 @@ def _extract_dur_candidate_drug_names(question_text: str, registered_drug_names:
 
     for token in _DRUG_TOKEN_RE.findall(question_text):
         candidate = _strip_drug_particle(token)
-        if len(candidate) >= 3 and candidate not in _DUR_QUERY_STOPWORDS:
+        if (
+            len(candidate) >= 3
+            and candidate not in _DUR_QUERY_STOPWORDS
+            and _is_plausible_drug_token(candidate)
+        ):
             candidates.append(candidate)
 
     seen: set[str] = set()
@@ -627,7 +681,11 @@ def _extract_question_drug_candidate_names(question_text: str) -> list[str]:
     candidates: list[str] = []
     for token in _DRUG_TOKEN_RE.findall(question_text):
         candidate = _strip_drug_particle(token)
-        if len(candidate) >= 3 and candidate not in _DRUG_RAG_QUERY_STOPWORDS:
+        if (
+            len(candidate) >= 3
+            and candidate not in _DRUG_RAG_QUERY_STOPWORDS
+            and _is_plausible_drug_token(candidate)
+        ):
             candidates.append(candidate)
 
     seen: set[str] = set()
@@ -1157,7 +1215,7 @@ def _gather_llm_inputs(
     [2026-07-20 추가] rag_refs — 실제 검색된 문서(title/source/item_name)를 API 응답의
     source_refs로 내려주기 위해 한 번의 조회(_retrieve_chat_rag_docs)에서 프롬프트용
     문자열과 함께 만든다(중복 조회 없음)."""
-    context_text = _build_patient_context(patient_id, session)
+    context_text, registered_dur_refs = _build_patient_context(patient_id, session)
     setting = session.get(NotificationSetting, patient_id)
     bot_name = setting.chatbot_name if setting else "약콩이"
     if _is_general_chat_question(question_text) or _is_internal_prompt_question(question_text):
@@ -1177,7 +1235,9 @@ def _gather_llm_inputs(
     # [2026-07-24 추가] DUR 전용 질문과 RAG(ChromaDB) 질문은 _should_answer_from_dur_only로
     # 갈리는 서로 배타적인 경로라 실제로 둘 다 채워지는 경우는 없지만, 합쳐서 반환해두면
     # 호출부가 "DUR인지 RAG인지" 신경 쓰지 않고 그대로 source_refs에 실어 보낼 수 있다.
-    return context_text, dur_context_lines, rag_context_lines, bot_name, [*dur_refs, *rag_refs]
+    # [2026-08-05 추가] registered_dur_refs — 환자가 이미 등록한 처방 자체의 DUR 경고
+    # ([DUR 임부금기] 등). 온디맨드 조회(dur_refs)와 별개 출처라 함께 실어 보낸다.
+    return context_text, dur_context_lines, rag_context_lines, bot_name, [*registered_dur_refs, *dur_refs, *rag_refs]
 
 
 def _sse_event(data: dict) -> str:
