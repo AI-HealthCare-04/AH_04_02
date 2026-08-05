@@ -167,8 +167,10 @@ def test_multiple_matching_titles_stop_at_the_first_one_found():
     ):
         items = _lifestyle_context_items("알레르기성 천식")
 
-    # "알레르기"에서 이미 문서를 찾았으니 "천식"까지 순회하면 안 된다.
-    assert calls == ["알레르기"]
+    # 1단계(exact-candidate 루프)가 진단명 원문("알레르기성 천식") 자체를 후보로 먼저
+    # 한 번 시도하고(매칭 없음), 2단계(전체 title 스캔)에서 "알레르기"를 찾으면 거기서
+    # 멈춰야 한다 — "천식"까지 순회하면 안 된다.
+    assert calls == ["알레르기성 천식", "알레르기"]
     semantic_search.assert_not_called()
     curated_search.assert_not_called()
     assert {item["source_ref"].disease for item in items} == {"알레르기"}
