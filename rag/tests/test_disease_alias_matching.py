@@ -140,3 +140,35 @@ def test_exact_title_match_skips_full_title_list_scan():
     assert calls == ["고혈압"]
     semantic_search.assert_not_called()
     assert items[0]["source_ref"].disease == "고혈압"
+
+
+def test_multiple_matching_titles_stop_at_the_first_one_found():
+    """[버그수정 회귀 테스트] 정규화 후 부분일치 특성상 하나의 진단명이 여러 KDCA
+    title과 동시에 매칭될 수 있다(예: "알레르기성 천식"이 "알레르기"와 "천식" 둘 다에
+    매칭) — 매칭되는 title을 전부 순회하며 계속 누적하면 서로 다른(연관은 있지만
+    별개인) 주제가 한 결과에 섞이고, title마다 실제 벡터DB 조회가 나가 과도한 순차
+    호출이 쌓인다. 바로 위 exact-candidate 루프와 동일하게, 문서를 실제로 찾은 첫
+    title에서 멈춰야 한다."""
+    calls = []
+
+    def exact_title_search(title: str):
+        calls.append(title)
+        if title == "알레르기":
+            return [_lifestyle_doc("알레르기", "111")]
+        if title == "천식":
+            return [_lifestyle_doc("천식", "222")]
+        return []
+
+    with (
+        patch("rag.rag_chain._all_kdca_titles", return_value=("알레르기", "천식")),
+        patch("rag.rag_chain.search_kdca_health_info_by_title", side_effect=exact_title_search),
+        patch("rag.rag_chain.search_kdca_health_info") as semantic_search,
+        patch("rag.rag_chain.search_by_disease") as curated_search,
+    ):
+        items = _lifestyle_context_items("알레르기성 천식")
+
+    # "알레르기"에서 이미 문서를 찾았으니 "천식"까지 순회하면 안 된다.
+    assert calls == ["알레르기"]
+    semantic_search.assert_not_called()
+    curated_search.assert_not_called()
+    assert {item["source_ref"].disease for item in items} == {"알레르기"}

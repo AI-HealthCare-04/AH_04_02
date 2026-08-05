@@ -410,6 +410,14 @@ def _lifestyle_context_items(diagnosis: str | None) -> list[dict]:
                 for title in _all_kdca_titles():
                     if not _title_matches_diagnosis(title, diagnosis_part):
                         continue
+                    # [버그수정] break가 없으면 정규화 후 부분일치 특성상 하나의 진단명이
+                    # 여러 title과 동시에 매칭될 수 있다(예: "알레르기성 천식"이 "알레르기"와
+                    # "천식" 둘 다에 매칭, "관절염"류 접미사 진단명은 4개 이상, "염"/"증"처럼
+                    # 흔한 글자는 수십~백여 개까지 매칭). 그 전부를 계속 누적하면 서로 다른
+                    # 주제가 한 카드에 섞이고, title마다 실제 ChromaDB 호출이 나가 한 요청
+                    # 안에서 순차 호출이 과도하게 쌓인다 — 바로 위 exact-candidate 루프와
+                    # 동일하게 문서를 실제로 찾은 첫 title에서 멈춘다.
+                    matched_this_title = False
                     for doc in search_kdca_health_info_by_title(title):
                         doc_id = (
                             doc.metadata.get("cntnts_sn"),
@@ -422,6 +430,9 @@ def _lifestyle_context_items(diagnosis: str | None) -> list[dict]:
                             continue
                         seen_kdca_ids.add(doc_id)
                         part_docs.append(doc)
+                        matched_this_title = True
+                    if matched_this_title:
+                        break
             if not part_docs:
                 # 진단명이 질병관리청 title과 정확히 일치하지 않을 수 있어(예: "고혈압 있음")
                 # 의미기반 검색으로 보강하되 다른 질환 문서는 제외한다.
