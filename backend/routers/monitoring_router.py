@@ -79,12 +79,12 @@ class PatientCreate(BaseModel):
 
 
 class PatientUpdate(BaseModel):
-    name: str | None = None
+    # [2026-08-05 수정] name/birth_date/gender는 본인인증(신원 확인)에 쓰이는 값이라
+    # 가입 이후 "내 정보"(MyInfo.tsx)에서 수정할 수 없다 — 아예 이 스키마에서 빼서, 클라이언트가
+    # 뭘 보내든 model_dump(exclude_unset=True)에 안 잡히므로 update_patient가 절대 못 건드린다.
     note: str | None = None
     phone: str | None = None
     email: str | None = None
-    birth_date: str | None = None
-    gender: Literal["male", "female"] | None = None
     # [2026-07-22 추가] "내 정보"(MyInfo.tsx)에서 회원가입 때 받은 알림 수신 설정도 같이 수정
     push_enabled: bool | None = None
     sms_enabled: bool | None = None
@@ -442,11 +442,11 @@ def list_caregivers(caregiver: Caregiver = Depends(get_current_caregiver)):
 class CaregiverUpdate(BaseModel):
     """[2026-07-22 추가] "내 정보"(MyInfo.tsx)에서 회원가입 때 받은 정보를 수정 —
     relation_type/password는 여기서 안 바꾼다(전자는 계정 성격 자체를 바꾸는 별개 작업,
-    후자는 이미 있는 비밀번호 재설정 흐름을 쓴다)."""
-    name: str | None = None
+    후자는 이미 있는 비밀번호 재설정 흐름을 쓴다).
+    [2026-08-05 수정] name/birth_date도 본인인증에 쓰이는 값이라 여기서 뺐다(PatientUpdate와
+    동일한 이유) — org_name(기관명)은 개인 신원 정보가 아니라 계속 수정 가능하게 남겨둔다."""
     phone: str | None = None
     email: str | None = None
-    birth_date: str | None = None
     push_enabled: bool | None = None
     sms_enabled: bool | None = None
     email_opt_in: bool | None = None

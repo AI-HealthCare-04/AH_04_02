@@ -88,24 +88,32 @@ def test_no_op_update_does_not_log(client: TestClient, session: Session):
     assert logs == []
 
 
-def test_patient_name_change_redacts_value(client: TestClient, session: Session):
-    """name은 암호화 PII라 실제 값 대신 '***'만 남긴다."""
+def test_patient_identity_fields_are_not_editable(client: TestClient, session: Session):
+    """[2026-08-05] name/birth_date/gender는 본인인증에 쓰이는 정보라 "내 정보" 화면에서
+    바꿀 수 없다 — PatientUpdate 스키마 자체에서 뺐으므로 요청에 실려와도 조용히 무시되고,
+    값도 그대로 남고 감사 로그도 안 남는다(애초에 바뀐 게 없으니까)."""
     pt = _make_patient(session)
+    pt.birth_date = "1950.01.01"
+    pt.gender = "female"
+    session.add(pt)
+    session.commit()
 
-    r = client.patch(f"/monitoring/patients/{pt.id}", json={"name": "새이름"}, headers=_headers(pt.id))
+    r = client.patch(
+        f"/monitoring/patients/{pt.id}",
+        json={"name": "새이름", "birth_date": "1999.09.09", "gender": "male"},
+        headers=_headers(pt.id),
+    )
     assert r.status_code == 200
+
+    session.refresh(pt)
+    assert pt.name == "환자"
+    assert pt.birth_date == "1950.01.01"
+    assert pt.gender == "female"
 
     log = session.exec(
         select(AuditLog).where(AuditLog.table_name == "patients").where(AuditLog.record_id == pt.id)
     ).first()
-    assert log is not None
-    assert log.before is not None
-    assert log.after is not None
-    assert json.loads(log.before) == {"name": "***"}
-    assert json.loads(log.after) == {"name": "***"}
-    # 원래 이름("환자")도 새 이름("새이름")도 로그에 그대로 남으면 안 된다
-    assert "환자" not in log.before
-    assert "새이름" not in log.after
+    assert log is None
 
 
 def test_caregiver_editing_schedule_records_caregiver_as_actor(client: TestClient, session: Session):
