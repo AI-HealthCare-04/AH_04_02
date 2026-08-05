@@ -19,7 +19,8 @@ _logger = logging.getLogger(__name__)
 # 캐시 키 네임스페이스 규칙: "모듈접두사.함수명|인자1|인자2|..."
 #   mfds.*  — mfds_client.py (e약은요, 허가정보 목록, 허가정보 상세)
 #   dur.*   — dur_master.py  (병용금기, 노인주의, 연령금기, 임부금기)
-# dur_master.py는 _disk_cache를 이 모듈에서 import해 같은 SQLite 파일을 공유한다.
+#   ocr.*   — backend/routers/ocr_router.py (환자용 복약 주의사항 LLM 요약, perf 캐싱)
+# dur_master.py/ocr_router.py는 _disk_cache를 이 모듈에서 import해 같은 SQLite 파일을 공유한다.
 # 새 함수를 추가할 때는 위 접두사 규칙에 따라 키 충돌을 방지할 것.
 try:
     _disk_cache: diskcache.Cache | None = diskcache.Cache(

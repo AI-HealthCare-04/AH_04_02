@@ -510,6 +510,36 @@ class TestSummarizePrecautionsCache:
 
         assert len(call_log) == 2, "원문이 다르면 캐시 키도 달라져서 매번 새로 요약해야 한다"
 
+    def test_prompt_or_model_change_is_a_cache_miss_even_with_identical_text(self, tmp_path):
+        """[PR #162 리뷰 반영] 캐시 키에 시스템 프롬프트·모델명도 포함되는지 — 원문이
+        같아도 프롬프트를 고치거나 OPENAI_MODEL을 바꾸면 배포 즉시 재요약해야 한다
+        (옛 프롬프트로 만든 요약을 TTL 끝날 때까지 그대로 돌려주면 안 됨)."""
+        import diskcache
+        import rag.mfds_client as mfds_client_mod
+        import routers.ocr_router as ocr_router_mod
+        from routers.ocr_router import _summarize_precautions_for_patient
+
+        fresh_cache = diskcache.Cache(str(tmp_path))
+        call_log: list = []
+        try:
+            with (
+                patch.object(mfds_client_mod, "_disk_cache", fresh_cache),
+                patch("rag.config.settings.OPENAI_API_KEY", "fake-key"),
+                patch("langchain_openai.ChatOpenAI", return_value=self._fake_chat(call_log)),
+            ):
+                _summarize_precautions_for_patient("캐시테스트약", "주의사항 원문", None, None)
+                with patch.object(ocr_router_mod, "_PATIENT_SUMMARY_SYSTEM_PROMPT", "변경된 시스템 프롬프트"):
+                    _summarize_precautions_for_patient("캐시테스트약", "주의사항 원문", None, None)
+                with patch("rag.config.settings.OPENAI_MODEL", "gpt-4o"):
+                    _summarize_precautions_for_patient("캐시테스트약", "주의사항 원문", None, None)
+        finally:
+            fresh_cache.close()
+
+        assert len(call_log) == 3, (
+            "동일한 원문이어도 시스템 프롬프트나 OPENAI_MODEL이 바뀌면 캐시 키도 달라져 "
+            "다시 요약해야 한다"
+        )
+
     def test_cached_entry_expires_with_mfds_cache_ttl(self, tmp_path):
         """다른 diskcache 캐시(mfds_client.py)와 동일한 TTL(MFDS_CACHE_TTL_SECONDS)로
         저장되는지 확인 — 이 캐시만 별도 만료 정책을 갖지 않도록."""

@@ -285,8 +285,16 @@ def _summarize_precautions_for_patient(
     # LLM을 새로 호출하면 /ocr/drug-info가 캐시 warm 상태에서도 3~4초씩 고정으로 걸렸다.
     # 약품명 + 원문 내용(raw_text) 해시를 키로 써서, 같은 약의 같은 원문에 대해서는
     # 한 번 요약한 결과를 재사용한다(원문이 갱신되면 해시가 달라져 자동으로 다시 요약됨).
-    cache_key = f"ocr.patient_summary|{drug_name}|{hashlib.sha256(raw_text.encode('utf-8')).hexdigest()}"
+    # [2026-08-05, 팀 리뷰 반영] 해시에 시스템 프롬프트·모델명도 함께 넣는다 — 안 넣으면
+    # _PATIENT_SUMMARY_SYSTEM_PROMPT를 고치거나 OPENAI_MODEL을 바꿔도 배포 직후 최대
+    # TTL(48시간) 동안 옛 프롬프트로 만든 요약을 그대로 돌려준다(환자 안전 문구를
+    # 다루는 기능이라 이 지연은 특히 피해야 함). 프롬프트/모델이 바뀌면 해시가 달라져
+    # 배포 즉시 새로 요약되고, 옛 키는 그냥 TTL이 지나며 자연 소멸한다.
+    from rag.config import settings as rag_settings
     from rag.mfds_client import _disk_cache as summary_disk_cache
+
+    cache_key_material = f"{raw_text}|{_PATIENT_SUMMARY_SYSTEM_PROMPT}|{rag_settings.OPENAI_MODEL}"
+    cache_key = f"ocr.patient_summary|{drug_name}|{hashlib.sha256(cache_key_material.encode('utf-8')).hexdigest()}"
 
     if summary_disk_cache is not None:
         try:
@@ -310,7 +318,6 @@ def _summarize_precautions_for_patient(
     ) as generation:
         try:
             from langchain_openai import ChatOpenAI
-            from rag.config import settings as rag_settings
 
             if not rag_settings.OPENAI_API_KEY:
                 update_observation(generation, output={"status": "skipped_no_openai_key"})
