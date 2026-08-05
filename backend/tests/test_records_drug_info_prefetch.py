@@ -10,9 +10,13 @@ GET /ocr/drug-info로 조회할 내용을 백그라운드에서 미리 조회해
 예약하는지, (2) 그 백그라운드 함수 자체가 개별 실패에도 안전하고 동시 실행 수를
 제한하며 로그를 남기는지를 나눠서 검증한다.
 """
+import asyncio
 import logging
-from unittest.mock import patch
+import threading
+import time
+from unittest.mock import AsyncMock, patch
 
+import anyio
 import pytest
 from core.auth import create_access_token
 from core.database import get_session
@@ -89,6 +93,29 @@ class TestBackgroundPrefetchScheduling:
         assert called_names == [m["drug_name"] for m in body["medications"]]
         assert called_names == list(dict.fromkeys(called_names)), "중복 제거가 안 됐다"
         assert all(called_names), "빈 문자열 약 이름이 섞여 있으면 안 된다"
+
+    def test_schedules_the_isolated_dispatch_wrapper_not_the_raw_function(
+        self, client: TestClient, session: Session, monkeypatch: pytest.MonkeyPatch
+    ):
+        """[2026-08-05 추가, perf 회귀 수정] create_record가 background_tasks.add_task에
+        _prefetch_drug_info를 직접 넘기지 않고 _dispatch_prefetch_drug_info(anyio 공유
+        풀을 안 타는 async 래퍼)를 넘기는지 배선 자체를 확인한다 — 누군가 이 배선을
+        되돌리면(원 함수를 직접 등록) 여기서 바로 잡힌다. _prefetch_drug_info만 patch하는
+        위 테스트는 래퍼를 거치든 안 거치든 결국 원 함수가 호출되므로 이 배선 자체는
+        구분해내지 못한다."""
+        monkeypatch.setenv("OCR_PROVIDER", "mock")
+        pt = _make_patient(session)
+        token = create_access_token(pt.id, "patient")
+
+        mock_dispatch = AsyncMock()
+        with patch("routers.records_router._dispatch_prefetch_drug_info", mock_dispatch):
+            r = _upload(client, pt.id, token)
+
+        assert r.status_code == 200, r.text
+        mock_dispatch.assert_called_once()
+        called_record_id, called_names = mock_dispatch.call_args.args
+        assert called_record_id == r.json()["record_id"]
+        assert called_names == [m["drug_name"] for m in r.json()["medications"]]
 
     def test_no_prefetch_scheduled_when_no_drug_names_present(
         self, client: TestClient, session: Session, monkeypatch: pytest.MonkeyPatch
@@ -179,3 +206,142 @@ class TestPrefetchDrugInfoFunction:
         assert "사전조회 시작" in caplog.text
         assert "사전조회 완료" in caplog.text
         assert "42" in caplog.text
+
+
+class TestPrefetchDispatchIsolatedFromAnyioSharedPool:
+    """[2026-08-05 추가, perf 회귀 수정] BackgroundTasks에 _prefetch_drug_info를 직접
+    등록하면 Starlette이 anyio 공유 스레드풀(list_records/drug_info 등 모든 동기 def
+    엔드포인트가 쓰는 그 풀, 기본 40개)로 실행한다 — 실측으로 확인된 문제(사전조회 여러
+    건이 겹치면 이 풀이 소진되어 GET /records가 최대 26초까지 지연)를 막기 위해
+    _dispatch_prefetch_drug_info(async 래퍼) + 전용 _prefetch_dispatch_executor로
+    분리했다. 이 클래스는 그 분리가 실제로 유지되는지 검증한다."""
+
+    def test_dispatch_wrapper_is_async_so_backgroundtasks_skips_anyio_threadpool(self):
+        """Starlette의 BackgroundTask.__call__은 등록된 함수가 async면(is_async_callable)
+        스레드풀을 거치지 않고 이벤트 루프에서 직접 await한다(starlette/background.py) —
+        이 전제가 깨지면(누군가 async def를 없애면) 다시 anyio 공유 풀을 타게 된다."""
+        from routers.records_router import _dispatch_prefetch_drug_info
+        from starlette._utils import is_async_callable
+
+        assert is_async_callable(_dispatch_prefetch_drug_info), (
+            "_dispatch_prefetch_drug_info가 async def가 아니면 BackgroundTasks가 다시 "
+            "anyio 공유 스레드풀로 실행한다 — 회귀"
+        )
+
+    def test_dispatch_does_not_borrow_anyio_shared_thread_limiter(self):
+        """_dispatch_prefetch_drug_info 실행 중 anyio의 공유 스레드풀(list_records 등
+        모든 동기 엔드포인트가 쓰는 바로 그 풀)에서 토큰을 빌리지 않는지 직접 확인한다 —
+        전용 executor만 쓴다는 핵심 주장의 가장 직접적인 검증."""
+        from routers.records_router import _dispatch_prefetch_drug_info
+
+        block = threading.Event()
+        release = threading.Event()
+
+        def blocking_drug_info(name):
+            release.set()
+            block.wait(timeout=10)
+            return {"drug_name": name}
+
+        async def run():
+            limiter = anyio.to_thread.current_default_thread_limiter()
+            baseline_borrowed = limiter.borrowed_tokens
+            with patch("routers.records_router.drug_info", side_effect=blocking_drug_info):
+                task = asyncio.create_task(_dispatch_prefetch_drug_info(1, ["약1"]))
+                for _ in range(100):
+                    if release.is_set():
+                        break
+                    await asyncio.sleep(0.05)
+                assert release.is_set(), "drug_info가 제한 시간 내에 실행되지 않았다"
+                during_borrowed = limiter.borrowed_tokens
+                block.set()
+                await task
+            return baseline_borrowed, during_borrowed
+
+        baseline_borrowed, during_borrowed = asyncio.run(run())
+        assert during_borrowed == baseline_borrowed, (
+            "사전조회 디스패치가 anyio 공유 스레드풀에서 토큰을 빌리면 안 된다 — 빌렸다면 "
+            "list_records 등 다른 동기 엔드포인트가 그만큼 대기하게 되는 회귀다"
+        )
+
+    def test_dispatch_never_delays_other_anyio_work_even_with_a_single_slot_pool(self):
+        """가장 직접적인 재현: anyio 공유 풀을 극단적으로 1개로 줄여도(list_records 등
+        "다른 동기 작업" 역할을 run_in_threadpool로 흉내낸다), 사전조회 디스패치가
+        (drug_info가 멈춰 있는 동안에도) 그 하나뿐인 자리를 두고 경쟁하지 않아야 한다 —
+        경쟁했다면 다른 작업은 사전조회가 끝날 때까지 기다렸을 것이다(실제로 26초까지
+        재현된 문제)."""
+        from routers.records_router import _dispatch_prefetch_drug_info
+        from starlette.concurrency import run_in_threadpool
+
+        block = threading.Event()
+
+        def blocking_drug_info(name):
+            block.wait(timeout=10)
+            return {"drug_name": name}
+
+        async def run():
+            limiter = anyio.to_thread.current_default_thread_limiter()
+            original_total = limiter.total_tokens
+            limiter.total_tokens = 1
+            try:
+                with patch("routers.records_router.drug_info", side_effect=blocking_drug_info):
+                    dispatch_task = asyncio.create_task(_dispatch_prefetch_drug_info(1, ["약1"]))
+                    await asyncio.sleep(0.2)  # drug_info에서 멈춰 있는 상태를 만든다
+
+                    t0 = time.perf_counter()
+                    other_work_result = await run_in_threadpool(lambda: "list_records 대역")
+                    elapsed = time.perf_counter() - t0
+
+                    block.set()
+                    await dispatch_task
+            finally:
+                limiter.total_tokens = original_total
+            return other_work_result, elapsed
+
+        result, elapsed = asyncio.run(run())
+        assert result == "list_records 대역"
+        assert elapsed < 1.0, (
+            f"anyio 공유 풀이 1개뿐인 상태에서 다른 동기 작업이 {elapsed:.2f}초 걸렸다 — "
+            "사전조회 디스패치가 그 풀을 다시 점유하게 된 회귀일 수 있다"
+        )
+
+
+class TestGetRecordsNotDelayedByPrefetchDispatch:
+    """[2026-08-05 추가, perf 회귀 수정] 실제 재현: PR #164 배포 후 GET /records?patient_id=81이
+    최대 26초까지 걸리던 문제 — 사전조회가 anyio 공유 스레드풀을 점유해서 벌어졌다
+    (실제 uvicorn 서버로 재현·측정 완료). 전용 풀로 분리한 뒤에는 사전조회가 얼마나
+    오래 걸리든(여기서는 아예 멈춰 있게 만듦) GET /records가 전혀 지연되면 안 된다."""
+
+    def test_get_records_stays_fast_while_prefetch_dispatch_is_blocked(
+        self, client: TestClient, session: Session, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setenv("OCR_PROVIDER", "mock")
+        pt = _make_patient(session)
+        token = create_access_token(pt.id, "patient")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        block = threading.Event()
+        release = threading.Event()
+
+        def blocking_drug_info(name):
+            release.set()
+            block.wait(timeout=10)
+            return {"drug_name": name, "patient_summary": None}
+
+        with patch("routers.records_router.drug_info", side_effect=blocking_drug_info):
+            post_thread = threading.Thread(target=_upload, args=(client, pt.id, token))
+            post_thread.start()
+            try:
+                assert release.wait(timeout=5), "사전조회(drug_info)가 제한 시간 내에 시작되지 않았다"
+
+                t0 = time.perf_counter()
+                r = client.get("/records", params={"patient_id": pt.id}, headers=headers)
+                elapsed = time.perf_counter() - t0
+            finally:
+                block.set()
+                post_thread.join(timeout=10)
+
+        assert r.status_code == 200
+        assert elapsed < 2.0, (
+            f"사전조회가 진행 중(멈춰 있음)인데도 GET /records가 {elapsed:.2f}초 걸렸다 — "
+            "anyio 공유 스레드풀을 다시 점유하게 된 회귀일 수 있다"
+        )

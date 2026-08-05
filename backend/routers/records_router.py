@@ -58,6 +58,17 @@ router = APIRouter(prefix="/records", tags=["Records"])
 # 동시 실행하지 않도록).
 _DRUG_INFO_PREFETCH_MAX_WORKERS = 4
 
+# [2026-08-05 추가, perf 회귀 수정] BackgroundTasks.add_task()에 동기 def 함수를 그대로
+# 등록하면 Starlette이 anyio.to_thread.run_sync()로 실행하는데, 이건 list_records/
+# drug_info 등 이 앱의 모든 동기 def 엔드포인트가 공유하는 바로 그 anyio 워커 스레드풀
+# (기본 40개)이다 — 실측으로 확인된 문제: 처방전 여러 건의 사전조회가 겹치면 이 풀이
+# 소진되고, 그 순간 들어온 GET /records 같은 무관한 요청이 스레드를 기다리며 최대 26초
+# 지연됐다(직접 재현). 사전조회 실행 자체는 이 전용 풀로만 보내서 anyio 공유 풀을
+# 절대 건드리지 않게 한다 — _prefetch_drug_info 내부의 ThreadPoolExecutor(약별 병렬
+# 조회)와는 별개로, "이 함수를 어느 풀에서 실행할지"를 결정하는 바깥쪽 풀이다.
+_PREFETCH_DISPATCH_MAX_WORKERS = 8
+_prefetch_dispatch_executor = ThreadPoolExecutor(max_workers=_PREFETCH_DISPATCH_MAX_WORKERS)
+
 
 def _prefetch_drug_info(record_id: int, drug_names: list[str]) -> None:
     """[2026-08-05 추가, perf] POST /records 응답을 받고 사용자가 확인 화면
@@ -89,6 +100,29 @@ def _prefetch_drug_info(record_id: int, drug_names: list[str]) -> None:
         "약물 상세정보 백그라운드 사전조회 완료: record_id=%s, drug_count=%d, drug_names=%s",
         record_id, len(drug_names), drug_names,
     )
+
+
+async def _dispatch_prefetch_drug_info(record_id: int, drug_names: list[str]) -> None:
+    """background_tasks.add_task()에 _prefetch_drug_info를 직접 등록하지 않고 이 async
+    래퍼를 등록하는 이유: Starlette의 BackgroundTask.__call__은 등록된 함수가 동기
+    (일반 def)면 anyio 공유 스레드풀로, async면 이벤트 루프에서 직접 await한다
+    (starlette/background.py 참고) — 이 함수를 async def로 만들어 그 분기를 타게 하고,
+    실제 블로킹 작업(_prefetch_drug_info)만 _prefetch_dispatch_executor로 넘겨서 anyio
+    공유 풀은 전혀 거치지 않는다.
+
+    _prefetch_drug_info는 내부에서 개별 약 실패를 전부 삼키므로 실질적으로 예외를
+    던지지 않지만, 혹시 모를 예외도 이 백그라운드 작업 밖으로 새 나가지 않도록 여기서도
+    한 번 더 방어한다.
+    """
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.run_in_executor(_prefetch_dispatch_executor, _prefetch_drug_info, record_id, drug_names)
+    except Exception:  # noqa: BLE001 — 사전조회 디스패치 실패도 사용자 화면에 영향 없어야 함
+        logger.warning(
+            "약물 상세정보 백그라운드 사전조회 디스패치 실패: record_id=%s, drug_names=%s",
+            record_id, drug_names, exc_info=True,
+        )
+
 
 # [2026-07-25 추가] ocr_router.py가 저장한 처방전 원본 사진(image_path, backend 루트
 # 기준 상대경로)을 절대경로로 풀 때 쓴다.
@@ -378,11 +412,14 @@ async def create_record(
     # /ocr/drug-info를 부르기 전에, 응답을 돌려준 뒤 백그라운드에서 미리 조회해 캐시를
     # 채워둔다 — BackgroundTasks는 응답이 클라이언트로 전송된 뒤 실행되므로 이 응답
     # 자체에는 영향이 없다.
+    # [2026-08-05 수정, perf 회귀 수정] _prefetch_drug_info를 직접 등록하지 않고
+    # _dispatch_prefetch_drug_info(async 래퍼)를 등록한다 — anyio 공유 스레드풀 소진
+    # 문제 수정, _dispatch_prefetch_drug_info 문서 참고.
     drug_names = list(
         dict.fromkeys(name for m in response["medications"] if (name := m["drug_name"]))
     )
     if drug_names:
-        background_tasks.add_task(_prefetch_drug_info, record.id, drug_names)
+        background_tasks.add_task(_dispatch_prefetch_drug_info, record.id, drug_names)
 
     return response
 
