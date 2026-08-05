@@ -960,12 +960,14 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "locust" },
     { name = "pillow" },
     { name = "pytesseract" },
     { name = "pytest" },
     { name = "ruff" },
     { name = "ty" },
+]
+loadtest = [
+    { name = "locust" },
 ]
 
 [package.metadata]
@@ -1006,13 +1008,13 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "locust", specifier = ">=2.46.3" },
     { name = "pillow", specifier = ">=10.0" },
     { name = "pytesseract", specifier = ">=0.3" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "ruff", specifier = ">=0.11" },
     { name = "ty", specifier = ">=0.0.59" },
 ]
+loadtest = [{ name = "locust", specifier = ">=2.46.3" }]
 
 [[package]]
 name = "hf-xet"
