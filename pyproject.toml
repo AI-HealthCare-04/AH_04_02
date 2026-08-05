@@ -47,6 +47,7 @@ dev = [
     "ty>=0.0.59",
     "pillow>=10.0",       # generate_mock_*.py 스크립트 + TesseractOCRProvider 폴백
     "pytesseract>=0.3",   # TesseractOCRProvider CLOVA 장애 폴백 (시스템: brew install tesseract)
+    "locust>=2.46.3",
 ]
 
 # torch가 sentence-transformers/langchain-huggingface의 간접 의존성으로 들어오는데,
