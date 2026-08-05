@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Bell, Check, CheckCircle2, Lock, Mail, MessageSquare } from "lucide-react";
+import { AlertTriangle, Bell, Check, CheckCircle2, Lock, Mail, MessageSquare, ShieldCheck } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import NavBar from "../components/NavBar";
 import Skeleton from "../components/Skeleton";
@@ -15,6 +15,7 @@ import {
   type Caregiver,
   type Patient,
 } from "../api/monitoring";
+import { GENDER_LABEL } from "../lib/age";
 import { getCurrentCaregiverId, getCurrentPatientId, getCurrentUserName, isLoggedIn } from "../lib/session";
 import { C } from "../theme";
 
@@ -37,6 +38,24 @@ function Field({
         className={inputCss}
         style={inputStyle}
       />
+    </div>
+  );
+}
+
+// [2026-08-05 추가] 이름/생년월일/성별은 본인인증에 쓰이는 정보라 가입 후에는 고쳐 쓸 수
+// 없다 — 입력 가능한 Field 대신 잠금 아이콘이 붙은 읽기 전용 표시로 바꾼다.
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <label className="flex items-center gap-1 text-[13px] font-bold mb-1.5" style={{ color: C.dark }}>
+        {label} <Lock className="w-3 h-3" style={{ color: C.muted }} />
+      </label>
+      <div
+        className={inputCss}
+        style={{ ...inputStyle, background: "rgba(30,26,23,0.04)", color: C.muted }}
+      >
+        {value || "-"}
+      </div>
     </div>
   );
 }
@@ -176,14 +195,14 @@ export default function MyInfo() {
     try {
       if (caregiverId) {
         await updateCaregiver(caregiverId, {
-          name: isOrganization ? orgName.trim() : name.trim(),
+          // [2026-08-05 수정] name/birth_date는 본인인증 정보라 더 이상 수정 대상이 아니다
+          // (백엔드 CaregiverUpdate에서도 아예 뺐음) — org_name(기관명)만 계속 수정 가능.
           // [2026-07-23 수정, 팀원 리뷰 반영] `|| undefined`를 쓰면 axios가 JSON으로
           // 직렬화할 때 이 키 자체를 통째로 빼버려서(undefined는 JSON에 안 실림), 백엔드의
           // model_dump(exclude_unset=True)가 "안 건드림"으로 해석했다 — 필드를 지우고
           // 저장해도 기존 값이 그대로 남는 버그였다. 빈 문자열도 그대로 보내야 실제로 지워진다.
           phone: phone.trim(),
           email: email.trim(),
-          birth_date: birthDate.trim(),
           push_enabled: pushEnabled,
           sms_enabled: smsEnabled,
           email_opt_in: emailOptIn,
@@ -198,12 +217,11 @@ export default function MyInfo() {
             : {}),
         });
       } else if (patientId != null) {
+        // [2026-08-05 수정] name/birth_date/gender는 본인인증 정보라 더 이상 수정 대상이
+        // 아니다(백엔드 PatientUpdate에서도 아예 뺐음).
         await updatePatient(patientId, {
-          name: name.trim(),
           phone: phone.trim(),
           email: email.trim(),
-          birth_date: birthDate.trim(),
-          gender: gender || undefined,
           push_enabled: pushEnabled,
           sms_enabled: smsEnabled,
           email_opt_in: emailOptIn,
@@ -320,30 +338,12 @@ export default function MyInfo() {
                 </>
               ) : (
                 <>
-                  <Field label="이름" value={name} onChange={setName} placeholder="홍길동" />
-                  <Field label="생년월일" value={birthDate} onChange={setBirthDate} placeholder="1945.03.15" />
-                  {patient && (
-                    <div>
-                      <label className="block text-[13px] font-bold mb-1.5" style={{ color: C.dark }}>성별</label>
-                      <div className="flex gap-3">
-                        {(["female", "male"] as const).map((g) => (
-                          <button
-                            key={g}
-                            type="button"
-                            onClick={() => setGender(g)}
-                            className="flex-1 py-3 rounded-xl font-bold text-[14px] transition-all"
-                            style={{
-                              background: gender === g ? C.terracotta : C.ivory,
-                              color: gender === g ? C.white : C.dark,
-                              border: `1.5px solid ${gender === g ? C.terracotta : "rgba(30,26,23,0.12)"}`,
-                            }}
-                          >
-                            {g === "female" ? "여성" : "남성"}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  <ReadOnlyField label="이름" value={name} />
+                  <ReadOnlyField label="생년월일" value={birthDate} />
+                  {patient && <ReadOnlyField label="성별" value={gender ? GENDER_LABEL[gender] : ""} />}
+                  <p className="flex items-center gap-1.5 text-[12px] -mt-1" style={{ color: C.muted }}>
+                    <ShieldCheck className="w-3.5 h-3.5 shrink-0" /> 본인인증에 쓰이는 정보라 직접 변경할 수 없어요.
+                  </p>
                   <Field label="이메일" value={email} onChange={setEmail} placeholder="example@email.com" type="email" />
                   <Field label="전화번호" value={phone} onChange={setPhone} placeholder="010-0000-0000" />
                 </>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Search, FileText, ChevronRight, Trash2, Star, CheckSquare, Square } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Search, FileText, ChevronRight, Trash2, Star, CheckSquare, Square, AlertTriangle, Check } from "lucide-react";
 import NavBar from "../components/NavBar";
 import Skeleton from "../components/Skeleton";
 import EmptyState from "../components/EmptyState";
@@ -42,6 +43,15 @@ export default function Records() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
+  // [2026-08-05 추가] 처방전 삭제 시 "등록된 약(복약 일정)도 함께 제거할지" 물어보는 팝업.
+  // 버튼 클릭 시 바로 지우지 않고 여기에 대상만 담아 모달을 띄운다(실제 삭제는
+  // handleConfirmDelete에서). bulk는 ids.length로 추론하지 않고 명시적으로 저장한다 —
+  // 선택 모드에서 정확히 1개만 골라 "선택 삭제"를 눌러도 선택 모드 정리(선택 해제 등)가
+  // 그대로 일어나야 하기 때문.
+  const [deleteTarget, setDeleteTarget] = useState<{ ids: number[]; bulk: boolean } | null>(null);
+  const [removeMedications, setRemoveMedications] = useState(true);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
   // [2026-07-20] 내비바 통합검색창에서 /records?search=...로 넘어오는 경우 반영 — useState
   // 초기값만으론 이미 /records에 있을 때(같은 라우트라 리마운트 없이 쿼리스트링만 바뀜)
   // 반영이 안 돼서 searchParams가 바뀔 때마다 동기화되도록 별도 effect로 분리.
@@ -67,17 +77,10 @@ export default function Records() {
     }
   };
 
-  const handleDelete = async (recordId: number) => {
-    if (deletingId !== null || !window.confirm("이 처방전을 삭제할까요? 되돌릴 수 없어요.")) return;
-    setDeletingId(recordId);
-    try {
-      await deleteRecord(recordId);
-      await loadRecords();
-    } catch {
-      setError("삭제하지 못했어요. 잠시 후 다시 시도해 주세요.");
-    } finally {
-      setDeletingId(null);
-    }
+  const handleDelete = (recordId: number) => {
+    if (deletingId !== null) return;
+    setRemoveMedications(true);
+    setDeleteTarget({ ids: [recordId], bulk: false });
   };
 
   const toggleSelectMode = () => {
@@ -94,19 +97,42 @@ export default function Records() {
     });
   };
 
-  const handleBulkDelete = async () => {
+  const handleBulkDelete = () => {
     if (bulkDeleting || selectedIds.size === 0) return;
-    if (!window.confirm(`선택한 ${selectedIds.size}개를 삭제할까요? 되돌릴 수 없어요.`)) return;
-    setBulkDeleting(true);
+    setRemoveMedications(true);
+    setDeleteTarget({ ids: [...selectedIds], bulk: true });
+  };
+
+  const closeDeleteModal = () => {
+    if (confirmingDelete) return;
+    setDeleteTarget(null);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget || confirmingDelete) return;
+    const { ids, bulk } = deleteTarget;
+    setConfirmingDelete(true);
+    if (bulk) setBulkDeleting(true);
+    else setDeletingId(ids[0]);
     try {
-      await Promise.all([...selectedIds].map((id) => deleteRecord(id)));
-      setRecords((prev) => prev.filter((r) => !selectedIds.has(r.record_id)));
-      setSelectedIds(new Set());
-      setSelectMode(false);
+      await Promise.all(ids.map((id) => deleteRecord(id, removeMedications)));
+      if (bulk) {
+        setRecords((prev) => prev.filter((r) => !ids.includes(r.record_id)));
+        setSelectedIds(new Set());
+        setSelectMode(false);
+      } else {
+        await loadRecords();
+      }
+      setDeleteTarget(null);
     } catch {
-      setError("일부 항목을 삭제하지 못했어요. 잠시 후 다시 시도해 주세요.");
+      // [2026-08-05 추가] 실패해도 모달을 닫아야 아래 배너(error)가 가려지지 않고 보인다 —
+      // 모달을 열어둔 채로 두면 에러 문구가 오버레이 뒤에 가려 사용자가 못 본다.
+      setDeleteTarget(null);
+      setError(bulk ? "일부 항목을 삭제하지 못했어요. 잠시 후 다시 시도해 주세요." : "삭제하지 못했어요. 잠시 후 다시 시도해 주세요.");
     } finally {
+      setConfirmingDelete(false);
       setBulkDeleting(false);
+      setDeletingId(null);
     }
   };
 
@@ -371,6 +397,81 @@ export default function Records() {
           </div>
         )}
       </main>
+
+      {deleteTarget &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-5"
+            style={{ background: "rgba(30,26,23,0.45)" }}
+            onClick={closeDeleteModal}
+          >
+            <div
+              className="w-full max-w-sm rounded-2xl p-7 text-center"
+              style={{ background: C.surface, boxShadow: C.shadowDropdown }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
+                className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4"
+                style={{ background: "rgba(217,79,79,0.15)" }}
+              >
+                <AlertTriangle className="w-6 h-6" style={{ color: "#D94F4F" }} />
+              </div>
+              <p className="text-[17px] font-black mb-2" style={{ color: C.dark }}>
+                {deleteTarget.bulk ? `선택한 ${deleteTarget.ids.length}개를 삭제할까요?` : "이 처방전을 삭제할까요?"}
+              </p>
+              <p className="text-[13px] leading-relaxed mb-5" style={{ color: C.muted }}>
+                삭제하면 되돌릴 수 없어요.
+              </p>
+
+              <button
+                type="button"
+                onClick={() => setRemoveMedications((v) => !v)}
+                className="w-full flex items-start gap-3 px-4 py-3.5 rounded-xl text-left mb-5"
+                style={{
+                  background: removeMedications ? "rgba(217,79,79,0.06)" : "rgba(30,26,23,0.03)",
+                  border: `1.5px solid ${removeMedications ? "#D94F4F" : "rgba(30,26,23,0.09)"}`,
+                }}
+              >
+                <div
+                  className="w-5 h-5 flex items-center justify-center shrink-0 mt-0.5"
+                  style={{
+                    background: removeMedications ? "#D94F4F" : C.white,
+                    border: `2px solid ${removeMedications ? "#D94F4F" : "rgba(30,26,23,0.2)"}`,
+                    borderRadius: 5,
+                  }}
+                >
+                  {removeMedications && <Check className="w-3 h-3 text-white" />}
+                </div>
+                <div>
+                  <p className="text-[14px] font-bold" style={{ color: C.dark }}>등록된 약도 함께 제거</p>
+                  <p className="text-[12px] mt-0.5" style={{ color: C.muted }}>
+                    체크를 풀면 처방전만 삭제되고, 이미 등록된 복약 일정은 그대로 유지돼요.
+                  </p>
+                </div>
+              </button>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={closeDeleteModal}
+                  disabled={confirmingDelete}
+                  className="flex-1 py-3 rounded-full font-bold text-[14px] border-2 disabled:opacity-50"
+                  style={{ borderColor: "rgba(30,26,23,0.15)", color: C.dark }}
+                >
+                  취소
+                </button>
+                <button
+                  onClick={handleConfirmDelete}
+                  disabled={confirmingDelete}
+                  className="flex-1 py-3 rounded-full font-black text-[14px] text-white disabled:opacity-50"
+                  style={{ background: "#D94F4F" }}
+                >
+                  {confirmingDelete ? "삭제하는 중..." : "삭제"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

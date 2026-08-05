@@ -166,14 +166,14 @@ export async function createCaregiver(payload: {
   return data;
 }
 
-/** [2026-07-22 추가] "내 정보"(MyInfo.tsx) — 회원가입 때 받은 보호자/기관 정보 수정 */
+/** [2026-07-22 추가] "내 정보"(MyInfo.tsx) — 회원가입 때 받은 보호자/기관 정보 수정
+ * [2026-08-05 수정] name/birth_date는 본인인증 정보라 여기서 제외(백엔드 CaregiverUpdate와
+ * 동일) — org_name(기관명)은 개인 신원 정보가 아니라 계속 수정 가능. */
 export async function updateCaregiver(
   caregiverId: number,
   payload: {
-    name?: string;
     phone?: string;
     email?: string;
-    birth_date?: string;
     push_enabled?: boolean;
     sms_enabled?: boolean;
     email_opt_in?: boolean;
@@ -268,15 +268,14 @@ export async function createPatient(payload: {
   return data;
 }
 
+/** [2026-08-05 수정] name/birth_date/gender는 본인인증 정보라 여기서 제외(백엔드
+ * PatientUpdate와 동일) — 가입 이후에는 "내 정보"에서 고칠 수 없다. */
 export async function updatePatient(
   patientId: number,
   payload: {
-    name?: string;
     note?: string;
     phone?: string;
     email?: string;
-    birth_date?: string;
-    gender?: "male" | "female";
     push_enabled?: boolean;
     sms_enabled?: boolean;
     email_opt_in?: boolean;

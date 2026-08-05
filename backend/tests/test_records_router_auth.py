@@ -241,6 +241,46 @@ class TestDeleteRecord:
         assert linked.active is False
         assert unrelated.active is True  # 이 처방전과 무관한 일정은 그대로 유지
 
+    def test_deactivate_medications_false_keeps_schedule_active(self, client: TestClient, session: Session):
+        """[2026-08-05 추가] Records.tsx의 "등록된 약도 함께 제거" 체크를 해제하고 삭제하면
+        처방전 기록만 지워지고 연결된 복약 일정·내약은 그대로 남아야 한다.
+        [2026-08-05 리뷰 반영, fkmc10101-hub] MedicationSchedule뿐 아니라 같은
+        `if deactivate_medications:` 블록에서 처리되는 PatientMedication도 건드리지
+        않는지 직접 검증한다."""
+        cg = _make_caregiver(session, "cgDelKeepSched")
+        pt = _make_patient(session, "ptDelKeepSched")
+        _link(session, cg, pt)
+        rec = _make_record(session, pt.id, status="completed")
+
+        linked = MedicationSchedule(patient_id=pt.id, drug_name="테스트약", time_slot="09:00", record_id=rec.id)
+        medication = PatientMedication(
+            patient_id=pt.id,
+            medication_name="테스트약",
+            prescription_id=rec.id,
+            source_type="prescription_ocr",
+        )
+        session.add(linked)
+        session.add(medication)
+        session.commit()
+        session.refresh(linked)
+        session.refresh(medication)
+
+        headers = {"Authorization": f"Bearer {_token(cg.id, 'caregiver')}"}
+        r = client.delete(
+            f"/records/{rec.id}", params={"deactivate_medications": False}, headers=headers
+        )
+        assert r.status_code == 200
+
+        session.refresh(linked)
+        session.refresh(medication)
+        assert linked.active is True
+        assert medication.deleted_at is None
+        assert medication.is_active is True
+
+        # 처방전 기록 자체는 정상적으로 soft-delete된다
+        r_get = client.get(f"/records/{rec.id}", headers=headers)
+        assert r_get.status_code == 404
+
     def test_deleting_record_soft_deletes_prescription_medications(self, client: TestClient, session: Session):
         """처방전 기반 내약이 남으면 다음 로그인 때 삭제가 안 된 것처럼 보인다."""
         cg = _make_caregiver(session, "cgDelPrescriptionMed")

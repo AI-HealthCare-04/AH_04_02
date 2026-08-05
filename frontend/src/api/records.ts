@@ -360,9 +360,13 @@ export async function listRecords(patientId: number, signal?: AbortSignal) {
   return data;
 }
 
-/** [2026-07-16 추가] 등록내역 삭제 (soft-delete) — 목록/상세 조회에서 이후 제외됨 */
-export async function deleteRecord(recordId: number) {
-  await monitoringClient.delete(`/records/${recordId}`);
+/** [2026-07-16 추가] 등록내역 삭제 (soft-delete) — 목록/상세 조회에서 이후 제외됨
+ * [2026-08-05 추가] deactivateMedications=false를 넘기면 이 처방전에 연결된 복약
+ * 일정(등록된 약)은 그대로 두고 처방전 기록만 지운다 — 기본값 true는 기존 동작 그대로. */
+export async function deleteRecord(recordId: number, deactivateMedications = true) {
+  await monitoringClient.delete(`/records/${recordId}`, {
+    params: { deactivate_medications: deactivateMedications },
+  });
 }
 
 /** [2026-07-21 추가] 등록내역 즐겨찾기처럼 위쪽에 고정/해제 */

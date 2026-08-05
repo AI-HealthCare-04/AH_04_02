@@ -153,7 +153,11 @@ export default function MonitoringDashboard() {
   useEffect(() => {
     if (patientId == null) return;
     setLoading(true);
-    Promise.all([getSchedules(patientId, false), getLogs(patientId, 45)])
+    // [2026-08-05 수정] activeOnly=false로 전체를 불러오면 처방전을 지워서(캐스케이드로
+    // active=false 처리된) 이미 중지된 약까지 "등록된 약" 목록에 그대로 남아있어 처방전을
+    // 여러 건 지워도 목록이 안 줄어드는 것처럼 보였다 — 이 대시보드는 "지금 복용 중인 약"을
+    // 보는 화면이라 활성 일정만 불러온다(중지된 약 이력은 복약일정 관리 화면에서 계속 볼 수 있음).
+    Promise.all([getSchedules(patientId, true), getLogs(patientId, 45)])
       .then(([s, l]) => {
         setSchedules(s);
         setLogs(l);
@@ -324,11 +328,11 @@ export default function MonitoringDashboard() {
 
             <div className="rounded-2xl overflow-hidden mb-6" style={{ background: C.surface, boxShadow: "0 2px 16px rgba(30,26,23,0.07)" }}>
               <div className="px-6 py-4 border-b flex items-center justify-between flex-wrap gap-2" style={{ borderColor: "rgba(30,26,23,0.08)" }}>
-                <h2 className="text-[16px] font-black" style={{ color: C.dark }}>등록된 약 전체</h2>
+                <h2 className="text-[16px] font-black" style={{ color: C.dark }}>복용 중인 약</h2>
                 <span className="text-[12px]" style={{ color: C.muted }}>약 이름을 클릭하면 상세 정보를 볼 수 있어요</span>
               </div>
               {schedules.length === 0 ? (
-                <p className="px-6 py-8 text-center text-[14px]" style={{ color: C.muted }}>등록된 약이 없어요.</p>
+                <p className="px-6 py-8 text-center text-[14px]" style={{ color: C.muted }}>복용 중인 약이 없어요.</p>
               ) : (
                 <>
                   {/* 모바일: 좁은 화면에서 표 컬럼이 한 글자씩 줄바꿈되는 걸 피하려고 카드형으로 */}
@@ -340,15 +344,7 @@ export default function MonitoringDashboard() {
                         style={{ borderBottom: i < schedules.length - 1 ? "1px solid rgba(30,26,23,0.06)" : undefined }}
                         onClick={() => navigate(`/drugs/${s.id}`, { state: { schedule: s } })}
                       >
-                        <div className="flex items-start justify-between gap-2 mb-1">
-                          <span className="font-bold text-[15px]" style={{ color: C.terracotta }}>{s.drug_name}</span>
-                          <span
-                            className="shrink-0 px-3 py-1 rounded-full text-[12px] font-bold"
-                            style={{ background: s.active ? `${C.success}20` : "rgba(30,26,23,0.07)", color: s.active ? "#4A7A47" : C.muted }}
-                          >
-                            {s.active ? "사용 중" : "중지"}
-                          </span>
-                        </div>
+                        <span className="font-bold text-[15px]" style={{ color: C.terracotta }}>{s.drug_name}</span>
                         <p className="text-[13px]" style={{ color: C.muted }}>{s.time_slot}{s.memo ? ` · ${s.memo}` : ""}</p>
                       </div>
                     ))}
@@ -356,7 +352,7 @@ export default function MonitoringDashboard() {
                   <table className="w-full hidden sm:table">
                     <thead>
                       <tr style={{ borderBottom: "1px solid rgba(30,26,23,0.08)" }}>
-                        {["약 이름", "복용 시간", "메모", "사용 여부"].map((h) => (
+                        {["약 이름", "복용 시간", "메모"].map((h) => (
                           <th key={h} className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider" style={{ color: C.muted }}>{h}</th>
                         ))}
                       </tr>
@@ -372,14 +368,6 @@ export default function MonitoringDashboard() {
                           <td className="px-5 py-3.5 font-bold text-[14px] hover:underline" style={{ color: C.terracotta }}>{s.drug_name}</td>
                           <td className="px-5 py-3.5 text-[13px]" style={{ color: C.muted }}>{s.time_slot}</td>
                           <td className="px-5 py-3.5 text-[13px]" style={{ color: C.muted }}>{s.memo || "—"}</td>
-                          <td className="px-5 py-3.5">
-                            <span
-                              className="px-3 py-1 rounded-full text-[12px] font-bold"
-                              style={{ background: s.active ? `${C.success}20` : "rgba(30,26,23,0.07)", color: s.active ? "#4A7A47" : C.muted }}
-                            >
-                              {s.active ? "사용 중" : "중지"}
-                            </span>
-                          </td>
                         </tr>
                       ))}
                     </tbody>
