@@ -48,6 +48,14 @@ dev = [
     "pillow>=10.0",       # generate_mock_*.py 스크립트 + TesseractOCRProvider 폴백
     "pytesseract>=0.3",   # TesseractOCRProvider CLOVA 장애 폴백 (시스템: brew install tesseract)
 ]
+# [2026-08-05 추가] locust는 dev 그룹과 분리 — backend/Dockerfile의 `uv sync --frozen`이
+# uv 기본 동작상 "dev" 그룹은 자동으로 같이 설치하지만, 이렇게 이름을 다르게 둔 그룹은
+# --group 옵션으로 명시하지 않으면 설치되지 않는다. 부하테스트 도구(+ gevent/flask 등
+# 하위 의존성 20여 개)가 실제 서비스에는 전혀 쓰이지 않는데 배포 이미지에 그대로
+# 딸려 들어가는 걸 막기 위함 — 로컬에서 쓸 때는 `uv sync --group loadtest`로 따로 설치.
+loadtest = [
+    "locust>=2.46.3",
+]
 
 # torch가 sentence-transformers/langchain-huggingface의 간접 의존성으로 들어오는데,
 # 지정 안 하면 기본 registry가 리눅스용 CUDA 툴킷(nvidia-* 15종, 수GB)까지 같이

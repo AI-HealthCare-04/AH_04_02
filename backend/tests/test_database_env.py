@@ -100,6 +100,34 @@ def test_production_env_succeeds_with_ssl_required_and_ca_set():
     assert "mysql" in result.stdout
 
 
+def test_production_env_uses_larger_connection_pool():
+    """[2026-08-05 추가, 리뷰 반영] production/development의 pool_size·max_overflow가
+    실수로 바뀌거나 지워지면(기본값 5+10으로 되돌아가면) 여기서 바로 잡힌다 — 이 값들이
+    Aiven max_connections=76을 넘기지 않게 맞춰둔 계산의 전제다."""
+    result = _run(
+        "from core import database; print(database.engine.pool.size(), database.engine.pool._max_overflow)",
+        {
+            "APP_ENV": "production",
+            "DATABASE_URL": "mysql+pymysql://user:pass@prod-db.internal:3306/healthdb_prod",
+            "DATABASE_SSL_REQUIRED": "true",
+            "DATABASE_SSL_CA": "/tmp/fake-ca-for-test.pem",
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "12 8"
+
+
+def test_development_env_uses_smaller_connection_pool():
+    """[2026-08-05 추가, 리뷰 반영] 팀원 여러 명이 동시에 development로 접속해도 공유 DB의
+    max_connections 예산을 많이 안 차지하도록 인스턴스당 풀을 작게(3+2) 잡아둔 값 검증."""
+    result = _run(
+        "from core import database; print(database.engine.pool.size(), database.engine.pool._max_overflow)",
+        {"APP_ENV": "development", "DATABASE_URL": "mysql+pymysql://user:pass@shared-db.internal:3306/healthdb"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "3 2"
+
+
 def test_development_env_with_mysql_url_uses_mysql_dialect_and_correct_host():
     result = _run(
         "from core import database; print(database.engine.dialect.name)",
