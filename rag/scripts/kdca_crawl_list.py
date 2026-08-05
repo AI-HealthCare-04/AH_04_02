@@ -1,5 +1,5 @@
 """질병관리청 국가건강정보포털 Open API 신청내역(83페이지)을 순회해서 cntntsSn
-목록을 수집한다. 사용법은 rag/README_rag.md의 "질병관리청 건강정보 수집" 절 참고.
+목록을 수집한다. 사용법은 rag/README.md의 "질병관리청 건강정보 수집" 절 참고.
 
 이 목록 페이지는 로그인 세션이 있어야만 접근되므로, 브라우저에서 로그인한 뒤
 DevTools Console에 `document.cookie`를 입력해 얻은 값을 KDCA_COOKIE 환경변수로

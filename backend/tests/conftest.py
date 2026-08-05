@@ -55,6 +55,25 @@ def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_mfds_disk_cache(tmp_path, monkeypatch):
+    """[2026-08-05 추가] rag/tests/conftest.py의 동명 fixture와 동일한 이유 —
+    routers/ocr_router.py의 _summarize_precautions_for_patient()가 rag.mfds_client의
+    diskcache를 재사용하게 되면서(perf: LLM 요약 캐싱), 이 캐시를 mock하지 않는 기존
+    backend 테스트가 실제 개발 환경의 mfds_cache/에 테스트 데이터를 남기고, 그 캐시가
+    남아있으면 다음 테스트 실행에서 ChatOpenAI mock을 건너뛰고 캐시 히트로 통과해버릴 수
+    있었다(실제 로직이 깨져도 캐시된 옛 결과 때문에 계속 통과). 매 테스트마다 격리된
+    임시 디렉토리로 교체해 실제 mfds_cache/를 건드리지 않고, 테스트 간 캐시 오염도
+    막는다."""
+    import diskcache
+    import rag.mfds_client as _mfds_client_mod
+
+    test_cache = diskcache.Cache(str(tmp_path / "mfds_cache"), timeout=1)
+    monkeypatch.setattr(_mfds_client_mod, "_disk_cache", test_cache)
+    yield
+    test_cache.close()
+
+
+@pytest.fixture(autouse=True)
 def _reset_chat_llm_available(monkeypatch: pytest.MonkeyPatch):
     """[2026-07-20 추가] routers/chat_router.py의 _CHAT_LLM_AVAILABLE은 모듈 import
     시점에 한 번만 CHAT_PROVIDER/rag.config.settings.OPENAI_API_KEY로 계산되는 전역

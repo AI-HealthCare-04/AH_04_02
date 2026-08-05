@@ -12,10 +12,13 @@ records_router.py(실제 업로드→OCR→가이드 한 번에 처리) 양쪽�
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import logging
 import os
 import sys
 import tempfile
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -55,6 +58,8 @@ from services.parsing_rules import extract_prescription_date  # noqa: E402
 _RAG_DIR = Path(__file__).resolve().parent.parent.parent / "rag"
 if _RAG_DIR.is_dir() and str(_RAG_DIR) not in sys.path:
     sys.path.insert(0, str(_RAG_DIR))
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ocr", tags=["OCR"])
 
@@ -96,7 +101,9 @@ def _fetch_permit_precautions(candidates: list[str]) -> list[str]:
                     precaution_parts.append(f"[사용상의 주의사항 - {title}] {text}" if title else text)
                 break
     except Exception:  # noqa: BLE001 — 키 미설정/네트워크 실패/미등재 약품명 등 어떤 이유로든 조용히 폴백
-        pass
+        # [버그수정] pass만 하면 실제 운영에서 왜 특정 약만 정보가 안 나오는지 로그로
+        # 추적할 방법이 없었다 — 화면은 그대로 조용히 폴백시키되 원인은 로그에 남긴다.
+        logger.warning("허가정보 사용상의 주의사항 조회 실패: candidates=%s", candidates, exc_info=True)
     return precaution_parts
 
 
@@ -141,8 +148,14 @@ def _fetch_eyakeun_info(candidates: list[str]) -> dict:
             # efficacy를 못 채운 경우(효능·효과 필드가 로컬 e약은요 xlsx 매칭에만 존재해서
             # HIRA 매칭 시 항상 빈 문자열이었던 문제)의 안전한 보강 소스로 쓴다.
             indication = best_hit.efcy_qesitm.strip() if best_hit.efcy_qesitm else None
+        elif not candidates:
+            logger.warning("e약은요 조회 후보 이름이 비어 있음")
+        else:
+            logger.warning("e약은요 조회 결과 없음: candidates=%s", candidates)
     except Exception:  # noqa: BLE001 — 키 미설정/네트워크 실패/미등재 약품명 등 어떤 이유로든 조용히 폴백
-        pass
+        # [버그수정] pass만 하면 보관법/부작용 등이 왜 비어있는지(키 미설정 vs 네트워크
+        # 실패 vs 오매칭) 운영에서 전혀 구분할 수 없었다 — 로그로 원인 추적 가능하게 한다.
+        logger.warning("e약은요 조회 실패: candidates=%s", candidates, exc_info=True)
     return {
         "precaution_parts": precaution_parts,
         "side_effects": side_effects,
@@ -170,7 +183,7 @@ def _fetch_dur_cautions(candidates: list[str]) -> list[dict]:
             {"category": c.category, "detail": c.detail, "extra": c.extra} for c in raw_cautions
         ]
     except Exception:  # noqa: BLE001
-        pass
+        logger.warning("DUR 주의사항 조회 실패: candidates=%s", candidates, exc_info=True)
     return dur_cautions
 
 
@@ -198,6 +211,7 @@ def _fetch_rag_drug_detail(drug_name: str) -> dict:
 
         candidates = resolve_drug_name_candidates(drug_name)
     except Exception:  # noqa: BLE001 — 후보 생성 실패 시 원문 하나만으로 폴백
+        logger.warning("약품명 후보 생성 실패, 원문으로 폴백: drug_name=%s", drug_name, exc_info=True)
         candidates = [drug_name]
 
     with ThreadPoolExecutor(max_workers=3) as executor:
@@ -266,6 +280,23 @@ def _summarize_precautions_for_patient(
         ]
         if part
     )
+
+    # [2026-08-05 추가, perf] mfds_client.py의 diskcache 패턴과 동일하게 — 매 요청마다
+    # LLM을 새로 호출하면 /ocr/drug-info가 캐시 warm 상태에서도 3~4초씩 고정으로 걸렸다.
+    # 약품명 + 원문 내용(raw_text) 해시를 키로 써서, 같은 약의 같은 원문에 대해서는
+    # 한 번 요약한 결과를 재사용한다(원문이 갱신되면 해시가 달라져 자동으로 다시 요약됨).
+    cache_key = f"ocr.patient_summary|{drug_name}|{hashlib.sha256(raw_text.encode('utf-8')).hexdigest()}"
+    from rag.mfds_client import _disk_cache as summary_disk_cache
+
+    if summary_disk_cache is not None:
+        try:
+            cached = summary_disk_cache.get(cache_key)
+        except Exception:  # noqa: BLE001 — 캐시 조회 실패는 LLM 호출로 폴백
+            cached = None
+        if cached is not None:
+            logger.info("복약 주의사항 요약 캐시 히트: drug_name=%s", drug_name)
+            return cached
+
     with optional_observation(
         as_type="generation",
         name="drug-info-patient-summary",
@@ -320,11 +351,33 @@ def _summarize_precautions_for_patient(
                 },
             )
             flush_langfuse()
+            if summary_disk_cache is not None:
+                try:
+                    summary_disk_cache.set(cache_key, summary, expire=rag_settings.MFDS_CACHE_TTL_SECONDS)
+                except Exception:  # noqa: BLE001 — 캐시 저장 실패는 이번 요청 결과에 영향 없음
+                    pass
             return summary
         except Exception as exc:  # noqa: BLE001 — LLM 실패/키 미설정/JSON 파싱 실패 등 어떤 이유로든 원문 폴백
             update_observation(generation, output={"status": "fallback", "error_type": type(exc).__name__})
             flush_langfuse()
             return None
+
+
+# [2026-08-05 추가, perf] POST /records의 백그라운드 사전조회(records_router.py의
+# _prefetch_drug_info)와 PrescriptionReview.tsx의 실시간 조회가 같은 약을 동시에 호출할
+# 수 있다 — diskcache 자체는 동시 read/write에 안전하지만(캐시 미스 상태에서 두 호출이
+# 동시에 들어오면 각자 라이브 API/LLM을 중복 호출한 뒤 마지막 write가 이긴다, 데이터
+# 손상은 없음 — 직접 재현해 확인함), 정부 API/LLM 호출이 그만큼 낭비된다. drug_name별
+# Lock으로 직렬화해서, 두 번째 호출은 첫 호출이 캐시를 채운 뒤 캐시 히트로 곧바로
+# 끝나게 한다. 약품명은 유한한 실물 집합이라 앱 수명 동안 조회된 고유 이름 수만큼만
+# Lock 객체가 쌓인다(장시간 운영 시 무시할 수준의 메모리 — 별도 정리 로직은 과함).
+_drug_info_call_locks: dict[str, threading.Lock] = {}
+_drug_info_call_locks_guard = threading.Lock()
+
+
+def _drug_info_lock_for(drug_name: str) -> threading.Lock:
+    with _drug_info_call_locks_guard:
+        return _drug_info_call_locks.setdefault(drug_name, threading.Lock())
 
 
 @router.get("/drug-info")
@@ -337,8 +390,11 @@ def drug_info(drug_name: str):
     [2026-07-20 추가] DrugDetail.tsx(복약 일정 기반, OCR 기록과 연결 안 됨)가 주의사항
     등을 표시할 방법이 아예 없었던 문제 — rag/ 패키지 live API로 보강 조회한 필드들을
     함께 내려준다(_fetch_rag_drug_detail 참고).
+
+    [2026-08-05 추가, perf] drug_name별 Lock으로 동시 호출을 직렬화한다 — 백그라운드
+    사전조회/실시간 조회 경쟁 시 캐시 미스 중복 호출을 막는다(_drug_info_lock_for 참고).
     """
-    with optional_observation(
+    with _drug_info_lock_for(drug_name), optional_observation(
         as_type="span",
         name="drug-info-detail",
         input={"drug_name": mask_for_langfuse(drug_name)},

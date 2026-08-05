@@ -117,6 +117,9 @@ uploads/
 
 # ===== 멘토링 보고서 (팀 취합용, 원격 push 제외) =====
 mentoring*
+# docs/mentoring_report/ 는 정식 보관 위치라 예외로 추적한다
+!docs/mentoring_report/
+!docs/mentoring_report/**
 
 # ===== AI 모델 / 대용량 파일 =====
 models/

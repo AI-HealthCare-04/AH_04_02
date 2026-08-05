@@ -34,7 +34,7 @@ export interface OcrMedication {
  * [7/9] RAG_PROVIDER=stub(기본값)과 RAG_PROVIDER=real이 서로 다른 모양을 반환한다.
  * 두 모드를 전환하며 테스트해야 하는 과도기라 필드를 전부 optional로 두고,
  * Result.tsx/MedGuide.tsx에서 어느 필드가 있는지 보고 어느 모드인지
- * 판단해서 렌더링한다. (실제 응답 샘플: docs/rag-real-response-sample.md)
+ * 판단해서 렌더링한다. (실제 응답 샘플: docs/Team Members' Notes/rag-real-response-sample.md)
  */
 export interface GuideDrug {
   drug_name: string;
@@ -284,7 +284,7 @@ export interface RecordSummary {
  * record_id로만 조회해서 이 처방전에 연결된 사진만 불러온다(다른 기록의 사진이 섞일 수 없음). */
 // [2026-07-28 버그수정] 휴대폰으로 찍은 처방전 원본 사진은 용량이 몇 MB씩 될 수 있는데,
 // 공용 axios 클라이언트의 전역 10초 타임아웃(monitoringClient.ts)을 그대로 썼다 —
-// askChat/getDrugIndication이 이미 겪은 것과 같은 문제(TROUBLESHOOTING.md 2026-07-09
+// askChat/getDrugIndication이 이미 겪은 것과 같은 문제(troubleshooting-log.md 2026-07-09
 // 항목 참고)로, 로컬(loopback)에서는 안 걸리다가 실제 배포 환경(휴대폰 네트워크 → nginx
 // → 백엔드)에서는 10초를 넘겨 실패할 수 있다. LLM 호출만큼 오래 걸리진 않지만 넉넉하게 잡는다.
 export async function getRecordImageBlobUrl(recordId: number): Promise<string> {

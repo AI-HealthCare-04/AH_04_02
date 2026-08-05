@@ -147,9 +147,17 @@ export default function PrescriptionReview() {
   // 항목별 입력칸을 감싸는 컨테이너 — blur 시 포커스가 "같은 항목의 다른 칸"으로
   // 이동하는 중인지 판별해서, 그 경우엔 아직 확인 완료 처리하지 않기 위함
   const itemContainerRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  // [2026-08-05 추가] Processing.tsx의 startedRef와 동일한 이유 — React StrictMode(main.tsx)는
+  // 개발 모드에서 마운트 이펙트를 일부러 두 번 실행한다. 이 이펙트가 recordId별로 한 번만
+  // 실행되도록 마지막으로 로딩을 시작한 recordId를 기록해둔다(단순 boolean이 아닌 이유:
+  // 실제로 다른 recordId로 넘어오면 새로 조회해야 하므로).
+  const startedForRecordIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!recordId) return;
+
+    if (startedForRecordIdRef.current === recordId) return;
+    startedForRecordIdRef.current = recordId;
 
     // 문제 없는 항목은 바로 "확인 완료"(초록)로 시작 — 사용자가 다시 볼 필요 없게.
     const applyData = (data: RecordResult, nameOkMap: Record<number, boolean>) => {

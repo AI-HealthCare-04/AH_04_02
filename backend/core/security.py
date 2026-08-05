@@ -122,6 +122,6 @@ def verify_pii_key_against_db(engine) -> None:
                 except InvalidToken as exc:
                     raise RuntimeError(
                         "PII_ENCRYPTION_KEY가 기존 데이터와 일치하지 않는 것 같습니다 — "
-                        "docs/env-var-checklist.md 참고"
+                        "docs/Team Members' Notes/env-var-checklist.md 참고"
                     ) from exc
     # patients/caregivers 모두 복호화 성공(또는 암호화 레코드 없음) — 통과

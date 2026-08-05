@@ -8,7 +8,7 @@ REQ-026a(정시 알림) + REQ-026c(놓침 감지) + REQ-026d(third_party_needed 
 동일하게, 동기 SQLModel Session 작업은 to_thread로 감싸 이벤트 루프를 막지 않는다.
 
 동시성 주의: 이 팀은 로컬 개발 서버 여러 대가 공유 Aiven MySQL DB 하나를 바라본다
-(docs/shared-dev-db-setup.md) — 즉 "지금 이 틱을 처리한 게 나 하나뿐"이라고 가정할 수
+(docs/Team Members' Notes/shared-dev-db-setup.md) — 즉 "지금 이 틱을 처리한 게 나 하나뿐"이라고 가정할 수
 없다. 그래서 "이미 처리했는지"의 진실 공급원은 스케줄러의 타이밍이 아니라
 NotificationLog의 (schedule_id, due_date, time_slot, kind) UniqueConstraint다 —
 두 서버가 같은 틱에 같은 알림을 동시에 처리하려 해도 DB가 한쪽만 통과시킨다.

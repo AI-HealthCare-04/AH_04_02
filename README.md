@@ -166,10 +166,16 @@ FastAPI (backend/main.py)
 │   ├── rag/                   # 가이드 생성 로직, 식약처/HIRA/DUR 연동
 │   └── tests/
 ├── pyproject.toml / uv.lock   # backend/ + rag/ 파이썬 의존성 (uv로 관리, 하나의 가상환경 공유)
-├── API명세서/                 # API 명세서 버전별 문서
-├── ERD/                       # ERD 버전별 문서
-├── 요구사항_정의서/            # 요구사항 정의서 버전별 문서
-├── docs/                       # 그 외 프로젝트 문서 (team-rules.md, revision_logs 등)
+├── docs/                       # 프로젝트 문서
+│   ├── API명세서/              # API 명세서 버전별 문서 + revision_log/
+│   ├── ERD/                    # ERD 버전별 문서 + revision_log/
+│   ├── 요구사항_정의서/         # 요구사항 정의서 버전별 문서 + revision_log/
+│   ├── deviation_log/          # 팀 간 편차·CAPA 로그 (날짜별)
+│   ├── troubleshooting_log/    # 트러블슈팅 로그
+│   ├── validation_summary/     # 검증 요약 보고서
+│   ├── mentoring_report/       # 멘토링 보고서
+│   ├── Team Members' Notes/    # 작업 내용 중 팀원이 숙지해야 할 문서 (team-rules.md 등)
+│   └── etc/                    # 그 외 참고 문서 (기술 가이드, 계정 정보, 1주차 기획 등)
 └── README.md
 ```
 
@@ -240,7 +246,7 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 
 ## 🤝 협업 규칙
 
-자세한 내용은 [`docs/team-rules.md`](./docs/team-rules.md) 참고.
+자세한 내용은 [`docs/Team Members' Notes/team-rules.md`](./docs/Team%20Members%27%20Notes/team-rules.md) 참고.
 
 ### 브랜치 전략
 
@@ -365,7 +371,7 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 
 개발 중 발생한 주요 문제와 해결 과정을 기록합니다. 단순 오류 메시지보다 **원인 분석 → 해결 방법 → 재발 방지책** 순으로 작성하는 것을 권장합니다.
 
-> 상세 기록은 [`docs/TROUBLESHOOTING.md`](./docs/TROUBLESHOOTING.md) 에 누적합니다. 아래는 주요 이슈 요약입니다.
+> 상세 기록은 [`docs/troubleshooting_log/troubleshooting-log.md`](./docs/troubleshooting_log/troubleshooting-log.md) 에 누적합니다. 아래는 주요 이슈 요약입니다.
 
 | 날짜 | 담당 | 문제 | 원인 | 해결 |
 |---|---|---|---|---|
@@ -389,7 +395,7 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 
 ### 배포 시 로컬 개발과 다른 점 — 특히 `.env`
 
-배포 스텝은 코드만 받아오고 **`.env`는 절대 건드리지 않습니다** (`.gitignore`돼 있어 git에 없음). 즉 EC2의 `backend/.env`는 로컬 `.env`와 별개로, 필요할 때 **직접 SSH로 들어가 손으로** 갱신해야 합니다 — 특히 `CORS_ALLOWED_ORIGINS`(프론트 도메인 추가)나 `VITE_MONITORING_API_URL`(백엔드 도메인) 같은 값이 바뀌었는데 EC2 쪽을 안 고치면 로그인부터 막힙니다. 체크리스트는 [`docs/env-var-checklist.md`](./docs/env-var-checklist.md) 참고.
+배포 스텝은 코드만 받아오고 **`.env`는 절대 건드리지 않습니다** (`.gitignore`돼 있어 git에 없음). 즉 EC2의 `backend/.env`는 로컬 `.env`와 별개로, 필요할 때 **직접 SSH로 들어가 손으로** 갱신해야 합니다 — 특히 `CORS_ALLOWED_ORIGINS`(프론트 도메인 추가)나 `VITE_MONITORING_API_URL`(백엔드 도메인) 같은 값이 바뀌었는데 EC2 쪽을 안 고치면 로그인부터 막힙니다. 체크리스트는 [`docs/Team Members' Notes/env-var-checklist.md`](./docs/Team%20Members%27%20Notes/env-var-checklist.md) 참고.
 
 `VITE_*` 값처럼 프론트 **빌드 시점**에 박히는 값을 바꿨다면, 컨테이너 재시작(`restart`)만으로는 반영되지 않고 재빌드(`up -d --build`)가 필요합니다.
 
@@ -397,5 +403,5 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 
 ## 📄 참고 문서
 
-- [팀 협업 규칙 (team-rules.md)](./docs/team-rules.md)
-- [요구사항 정의서](./요구사항_정의서/) / [ERD](./ERD/) / [API 명세서](./API명세서/) — 버전별 문서, 변경 이력은 [`docs/revision_logs/`](./docs/revision_logs/) 참고
+- [팀 협업 규칙 (team-rules.md)](./docs/Team%20Members%27%20Notes/team-rules.md)
+- [요구사항 정의서](./docs/요구사항_정의서/) / [ERD](./docs/ERD/) / [API 명세서](./docs/API명세서/) — 버전별 문서, 변경 이력은 각 폴더의 `revision_log/` 참고
