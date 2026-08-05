@@ -56,6 +56,20 @@ if APP_ENV == "production" and not DATABASE_SSL_REQUIRED:
         "반드시 SSL로 연결해야 합니다 — DATABASE_SSL_REQUIRED=true와 DATABASE_SSL_CA를 지정하세요."
     )
 
+# [2026-08-05 추가] Aiven MySQL 공유 DB의 max_connections=76을 배포 서버(워커 2개)와
+# 팀원 로컬 development 접속이 전부 나눠 쓴다 — SQLAlchemy pool_size/max_overflow를
+# 안 정해두면 기본값(5+10=15)이 그대로 적용되는데, 부하테스트로 워커 2개 × 15 = 30
+# 근처에서 이미 pool 대기 타임아웃(502/504)이 발생하는 걸 실제로 확인했다.
+# production은 넉넉하게(워커당 20 → 2개면 40), development는 팀원이 여러 명 동시에
+# 로컬에서 이 DB에 붙어도 76을 넘기지 않도록 작게(인스턴스당 5) 잡는다 — 다 합쳐도
+# 40(production) + 5명 × 5(development) = 65로 관리자 예약 슬롯을 포함해도 76 안에 든다.
+if APP_ENV == "production":
+    _POOL_SIZE, _MAX_OVERFLOW = 12, 8
+elif APP_ENV == "development":
+    _POOL_SIZE, _MAX_OVERFLOW = 3, 2
+else:
+    _POOL_SIZE, _MAX_OVERFLOW = 5, 10  # local(SQLite)은 아래 분기에서 실제로는 안 쓰임
+
 # check_same_thread=False: SQLite에서 FastAPI가 여러 요청을 처리할 때 필요한 옵션.
 # MySQL 등 서버형 DB는 이 옵션이 없고, 대신 pool_pre_ping으로 끊긴 연결을 자동 복구한다.
 if _url.get_backend_name() == "sqlite":
@@ -67,9 +81,17 @@ elif DATABASE_SSL_REQUIRED:
             "APP_ENV=production인데 DATABASE_SSL_CA가 없습니다. 운영 DB는 서버 인증서를 "
             "반드시 검증해야 합니다 — CA 인증서 경로를 DATABASE_SSL_CA에 지정하세요."
         )
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args={"ssl": ssl_args})
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        pool_size=_POOL_SIZE,
+        max_overflow=_MAX_OVERFLOW,
+        connect_args={"ssl": ssl_args},
+    )
 else:
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    engine = create_engine(
+        DATABASE_URL, pool_pre_ping=True, pool_size=_POOL_SIZE, max_overflow=_MAX_OVERFLOW
+    )
 
 
 def log_db_connection_info() -> None:
