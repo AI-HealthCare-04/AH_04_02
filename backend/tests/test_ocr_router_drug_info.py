@@ -159,6 +159,30 @@ class TestDrugInfoDegradedGracefully:
         # 정적 매칭(drug_class/indication)은 rag 조회 실패와 무관하게 그대로 동작해야 함
         assert "drug_class" in data
 
+    def test_all_external_calls_failing_logs_warning_instead_of_silent_pass(self, caplog):
+        """[버그수정 회귀 테스트] 예전엔 except Exception: pass라서 정부 API 조회가
+        실패해도(키 미설정/네트워크 오류/오매칭 등) 로그에 아무 흔적도 안 남아 운영에서
+        "왜 이 약만 보관법이 안 나오지"를 추적할 방법이 없었다 — 이제 실패는 warning
+        로그로 남아야 한다."""
+        import logging
+
+        with (
+            patch("rag.mfds_client.search_permit_detail", side_effect=Exception("network down")),
+            patch("rag.mfds_client.search_by_name", side_effect=Exception("network down")),
+            patch("rag.dur_master.search_elderly_caution", side_effect=Exception("network down")),
+            patch("rag.dur_master.search_age_taboo", side_effect=Exception("network down")),
+            patch("rag.dur_master.search_pregnancy_taboo", side_effect=Exception("network down")),
+            patch("routers.ocr_router._summarize_precautions_for_patient", return_value=None),
+            caplog.at_level(logging.WARNING, logger="routers.ocr_router"),
+        ):
+            r = client.get("/ocr/drug-info", params={"drug_name": "암로디핀정5mg"})
+
+        assert r.status_code == 200
+        warning_messages = [rec.message for rec in caplog.records if rec.levelno >= logging.WARNING]
+        assert any("e약은요 조회 실패" in m for m in warning_messages)
+        assert any("DUR 주의사항 조회 실패" in m for m in warning_messages)
+        assert any("허가정보 사용상의 주의사항 조회 실패" in m for m in warning_messages)
+
     def test_unregistered_drug_name_no_hits_returns_empty_gracefully(self):
         with (
             patch("rag.mfds_client.search_permit_detail", return_value=[]),

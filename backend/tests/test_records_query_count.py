@@ -155,9 +155,29 @@ class TestBulkResultsMatchOriginalPerRecordBehavior:
         body = r.json()
         assert len(body) == 3
         for entry in body:
-            # diagnosis는 그 기록의 "첫 OCR 항목"(약A) 것을 그대로 씀 — 원래 함수와 동일 규칙
+            # 약B의 diagnosis는 빈 문자열이라 걸러지고, 중복 없는 "고혈압" 하나만 남는다.
             assert entry["diagnosis"] == "고혈압"
             assert len(entry["drug_names"]) == 2
+
+    def test_diagnosis_combines_distinct_values_from_all_ocr_items(
+        self, client: TestClient, session: Session
+    ):
+        """[버그수정 회귀 테스트] 약마다 진단명이 다른 처방전(천식약+비염약)은 목록에
+        모든 진단명이 중복 없이 함께 보여야 한다 — 첫 번째 약의 진단명만 보이던 버그 재발 방지."""
+        pt = _make_patient(session)
+        record = MedicalRecord(patient_id=pt.id, image_path="/tmp/multi.png")
+        session.add(record)
+        session.commit()
+        session.refresh(record)
+        session.add(OcrResult(record_id=record.id, drug_name="살부타몰흡입제", diagnosis="천식"))
+        session.add(OcrResult(record_id=record.id, drug_name="항히스타민제", diagnosis="알레르기성 비염"))
+        session.add(OcrResult(record_id=record.id, drug_name="살부타몰흡입제2", diagnosis="천식"))
+        session.commit()
+
+        r = client.get("/records", params={"patient_id": pt.id}, headers=_headers(pt.id))
+        body = r.json()
+        assert len(body) == 1
+        assert body[0]["diagnosis"] == "천식, 알레르기성 비염"
 
     def test_uploader_name_only_when_uploaded_by_caregiver(self, client: TestClient, session: Session):
         pt = _make_patient(session)

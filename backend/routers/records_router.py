@@ -542,12 +542,19 @@ def list_records(
     summaries = []
     for r in records:
         ocr_items = ocr_items_by_record.get(r.id, [])
+        # [버그수정] 예전엔 ocr_items[0].diagnosis만 써서, 약마다 진단명이 다른
+        # 처방전(예: 천식약+비염약)은 목록에 첫 번째 약의 진단명만 보이고 나머지가
+        # 조용히 사라졌다 — 모든 약의 진단명을 중복 제거해 합쳐서 보여준다.
+        diagnoses = []
+        for item in ocr_items:
+            if item.diagnosis and item.diagnosis not in diagnoses:
+                diagnoses.append(item.diagnosis)
         summaries.append(
             {
                 "record_id": r.id,
                 "status": r.status,
                 "created_at": r.created_at.isoformat(),
-                "diagnosis": ocr_items[0].diagnosis if ocr_items else "",
+                "diagnosis": ", ".join(diagnoses),
                 "drug_names": [item.drug_name for item in ocr_items],
                 "uploaded_by_name": uploader_names_by_id.get(r.uploaded_by_caregiver_id),
                 "pinned": r.pinned,
