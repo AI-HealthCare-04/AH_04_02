@@ -39,6 +39,14 @@ os.environ.setdefault("DATABASE_SSL_CA", "")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# [2026-08-05 추가] rag/도 backend/와 같은 이유로 sys.path에 필요하다 — routers/rag_router.py가
+# RAG_PROVIDER=real일 때 자기 import 시점에 sys.path.insert(rag/)를 하는 부수효과로 그동안
+# 우연히 채워졌지만, 이 fixture(아래 _isolate_mfds_disk_cache)처럼 rag.mfds_client를 직접
+# import하는 테스트 파일이 rag_router.py보다 먼저 수집·실행되면(예: 이 파일 단독 실행,
+# 또는 컬렉션 순서가 바뀌면) "No module named 'rag.mfds_client'"로 실패했다. 명시적으로
+# 넣어서 수집 순서에 의존하지 않게 한다.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "rag"))
+
 
 # [2026-07-28 추가] SQLite는 기본적으로 외래키 제약을 강제하지 않는다(PRAGMA로 켜야 함) —
 # 반면 실서버(MySQL/InnoDB)는 항상 강제한다. 그래서 "삭제 순서를 안 지켜 FK 위반이 나는"
