@@ -33,6 +33,7 @@ Day 2에 각자 자기 테이블을 검토하고 필요하면 컬럼을 고쳐�
   내므로, backend/.env에 반드시 채워야 함(생성 방법은 security.py 상단 주석 참고).
 """
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from core.security import decrypt_pii, encrypt_pii, hash_phone
 from sqlalchemy import Column, Index, LargeBinary, Text, UniqueConstraint
@@ -499,6 +500,12 @@ class MedicationLog(SQLModel, table=True):
 # 처리된다 — 스케줄러 자체의 "정확히 한 번" 보장이 아니라 DB가 최종 중재자.
 # kind를 제약에 포함한 이유: 같은 스케줄/같은 날 "reminder"(정시 알림)와 "missed"
 # (놓침 판정)가 서로 다른 사건이라 둘 다 한 번씩은 남아야 한다.
+def _now_kst() -> datetime:
+    # scheduler.py의 _now_kst()와 동일한 이유: datetime.now()는 Docker 컨테이너의
+    # OS 시간대(기본 UTC)를 따라가 due_at 기준 시각과 9시간 어긋난다.
+    return datetime.now(ZoneInfo("Asia/Seoul")).replace(tzinfo=None)
+
+
 class NotificationLog(SQLModel, table=True):
     __tablename__ = "notification_logs"
     __table_args__ = (
@@ -521,7 +528,7 @@ class NotificationLog(SQLModel, table=True):
     status: str = "pending"  # pending / sent / suppressed / failed
     channels: str = "[]"  # JSON 배열, 예: '["inapp","email:patient","email:caregiver:3"]'
     # [2026-08-03 추가, perf] list_logs가 "최근 N일"을 이 컬럼으로 필터링한다.
-    fired_at: datetime = Field(default_factory=datetime.now, index=True)
+    fired_at: datetime = Field(default_factory=_now_kst, index=True)
     acknowledged_at: datetime | None = None  # 환자가 인앱 알림을 확인 처리하면 채워짐
     deleted_at: datetime | None = None  # 알림함에서 정리한 시각; 중복 발송 판정 기록은 보존
 

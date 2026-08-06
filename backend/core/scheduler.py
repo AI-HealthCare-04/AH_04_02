@@ -373,13 +373,21 @@ def _tick() -> None:
 
 
 async def reminder_loop() -> None:
-    """lifespan에서 asyncio.create_task로 띄우고, 종료 시 CancelledError로 멈춘다."""
+    """lifespan에서 asyncio.create_task로 띄우고, 종료 시 CancelledError로 멈춘다.
+
+    [2026-08-06] 기존엔 매 틱 후 그냥 TICK_SECONDS(60초)만 쉬었다 — 그러면 틱 위상이
+    "서버가 시작된 초"에 고정돼, 예를 들어 서버가 :23초에 뜨면 영원히 매분 :23초에만
+    틱이 돈다. 40분 정시 알림이 40:00이 되고도 40:23까지 최대 59초를 더 기다려야
+    발송되는 원인이 이거였다 — 다음 "분(:00초)"까지 남은 시간만큼 자면 항상 정각 근처에
+    틱이 돌아 이 지연이 거의 없어진다.
+    """
     while True:
         try:
             await asyncio.to_thread(_tick)
         except Exception:
             logger.exception("scheduler tick 중 처리되지 않은 예외 발생 — 다음 틱은 계속 진행")
-        await asyncio.sleep(TICK_SECONDS)
+        now = _now_kst()
+        await asyncio.sleep(TICK_SECONDS - now.second - now.microsecond / 1_000_000)
 
 
 def scheduler_enabled() -> bool:
