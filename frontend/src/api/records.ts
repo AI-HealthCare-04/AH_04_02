@@ -128,13 +128,6 @@ function sourceRefTitles(ref: SourceRef): string[] {
   return titles.length > 0 ? titles : [ref.drug_name ?? "출처 미상"];
 }
 
-/** source_refs 항목 하나를 사람이 읽을 수 있는 한 줄로 표시 (stub/실제 두 모양 다 처리).
- * 여러 데이터 소스를 겸하는 ref는 첫 번째 타이틀만 반환 — 전체 목록이 필요하면
- * formatUniqueSourceRefs를 쓸 것. */
-export function formatSourceRef(ref: SourceRef): string {
-  return sourceRefTitles(ref)[0];
-}
-
 /** source_refs를 "이 답변이 근거로 삼은 데이터 소스" 제목 목록으로 변환하되, 같은
  * 소스가 반복되면 한 번만 남긴다(여러 약이 같은 학회 지침·같은 DUR 카테고리를 각자
  * 인용하는 경우가 많음). */

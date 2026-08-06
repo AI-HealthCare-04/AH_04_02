@@ -1108,7 +1108,7 @@ def _rag_docs_to_prompt_lines(docs: list) -> list[str]:
 
 def _rag_docs_to_source_refs(docs: list) -> list[dict]:
     """실제 검색된 문서의 title/source/item_name 등을 프론트에서 확인할 수 있는 형태로
-    변환한다. frontend/src/api/records.ts의 기존 SourceRef 타입/formatSourceRef와 필드명을
+    변환한다. frontend/src/api/records.ts의 기존 SourceRef 타입/sourceRefTitles와 필드명을
     맞춰 재사용한다(의약품 인용에 이미 쓰이는 관례 — 새 타입 안 만듦)."""
     refs = []
     for doc in docs:
