@@ -151,6 +151,25 @@ def test_dur_question_does_not_use_general_kdca_rag_context():
     mock_search.assert_not_called()
 
 
+def test_storage_question_is_not_misclassified_as_dur_only():
+    """실사용 재현: "나 복용하는 의약품 보관 어떻게해?"(보관법 질문, DUR과 무관)가
+    _DUR_ONLY_KEYWORDS의 bare "복용" 때문에 DUR 전용 질문으로 잘못 분류돼
+    _retrieve_chat_rag_docs가 건너뛰어지고(실제 e약은요 보관법 문서를 검색하지 않음),
+    카테고리가 애매하면 "둘 다 보여준다" 폴백 때문에 무관한 DUR 임부금기 참고자료까지
+    붙던 버그의 회귀 테스트. "이 약 복용해도 되나요?"처럼 실제 DUR 질문은 여전히
+    올바르게 분류돼야 한다."""
+    assert not _should_answer_from_dur_only("나 복용하는 의약품 보관 어떻게해?")
+    assert not _should_answer_from_dur_only("복용 방법 알려줘")
+    assert not _should_answer_from_dur_only("복용 시간이 언제야?")
+
+    assert _should_answer_from_dur_only("이 약 복용해도 되나요?")
+
+    with patch("rag.vectorstore.similarity_search", return_value=[]) as mock_search:
+        _retrieve_chat_rag_docs("나 복용하는 의약품 보관 어떻게해?")
+
+    mock_search.assert_called()
+
+
 def test_general_greeting_does_not_use_kdca_rag_context():
     """인사/앱 안내성 질문은 의료 근거가 아니므로 질병관리청 참고자료를 붙이지 않는다."""
     assert _is_general_chat_question("안녕하세요")
