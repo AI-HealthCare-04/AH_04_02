@@ -5,7 +5,7 @@ import { C } from "../theme";
 // 동일한 시간 입력 UI가 필요해서 공용 컴포넌트로 분리 (기존 동작은 그대로 유지).
 export const PERIODS = ["오전", "오후"];
 export const HOURS_12 = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0"));
-export const MINUTES_5 = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, "0"));
+export const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, "0"));
 
 export function formatTime12(time: string) {
   const [hStr, m] = time.split(":");
@@ -16,16 +16,15 @@ export function formatTime12(time: string) {
   return `${period} ${String(h12).padStart(2, "0")}:${m ?? "00"}`;
 }
 
-/** 24시간 "HH:MM" → 휠 피커용 {오전/오후, 01~12시, 5분단위} */
+/** 24시간 "HH:MM" → 휠 피커용 {오전/오후, 01~12시, 1분단위} */
 export function to12(time: string) {
   const [hStr, mStr] = time.split(":");
   const h = Number(hStr) || 0;
   const period = h < 12 ? "오전" : "오후";
   let h12 = h % 12;
   if (h12 === 0) h12 = 12;
-  const m = Number(mStr) || 0;
-  const roundedM = (Math.round(m / 5) * 5) % 60;
-  return { period, hour: String(h12).padStart(2, "0"), minute: String(roundedM).padStart(2, "0") };
+  const m = (Number(mStr) || 0) % 60;
+  return { period, hour: String(h12).padStart(2, "0"), minute: String(m).padStart(2, "0") };
 }
 
 /** 휠 피커 선택값 → 24시간 "HH:MM" */
