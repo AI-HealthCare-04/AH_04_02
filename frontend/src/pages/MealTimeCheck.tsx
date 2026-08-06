@@ -4,7 +4,7 @@ import NavBar from "../components/NavBar";
 import PatientContextBanner from "../components/PatientContextBanner";
 import { getPatients, updateMealTimes } from "../api/monitoring";
 import { getCurrentUserName, isLoggedIn, useGuardedPatientId } from "../lib/session";
-import { from12, HOURS_12, MINUTES_5, PERIODS, to12, WheelColumn } from "../components/WheelTimePicker";
+import { from12, HOURS_12, MINUTES, PERIODS, to12, WheelColumn } from "../components/WheelTimePicker";
 
 type MealKey = "breakfast" | "lunch" | "dinner";
 
@@ -125,7 +125,7 @@ export default function MealTimeCheck() {
                   />
                   <span className="text-[15px] font-bold text-[#8A7E75] px-0.5">:</span>
                   <WheelColumn
-                    options={MINUTES_5}
+                    options={MINUTES}
                     value={t12.minute}
                     onChange={(v) => setTime((prev) => ({ ...prev, [key]: from12(t12.period, t12.hour, v) }))}
                   />

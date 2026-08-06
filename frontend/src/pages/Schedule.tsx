@@ -17,7 +17,7 @@ import {
 } from "../api/monitoring";
 import { getCurrentUserName, isLoggedIn, useGuardedPatientId } from "../lib/session";
 import { C } from "../theme";
-import { formatTime12, from12, HOURS_12, MINUTES_5, PERIODS, to12, WheelColumn } from "../components/WheelTimePicker";
+import { formatTime12, from12, HOURS_12, MINUTES, PERIODS, to12, WheelColumn } from "../components/WheelTimePicker";
 
 // [7/8 변경] 피그마 디자인 반영 — 시간대(아침/점심/저녁) 대신 "복용 상태" 6종 + 실제 시각 입력
 // [2026-07-21] PrescriptionReview.tsx(처방확인 화면)에서도 그대로 재사용하려고 export.
@@ -564,7 +564,7 @@ export default function SchedulePage() {
                         />
                         <span className="text-[15px] font-bold text-[#6E6259] px-0.5">:</span>
                         <WheelColumn
-                          options={MINUTES_5}
+                          options={MINUTES}
                           value={t12.minute}
                           onChange={(v) => updateEntry(entry.key, { time: from12(t12.period, t12.hour, v) })}
                         />
