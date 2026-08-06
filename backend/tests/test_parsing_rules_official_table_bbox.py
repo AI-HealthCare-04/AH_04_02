@@ -131,3 +131,55 @@ def test_parse_official_table_by_bbox_inhaler_row_not_dropped():
     assert meds[2]["dosage"] == "1앰플"
     assert meds[2]["frequency"] == "필요시"
     assert meds[2]["total_days"] == "5일"
+
+
+def test_parse_official_table_by_bbox_plaster_row_not_dropped():
+    """실사용 재현(prescription_sample_02, 고지혈증·통증): "케토톱플라스타"처럼
+    "패취/패치" 대신 "플라스타"(plaster)로 표기된 패취제 약품명이 row_anchors
+    판정에서 통째로 빠져 그 행이 사라지던 버그의 회귀 테스트."""
+    fields = [
+        # 헤더 7개 컬럼
+        {"inferText": "No", "boundingPoly": {"vertices": [{"x": 120, "y": 800}]}},
+        {"inferText": "처방", "boundingPoly": {"vertices": [{"x": 300, "y": 800}]}},
+        {"inferText": "의약품", "boundingPoly": {"vertices": [{"x": 350, "y": 800}]}},
+        {"inferText": "명칭", "boundingPoly": {"vertices": [{"x": 400, "y": 800}]}},
+        {"inferText": "1회", "boundingPoly": {"vertices": [{"x": 668, "y": 800}]}},
+        {"inferText": "투약량", "boundingPoly": {"vertices": [{"x": 696, "y": 800}]}},
+        {"inferText": "1일", "boundingPoly": {"vertices": [{"x": 837, "y": 800}]}},
+        {"inferText": "횟수", "boundingPoly": {"vertices": [{"x": 886, "y": 800}]}},
+        {"inferText": "총일수", "boundingPoly": {"vertices": [{"x": 993, "y": 800}]}},
+        {"inferText": "용법·용량", "boundingPoly": {"vertices": [{"x": 1221, "y": 800}]}},
+        {"inferText": "조제시", "boundingPoly": {"vertices": [{"x": 1400, "y": 800}]}},
+        # 행 1: 크레스토정10밀리그램 — 1정/1회/28일
+        {"inferText": "1", "boundingPoly": {"vertices": [{"x": 121, "y": 900}]}},
+        {"inferText": "크레스토정10밀리그램", "boundingPoly": {"vertices": [{"x": 171, "y": 900}]}},
+        {"inferText": "1정", "boundingPoly": {"vertices": [{"x": 687, "y": 900}]}},
+        {"inferText": "1회", "boundingPoly": {"vertices": [{"x": 853, "y": 900}]}},
+        {"inferText": "28일", "boundingPoly": {"vertices": [{"x": 1003, "y": 900}]}},
+        {"inferText": "저녁 식후", "boundingPoly": {"vertices": [{"x": 1230, "y": 900}]}},
+        # 행 2: 타이레놀8시간이알서방정650밀리그램 — 1정/2회/5일
+        {"inferText": "2", "boundingPoly": {"vertices": [{"x": 121, "y": 1000}]}},
+        {"inferText": "타이레놀8시간이알서방정650밀리그램", "boundingPoly": {"vertices": [{"x": 171, "y": 1000}]}},
+        {"inferText": "1정", "boundingPoly": {"vertices": [{"x": 687, "y": 1000}]}},
+        {"inferText": "2회", "boundingPoly": {"vertices": [{"x": 853, "y": 1000}]}},
+        {"inferText": "5일", "boundingPoly": {"vertices": [{"x": 1003, "y": 1000}]}},
+        {"inferText": "통증 시 경구투여", "boundingPoly": {"vertices": [{"x": 1230, "y": 1000}]}},
+        # 행 3: 케토톱플라스타 — 1매/1회/7일
+        {"inferText": "3", "boundingPoly": {"vertices": [{"x": 121, "y": 1100}]}},
+        {"inferText": "케토톱플라스타", "boundingPoly": {"vertices": [{"x": 171, "y": 1100}]}},
+        {"inferText": "1매", "boundingPoly": {"vertices": [{"x": 687, "y": 1100}]}},
+        {"inferText": "1회", "boundingPoly": {"vertices": [{"x": 853, "y": 1100}]}},
+        {"inferText": "7일", "boundingPoly": {"vertices": [{"x": 1003, "y": 1100}]}},
+        {"inferText": "통증 부위에 부착", "boundingPoly": {"vertices": [{"x": 1230, "y": 1100}]}},
+    ]
+
+    meds = parse_official_table_by_bbox(fields)
+    assert len(meds) == 3
+
+    assert meds[0]["drug_name"] == "크레스토정"
+    assert meds[1]["drug_name"] == "타이레놀8시간이알서방정"
+
+    assert meds[2]["drug_name"] == "케토톱플라스타"
+    assert meds[2]["dosage"] == "1매"
+    assert meds[2]["frequency"] == "1회"
+    assert meds[2]["total_days"] == "7일"
