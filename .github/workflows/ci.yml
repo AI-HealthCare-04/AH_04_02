@@ -10,7 +10,7 @@ on:
 # Actions 분당 한도를 중복 실행으로 낭비하지 않기 위함.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/dev' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   ci:
@@ -47,7 +47,7 @@ jobs:
   deploy:
     needs: ci
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     timeout-minutes: 10
 
     steps:
@@ -63,10 +63,10 @@ jobs:
             mkdir -p backend/certs
             echo "${{ secrets.AIVEN_CA_CERT_BASE64 }}" | base64 -d > backend/certs/aiven-ca.pem
             [ -s backend/certs/aiven-ca.pem ] || { echo "AIVEN_CA_CERT_BASE64 secret이 비어있거나 잘못됨"; exit 1; }
-            git fetch origin dev
-            git merge --ff-only origin/dev || {
+            git fetch origin main
+            git merge --ff-only origin/main || {
               echo "⚠️ Fast-forward 실패 - EC2 로컬에 예상치 못한 변경이 있습니다. 강제 리셋합니다."
-              git reset --hard origin/dev
+              git reset --hard origin/main
             }
             docker compose -f docker-compose.yml up -d --build
             # [2026-08-04 추가, 실제 재현된 장애] backend/Dockerfile은 코드를 이미지에
