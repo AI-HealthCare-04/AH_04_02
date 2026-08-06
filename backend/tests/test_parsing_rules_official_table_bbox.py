@@ -71,3 +71,63 @@ def test_parse_official_table_by_bbox_end_to_end():
     assert meds[0]["dosage"] == "1정"
     assert meds[0]["frequency"] == "1회"
     assert meds[0]["total_days"] == "30일"
+
+
+def test_parse_official_table_by_bbox_inhaler_row_not_dropped():
+    """실사용 재현(prescription_sample_03, 천식·알레르기 비염): "심비코트터부헬러"처럼
+    정/캡슐/액 같은 통상 제형어가 아니라 흡입기 디바이스명("헬러")으로 끝나는 약품명이
+    row_anchors 판정에서 통째로 빠져 그 행이 사라지고, 값이 다음 행(알레그라정)에
+    섞여 들어가던 버그의 회귀 테스트."""
+    fields = [
+        # 헤더 7개 컬럼
+        {"inferText": "No", "boundingPoly": {"vertices": [{"x": 120, "y": 800}]}},
+        {"inferText": "처방", "boundingPoly": {"vertices": [{"x": 300, "y": 800}]}},
+        {"inferText": "의약품", "boundingPoly": {"vertices": [{"x": 350, "y": 800}]}},
+        {"inferText": "명칭", "boundingPoly": {"vertices": [{"x": 400, "y": 800}]}},
+        {"inferText": "1회", "boundingPoly": {"vertices": [{"x": 668, "y": 800}]}},
+        {"inferText": "투약량", "boundingPoly": {"vertices": [{"x": 696, "y": 800}]}},
+        {"inferText": "1일", "boundingPoly": {"vertices": [{"x": 837, "y": 800}]}},
+        {"inferText": "횟수", "boundingPoly": {"vertices": [{"x": 886, "y": 800}]}},
+        {"inferText": "총일수", "boundingPoly": {"vertices": [{"x": 993, "y": 800}]}},
+        {"inferText": "용법·용량", "boundingPoly": {"vertices": [{"x": 1221, "y": 800}]}},
+        {"inferText": "조제시", "boundingPoly": {"vertices": [{"x": 1400, "y": 800}]}},
+        # 행 1: 심비코트터부헬러160/4.5마이크로그램 — 1흡입/2회/30일
+        {"inferText": "1", "boundingPoly": {"vertices": [{"x": 121, "y": 900}]}},
+        {"inferText": "심비코트터부헬러160/4.5마이크로그램", "boundingPoly": {"vertices": [{"x": 171, "y": 900}]}},
+        {"inferText": "1흡입", "boundingPoly": {"vertices": [{"x": 687, "y": 900}]}},
+        {"inferText": "2회", "boundingPoly": {"vertices": [{"x": 853, "y": 900}]}},
+        {"inferText": "30일", "boundingPoly": {"vertices": [{"x": 1003, "y": 900}]}},
+        {"inferText": "아침·저녁", "boundingPoly": {"vertices": [{"x": 1230, "y": 900}]}},
+        # 행 2: 알레그라정120밀리그램 — 1정/1회/14일
+        {"inferText": "2", "boundingPoly": {"vertices": [{"x": 121, "y": 1000}]}},
+        {"inferText": "알레그라정120밀리그램", "boundingPoly": {"vertices": [{"x": 171, "y": 1000}]}},
+        {"inferText": "1정", "boundingPoly": {"vertices": [{"x": 687, "y": 1000}]}},
+        {"inferText": "1회", "boundingPoly": {"vertices": [{"x": 853, "y": 1000}]}},
+        {"inferText": "14일", "boundingPoly": {"vertices": [{"x": 1003, "y": 1000}]}},
+        {"inferText": "아침 식후", "boundingPoly": {"vertices": [{"x": 1230, "y": 1000}]}},
+        # 행 3: 벤토린흡입액2.5밀리그램/2.5밀리리터 — 1앰플/필요시/5일
+        {"inferText": "3", "boundingPoly": {"vertices": [{"x": 121, "y": 1100}]}},
+        {"inferText": "벤토린흡입액2.5밀리그램/2.5밀리리터", "boundingPoly": {"vertices": [{"x": 171, "y": 1100}]}},
+        {"inferText": "1앰플", "boundingPoly": {"vertices": [{"x": 687, "y": 1100}]}},
+        {"inferText": "필요시", "boundingPoly": {"vertices": [{"x": 853, "y": 1100}]}},
+        {"inferText": "5일", "boundingPoly": {"vertices": [{"x": 1003, "y": 1100}]}},
+        {"inferText": "네불라이저 흡입", "boundingPoly": {"vertices": [{"x": 1230, "y": 1100}]}},
+    ]
+
+    meds = parse_official_table_by_bbox(fields)
+    assert len(meds) == 3
+
+    assert meds[0]["drug_name"] == "심비코트터부헬러"
+    assert meds[0]["dosage"] == "1흡입"
+    assert meds[0]["frequency"] == "2회"
+    assert meds[0]["total_days"] == "30일"
+
+    assert meds[1]["drug_name"] == "알레그라정"
+    assert meds[1]["dosage"] == "1정"
+    assert meds[1]["frequency"] == "1회"
+    assert meds[1]["total_days"] == "14일"
+
+    assert meds[2]["drug_name"] == "벤토린흡입액"
+    assert meds[2]["dosage"] == "1앰플"
+    assert meds[2]["frequency"] == "필요시"
+    assert meds[2]["total_days"] == "5일"
