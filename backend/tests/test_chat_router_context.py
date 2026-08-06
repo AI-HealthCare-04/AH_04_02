@@ -145,6 +145,12 @@ def test_dur_question_does_not_use_general_kdca_rag_context():
     assert _should_answer_from_dur_only("아스피린과 와파린을 함께 복용해도 괜찮나요?")
     assert _should_answer_from_dur_only("노바스크정5밀리그람과 타이레놀 병용 가능해?")
     assert _should_answer_from_dur_only("이 약 드셔도 되나요?")
+    # [2026-08-06 버그수정] 실사용 재현: "지금 먹는 약 중에 임산부가 피해야 하는 약
+    # 있어?"는 답변 내용은 실제 DUR 임부금기 데이터를 정확히 인용했는데 "임산부"가
+    # "임부"/"임신"의 부분 문자열이 아니라서 화면 참고자료가 빈 배열로 나갔다.
+    assert _should_answer_from_dur_only("지금 먹는 약 중에 임산부가 피해야 하는 약 있어?")
+    needs_taboo, needs_cautions = _dur_lookup_modes("임산부가 이 약 먹어도 되나요?")
+    assert needs_cautions
     with patch("rag.vectorstore.similarity_search") as mock_search:
         assert _retrieve_chat_rag_docs("노바스크정5밀리그람과 타이레놀 병용 가능해?") == []
 
