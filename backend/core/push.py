@@ -74,6 +74,13 @@ def send_push_to_recipient(
                 data=payload,
                 vapid_private_key=_VAPID_PRIVATE_KEY,
                 vapid_claims={"sub": f"mailto:{_VAPID_CONTACT_EMAIL}"},
+                # [2026-08-06] 기본값(Urgency 미지정="normal", ttl=0)이면 FCM(안드로이드/
+                # 크롬)이 절전모드에서 발송을 몇 분~몇십 분씩 묶어서 배달한다 — 복약
+                # 정시 알림처럼 지금 당장 봐야 하는 알림은 high로 즉시 배달을 요청해야
+                # 한다. ttl도 0(=지금 못 전달하면 버림)이라 CATCH_UP_MINUTES(10분) 창과
+                # 맞춰 늘려서, 기기가 잠깐 오프라인이어도 그 안에는 배달되게 한다.
+                headers={"Urgency": "high"},
+                ttl=600,
             )
         except WebPushException as exc:
             status = exc.response.status_code if exc.response is not None else None
