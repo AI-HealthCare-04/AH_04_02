@@ -18,7 +18,7 @@ _patient_registered_drug_names(patient_id, session)로 옮겨갔다(여전히 LL
 """
 import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import routers.chat_router as chat_router
@@ -39,6 +39,7 @@ from routers.chat_router import (
     PRESET_QUESTIONS,
     _build_dynamic_questions,
     _build_patient_context,
+    _gather_llm_inputs,
     _patient_registered_drug_names,
 )
 from sqlmodel import Session, SQLModel, create_engine
@@ -219,6 +220,78 @@ class TestPatientContextExposesRegisteredDrugDurRefs:
                 "dur_detail": "태아 발육에 필수적인 콜레스테롤의 생합성 감소 가능성.",
             }
         ]
+
+
+class TestGatherLlmInputsScopesRegisteredDurRefsToQuestion:
+    """[2026-08-05 추가, 실사용 재현] 환자 등록약에 임부금기 등 DUR 경고가 있으면,
+    그 경고와 전혀 무관한 질문에도 화면 "참고 자료"에 그게 그대로 떴다 —
+    _gather_llm_inputs()가 registered_dur_refs를 질문 내용과 무관하게 항상 통째로
+    반환했기 때문. 이제 DUR 질문이 아니면 아예 안 보이고, DUR 질문이어도 실제로
+    물어본 카테고리(병용금기 vs 노인주의·연령금기·임부금기)만 남아야 한다."""
+
+    def _make_patient_with_dur_refs(self, session: Session) -> Patient:
+        pt = _make_patient(session, "durScopePat")
+        record = MedicalRecord(patient_id=pt.id, image_path="x.jpg", status="completed")
+        session.add(record)
+        session.commit()
+        session.refresh(record)
+        session.add(
+            GuideResult(
+                record_id=record.id,
+                medication_guide="[]",
+                lifestyle_guide="{}",
+                source_refs=json.dumps(
+                    [
+                        {
+                            "drug_name": "자누비아정50밀리그램",
+                            "dur_category": "임부금기",
+                            "dur_detail": "태아 발육에 필수적인 콜레스테롤의 생합성 감소 가능성.",
+                        },
+                        {
+                            "drug_name": "자누비아정50밀리그램",
+                            "mixture_item_name": "메트포르민정",
+                            "prohbt_content": "저혈당 위험 증가",
+                        },
+                    ],
+                    ensure_ascii=False,
+                ),
+            )
+        )
+        session.commit()
+        return pt
+
+    def _call(self, session: Session, patient_id: int, question: str):
+        with (
+            patch("routers.chat_router._retrieve_chat_rag_docs", return_value=[]),
+            patch("rag.mfds_client.search_by_name", return_value=[]),
+            patch("rag.mfds_client.search_permit_info", return_value=[]),
+            patch.object(chat_router, "_search_dur_taboo", lambda _name: [], create=True),
+            patch.object(chat_router, "_search_dur_cautions", lambda _name: [], create=True),
+        ):
+            return _gather_llm_inputs(patient_id, question, session)
+
+    def test_unrelated_question_does_not_expose_registered_dur_refs(self, session: Session):
+        pt = self._make_patient_with_dur_refs(session)
+
+        _, _, _, _, source_refs = self._call(session, pt.id, "이 약 효능이 뭐야?")
+
+        assert source_refs == []
+
+    def test_pregnancy_question_exposes_only_caution_refs(self, session: Session):
+        pt = self._make_patient_with_dur_refs(session)
+
+        _, _, _, _, source_refs = self._call(session, pt.id, "나 임신했는데 이 약 먹어도 돼?")
+
+        assert any(ref.get("dur_category") == "임부금기" for ref in source_refs)
+        assert not any(ref.get("mixture_item_name") for ref in source_refs)
+
+    def test_combination_question_exposes_only_taboo_refs(self, session: Session):
+        pt = self._make_patient_with_dur_refs(session)
+
+        _, _, _, _, source_refs = self._call(session, pt.id, "이 약들 같이 먹어도 돼?")
+
+        assert any(ref.get("mixture_item_name") == "메트포르민정" for ref in source_refs)
+        assert not any(ref.get("dur_category") for ref in source_refs)
 
 
 class TestQuestionsEndpointAuth:

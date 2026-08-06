@@ -103,29 +103,50 @@ export interface SourceRef {
   dur_extra?: string;
 }
 
-/** source_refs 항목 하나를 사람이 읽을 수 있는 한 줄로 표시 (stub/실제 두 모양 다 처리) */
-export function formatSourceRef(ref: SourceRef): string {
-  if (ref.title) return ref.title; // stub 모양
-  if (ref.mixture_item_name) return `⚠️ ${ref.mixture_item_name}와 병용금기${ref.prohbt_content ? ` (${ref.prohbt_content})` : ""}`;
-  if (ref.dur_category) {
-    const extra = ref.dur_extra ? ` (${ref.dur_extra})` : "";
-    return `⚠️ ${ref.dur_category}${extra}${ref.dur_detail ? `: ${ref.dur_detail}` : ""}`;
-  }
-  if (ref.item_name) return `${ref.item_name}${ref.field ? ` · ${ref.field}` : ""}`; // 의약품 인용
-  if (ref.disease) return ref.source ?? `${ref.disease}${ref.category ? ` · ${ref.category}` : ""}`; // 생활지침 인용 — 실제 출처(학회/기관), 없으면 질환·카테고리로 폴백
-  return ref.drug_name ?? "출처 미상";
+/** [2026-08-05 수정] 예전엔 DUR 경고문 전체(⚠️ ...와 병용금기 (상세내용))처럼 "내용"까지
+ * 한 줄로 풀어서 보여줬다 — 사용자 입장에선 "무슨 자료를 근거로 답했는지"만 알면 되는데
+ * 상세 문구까지 줄줄이 나와 오히려 어떤 데이터 소스를 썼는지 한눈에 안 들어왔다.
+ * 이제 "출처: 식약처 DUR 임부금기"처럼 데이터 소스명만 짧게 보여준다 — 실제 경고 내용은
+ * 이미 답변 본문/주의사항 카드에 있으므로 여기서 중복할 필요가 없다.
+ *
+ * 허가정보(permit_active)가 그동안 완전히 무시되고 있었다 — e약은요/HIRA와 같은 ref
+ * 객체에 부가 필드로만 붙어 있고 화면에 반영이 안 됐다. 이제 실제로 조회·사용된 각
+ * 데이터 소스마다 별도 타이틀을 만든다(한 ref가 여러 타이틀을 낼 수 있음 — 예: e약은요 +
+ * 허가정보 둘 다 조회됐으면 두 줄 모두 노출). */
+function sourceRefTitles(ref: SourceRef): string[] {
+  if (ref.title) return [ref.title]; // stub 모양
+
+  const titles: string[] = [];
+  if (ref.mixture_item_name) titles.push("식약처 DUR 병용금기");
+  if (ref.dur_category) titles.push(`식약처 DUR ${ref.dur_category}`);
+  if (ref.item_name) titles.push("식약처 e약은요");
+  // hira_active/permit_active는 boolean(true/false)까지 유효한 값이라 null/undefined만 "조회 안 됨"으로 취급
+  if (ref.hira_active !== undefined && ref.hira_active !== null) titles.push("건강보험심사평가원 약가마스터");
+  if (ref.permit_active !== undefined && ref.permit_active !== null) titles.push("식약처 의약품제품허가정보");
+  if (ref.disease) titles.push(ref.source ?? `${ref.disease}${ref.category ? ` · ${ref.category}` : ""}`); // 생활지침 인용 — 실제 출처(학회/기관), 없으면 질환·카테고리로 폴백
+
+  return titles.length > 0 ? titles : [ref.drug_name ?? "출처 미상"];
 }
 
-/** source_refs를 표시용 문자열로 변환하되, 같은 출처 텍스트가 반복되면 한 번만 남긴다
- * (여러 약이 같은 학회 지침·같은 DUR 주의를 각자 인용하는 경우가 많음). */
+/** source_refs 항목 하나를 사람이 읽을 수 있는 한 줄로 표시 (stub/실제 두 모양 다 처리).
+ * 여러 데이터 소스를 겸하는 ref는 첫 번째 타이틀만 반환 — 전체 목록이 필요하면
+ * formatUniqueSourceRefs를 쓸 것. */
+export function formatSourceRef(ref: SourceRef): string {
+  return sourceRefTitles(ref)[0];
+}
+
+/** source_refs를 "이 답변이 근거로 삼은 데이터 소스" 제목 목록으로 변환하되, 같은
+ * 소스가 반복되면 한 번만 남긴다(여러 약이 같은 학회 지침·같은 DUR 카테고리를 각자
+ * 인용하는 경우가 많음). */
 export function formatUniqueSourceRefs(refs: SourceRef[]): { text: string; url?: string }[] {
   const seen = new Set<string>();
   const result: { text: string; url?: string }[] = [];
   for (const ref of refs) {
-    const text = formatSourceRef(ref);
-    if (seen.has(text)) continue;
-    seen.add(text);
-    result.push({ text, url: ref.url });
+    for (const text of sourceRefTitles(ref)) {
+      if (seen.has(text)) continue;
+      seen.add(text);
+      result.push({ text, url: ref.url });
+    }
   }
   return result;
 }

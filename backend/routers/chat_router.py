@@ -1221,6 +1221,26 @@ def _gather_llm_inputs(
     if _is_general_chat_question(question_text) or _is_internal_prompt_question(question_text):
         return context_text, [], [], bot_name, []
 
+    # [2026-08-05 버그수정] registered_dur_refs는 위에서 질문 내용과 무관하게 환자의
+    # "가장 최근 처방전"에 있는 DUR 경고를 전부 가져온다 — 그래서 "임부금기"를 물어본 적
+    # 없는 질문에도 임부금기 출처가 화면에 뜨는 문제가 있었다(실사용 재현: 등록약에
+    # 임부금기 항목이 있으면 아무 질문에나 그게 "참고 자료"로 붙었음). 프롬프트 텍스트
+    # (context_text)는 원래부터 이렇게 전체를 다 보여줬지만(LLM이 필요하면 알아서
+    # 골라 쓰라는 의도), 화면에 노출되는 구조화된 인용은 실제로 질문과 관련된 카테고리만
+    # 보여야 한다. _should_answer_from_dur_only/_dur_lookup_modes가 온디맨드 DUR 조회에서
+    # 이미 쓰는 것과 동일한 질문-카테고리 판별 로직을 재사용해서, DUR 질문이 아니면 아예
+    # 안 보여주고, DUR 질문이면 병용금기/노인주의·연령금기·임부금기 중 실제로 물어본
+    # 카테고리만 남긴다.
+    if _should_answer_from_dur_only(question_text):
+        needs_taboo, needs_cautions = _dur_lookup_modes(question_text)
+        registered_dur_refs = [
+            ref
+            for ref in registered_dur_refs
+            if (ref.get("mixture_item_name") and needs_taboo) or (ref.get("dur_category") and needs_cautions)
+        ]
+    else:
+        registered_dur_refs = []
+
     # DUR 조회용 약 이름: 처방전 OCR 약 이름 + 환자가 직접 등록한 약 이름을 합친다.
     # (버그: OCR만 보면 처방전 없이 '내 약 등록'만 한 환자는 DUR 조회에서 통째로 빠졌다.)
     registered_drug_names = list(

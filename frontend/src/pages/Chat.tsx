@@ -190,7 +190,7 @@ export default function Chat() {
                         없이 답한 경우(사전 등록 답변/폴백 등)에만 보조로 보여준다. */}
                     {m.sourceRefs && m.sourceRefs.length > 0 ? (
                       <p className="text-[11px] mt-1.5 px-1" style={{ color: C.muted }}>
-                        참고 자료: {formatUniqueSourceRefs(m.sourceRefs).map((ref) => ref.text).join(", ")}
+                        이 답변의 근거: {formatUniqueSourceRefs(m.sourceRefs).map((ref) => ref.text).join(", ")}
                       </p>
                     ) : (
                       m.source && (
