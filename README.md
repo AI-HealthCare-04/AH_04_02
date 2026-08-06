@@ -87,8 +87,8 @@
 ### 인프라 / 배포
 `AWS EC2` `Docker Compose` `Nginx`(호스트 직접 설치, HTTPS + Duck DNS) `GitHub Actions`
 
-### 관측
-`Langfuse`(LLM 호출 추적·평가)
+### 관측 / 성능 테스트
+`Langfuse`(LLM 호출 추적·평가) `Locust`(부하테스트 — `dev` 그룹과 분리된 `loadtest` 그룹, `uv sync --group loadtest`로만 설치, 배포 이미지엔 안 들어감)
 
 ### 협업 도구
 `Git / GitHub` `Notion` `Discord`
@@ -130,6 +130,7 @@ FastAPI (backend/main.py)
 - **Aiven MySQL**: 팀 공용 개발 DB이자 운영 DB(SSL 접속). 개인이 혼자 로컬에서만 돌릴 때는 `DATABASE_URL` 미설정 시 SQLite로 자동 대체됨
 - **Alembic**: 스키마 변경은 마이그레이션으로 관리(`backend/alembic/versions/`) — 배포 시 `alembic upgrade head`를 실행해야 반영됨(누락 시 실제 장애로 이어진 적 있음, [PR #157](https://github.com/pecs0310/AH_04_02/pull/157) 참고)
 - **알림 스케줄러**: Redis/Celery 없이 FastAPI 프로세스 안 asyncio 루프로 60초마다 복약 알림·놓침을 확인해 이메일/Web Push 발송. 여러 서버가 같은 알림을 중복 처리하지 않도록 DB `UniqueConstraint`를 선점 기준으로 사용
+- **DB 커넥션 풀**: Aiven 플랜의 `max_connections=76`을 배포(운영 워커 2개)와 팀원 로컬 `development` 접속이 함께 나눠 쓴다 — `backend/core/database.py`가 `APP_ENV`별로 풀 크기를 다르게 지정(production 워커당 20개, development 인스턴스당 5개)해서 한도를 넘지 않게 관리한다. 부하테스트로 실측한 처리 가능 규모는 [☁️ 배포](#-배포) 참고
 - **rag/**: RAG(LangChain + ChromaDB + OpenAI) 로직은 별도 디렉터리에서 개발되어 `backend`가 `RAG_PROVIDER=real`/`CHAT_PROVIDER=real`일 때 그대로 import해서 사용 (저장소 루트 `pyproject.toml`/`uv.lock`으로 backend와 같은 가상환경을 공유)
 - **OCR**: CLOVA OCR(`OCR_PROVIDER=clova`) 또는 로컬 목업(`OCR_PROVIDER=mock`)으로 전환 가능
 
@@ -241,6 +242,19 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 
 - 프론트: http://localhost:5173
 - API 문서(Swagger): http://localhost:8000/docs
+
+### 5. 부하테스트 (선택)
+
+[Locust](https://locust.io/)는 기본 `uv sync`에는 안 설치되는 별도 `loadtest` 그룹입니다 — 필요할 때만 따로 받습니다.
+
+```bash
+uv sync --group loadtest
+uv run locust -f locustfile.py                                                # 로컬 백엔드(APP_ENV=local) 대상
+uv run locust -f locustfile_deploy.py --host https://yakcong.duckdns.org       # 배포 환경, 인증 불필요한 공개 엔드포인트만
+uv run locust -f locustfile_deploy_auth.py --host https://yakcong.duckdns.org  # 배포 환경, 실제 로그인 계정 필요(조회만 수행)
+```
+
+`locustfile_deploy_auth.py`는 실행 전 `LOCUST_TEST_IDENTIFIER`/`LOCUST_TEST_PASSWORD` 환경변수로 테스트 계정 정보를 넘겨야 합니다(코드에 하드코딩하지 않음). 위 명령을 실행하면 `http://localhost:8089`에서 웹 UI로 동시 사용자 수를 조절하며 볼 수 있습니다. **배포 환경을 대상으로 할 때는 실제 서비스에 부하가 걸리니, 반드시 가볍게(동시 사용자 소수·짧은 시간) 시작해서 단계적으로 올리세요.**
 
 ---
 
@@ -375,7 +389,7 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 
 | 날짜 | 담당 | 문제 | 원인 | 해결 |
 |---|---|---|---|---|
-| - | - | _아직 기록된 이슈 없음_ | - | - |
+| 2026-08-05 | 박소정 | Locust 부하테스트 중 동시접속 ~30명 근처에서 `502`/`504` 발생 | SQLAlchemy 커넥션 풀 기본값(워커당 15개)이 Aiven `max_connections=76`에 비해 여유가 부족했음 | `APP_ENV`별로 풀 크기 재조정(production 워커당 20개, development 인스턴스당 5개) — 재측정으로 50명까지 무결점 확인 ([PR #173](https://github.com/AI-HealthCare-04/AH_04_02/pull/173)) |
 
 ### 기록 가이드
 
@@ -398,6 +412,15 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 배포 스텝은 코드만 받아오고 **`.env`는 절대 건드리지 않습니다** (`.gitignore`돼 있어 git에 없음). 즉 EC2의 `backend/.env`는 로컬 `.env`와 별개로, 필요할 때 **직접 SSH로 들어가 손으로** 갱신해야 합니다 — 특히 `CORS_ALLOWED_ORIGINS`(프론트 도메인 추가)나 `VITE_MONITORING_API_URL`(백엔드 도메인) 같은 값이 바뀌었는데 EC2 쪽을 안 고치면 로그인부터 막힙니다. 체크리스트는 [`docs/Team Members' Notes/env-var-checklist.md`](./docs/Team%20Members%27%20Notes/env-var-checklist.md) 참고.
 
 `VITE_*` 값처럼 프론트 **빌드 시점**에 박히는 값을 바꿨다면, 컨테이너 재시작(`restart`)만으로는 반영되지 않고 재빌드(`up -d --build`)가 필요합니다.
+
+### 실측 처리량 (2026-08-05~06, Locust 부하테스트)
+
+배포 환경(EC2 t3.medium, FastAPI 워커 2개)에 Locust(위 [시작하기](#-시작하기) 5번 참고)로 실제 로그인 계정을 이용해 조회 API 부하테스트를 진행해 실제 한계를 확인했습니다.
+
+- **커넥션 풀 조정 전**: 동시접속 **~30명** 근처에서 SQLAlchemy 커넥션 풀 소진으로 `502`/`504` 발생
+- **`APP_ENV`별 풀 크기 조정 후**([PR #173](https://github.com/AI-HealthCare-04/AH_04_02/pull/173)): 동시접속 **50명까지 무결점**, **80명대**부터 Aiven `max_connections=76` 한도에 실제로 부딪혀 `500` 에러 발생(재현 확인). 서버(컨테이너)는 이 구간에서도 다운되지 않고 에러 응답만 정상적으로 돌려줌
+- 응답속도도 동시접속자 수에 비례해 느려짐 — 50명까지는 2~4초대, 80명대에서는 지속시간이 길어질수록 최대 30초 이상까지 저하
+- 동시접속 **200명** 규모까지 안정적으로 처리하려면 이번 풀 조정만으로는 부족하고, 쿼리 최적화(N+1·PII 복호화 비용 등) + Aiven/EC2 플랜 업그레이드가 추가로 필요할 것으로 판단됨(비동기 전환은 리스크 대비 효과가 낮아 우선순위 낮음)
 
 ---
 
