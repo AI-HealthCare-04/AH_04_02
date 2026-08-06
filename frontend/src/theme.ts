@@ -1,0 +1,27 @@
+// 건강동행 공용 디자인 토큰 — NavBar.tsx/Chat.tsx에 흩어져 있던 hex 값을 한 곳으로 모았습니다.
+// 앞으로 새 화면 만들 때 색상은 여기서 가져다 쓰세요.
+//
+// ⚠️ 정리하면서 통일한 값 (기존에 파일마다 다르게 쓰던 것들, 눈에 띄지 않을 정도로 미세한 차이):
+//   - 진한 텍스트: NavBar #1E1A17 vs Chat #2A2A2A → #1E1A17로 통일
+//   - 보조 텍스트: NavBar #8A7E75 vs Chat #888888 → #8A7E75로 통일
+
+export const C = {
+  terracotta: "#C1653D",
+  terracottaLight: "#E08A5B",
+  ivory: "#F2E8D8",
+  white: "#FFFFFF",
+  // [2026-07-22 추가] 카드/패널 배경 전용 — 순백 대신 페이지 배경(ivory)과 톤온톤이
+  // 되도록 살짝 톤을 낮췄다. 버튼 텍스트·아이콘 등 진짜 "흰색"이 필요한 곳은 계속 white를 쓴다.
+  surface: "#F9F4EB",
+  dark: "#1E1A17",
+  muted: "#6E6259", // [2026-07-20] #8A7E75는 흰/아이보리 배경 대비 3.95:1로 WCAG AA(4.5:1) 미달 — 같은 웜브라운 톤에서 명도만 낮춤(5.9:1)
+  bubbleBg: "#F4F0EA",
+  success: "#8FAE8B",
+  successText: "#4A7A47", // success(#8FAE8B)는 작은 텍스트엔 대비가 약해서, 흰 배경 위 텍스트는 이 진한 초록을 씀
+  danger: "#D94F4F",
+  warningBg: "rgba(224, 138, 91, 0.10)",
+  warningBorder: "rgba(224, 138, 91, 0.25)",
+  warningText: "#7A4B28",
+  shadowCard: "0 1px 2px rgba(30,26,23,0.04), 0 6px 20px rgba(30,26,23,0.09)",
+  shadowDropdown: "0 8px 24px rgba(30,26,23,0.14)",
+} as const;

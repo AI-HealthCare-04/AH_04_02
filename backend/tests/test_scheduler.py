@@ -1,0 +1,580 @@
+"""
+core/scheduler.py 테스트 (2026-07-19 신규, 담당: 김영혜)
+
+REQ-026a(정시 알림)/REQ-026c(놓침 감지)의 핵심 로직을 검증한다. 스케줄러는 백그라운드
+asyncio 루프라 lifespan을 실제로 띄우지 않고, _fire_due_reminders/_mark_missed를 명시적
+now 인자로 직접 호출해 "정시가 됐다"를 시뮬레이션한다(실시간 sleep 없이 결정적으로 테스트).
+
+[2026-07-23 삭제] REQ-026d(third_party_needed 공동알림)는 자가진단(CareLevelAssessment)
+자체를 제거하면서 함께 정리했다 — 만드는 화면이 없어 실질적으로 한 번도 동작한 적 없었다.
+"""
+import json
+from datetime import datetime
+from unittest.mock import patch
+
+import pytest
+from core import scheduler
+from models import (
+    Caregiver,
+    CaregiverPatient,
+    MedicationRecord,
+    MedicationSchedule,
+    NotificationLog,
+    NotificationSetting,
+    Patient,
+    ScheduleCaregiverAlert,
+)
+from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel.pool import StaticPool
+
+
+@pytest.fixture(name="session")
+def session_fixture():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        yield session
+
+
+def _make_patient(session: Session, name: str = "환자", email: str | None = "patient@test.com") -> Patient:
+    pt = Patient(hashed_password="x", email=email, email_opt_in=bool(email))
+    pt.name = name
+    session.add(pt)
+    session.commit()
+    session.refresh(pt)
+    return pt
+
+
+def _make_schedule(
+    session: Session, patient: Patient, time_slot: str, active: bool = True, days_of_week: str | None = None
+) -> MedicationSchedule:
+    sched = MedicationSchedule(
+        patient_id=patient.id, drug_name="테스트약", time_slot=time_slot, active=active, days_of_week=days_of_week
+    )
+    session.add(sched)
+    session.commit()
+    session.refresh(sched)
+    return sched
+
+
+def _make_caregiver_linked(session: Session, patient: Patient, name: str) -> Caregiver:
+    cg = Caregiver(hashed_password="x", email=f"{name}@test.com", email_opt_in=True)
+    cg.name = name
+    session.add(cg)
+    session.commit()
+    session.refresh(cg)
+    session.add(CaregiverPatient(caregiver_id=cg.id, patient_id=patient.id))
+    session.commit()
+    return cg
+
+
+class TestFireDueReminders:
+    def test_fires_reminder_when_due_time_just_passed(self, session: Session):
+        pt = _make_patient(session)
+        now = datetime(2026, 7, 19, 8, 5)
+        _make_schedule(session, pt, "08:00")
+
+        scheduler._fire_due_reminders(session, now)
+
+        logs = session.exec(select(NotificationLog)).all()
+        assert len(logs) == 1
+        assert logs[0].kind == "reminder"
+        assert logs[0].status == "sent"
+        assert logs[0].due_date == "2026-07-19"
+
+    def test_does_not_fire_before_due_time(self, session: Session):
+        pt = _make_patient(session)
+        _make_schedule(session, pt, "08:00")
+        now = datetime(2026, 7, 19, 7, 59)
+
+        scheduler._fire_due_reminders(session, now)
+
+        assert session.exec(select(NotificationLog)).all() == []
+
+    def test_does_not_fire_outside_catch_up_window(self, session: Session):
+        pt = _make_patient(session)
+        _make_schedule(session, pt, "08:00")
+        now = datetime(2026, 7, 19, 8, 30)  # CATCH_UP_MINUTES(10분) 훌쩍 넘김
+
+        scheduler._fire_due_reminders(session, now)
+
+        assert session.exec(select(NotificationLog)).all() == []
+
+    def test_dedup_via_unique_constraint_second_tick_noop(self, session: Session):
+        pt = _make_patient(session)
+        _make_schedule(session, pt, "08:00")
+        now = datetime(2026, 7, 19, 8, 5)
+
+        scheduler._fire_due_reminders(session, now)
+        scheduler._fire_due_reminders(session, datetime(2026, 7, 19, 8, 8))  # 다음 틱, 같은 창 안
+
+        logs = session.exec(select(NotificationLog)).all()
+        assert len(logs) == 1  # 두 번째 틱은 이미 처리된 걸 보고 건너뜀
+
+    def test_inactive_schedule_ignored(self, session: Session):
+        pt = _make_patient(session)
+        _make_schedule(session, pt, "08:00", active=False)
+        now = datetime(2026, 7, 19, 8, 5)
+
+        scheduler._fire_due_reminders(session, now)
+
+        assert session.exec(select(NotificationLog)).all() == []
+
+    def test_days_of_week_filters_out_non_matching_day(self, session: Session):
+        pt = _make_patient(session)
+        # 2026-07-19는 일요일(sun) — 스케줄은 월/수/금만
+        _make_schedule(session, pt, "08:00", days_of_week='["mon","wed","fri"]')
+        now = datetime(2026, 7, 19, 8, 5)
+
+        scheduler._fire_due_reminders(session, now)
+
+        assert session.exec(select(NotificationLog)).all() == []
+
+    def test_malformed_time_slot_skipped_without_crash(self, session: Session):
+        pt = _make_patient(session)
+        _make_schedule(session, pt, "아침")  # 구 데이터 형식
+        now = datetime(2026, 7, 19, 8, 5)
+
+        scheduler._fire_due_reminders(session, now)  # 예외 없이 건너뛰어야 함
+
+        assert session.exec(select(NotificationLog)).all() == []
+
+    def test_opt_out_suppresses_send_but_logs(self, session: Session):
+        pt = _make_patient(session)
+        session.add(NotificationSetting(patient_id=pt.id, medication_reminder_enabled=False))
+        session.commit()
+        _make_schedule(session, pt, "08:00")
+        now = datetime(2026, 7, 19, 8, 5)
+
+        scheduler._fire_due_reminders(session, now)
+
+        logs = session.exec(select(NotificationLog)).all()
+        assert len(logs) == 1
+        assert logs[0].status == "suppressed"
+        assert logs[0].channels == "[]"
+
+
+class TestMarkMissed:
+    def test_marks_missed_when_no_log_after_window(self, session: Session):
+        pt = _make_patient(session)
+        _make_schedule(session, pt, "08:00")
+        now = datetime(2026, 7, 19, 9, 5)  # MISSED_AFTER_MINUTES(60분) 지남
+
+        scheduler._mark_missed(session, now)
+
+        logs = session.exec(select(NotificationLog)).all()
+        assert len(logs) == 1
+        assert logs[0].kind == "missed"
+
+    def test_no_missed_if_already_checked_today(self, session: Session):
+        # [round5 수정] taken_at을 명시하지 않으면 MedicationRecord의 default_factory=datetime.now가
+        # "실제" 시스템 날짜를 쓰는데, 이 테스트는 시뮬레이션된 now(2026-07-19)와 비교한다 —
+        # 테스트를 만든 날은 실제 날짜도 7/19라 우연히 통과했지만, 다음 날 실행하면 실패한다
+        # (실제로 재현됨). taken_at을 시뮬레이션된 now로 명시해 날짜에 무관하게 만든다.
+        pt = _make_patient(session)
+        sched = _make_schedule(session, pt, "08:00")
+        now = datetime(2026, 7, 19, 9, 5)
+        session.add(MedicationRecord(schedule_id=sched.id, status="taken", taken_at=now))
+        session.commit()
+
+        scheduler._mark_missed(session, now)
+
+        assert session.exec(select(NotificationLog)).all() == []
+
+    def test_no_missed_before_window_elapses(self, session: Session):
+        pt = _make_patient(session)
+        _make_schedule(session, pt, "08:00")
+        now = datetime(2026, 7, 19, 8, 30)  # 아직 60분 안 지남
+
+        scheduler._mark_missed(session, now)
+
+        assert session.exec(select(NotificationLog)).all() == []
+
+    def test_missed_dedup_second_tick_noop(self, session: Session):
+        pt = _make_patient(session)
+        _make_schedule(session, pt, "08:00")
+        now = datetime(2026, 7, 19, 9, 5)
+
+        scheduler._mark_missed(session, now)
+        scheduler._mark_missed(session, datetime(2026, 7, 19, 9, 10))
+
+        assert len(session.exec(select(NotificationLog)).all()) == 1
+
+    def test_reminder_and_missed_coexist_for_same_schedule_day(self, session: Session):
+        """같은 (schedule, due_date, time_slot)이라도 kind가 다르면 유니크 제약에 안 걸려야 한다."""
+        pt = _make_patient(session)
+        _make_schedule(session, pt, "08:00")
+
+        scheduler._fire_due_reminders(session, datetime(2026, 7, 19, 8, 5))
+        scheduler._mark_missed(session, datetime(2026, 7, 19, 9, 5))
+
+        logs = session.exec(select(NotificationLog)).all()
+        assert {log.kind for log in logs} == {"reminder", "missed"}
+
+
+class TestCoNotification:
+    def test_notifies_all_linked_caregivers_by_default(self, session: Session):
+        """[2026-07-24 수정] 예전엔 "가장 먼저 연결된 caregiver 1명"에게만 갔다(임의의
+        단순화) — 일정마다 알림 받을 사람을 이름으로 직접 고를 수 있게 되면서(REQ 없음,
+        팀 요청), 명시적으로 고른 적 없는 일정은 연결된 caregiver 전원에게 보내는 걸
+        기본값으로 바꿨다(core/schedule_alerts.py.effective_alert_caregiver_ids)."""
+        pt = _make_patient(session, email=None)  # 환자 본인은 이메일 미동의 — 보호자만 받는지 확인
+        cg1 = Caregiver(hashed_password="x", email="cg1@test.com", email_opt_in=True)
+        cg1.name = "보호자1"
+        cg2 = Caregiver(hashed_password="x", email="cg2@test.com", email_opt_in=True)
+        cg2.name = "보호자2"
+        session.add(cg1)
+        session.add(cg2)
+        session.commit()
+        session.refresh(cg1)
+        session.refresh(cg2)
+        session.add(CaregiverPatient(caregiver_id=cg1.id, patient_id=pt.id))
+        session.add(CaregiverPatient(caregiver_id=cg2.id, patient_id=pt.id))
+        session.commit()
+        _make_schedule(session, pt, "08:00")
+
+        scheduler._fire_due_reminders(session, datetime(2026, 7, 19, 8, 5))
+
+        log = session.exec(select(NotificationLog)).first()
+        channels = json.loads(log.channels)
+        assert channels == [f"email:caregiver:{cg1.id}", f"email:caregiver:{cg2.id}"]
+
+    def test_notifies_only_explicitly_selected_caregivers(self, session: Session):
+        """[2026-07-24 추가] Schedule.tsx에서 특정 caregiver만 체크해뒀으면(ScheduleCaregiverAlert
+        행이 있으면) 연결된 전원이 아니라 고른 사람에게만 간다."""
+        pt = _make_patient(session, email=None)
+        cg1 = Caregiver(hashed_password="x", email="cg1@test.com", email_opt_in=True)
+        cg1.name = "보호자1"
+        cg2 = Caregiver(hashed_password="x", email="cg2@test.com", email_opt_in=True)
+        cg2.name = "보호자2"
+        session.add(cg1)
+        session.add(cg2)
+        session.commit()
+        session.refresh(cg1)
+        session.refresh(cg2)
+        session.add(CaregiverPatient(caregiver_id=cg1.id, patient_id=pt.id))
+        session.add(CaregiverPatient(caregiver_id=cg2.id, patient_id=pt.id))
+        session.commit()
+        sched = _make_schedule(session, pt, "08:00")
+        session.add(ScheduleCaregiverAlert(schedule_id=sched.id, caregiver_id=cg2.id))
+        session.commit()
+
+        scheduler._fire_due_reminders(session, datetime(2026, 7, 19, 8, 5))
+
+        log = session.exec(select(NotificationLog)).first()
+        channels = json.loads(log.channels)
+        assert channels == [f"email:caregiver:{cg2.id}"]
+
+    def test_revoked_caregiver_excluded_from_recipients(self, session: Session):
+        """[2026-07-23 추가] 연결이 끊긴(revoked) 보호자는 최초 연결이었어도 더 이상 알림을
+        받으면 안 된다 — unlink가 하드 삭제 대신 status="revoked"로 남는 소프트 삭제로
+        바뀌면서, 이 필터가 없으면 끊긴 보호자에게도 계속 이메일이 갔다."""
+        pt = _make_patient(session, email=None)
+        cg1 = Caregiver(hashed_password="x", email="cg1@test.com", email_opt_in=True)
+        cg1.name = "해제된보호자"
+        cg2 = Caregiver(hashed_password="x", email="cg2@test.com", email_opt_in=True)
+        cg2.name = "현재보호자"
+        session.add(cg1)
+        session.add(cg2)
+        session.commit()
+        session.refresh(cg1)
+        session.refresh(cg2)
+        # cg1이 먼저(최초) 연결됐지만 이후 해제됐고, cg2가 나중에 연결된 상태
+        session.add(CaregiverPatient(caregiver_id=cg1.id, patient_id=pt.id, status="revoked"))
+        session.add(CaregiverPatient(caregiver_id=cg2.id, patient_id=pt.id))
+        session.commit()
+        _make_schedule(session, pt, "08:00")
+
+        scheduler._fire_due_reminders(session, datetime(2026, 7, 19, 8, 5))
+
+        log = session.exec(select(NotificationLog)).first()
+        channels = json.loads(log.channels)
+        assert channels == [f"email:caregiver:{cg2.id}"]
+
+    def test_schedule_caregiver_alert_false_skips_caregivers_but_not_patient(self, session: Session):
+        """monitoring_router.py 스케줄 생성/수정 API에 이미 있는 per-schedule
+        caregiver_alert 토글 — round5에서 발견: 스케줄러가 이 값을 전혀 참고하지 않고
+        항상 보호자에게 알림을 보내던 실제 버그에 대한 회귀 테스트."""
+        pt = _make_patient(session, email="patient@test.com")
+        cg = _make_caregiver_linked(session, pt, "cg-alert-off")
+        sched = MedicationSchedule(
+            patient_id=pt.id, drug_name="테스트약", time_slot="08:00", active=True, caregiver_alert=False
+        )
+        session.add(sched)
+        session.commit()
+
+        scheduler._fire_due_reminders(session, datetime(2026, 7, 19, 8, 5))
+
+        log = session.exec(select(NotificationLog)).first()
+        channels = json.loads(log.channels)
+        assert channels == ["email:patient"]
+        assert f"email:caregiver:{cg.id}" not in channels
+
+    def test_default_recipient_order_is_deterministic_by_link_id_not_insertion_coincidence(self, session: Session):
+        """links 쿼리에 order_by가 없으면 SQLite에서는 우연히 삽입 순서로 보이지만 SQL
+        표준상 보장되지 않는다(팀 실제 운영/개발 DB는 MySQL) — caregiver_patients.id로
+        정렬해 전원에게 보낼 때도 순서가 실제로 결정적인지 확인한다. cg2를 먼저 만들어
+        caregivers.id가 더 작게 하고, CaregiverPatient는 cg1(나중에 만든, id가 더 큼)을
+        먼저 연결해 "caregivers.id 순서"와 "caregiver_patients.id(연결) 순서"가 갈리게 한다."""
+        pt = _make_patient(session, email=None)
+        cg2 = Caregiver(hashed_password="x", email="cg2@test.com", email_opt_in=True)
+        cg2.name = "먼저 생성된 보호자"
+        session.add(cg2)
+        session.commit()
+        session.refresh(cg2)
+        cg1 = Caregiver(hashed_password="x", email="cg1@test.com", email_opt_in=True)
+        cg1.name = "나중에 생성된 보호자"
+        session.add(cg1)
+        session.commit()
+        session.refresh(cg1)
+        assert cg2.id < cg1.id
+
+        # CaregiverPatient는 cg1을 먼저 연결(insert 순서상 cg1이 "먼저"지만 caregiver_patients.id는
+        # 여전히 이 insert 순서를 따름 — 여기서 검증하려는 건 caregivers.id가 아니라
+        # caregiver_patients.id(연결된 순서)로 정렬한다는 점).
+        session.add(CaregiverPatient(caregiver_id=cg1.id, patient_id=pt.id))
+        session.add(CaregiverPatient(caregiver_id=cg2.id, patient_id=pt.id))
+        session.commit()
+        _make_schedule(session, pt, "08:00")
+
+        scheduler._fire_due_reminders(session, datetime(2026, 7, 19, 8, 5))
+
+        log = session.exec(select(NotificationLog)).first()
+        channels = json.loads(log.channels)
+        # caregiver_patients row 삽입 순서상 cg1이 먼저 연결됐으므로 cg1이 채널 목록에서도 먼저 나와야 한다.
+        assert channels == [f"email:caregiver:{cg1.id}", f"email:caregiver:{cg2.id}"]
+
+    def test_care_alert_disabled_suppresses_caregivers_but_not_patient(self, session: Session):
+        """[2026-07-24 추가, 팀 요청] 알림 설정의 "돌봄 알림"(NotificationSetting.care_alert_enabled)을
+        끄면 보호자에게 실제로 알림이 안 가야 한다 — 다만 "누구에게 보낼지" 선택
+        (ScheduleCaregiverAlert/schedule.caregiver_alert)은 그대로 둔다(아래 재활성화 테스트가
+        선택이 보존되는지 확인). 환자 본인 알림은 이 스위치와 무관하게 그대로 간다."""
+        pt = _make_patient(session, email="patient@test.com")
+        cg = _make_caregiver_linked(session, pt, "보호자1")
+        session.add(NotificationSetting(patient_id=pt.id, care_alert_enabled=False))
+        session.commit()
+        _make_schedule(session, pt, "08:00")
+
+        scheduler._fire_due_reminders(session, datetime(2026, 7, 19, 8, 5))
+
+        log = session.exec(select(NotificationLog)).first()
+        channels = json.loads(log.channels)
+        assert channels == ["email:patient"]
+        assert f"email:caregiver:{cg.id}" not in channels
+
+    def test_care_alert_re_enabled_restores_same_recipients_without_reselecting(self, session: Session):
+        """"돌봄 알림"을 다시 켜면 alert_caregiver_ids를 다시 고를 필요 없이 그대로
+        복원돼야 한다 — care_alert_enabled는 selection을 건드리지 않는 별개의 스위치이기
+        때문이다. (_recipients를 직접 호출 — _fire_due_reminders를 두 번 부르면 같은
+        due_date/time_slot 조합이라 두 번째 호출이 dedup으로 그냥 건너뛰어져 재현이 안 됨.)"""
+        pt = _make_patient(session, email=None)
+        _make_caregiver_linked(session, pt, "보호자1")
+        cg2 = _make_caregiver_linked(session, pt, "보호자2")
+        setting = NotificationSetting(patient_id=pt.id, care_alert_enabled=False)
+        session.add(setting)
+        session.commit()
+        sched = _make_schedule(session, pt, "08:00")
+        session.add(ScheduleCaregiverAlert(schedule_id=sched.id, caregiver_id=cg2.id))
+        session.commit()
+
+        assert scheduler._recipients(session, pt, sched) == []  # 꺼져 있으니 보호자 몫 없음(환자도 이메일 미동의)
+
+        setting.care_alert_enabled = True
+        session.add(setting)
+        session.commit()
+
+        # cg1이 아니라 cg2 — 아까 골라둔 선택이 그대로 살아있어야 한다(재선택 없이 복원).
+        recipients = scheduler._recipients(session, pt, sched)
+        assert [label for label, _email in recipients] == [f"email:caregiver:{cg2.id}"]
+
+
+class TestDeliveryOrderingAvoidsDuplicateSend:
+    """[2026-07-20 round2, 박소정님 리뷰에서 발견] 예전엔 _deliver()(실제 발송)가
+    NotificationLog 커밋보다 먼저 실행됐다 — 유니크 제약이 "로그 행"의 중복은 막아도
+    "발송 자체"의 중복은 못 막아서, 공유 DB에 동시 tick이 오면 두 프로세스가 각자
+    이메일을 보낼 수 있었다(로그는 하나만 남지만). placeholder 행을 먼저 insert+commit해서
+    유니크 제약으로 선점한 프로세스만 실제 발송하도록 순서를 바꿨다 — _deliver가 불리는
+    시점엔 이미 로그 행이 커밋되어 있어야 한다."""
+
+    def test_reminder_placeholder_committed_before_delivery_attempted(self, session: Session):
+        pt = _make_patient(session)
+        sched = _make_schedule(session, pt, "08:00")
+        now = datetime(2026, 7, 19, 8, 5)
+
+        log_existed_at_delivery_time = []
+        original_deliver = scheduler._deliver
+
+        def _spy_deliver(sess, schedule_arg, patient_arg, kind):
+            existing = sess.exec(
+                select(NotificationLog).where(NotificationLog.schedule_id == schedule_arg.id)
+            ).first()
+            log_existed_at_delivery_time.append(existing is not None)
+            return original_deliver(sess, schedule_arg, patient_arg, kind)
+
+        with patch("core.scheduler._deliver", side_effect=_spy_deliver):
+            scheduler._fire_due_reminders(session, now)
+
+        assert log_existed_at_delivery_time == [True]
+        # placeholder는 최종적으로 실제 발송 결과로 갱신되어야 한다("pending"으로 안 남음).
+        final = session.exec(select(NotificationLog).where(NotificationLog.schedule_id == sched.id)).first()
+        assert final.status != "pending"
+
+    def test_missed_placeholder_committed_before_delivery_attempted(self, session: Session):
+        pt = _make_patient(session)
+        sched = _make_schedule(session, pt, "08:00")
+        now = datetime(2026, 7, 19, 9, 5)
+
+        log_existed_at_delivery_time = []
+        original_deliver = scheduler._deliver
+
+        def _spy_deliver(sess, schedule_arg, patient_arg, kind):
+            existing = sess.exec(
+                select(NotificationLog).where(NotificationLog.schedule_id == schedule_arg.id)
+            ).first()
+            log_existed_at_delivery_time.append(existing is not None)
+            return original_deliver(sess, schedule_arg, patient_arg, kind)
+
+        with patch("core.scheduler._deliver", side_effect=_spy_deliver):
+            scheduler._mark_missed(session, now)
+
+        assert log_existed_at_delivery_time == [True]
+        final = session.exec(select(NotificationLog).where(NotificationLog.schedule_id == sched.id)).first()
+        assert final.status != "pending"
+
+    def test_delivery_not_attempted_when_slot_already_claimed_by_another_process(self, session: Session):
+        """다른 프로세스가 이미 이 (schedule, due_date, time_slot, kind)를 선점(커밋)해둔
+        상태를 시뮬레이션 — placeholder insert가 유니크 제약에 걸려 실패하므로 발송 자체가
+        아예 시도되면 안 된다."""
+        pt = _make_patient(session)
+        sched = _make_schedule(session, pt, "08:00")
+        now = datetime(2026, 7, 19, 8, 5)
+
+        session.add(
+            NotificationLog(
+                schedule_id=sched.id,
+                patient_id=pt.id,
+                due_date="2026-07-19",
+                time_slot="08:00",
+                kind="reminder",
+                status="sent",
+                channels="[]",
+            )
+        )
+        session.commit()
+
+        with patch("core.scheduler._deliver") as mock_deliver:
+            scheduler._fire_due_reminders(session, now)
+
+        mock_deliver.assert_not_called()
+
+
+class TestPushIntegration:
+    """[2026-07-24 추가] _deliver()가 이메일과 나란히 core.push.send_push_to_recipient를
+    호출하는지 검증한다. 실제 pywebpush 호출은 test_push.py에서 이미 다루므로 여기선
+    "언제(누구에게) 호출하느냐"만 확인한다."""
+
+    def test_sends_push_to_patient_and_primary_caregiver_by_default(self, session: Session):
+        pt = _make_patient(session)
+        cg = _make_caregiver_linked(session, pt, "보호자")
+        _make_schedule(session, pt, "08:00")
+        now = datetime(2026, 7, 19, 8, 5)
+
+        with patch("core.scheduler.send_push_to_recipient") as mock_push:
+            scheduler._fire_due_reminders(session, now)
+
+        called_targets = {(c.args[1], c.args[2]) for c in mock_push.call_args_list}
+        assert called_targets == {("patient", pt.id), ("caregiver", cg.id)}
+
+    def test_skips_push_when_all_push_enabled_is_false_but_still_emails(self, session: Session):
+        pt = _make_patient(session)
+        session.add(NotificationSetting(patient_id=pt.id, all_push_enabled=False))
+        session.commit()
+        _make_schedule(session, pt, "08:00")
+        now = datetime(2026, 7, 19, 8, 5)
+
+        with patch("core.scheduler.send_push_to_recipient") as mock_push:
+            scheduler._fire_due_reminders(session, now)
+
+        mock_push.assert_not_called()
+        logs = session.exec(select(NotificationLog)).all()
+        assert logs[0].status == "sent"
+        assert "email:patient" in json.loads(logs[0].channels)
+
+    def test_skips_push_when_medication_reminder_disabled(self, session: Session):
+        """medication_reminder_enabled=False면 이메일도 push도 전부 스킵돼야 한다."""
+        pt = _make_patient(session)
+        session.add(NotificationSetting(patient_id=pt.id, medication_reminder_enabled=False))
+        session.commit()
+        _make_schedule(session, pt, "08:00")
+        now = datetime(2026, 7, 19, 8, 5)
+
+        with patch("core.scheduler.send_push_to_recipient") as mock_push:
+            scheduler._fire_due_reminders(session, now)
+
+        mock_push.assert_not_called()
+
+    def test_push_respects_caregiver_alert_false(self, session: Session):
+        pt = _make_patient(session)
+        _make_caregiver_linked(session, pt, "보호자")
+        _make_schedule(session, pt, "08:00")
+        sched = session.exec(select(MedicationSchedule)).one()
+        sched.caregiver_alert = False
+        session.add(sched)
+        session.commit()
+        now = datetime(2026, 7, 19, 8, 5)
+
+        with patch("core.scheduler.send_push_to_recipient") as mock_push:
+            scheduler._fire_due_reminders(session, now)
+
+        called_targets = {(c.args[1], c.args[2]) for c in mock_push.call_args_list}
+        assert called_targets == {("patient", pt.id)}
+
+    def test_push_respects_per_caregiver_notifications_enabled(self, session: Session):
+        # [2026-07-30 추가] 여러 환자를 관리하는 보호자·기관이 이 환자 알림만 개별로 꺼둔
+        # 경우 — caregiver_alert_false(일정 단위)와 달리 (보호자, 환자) 관계 단위 토글.
+        pt = _make_patient(session)
+        cg_off = _make_caregiver_linked(session, pt, "알림꺼둔보호자")
+        cg_on = _make_caregiver_linked(session, pt, "알림켜둔보호자")
+        link = session.exec(
+            select(CaregiverPatient).where(CaregiverPatient.caregiver_id == cg_off.id)
+        ).one()
+        link.notifications_enabled = False
+        session.add(link)
+        session.commit()
+        _make_schedule(session, pt, "08:00")
+        now = datetime(2026, 7, 19, 8, 5)
+
+        with patch("core.scheduler.send_push_to_recipient") as mock_push:
+            scheduler._fire_due_reminders(session, now)
+
+        called_targets = {(c.args[1], c.args[2]) for c in mock_push.call_args_list}
+        assert called_targets == {("patient", pt.id), ("caregiver", cg_on.id)}
+
+
+def test_soft_deleted_notification_still_prevents_duplicate_delivery(session: Session):
+    """알림함 정리는 화면에서만 숨기며 동일 일정의 재발송 근거는 보존한다."""
+    pt = _make_patient(session)
+    schedule = _make_schedule(session, pt, "08:00")
+    log = NotificationLog(
+        schedule_id=schedule.id,
+        patient_id=pt.id,
+        due_date="2026-08-04",
+        time_slot="08:00",
+        kind="reminder",
+        status="sent",
+        deleted_at=datetime(2026, 8, 4, 9, 0),
+    )
+    session.add(log)
+    session.commit()
+
+    assert scheduler._already_logged(session, schedule.id, "2026-08-04", "08:00", "reminder") is True
+
+
+class TestSchedulerEnabledGate:
+    def test_defaults_false_in_test_env(self, monkeypatch):
+        monkeypatch.delenv("SCHEDULER_ENABLED", raising=False)
+        assert scheduler.scheduler_enabled() is False
+
+    def test_explicit_true_overrides_test_default(self, monkeypatch):
+        monkeypatch.setenv("SCHEDULER_ENABLED", "true")
+        assert scheduler.scheduler_enabled() is True

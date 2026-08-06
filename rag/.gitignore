@@ -1,0 +1,13 @@
+.env
+chroma_db/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+.ruff_cache/
+data/*.csv
+data/*.xlsx
+data/*.jsonl

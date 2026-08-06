@@ -1,16 +1,45 @@
 # ===== Python-generated files =====
 __pycache__/
-*.py[oc]
+*.py[cod]
+*$py.class
+*.so
 build/
 dist/
 wheels/
 *.egg-info
+*.egg
+MANIFEST
+develop-eggs/
+downloads/
+eggs/
+# lib/ 은 넣지 않음 — frontend/src/lib/과 겹쳐서 새 파일이 조용히 안 잡힐 위험이 있음
+lib64/
+parts/
+sdist/
+var/
+share/python-wheels/
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+cover/
 
 # ===== IDE settings =====
-# pycharm
+# pycharm — .idea 폴더 전체를 위 .* 패턴으로 이미 통째로 무시하므로
+# .idea/**/워크스페이스 단위 세부 규칙(toptal 생성분)은 안 넣음 — 있어도 도달 못 함
 .idea
 # VSCode
 settings.json
+
+# ===== macOS (toptal에서 추가로 확인한 것 중 .*로 안 걸리는 것만) =====
+Icon
+Network Trash Folder
+Temporary Items
+*.icloud
 
 # ===== Virtual environments =====
 .venv
@@ -19,7 +48,24 @@ settings.json
 envs/
 *.env
 .env
+.env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
 .python-version
+
+# ===== Claude Code / OMC 내부 상태 (커밋 불필요) =====
+.omc/state/
+.omc/logs/
+.omc/artifacts/
+.omc/handoffs/
+.omc/research/
+.omc/plans/
+.omc/ultragoal/
+# .omc/skills/ 는 의도적으로 커밋 가능 — 예외 처리
+!.omc/skills/
+!.omc/skills/**
 .DS_Store
 
 # ===== Custom ignore patterns =====
@@ -33,11 +79,47 @@ _*
 !.github/
 !.github/**
 
+# _* 패턴이 __init__.py까지 가리는 것 방지
+!**/__init__.py
+
+# ===== 개인 작업 디렉터리 (로컬 메모, 세션별 스크래치) =====
+AH_04_02_soonhyun/
+
+# ===== macOS 홈 디렉터리 표준 폴더 =====
+# 루트 앵커(/) 없이 쓰면 frontend/public/ 같은 하위 폴더까지 대소문자 무시하고 매칭돼서
+# 새로 추가한 파일이 조용히 안 잡히는 문제가 있었음 (예: PWA 아이콘) — 최상위만 매칭하도록 고정
+/Desktop/
+/Documents/
+/Applications/
+/Downloads/
+/Library/
+/Pictures/
+/Music/
+/Movies/
+/Public/
+# 무관 프로젝트/파일
+/Pregnancy-Success-Forecaster/
+/aimers6th.fertility_patients_pregnancy_success_prediction/
+/oz-ai-04-soon/
+/docker/
+/git/
+/project/
+/SHOW
+/hello.py
+/PyCharmMiscProject/
+/rag-prototype/
+
 # ===== 민감 데이터 / 의료정보 (절대 커밋 금지) =====
 data/private/
 uploads/
 *.dicom
 *.dcm
+
+# ===== 멘토링 보고서 (팀 취합용, 원격 push 제외) =====
+mentoring*
+# docs/mentoring_report/ 는 정식 보관 위치라 예외로 추적한다
+!docs/mentoring_report/
+!docs/mentoring_report/**
 
 # ===== AI 모델 / 대용량 파일 =====
 models/
@@ -57,6 +139,16 @@ htmlcov/
 # ===== 로그 =====
 *.log
 logs/
+
+# ===== SQLite (backend/ 로컬 개발 DB) =====
+*.db
+
+# ===== 식약처 API 디스크 캐시 (mfds_client.py / dur_master.py) =====
+# diskcache가 SQLite + 보조 파일로 생성하는 런타임 캐시 디렉토리 — 커밋 불필요
+mfds_cache/
+
+# ===== 공유 개발 DB(Aiven) SSL CA 인증서 — 팀원 각자 로컬에 두는 파일, 레포에 커밋 안 함 =====
+backend/certs/*.pem
 
 # ===== Docker / 빌드 산출물 =====
 *.pid

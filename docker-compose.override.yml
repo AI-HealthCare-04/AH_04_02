@@ -1,0 +1,8 @@
+# 로컬 개발용 오버라이드 — docker compose up 시 자동으로 병합됨.
+#
+# Dockerfile의 CMD(--workers 2)를 --reload로 교체해서, 코드 수정 시 자동 재시작이
+# 동작하게 한다. EC2 배포는 ci.yml에서 -f docker-compose.yml 만 명시해
+# 이 파일을 건너뛰므로 --workers 2가 그대로 적용된다.
+services:
+  backend:
+    command: ["uv", "run", "--project", "/workspace", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

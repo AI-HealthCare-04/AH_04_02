@@ -1,0 +1,90 @@
+[
+  {
+    "id": "htn-diet-1",
+    "disease": "고혈압",
+    "disease_code": "hypertension",
+    "category": "식이요법",
+    "rule": "하루 소금 섭취량을 6g 이하로 줄이고, 국물 섭취를 최소화합니다.",
+    "source": "대한고혈압학회 고혈압 진료지침; 질병관리청 심뇌혈관질환 예방관리수칙"
+  },
+  {
+    "id": "htn-weight-1",
+    "disease": "고혈압",
+    "disease_code": "hypertension",
+    "category": "체중조절",
+    "rule": "본인 체질량지수(BMI)에 맞는 적정 체중을 유지합니다.",
+    "source": "대한고혈압학회 고혈압 진료지침"
+  },
+  {
+    "id": "htn-smoking-alcohol-1",
+    "disease": "고혈압",
+    "disease_code": "hypertension",
+    "category": "금연·절주",
+    "rule": "담배는 절대 피우지 않고, 술은 하루 1~2잔 이하로 제한합니다.",
+    "source": "질병관리청 심뇌혈관질환 예방관리수칙"
+  },
+  {
+    "id": "htn-exercise-1",
+    "disease": "고혈압",
+    "disease_code": "hypertension",
+    "category": "운동",
+    "rule": "주 3~5회, 1회당 30분 이상 땀이 날 정도의 유산소 운동을 합니다.",
+    "source": "대한고혈압학회 고혈압 진료지침"
+  },
+  {
+    "id": "dm-diet-1",
+    "disease": "당뇨병",
+    "disease_code": "diabetes",
+    "category": "식이요법",
+    "rule": "매일 일정한 시간에 탄수화물(당질)과 단백질, 지방을 골고루 섭취합니다.",
+    "source": "대한당뇨병학회 당뇨병 진료지침"
+  },
+  {
+    "id": "dm-diet-2",
+    "disease": "당뇨병",
+    "disease_code": "diabetes",
+    "category": "식이요법",
+    "rule": "흰쌀밥 대신 잡곡밥, 단순당(설탕·빵·과자) 대신 식이섬유가 풍부한 채소를 먼저 먹어 혈당 스파이크를 방지합니다.",
+    "source": "대한당뇨병학회 당뇨병 진료지침"
+  },
+  {
+    "id": "dm-foot-care-1",
+    "disease": "당뇨병",
+    "disease_code": "diabetes",
+    "category": "발관리",
+    "rule": "발에 상처가 나지 않도록 매일 살피고, 발을 항상 깨끗하고 건조하게 유지합니다.",
+    "source": "대한당뇨병학회 당뇨병 진료지침 (당뇨병성 족부질환 예방)"
+  },
+  {
+    "id": "dyslipidemia-fat-limit-1",
+    "disease": "이상지질혈증",
+    "disease_code": "dyslipidemia",
+    "category": "지방섭취제한",
+    "rule": "육류의 기름진 부위, 버터, 마가린, 튀김류 등 포화지방·트랜스지방 섭취를 줄입니다.",
+    "source": "한국지질·동맥경화학회 이상지질혈증 치료지침"
+  },
+  {
+    "id": "dyslipidemia-healthy-fat-1",
+    "disease": "이상지질혈증",
+    "disease_code": "dyslipidemia",
+    "category": "건강한지방섭취",
+    "rule": "삼겹살, 치킨 등 동물성 지방 대신 등푸른 생선, 견과류 등 불포화지방산이 풍부한 식품을 섭취합니다.",
+    "source": "한국지질·동맥경화학회 이상지질혈증 치료지침"
+  },
+  {
+    "id": "ckd-protein-sodium-1",
+    "disease": "만성콩팥병",
+    "disease_code": "chronic_kidney_disease",
+    "category": "단백질·염분조절",
+    "rule": "단백질과 소금 섭취를 가급적 줄여 콩팥의 부담을 덜어줍니다.",
+    "source": "대한신장학회 만성콩팥병 진료지침"
+  },
+  {
+    "id": "ckd-potassium-water-1",
+    "disease": "만성콩팥병",
+    "disease_code": "chronic_kidney_disease",
+    "category": "칼륨·수분관리",
+    "rule": "신장 기능 단계에 따라 칼륨(바나나, 토마토 등)과 수분 섭취량을 조절해야 합니다.",
+    "source": "대한신장학회 만성콩팥병 진료지침 (스테이지별 단백질·칼륨·수분 제한 기준)"
+  }
+]

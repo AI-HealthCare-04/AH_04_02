@@ -1,0 +1,166 @@
+"""
+test_database_env.py — APP_ENV/DATABASE_URL 환경변수 기반 DB 연결 전환 검증 (2026-07-14 추가)
+
+database.py는 모듈 임포트 시점에 환경변수를 읽어 엔진을 만들기 때문에, 같은 프로세스
+안에서 재임포트로는 다른 설정을 재현할 수 없다 — 그래서 서브프로세스로 각 케이스를
+독립 실행해서 검증한다(실제 서버 프로세스가 기동될 때와 동일한 조건).
+"""
+import subprocess
+import sys
+from pathlib import Path
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+_BASE_ENV = {
+    "PII_ENCRYPTION_KEY": "c7Ka8_mp2rYGAesszwMtAXutMT8rq2SqDyVnhjU6H_8=",
+    "PII_HASH_SECRET": "test-only-hash-secret",
+    "SECRET_KEY": "test-only-jwt-secret",
+}
+
+
+def _run(code: str, extra_env: dict) -> subprocess.CompletedProcess:
+    import os
+
+    # [주의] conftest.py가 이 테스트 프로세스 자체의 os.environ에 DATABASE_URL=sqlite://를
+    # setdefault로 심어둔다. 또 다른 테스트 파일이 `from main import app`하면 main.py의
+    # load_dotenv()가 backend/.env를 os.environ에 주입해서 DATABASE_SSL_REQUIRED=true 등이
+    # 부모 프로세스 환경에 섞인다 — 이것들이 서브프로세스로 누수되면 "SSL 없음" 케이스를
+    # 재현할 수 없으므로, DATABASE_* 변수 전체를 지우고 시작한다.
+    _DB_KEYS = {"DATABASE_URL", "APP_ENV", "DATABASE_SSL_REQUIRED", "DATABASE_SSL_CA"}
+    env = {k: v for k, v in os.environ.items() if k not in _DB_KEYS}
+    env.update(_BASE_ENV)
+    env.update(extra_env)
+    return subprocess.run(
+        [sys.executable, "-c", code], cwd=BACKEND_DIR, env=env, capture_output=True, text=True, timeout=30
+    )
+
+
+def test_local_env_defaults_to_sqlite_without_database_url():
+    result = _run(
+        "from core import database; print(database.engine.dialect.name)",
+        {"APP_ENV": "local"},  # DATABASE_URL 생략
+    )
+    assert result.returncode == 0, result.stderr
+    assert "sqlite" in result.stdout
+
+
+def test_development_env_requires_database_url():
+    result = _run("from core import database", {"APP_ENV": "development"})  # DATABASE_URL 생략
+    assert result.returncode != 0
+    assert "DATABASE_URL" in result.stderr
+
+
+def test_production_env_requires_database_url():
+    result = _run("from core import database", {"APP_ENV": "production"})  # DATABASE_URL 생략
+    assert result.returncode != 0
+    assert "DATABASE_URL" in result.stderr
+
+
+def test_production_env_requires_ssl_even_without_ssl_required_flag_set():
+    """[2026-07-15 추가] 회귀 테스트 — production인데 DATABASE_SSL_REQUIRED 자체를 안 켜면
+    (DATABASE_SSL_CA도 없이) else 분기(SSL 없는 평문 연결)로 빠져 가드를 통째로 건너뛰던
+    버그. DATABASE_SSL_REQUIRED 값과 무관하게 production은 항상 막혀야 한다."""
+    result = _run(
+        "from core import database",
+        {
+            "APP_ENV": "production",
+            "DATABASE_URL": "mysql+pymysql://user:pass@prod-db.internal:3306/healthdb_prod",
+            # DATABASE_SSL_REQUIRED/DATABASE_SSL_CA 둘 다 생략 — 이게 버그를 재현하던 조합
+        },
+    )
+    assert result.returncode != 0
+    assert "DATABASE_SSL_REQUIRED" in result.stderr
+
+
+def test_production_env_requires_ssl_ca_when_ssl_required_is_true():
+    result = _run(
+        "from core import database",
+        {
+            "APP_ENV": "production",
+            "DATABASE_URL": "mysql+pymysql://user:pass@prod-db.internal:3306/healthdb_prod",
+            "DATABASE_SSL_REQUIRED": "true",
+            # DATABASE_SSL_CA 생략
+        },
+    )
+    assert result.returncode != 0
+    assert "DATABASE_SSL_CA" in result.stderr
+
+
+def test_production_env_succeeds_with_ssl_required_and_ca_set():
+    result = _run(
+        "from core import database; print(database.engine.dialect.name)",
+        {
+            "APP_ENV": "production",
+            "DATABASE_URL": "mysql+pymysql://user:pass@prod-db.internal:3306/healthdb_prod",
+            "DATABASE_SSL_REQUIRED": "true",
+            "DATABASE_SSL_CA": "/tmp/fake-ca-for-test.pem",
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    assert "mysql" in result.stdout
+
+
+def test_production_env_uses_larger_connection_pool():
+    """[2026-08-05 추가, 리뷰 반영] production/development의 pool_size·max_overflow가
+    실수로 바뀌거나 지워지면(기본값 5+10으로 되돌아가면) 여기서 바로 잡힌다 — 이 값들이
+    Aiven max_connections=76을 넘기지 않게 맞춰둔 계산의 전제다."""
+    result = _run(
+        "from core import database; print(database.engine.pool.size(), database.engine.pool._max_overflow)",
+        {
+            "APP_ENV": "production",
+            "DATABASE_URL": "mysql+pymysql://user:pass@prod-db.internal:3306/healthdb_prod",
+            "DATABASE_SSL_REQUIRED": "true",
+            "DATABASE_SSL_CA": "/tmp/fake-ca-for-test.pem",
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "12 8"
+
+
+def test_development_env_uses_smaller_connection_pool():
+    """[2026-08-05 추가, 리뷰 반영] 팀원 여러 명이 동시에 development로 접속해도 공유 DB의
+    max_connections 예산을 많이 안 차지하도록 인스턴스당 풀을 작게(3+2) 잡아둔 값 검증."""
+    result = _run(
+        "from core import database; print(database.engine.pool.size(), database.engine.pool._max_overflow)",
+        {"APP_ENV": "development", "DATABASE_URL": "mysql+pymysql://user:pass@shared-db.internal:3306/healthdb"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "3 2"
+
+
+def test_development_env_with_mysql_url_uses_mysql_dialect_and_correct_host():
+    result = _run(
+        "from core import database; print(database.engine.dialect.name)",
+        {"APP_ENV": "development", "DATABASE_URL": "mysql+pymysql://user:pass@shared-db.internal:3306/healthdb"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert "mysql" in result.stdout
+
+
+def test_log_db_connection_info_never_prints_password():
+    result = _run(
+        "from core import database; database.log_db_connection_info()",
+        {"APP_ENV": "development", "DATABASE_URL": "mysql+pymysql://secretuser:secretpass123@shared-db.internal:3306/healthdb"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert "secretpass123" not in result.stdout
+    assert "secretuser" not in result.stdout
+    assert "shared-db.internal" in result.stdout  # host는 노출(민감정보 아님)
+
+
+def test_log_db_connection_info_hides_details_in_production():
+    result = _run(
+        "from core import database; database.log_db_connection_info()",
+        {
+            "APP_ENV": "production",
+            "DATABASE_URL": "mysql+pymysql://user:pass@prod-db.internal:3306/healthdb_prod",
+            # [2026-07-15] production은 이제 DATABASE_SSL_REQUIRED/CA 없이는 임포트 시점에
+            # RuntimeError를 낸다(SSL 가드) — 이 테스트가 검증하려는 건 로그 마스킹이지
+            # SSL 가드가 아니므로, 가드를 통과할 최소 값을 채워준다.
+            "DATABASE_SSL_REQUIRED": "true",
+            "DATABASE_SSL_CA": "/tmp/fake-ca-for-test.pem",
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    assert "prod-db.internal" not in result.stdout  # 운영은 host도 로그에 안 남김
+    assert "healthdb_prod" not in result.stdout

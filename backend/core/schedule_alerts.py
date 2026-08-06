@@ -1,0 +1,107 @@
+"""core/schedule_alerts.py — "이 복약 일정이 실제로 누구에게 알림을 보내는가"를 계산하는
+공용 로직 (2026-07-24 신규).
+
+routers/monitoring_router.py(Schedule.tsx API 응답의 alert_caregiver_ids)와
+core/scheduler.py(실제 이메일 발송 대상)가 반드시 같은 계산을 공유해야 화면에 뜨는
+이름과 실제 발송 대상이 어긋나지 않는다 — 한쪽만 고치면 "체크박스엔 없는데 알림은
+가는" 또는 그 반대의 불일치가 생긴다.
+"""
+from __future__ import annotations
+
+from models import CaregiverPatient, MedicationSchedule, ScheduleCaregiverAlert
+from sqlmodel import Session, select
+
+
+def linked_caregiver_ids(patient_id: int, session: Session) -> list[int]:
+    """이 환자와 현재 연결된(해제되지 않은) caregiver id 전체 — 알림 선택 UI의 후보
+    목록이자, 일정에 명시적 선택이 없을 때의 기본 수신자 집합이기도 하다."""
+    return list(
+        session.exec(
+            select(CaregiverPatient.caregiver_id)
+            .where(CaregiverPatient.patient_id == patient_id)
+            .where(CaregiverPatient.status != "revoked")
+            .order_by(CaregiverPatient.id)
+        ).all()
+    )
+
+
+def effective_alert_caregiver_ids(schedule: MedicationSchedule, session: Session) -> list[int]:
+    """이 일정이 실제로 알림을 보낼 caregiver id 목록.
+
+    caregiver_alert가 꺼져 있으면 무조건 빈 목록(기존 kill switch 유지). 명시적으로
+    고른 행(ScheduleCaregiverAlert)이 있으면 그 목록만 — 예전엔 "가장 먼저 연결된
+    caregiver 1명"에게만 갔는데(임의의 단순화), 이제는 환자·보호자가 직접 고른 사람만
+    받는다. 하나도 명시적으로 고른 적 없으면(과거 데이터, 또는 아직 새 체크박스 UI를
+    거치지 않은 일정) 연결된 caregiver 전원에게 보낸다 — 아무도 못 받는 것보다 안전한
+    기본값이자, 기존 "첫 연결자만" 제한을 오히려 완화하는 방향이다.
+
+    [주의] "선택한 행이 0개"와 "한 번도 선택한 적 없음"을 이 함수는 구분하지 못한다 —
+    체크박스를 전부 해제해서 명시적으로 "아무에게도 안 보낸다"를 표현하려면 반드시
+    caregiver_alert=False도 같이 꺼야 한다(위 kill switch가 우선 적용된다).
+    Schedule.tsx의 save()가 실제로 그렇게 두 값을 항상 같이 보낸다."""
+    if not schedule.caregiver_alert:
+        return []
+    selected = list(
+        session.exec(
+            select(ScheduleCaregiverAlert.caregiver_id).where(
+                ScheduleCaregiverAlert.schedule_id == schedule.id
+            )
+        ).all()
+    )
+    if selected:
+        return selected
+    return linked_caregiver_ids(schedule.patient_id, session)
+
+
+def bulk_effective_alert_caregiver_ids(
+    schedules: list[MedicationSchedule], session: Session
+) -> dict[int, list[int]]:
+    """effective_alert_caregiver_ids의 배치 버전 — GET /monitoring/schedules처럼 스케줄
+    목록 전체를 한 번에 내려줄 때 쓴다. 스케줄마다 ScheduleCaregiverAlert/linked_caregiver_ids를
+    반복 조회하던 걸 없애고, 로직(우선순위: kill switch → 명시적 선택 → 환자 단위
+    linked_caregiver_ids 폴백)은 effective_alert_caregiver_ids와 완전히 동일하게 유지한다.
+
+    [perf, N+1 수정] ScheduleCaregiverAlert는 전체 스케줄 id를 모아 한 번만 bulk-select하고,
+    linked_caregiver_ids는 같은 환자의 스케줄이 여러 건이어도 그 환자에 대해 한 번만
+    계산해서 재사용한다(스케줄이 아니라 환자 단위 캐시)."""
+    result: dict[int, list[int]] = {}
+    if not schedules:
+        return result
+
+    schedule_ids = [s.id for s in schedules]
+    selected_by_schedule: dict[int, list[int]] = {}
+    for schedule_id, caregiver_id in session.exec(
+        select(ScheduleCaregiverAlert.schedule_id, ScheduleCaregiverAlert.caregiver_id).where(
+            ScheduleCaregiverAlert.schedule_id.in_(schedule_ids)
+        )
+    ):
+        selected_by_schedule.setdefault(schedule_id, []).append(caregiver_id)
+
+    linked_by_patient: dict[int, list[int]] = {}
+    for schedule in schedules:
+        if not schedule.caregiver_alert:
+            result[schedule.id] = []
+            continue
+        selected = selected_by_schedule.get(schedule.id)
+        if selected:
+            result[schedule.id] = selected
+            continue
+        if schedule.patient_id not in linked_by_patient:
+            linked_by_patient[schedule.patient_id] = linked_caregiver_ids(schedule.patient_id, session)
+        result[schedule.id] = linked_by_patient[schedule.patient_id]
+
+    return result
+
+
+def caregiver_wants_notifications(caregiver_id: int, patient_id: int, session: Session) -> bool:
+    """[2026-07-30 추가] 여러 환자를 관리하는 보호자·기관이 (이 보호자, 이 환자) 관계
+    단위로 알림을 꺼뒀는지 — CaregiverPatient.notifications_enabled. 연결 자체가 없거나
+    이미 해제됐으면(레코드 없음) 판단할 관계가 없으니 True로 둔다(호출부가 이미
+    linked_caregiver_ids/명시적 선택 등으로 "연결됨"을 전제하고 부르기 때문)."""
+    link = session.exec(
+        select(CaregiverPatient)
+        .where(CaregiverPatient.caregiver_id == caregiver_id)
+        .where(CaregiverPatient.patient_id == patient_id)
+        .where(CaregiverPatient.status != "revoked")
+    ).first()
+    return link.notifications_enabled if link else True

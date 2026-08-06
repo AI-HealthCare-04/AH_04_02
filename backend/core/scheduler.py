@@ -1,0 +1,392 @@
+"""
+scheduler.py — 복약 알림/놓침 감지 백그라운드 스케줄러 (신규, 2026-07-19, 담당: 김영혜)
+
+REQ-026a(정시 알림) + REQ-026c(놓침 감지) + REQ-026d(third_party_needed 공동알림)를
+구현한다. 팀이 이미 두 번(REQ-035, REQ-028/029) Redis/Celery를 명시적으로 거부하고
+더 단순한 방식을 택한 전례를 따라, 별도 워커 프로세스 없이 FastAPI 앱 프로세스 안에서
+도는 asyncio 루프 하나로 구현한다 — routers/*.py 전반의 `asyncio.to_thread(...)` 관례와
+동일하게, 동기 SQLModel Session 작업은 to_thread로 감싸 이벤트 루프를 막지 않는다.
+
+동시성 주의: 이 팀은 로컬 개발 서버 여러 대가 공유 Aiven MySQL DB 하나를 바라본다
+(docs/Team Members' Notes/shared-dev-db-setup.md) — 즉 "지금 이 틱을 처리한 게 나 하나뿐"이라고 가정할 수
+없다. 그래서 "이미 처리했는지"의 진실 공급원은 스케줄러의 타이밍이 아니라
+NotificationLog의 (schedule_id, due_date, time_slot, kind) UniqueConstraint다 —
+두 서버가 같은 틱에 같은 알림을 동시에 처리하려 해도 DB가 한쪽만 통과시킨다.
+
+알려진 한계(팀 공유 필요, 코멘트에도 명시):
+- [2026-07-28 수정] 예전엔 서버 프로세스의 OS 로컬 시간대에 의존했는데(Patient/
+  MedicationSchedule의 timezone 필드는 여전히 안 씀), Docker 컨테이너가 기본 UTC로
+  뜨는 경우 실제로 9시간 어긋나는 게 발견돼 _now_kst()로 한국 시간을 명시적으로
+  고정했다 — 여러 시간대의 환자를 지원해야 할 때는 이 가정을 재검토해야 한다.
+- [2026-07-24 수정] 배달 채널은 core/email.py(mock/smtp) + core/push.py(Web Push)다.
+  단, push는 백엔드/DB만 준비된 상태 — 프론트에 서비스워커 구독 흐름이 아직 없어
+  PushSubscription이 항상 0건이라 core/push.py가 조용히 no-op한다(HTTPS 배포 이후
+  프론트 작업 붙이면 이 경로가 그대로 살아남).
+- 여러 서버가 동시에 이 루프를 돌리는 멀티워커 배포는 가정하지 않는다(각자 로컬에서
+  스케줄러를 꺼둘 수 있게 SCHEDULER_ENABLED로 게이트만 해둠 — 실제 운영 배포시 재검토 필요).
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
+
+from models import (
+    Caregiver,
+    MedicationRecord,
+    MedicationSchedule,
+    NotificationLog,
+    NotificationSetting,
+    Patient,
+)
+from sqlmodel import Session, func, select
+
+from core.database import engine
+from core.email import send_email
+from core.push import send_push_to_recipient
+from core.schedule_alerts import caregiver_wants_notifications, effective_alert_caregiver_ids
+
+logger = logging.getLogger(__name__)
+
+TICK_SECONDS = 60
+# [2026-07-19] 스케줄러가 60초마다 도는데, "정시"를 정확히 그 초에 맞춰 잡을 수 없으니
+# due_time 이후 이 창 안에 들어온 것까지는 아직 "정시 알림 대상"으로 본다. 창을 넘기면
+# 그때부터는 _fire_due_reminders가 아니라 _mark_missed가 처리한다.
+CATCH_UP_MINUTES = 10
+# [2026-07-19] 정시를 이만큼 넘기고도 MedicationRecord에 오늘자 체크가 없으면 "놓침"으로
+# 판정한다. Dashboard.tsx의 "아직이요"(clear_intake) 버튼이 오늘자 로그를 지우면 이
+# 창이 다시 흐르기 시작하므로, 사용자가 그 버튼을 정시 임박 직전에 누르면 곧바로 다시
+# missed 판정될 수 있다는 걸 알고 있다(라운드2 검토에서 지적된 한계, 별도 UX 개선 필요).
+MISSED_AFTER_MINUTES = 60
+
+_WEEKDAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+_KST = ZoneInfo("Asia/Seoul")
+
+
+def _now_kst() -> datetime:
+    """[2026-07-28 추가, 실제 발견된 버그 수정] time_slot("16:00" 등)은 항상 사용자가
+    보는 한국 시간 기준인데, datetime.now()는 프로세스가 도는 OS의 로컬 시간대를 그대로
+    쓴다 — Docker 컨테이너 기본 시간대(UTC)에서 돌면 due_at 비교가 9시간 어긋나서 정시
+    알림이 실제로는 그날 새벽에 발송 처리되고 있었다(재현: 로컬 docker backend가 UTC로
+    떠서 오후 4시 일정이 다음날 새벽 1시로 계산됨). OS 시간대와 무관하게 항상 한국
+    시간으로 계산하도록 명시적으로 고정한다."""
+    return datetime.now(_KST).replace(tzinfo=None)
+
+
+def _schedule_runs_today(schedule: MedicationSchedule, today: date) -> bool:
+    if not schedule.days_of_week:
+        return True
+    try:
+        days = json.loads(schedule.days_of_week)
+    except (TypeError, ValueError):
+        logger.warning(
+            "schedule %s의 days_of_week가 JSON이 아니라 건너뜁니다: %r",
+            schedule.id, schedule.days_of_week,
+        )
+        return True
+    return _WEEKDAY_KEYS[today.weekday()] in days
+
+
+def _parse_time_slot(time_slot: str) -> tuple[int, int] | None:
+    try:
+        hour_str, minute_str = time_slot.split(":", 1)
+        return int(hour_str), int(minute_str)
+    except (ValueError, AttributeError):
+        logger.warning("time_slot 형식이 잘못돼 건너뜁니다: %r", time_slot)
+        return None
+
+
+def _has_today_log(session: Session, schedule_id: int, today_str: str) -> bool:
+    return (
+        session.exec(
+            select(MedicationRecord)
+            .where(MedicationRecord.schedule_id == schedule_id)
+            .where(func.date(MedicationRecord.taken_at) == today_str)
+            .where(MedicationRecord.status.in_(["taken", "skipped"]))
+        ).first()
+        is not None
+    )
+
+
+def _already_logged(session: Session, schedule_id: int, due_date: str, time_slot: str, kind: str) -> bool:
+    return (
+        session.exec(
+            select(NotificationLog)
+            .where(NotificationLog.schedule_id == schedule_id)
+            .where(NotificationLog.due_date == due_date)
+            .where(NotificationLog.time_slot == time_slot)
+            .where(NotificationLog.kind == kind)
+        ).first()
+        is not None
+    )
+
+
+def _recipients(session: Session, patient: Patient, schedule: MedicationSchedule) -> list[tuple[str, str]]:
+    """(채널라벨, 이메일) 목록.
+
+    [2026-07-24 수정] "첫 연결(caregiver_patients 최초 1건)만 주 보호자로 취급"하던
+    임의의 단순화를 제거했다 — 실제 주/부 보호자 구분 필드가 없어 생긴 한계였고, 2번째·
+    3번째로 연결된 보호자·지원인력에게는 애초에 알림이 안 갔다(Schedule.tsx의 "보호자에게도
+    알림" 라벨이 사실과 달랐던 원인). 이제 core/schedule_alerts.py.effective_alert_caregiver_ids
+    (monitoring_router.py의 API 응답과 공유하는 계산)를 그대로 써서, 일정마다 환자·보호자가
+    직접 고른 caregiver들에게만 보낸다 — 명시적으로 고른 적 없는 일정(과거 데이터 포함)은
+    연결된 caregiver 전원에게 보낸다.
+
+    [2026-07-23 삭제] care_level(자가진단) 기반 "전원 알림" 분기를 제거했다 — 자가진단을 만드는
+    화면이 없어 assessment가 항상 None이라 이 분기는 실질적으로 한 번도 탄 적이 없었다.
+
+    [2026-07-19 round5 수정] schedule.caregiver_alert(monitoring_router.py 스케줄 생성/수정
+    API에 이미 있는 "이 일정만 보호자에게 알릴지" per-schedule 토글)를 지금까지 전혀 참고하지
+    않고 있었다 — 환자가 특정 약 일정에서 이 값을 False로 꺼도 스케줄러가 무시하고 보호자에게
+    계속 알림을 보내던 실제 버그. False면 보호자 후보를 아예 안 만든다(환자 본인 몫은 그대로,
+    effective_alert_caregiver_ids 내부에서 처리).
+
+    [2026-07-24 추가] NotificationSetting.care_alert_enabled("돌봄 알림" — 알림 설정 화면)를
+    보호자 몫에만 별도로 적용한다 — 팀 요청: 이 스위치를 끄면 "누구에게 보낼지"(alert_caregiver_ids
+    선택, schedule.caregiver_alert)는 그대로 두고 실제 발송만 막아야 한다(껐다 켜면 다시 같은
+    사람들에게 그대로 가야 하므로). 그래서 selection을 지우거나 바꾸는 대신 여기서 조건부로
+    건너뛴다 — 환자 본인 알림(medication_reminder_enabled, _deliver에서 이미 처리)과는
+    완전히 별개의 스위치다."""
+    recipients: list[tuple[str, str]] = []
+    if patient.email_opt_in and patient.email:
+        recipients.append(("email:patient", patient.email))
+
+    setting = session.get(NotificationSetting, patient.id)
+    care_alert_enabled = setting.care_alert_enabled if setting else True
+    if care_alert_enabled:
+        for caregiver_id in effective_alert_caregiver_ids(schedule, session):
+            caregiver = session.get(Caregiver, caregiver_id)
+            if caregiver and caregiver.email_opt_in and caregiver.email:
+                recipients.append((f"email:caregiver:{caregiver.id}", caregiver.email))
+    return recipients
+
+
+def _push_targets(session: Session, patient: Patient, schedule: MedicationSchedule) -> list[tuple[str, int | None]]:
+    """(recipient_role, recipient_id) 목록 — _recipients()와 동일하게
+    effective_alert_caregiver_ids(일정마다 환자·보호자가 직접 고른 caregiver, 명시적
+    선택이 없으면 연결된 전원)를 그대로 쓴다. email_opt_in은 이메일 전용 동의라 여기선
+    보지 않는다 — push는 구독이 실제로 있는지만으로 판단하고, 구독이 없으면 core/push.py가
+    알아서 아무것도 안 보낸다. care_alert_enabled도 _recipients()와 동일하게 존중한다."""
+    targets: list[tuple[str, int | None]] = [("patient", patient.id)]
+
+    setting = session.get(NotificationSetting, patient.id)
+    care_alert_enabled = setting.care_alert_enabled if setting else True
+    if not care_alert_enabled:
+        return targets
+
+    for caregiver_id in effective_alert_caregiver_ids(schedule, session):
+        # [2026-07-30 추가] 여러 환자를 관리하는 보호자·기관이 이 환자에 대한 알림을
+        # 개별로 꺼뒀으면 제외 — 일정 단위 선택(위 함수)과는 별개 축.
+        if caregiver_wants_notifications(caregiver_id, patient.id, session):
+            targets.append(("caregiver", caregiver_id))
+    return targets
+
+
+def _same_slot_drug_names(session: Session, schedule: MedicationSchedule) -> list[str]:
+    """같은 환자·같은 시간대(time_slot)에 걸린 다른 활성 일정들의 약품명 — 알림 한 통에서
+    "이 시간에 뭘 먹어야 하는지" 전부 보여주기 위함(REQ 아님, 사용자 요청: 시간별 그룹핑).
+    NotificationLog의 (schedule_id, ...) 유니크 제약/멱등성 로직은 그대로 두고, 메시지
+    내용만 풍부하게 만든다 — 스케줄러당 발송 건수는 기존과 동일(일정당 1건)."""
+    siblings = session.exec(
+        select(MedicationSchedule)
+        .where(MedicationSchedule.patient_id == schedule.patient_id)
+        .where(MedicationSchedule.time_slot == schedule.time_slot)
+        .where(MedicationSchedule.active == True)  # noqa: E712
+    ).all()
+    names = [s.drug_name for s in siblings if s.drug_name]
+    # 자기 자신이 맨 앞에 오도록(다른 약 우선순위를 임의로 매기지 않기 위해 순서만 보정)
+    if schedule.drug_name in names:
+        names.remove(schedule.drug_name)
+    return [schedule.drug_name, *names]
+
+
+def _deliver(session: Session, schedule: MedicationSchedule, patient: Patient, kind: str) -> tuple[str, list[str]]:
+    """opt-out(NotificationSetting.medication_reminder_enabled)을 존중한다 — 꺼져 있으면
+    NotificationLog는 남기되(놓침 판정 로직이 알림 설정과 무관하게 계속 동작하도록)
+    상태만 suppressed로 남기고 실제 발송은 하지 않는다.
+    """
+    setting = session.get(NotificationSetting, patient.id)
+    enabled = setting.medication_reminder_enabled if setting else True
+    if not enabled:
+        return "suppressed", []
+
+    recipients = _recipients(session, patient, schedule)
+    if not recipients:
+        return "sent", []
+
+    verb = "복약 시간이에요" if kind == "reminder" else "복약을 놓치신 것 같아요"
+    drug_names = _same_slot_drug_names(session, schedule)
+    drug_list = ", ".join(drug_names)
+    subject = f"[건강동행] {schedule.time_slot} {verb}"
+    body = f"{schedule.time_slot}에 복용할 약: {drug_list} — {verb}. 앱에서 확인해 주세요."
+    channels: list[str] = []
+    for label, email in recipients:
+        send_email(to=email, subject=subject, body=body)
+        channels.append(label)
+
+    # [2026-07-24 추가] Web Push — all_push_enabled(기본 True)가 꺼져 있으면 스킵한다.
+    # medication_reminder_enabled(위에서 이미 체크)와 별개로 push 채널만 따로 끌 수
+    # 있는 토글. 캐어기버 본인의 push 선호도를 patient별 설정으로 같이 묶는 건 단순화다
+    # (환자 단위 NotificationSetting을 그대로 재사용) — 실제 요구가 생기면 분리 필요.
+    if setting is None or setting.all_push_enabled:
+        # [2026-07-31 추가, 리뷰 지적 반영] role 구분 없이 patient/caregiver 모두에게 같은
+        # schedule_id를 실어 보낸다 — 의도된 동작이다. 보호자·기관도 "복용했어요" 액션
+        # 버튼으로 대신 체크할 수 있고(monitoring_router.py의 confirmed_by_caregiver_id가
+        # 인증된 actor 기준으로 이 경우를 이미 구분해서 기록한다), require_actor_patient_access가
+        # 이 환자에 연결된 보호자인지 어차피 검증하므로 새로운 인가 구멍은 아니다.
+        for role, recipient_id in _push_targets(session, patient, schedule):
+            if recipient_id is None:
+                continue
+            # [2026-07-28] "/schedule"은 일정 관리 화면이라 "먹었어요" 체크를 할 수 없다 —
+            # 실제로 체크할 수 있는 대시보드로 보내고, 어떤 카드 때문에 알림이 왔는지
+            # 강조 표시할 수 있게 schedule.id를 쿼리로 같이 넘긴다.
+            attempted = send_push_to_recipient(
+                session, role, recipient_id, title=subject, body=body,
+                url=f"/dashboard?highlight={schedule.id}",
+                schedule_id=schedule.id,
+            )
+            # [2026-07-24] 구독이 없거나 VAPID 키가 없으면 아무 일도 안 했다는 뜻이라
+            # channels에 남기지 않는다 — "발송했다"는 로그가 실제로 아무것도 안 보낸
+            # 경우까지 포함하면 나중에 발송 이력을 신뢰할 수 없게 된다.
+            if attempted:
+                channels.append(f"push:{role}:{recipient_id}")
+
+    return "sent", channels
+
+
+def _fire_due_reminders(session: Session, now: datetime) -> None:
+    today = now.date()
+    today_str = today.isoformat()
+    schedules = session.exec(
+        select(MedicationSchedule).where(MedicationSchedule.active == True)  # noqa: E712
+    ).all()
+
+    for schedule in schedules:
+        if not _schedule_runs_today(schedule, today):
+            continue
+        parsed = _parse_time_slot(schedule.time_slot)
+        if parsed is None:
+            continue
+        hour, minute = parsed
+        due_at = datetime.combine(today, datetime.min.time()).replace(hour=hour, minute=minute)
+        if due_at > now or now - due_at > timedelta(minutes=CATCH_UP_MINUTES):
+            continue  # 아직 정시 전이거나, catch-up 창을 이미 넘겨 _mark_missed 몫
+        if _already_logged(session, schedule.id, today_str, schedule.time_slot, "reminder"):
+            continue
+
+        patient = session.get(Patient, schedule.patient_id)
+        if not patient:
+            continue
+
+        # [2026-07-20 round2 수정, 박소정님 리뷰에서 발견] 원래는 _deliver()(실제 이메일
+        # 발송)를 먼저 하고 나서 NotificationLog를 커밋했다 — 그러면 유니크 제약이 "로그
+        # 행"의 중복은 막아도 "발송 자체"의 중복은 못 막는다. 두 서버가 거의 동시에 같은
+        # 틱을 처리하면 둘 다 커밋 전이라 _already_logged 체크를 통과해 각자 이메일을 보낼
+        # 수 있었다(로그는 하나만 남지만 이메일은 두 번 나감). placeholder 행을 먼저
+        # insert+commit해서 유니크 제약으로 "이 틱을 처리할 프로세스"를 먼저 선점하고,
+        # 그 커밋이 성공했을 때만(=선점에 성공했을 때만) 실제 발송한다.
+        placeholder = NotificationLog(
+            schedule_id=schedule.id,
+            patient_id=schedule.patient_id,
+            due_date=today_str,
+            time_slot=schedule.time_slot,
+            kind="reminder",
+            status="pending",
+            channels="[]",
+        )
+        session.add(placeholder)
+        try:
+            session.commit()
+        except Exception:
+            # 공유 DB에 서버 여러 대가 동시에 같은 틱을 처리하다 UniqueConstraint에 걸리는
+            # 경우 — 이미 다른 프로세스가 선점했다는 뜻이니 발송하지 않고 조용히 넘어간다.
+            session.rollback()
+            continue
+
+        status, channels = _deliver(session, schedule, patient, "reminder")
+        placeholder.status = status
+        placeholder.channels = json.dumps(channels)
+        session.add(placeholder)
+        session.commit()
+
+
+def _mark_missed(session: Session, now: datetime) -> None:
+    today = now.date()
+    today_str = today.isoformat()
+    schedules = session.exec(
+        select(MedicationSchedule).where(MedicationSchedule.active == True)  # noqa: E712
+    ).all()
+
+    for schedule in schedules:
+        if not _schedule_runs_today(schedule, today):
+            continue
+        parsed = _parse_time_slot(schedule.time_slot)
+        if parsed is None:
+            continue
+        hour, minute = parsed
+        due_at = datetime.combine(today, datetime.min.time()).replace(hour=hour, minute=minute)
+        if now - due_at < timedelta(minutes=MISSED_AFTER_MINUTES):
+            continue
+        if _has_today_log(session, schedule.id, today_str):
+            continue  # 이미 taken/skipped 등으로 체크됨
+        if _already_logged(session, schedule.id, today_str, schedule.time_slot, "missed"):
+            continue
+
+        patient = session.get(Patient, schedule.patient_id)
+        if not patient:
+            continue
+
+        # [2026-07-20 round2 수정] _fire_due_reminders와 동일한 이유 — placeholder를
+        # 먼저 insert+commit해서 유니크 제약으로 선점한 프로세스만 실제 발송한다.
+        placeholder = NotificationLog(
+            schedule_id=schedule.id,
+            patient_id=schedule.patient_id,
+            due_date=today_str,
+            time_slot=schedule.time_slot,
+            kind="missed",
+            status="pending",
+            channels="[]",
+        )
+        session.add(placeholder)
+        try:
+            session.commit()
+        except Exception:
+            session.rollback()
+            continue
+
+        status, channels = _deliver(session, schedule, patient, "missed")
+        placeholder.status = status
+        placeholder.channels = json.dumps(channels)
+        session.add(placeholder)
+        session.commit()
+
+
+def _tick() -> None:
+    now = _now_kst()
+    with Session(engine) as session:
+        _fire_due_reminders(session, now)
+        _mark_missed(session, now)
+
+
+async def reminder_loop() -> None:
+    """lifespan에서 asyncio.create_task로 띄우고, 종료 시 CancelledError로 멈춘다."""
+    while True:
+        try:
+            await asyncio.to_thread(_tick)
+        except Exception:
+            logger.exception("scheduler tick 중 처리되지 않은 예외 발생 — 다음 틱은 계속 진행")
+        await asyncio.sleep(TICK_SECONDS)
+
+
+def scheduler_enabled() -> bool:
+    # [2026-07-19] 로컬 개발 시 팀원 각자가 원치 않으면 끌 수 있게 게이트만 둔다.
+    # 테스트에서는 backend/tests/conftest.py가 이 값을 확인하지 않고 그대로 앱을 띄우므로,
+    # 테스트 격리를 위해 test 환경에서는 기본 꺼짐으로 둔다.
+    from core.database import APP_ENV
+
+    default = "false" if APP_ENV == "test" else "true"
+    return os.environ.get("SCHEDULER_ENABLED", default).lower() == "true"
