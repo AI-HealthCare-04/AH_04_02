@@ -1,4 +1,4 @@
-# 💊 진료 기록 기반 복약 안내 및 생활습관 개선 가이드 자동 생성 시스템
+# 진료 기록 기반 복약 안내 및 생활습관 개선 가이드 자동 생성 시스템
 
 > AI 헬스케어 4기 파이널 프로젝트 · 2팀 · Uponati(어포나티) 참여기업 주제
 
@@ -9,7 +9,7 @@
 
 ---
 
-## 📌 목차
+## 목차
 
 1. [프로젝트 소개](#-프로젝트-소개)
 2. [팀 소개](#-팀-소개)
@@ -24,7 +24,7 @@
 
 ---
 
-## 📖 프로젝트 소개
+## 프로젝트 소개
 
 ### 한 줄 소개
 
@@ -59,7 +59,7 @@
 
 ---
 
-## 👥 팀 소개
+## 팀 소개
 
 **2팀** · 담당 멘토: 이현구
 
@@ -73,7 +73,7 @@
 
 ---
 
-## 🛠 기술 스택
+## 기술 스택
 
 ### Backend
 `FastAPI` `Uvicorn` `Python 3.13+` `SQLModel` `Alembic` `Aiven MySQL`(팀 공용 개발·운영) / `SQLite`(개인 로컬 전용) `uv`
@@ -97,7 +97,7 @@
 
 ---
 
-## 🏗 시스템 아키텍처
+## 시스템 아키텍처
 
 3인 소규모 팀 체제에 맞춰, 별도 메시지 브로커/워커 없이 **FastAPI 단일 프로세스가 동기 방식으로 처리**하는 단순한 구조로 운영 중입니다. 응답이 느린 외부 호출(CLOVA OCR, OpenAI)은 `asyncio.to_thread`로 감싸 이벤트 루프를 막지 않도록만 처리합니다.
 
@@ -144,7 +144,7 @@ FastAPI (backend/main.py)
 
 ---
 
-## 📂 프로젝트 구조
+## 프로젝트 구조
 
 ```
 .
@@ -182,7 +182,7 @@ FastAPI (backend/main.py)
 
 ---
 
-## 🚀 시작하기
+## 시작하기
 
 > ℹ️ 이 README는 초기 기획 당시(Redis Stream + PostgreSQL + S3 + Nginx, 5인 체제) 내용으로 시작했지만,
 > [기술 스택](#-기술-스택)/[시스템 아키텍처](#-시스템-아키텍처)/[프로젝트 구조](#-프로젝트-구조)/"시작하기"/"배포"
@@ -258,7 +258,7 @@ uv run locust -f locustfile_deploy_auth.py --host https://yakcong.duckdns.org  #
 
 ---
 
-## 🤝 협업 규칙
+## 협업 규칙
 
 자세한 내용은 [`docs/Team Members' Notes/team-rules.md`](./docs/Team%20Members%27%20Notes/team-rules.md) 참고.
 
@@ -305,7 +305,7 @@ uv run locust -f locustfile_deploy_auth.py --host https://yakcong.duckdns.org  #
 
 ---
 
-## 📅 프로젝트 일정
+## 프로젝트 일정
 
 전체 기간: **2026.06.16(화) ~ 08.07(금)**
 
@@ -381,7 +381,7 @@ uv run locust -f locustfile_deploy_auth.py --host https://yakcong.duckdns.org  #
 
 ---
 
-## 🐛 트러블슈팅
+## 트러블슈팅
 
 개발 중 발생한 주요 문제와 해결 과정을 기록합니다. 단순 오류 메시지보다 **원인 분석 → 해결 방법 → 재발 방지책** 순으로 작성하는 것을 권장합니다.
 
@@ -399,7 +399,7 @@ uv run locust -f locustfile_deploy_auth.py --host https://yakcong.duckdns.org  #
 
 ---
 
-## ☁️ 배포
+## 배포
 
 > [2026-07-28 갱신] 아래 "후보 배포 방식 미검토" 내용은 실제 배포 전에 작성된 초안이 그대로 남아있던 것입니다 — 현재는 EC2 + GitHub Actions로 실제 배포되어 있습니다.
 
